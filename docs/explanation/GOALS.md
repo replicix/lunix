@@ -43,6 +43,11 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
     worst-case loss after the host and its disk die is bounded by *T* and *B*.
   - **sync**: every FLUSH/FUA waits for S3 durability, using group commit
     and one round trip per flush group.
+  - **write-through**: every write waits for S3 durability. Nothing
+    acknowledged is lost even when the whole client machine is lost.
+  - These are presets of two settings: `write_ack` and `flush`, each
+    `local` or `s3` (ADR-27). The fsync of a file system on the device
+    arrives as FLUSH/FUA.
   - **local** (no backend): FLUSH waits only for the local disk.
 - **Single writer, enforced.** One host writes a volume at a time.
   Conditional writes on the authority bucket fence a stale or partitioned

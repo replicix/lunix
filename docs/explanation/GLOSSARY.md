@@ -66,8 +66,12 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   - A **mirror** is a byte-identical follower.
 - **Cursor:** the highest commit a backend holds.
 - **Backend states:** Joining → CatchingUp → InSync → Draining → Removed.
-- **Mode:** `local`, `async` (commit every T or B, cap `B_max`) or
-  `sync` (FLUSH waits for a DELTA commit).
+- **Mode:** a durability preset. `local` (no backend), `async` (commit
+  every T or B, cap `B_max`), `sync` (FLUSH waits for a DELTA commit) or
+  `write-through` (every write waits for one).
+- **write_ack / flush:** the two durability settings behind the modes
+  (ADR-27). Each is `local` or `s3`, and says where data must be before
+  a write or a FLUSH completes.
 - **Space ladder:** what happens as local space runs out: evict clean →
   compact → throttle → `on_full` (`wait` with an optional timeout, or
   `error` = ENOSPC).

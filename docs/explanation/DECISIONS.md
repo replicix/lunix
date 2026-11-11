@@ -319,6 +319,8 @@ hint falls back to the chunk index (ADR-14).
 
 ## ADR-10: Durability modes: local, async (default with a backend), sync
 
+*Amended by ADR-27:* the modes are presets of two settings, `write_ack` and `flush` (each `local` or `s3`). A new preset, `write-through`, makes every acknowledged write durable on S3.
+
 *Amended by ADR-26:* S3-only volumes run in sync mode, unless `--unsafe-flush` is given.
 
 **Decision:**
@@ -987,3 +989,68 @@ elements:
   - ADR-10: S3-only implies sync unless `--unsafe-flush`.
   - ADR-14: the local store is optional.
   - ADR-16: the keeper process.
+
+## ADR-27: Durability is two settings: `write_ack` and `flush`
+
+**Context:**
+- A file system's fsync reaches the device as a FLUSH (`REQ_PREFLUSH`)
+  and FUA writes. Lunix advertises a volatile cache and FUA (ADR-3), so
+  it receives both.
+- The maintainer asked (2026-11-12) for durability to be configured as
+  two explicit choices:
+  1. Whether an acknowledged *write* survives the loss of the whole
+     client machine.
+  2. Whether an acknowledged *fsync* is persisted to the local disk only,
+     or to S3.
+
+**Decision:** two per-volume settings, changeable at runtime. The
+ADR-10 modes become presets of them.
+
+| setting | `local` | `s3` |
+|---|---|---|
+| `write_ack`: when a write completes | once it is in the local journal (or the RAM buffer, with no local tier) | once a DELTA commit holding it is on the authority: write-through |
+| `flush`: when a FLUSH or FUA completes | after a journal `fdatasync` | once a DELTA commit holding everything before it is on the authority |
+
+| `write_ack` | `flush` | preset | survives losing the client machine |
+|---|---|---|---|
+| `local` | `local` | `async` (default with a backend) | commits up to the last `T`/`B` cut |
+| `local` | `s3` | `sync` | every fsync-acknowledged write |
+| `s3` | `s3` | `write-through` (new) | every acknowledged write |
+| `s3` | `local` | refused: contradictory | — |
+| — | — | `local` (no backend) | nothing once the disk is lost |
+
+- **`write-through`:**
+  - Each write waits for the group commit that the sync mode uses for
+    FLUSH. Concurrent writes share one DELTA PUT, with one PUT in flight
+    per volume, and FLUSH then completes at once.
+  - The device keeps advertising a volatile cache, so no ublk parameter
+    changes and the switch is live. A device may always behave more
+    durably than it advertises.
+- **Local tier `none` (ADR-26):** `flush = local` has no disk to persist
+  to, so it is refused there unless `--unsafe-flush` is given. Then
+  FLUSH completes from the keeper-held RAM buffer.
+- **Background commits:** in every combination, FULL commits still run
+  on the `T`/`B`/`B_max` cadence and fold DELTAs.
+- **Configuration:**
+  - The CLI is `lunix durability NAME --write-ack local|s3 --flush
+    local|s3`. `lunix mode` stays as preset shorthand.
+  - The CSI StorageClass parameters are `writeAck` and `flush`.
+
+**Rejected:**
+- *Write-through by advertising no volatile cache.* ublk device
+  parameters cannot be changed on a live device, so switching modes
+  would need a detach. It would also stop file systems sending FLUSH,
+  which loses the ordering hints.
+- *Making write-through the default.* Every write costs one S3 PUT round
+  trip. The measured S3 Standard PUT p50 was 70 ms, so a queue-depth-1
+  writer gets about 14 IOPS, and QD32 gets about 450. Express One Zone,
+  with a p99 of about 7 ms, gives roughly 10× that. It is also billed per
+  PUT group, like sync mode (ADR-10 cost note).
+  - Applications that need durability already fsync. So do file system
+    journals and databases. `flush = s3` (`sync`) gives them the same
+    guarantee at a fraction of the cost.
+  - `write-through` matters only for writers that never issue a FLUSH.
+
+**Amends:**
+- ADR-10: its modes are presets of these two settings, and
+  `write-through` is added.

@@ -59,8 +59,10 @@ A **volume** is a thin block device of a given size. Its data path is:
 - **Local tier** (ADR-26): `store` (a complete local copy), `cache`
   (partial, evictable; needs a backend) or `none` (no local files; needs
   a backend). It is chosen per attach and changeable live (§13).
-- **Mode:** `local` | `async{T,B,B_max}` | `sync` (ADR-10), changeable
-  at runtime.
+- **Durability** (ADR-27): `write_ack = local|s3` and `flush = local|s3`,
+  changeable at runtime. The presets are `local` (no backend),
+  `async{T,B,B_max}` (local/local), `sync` (local/s3) and `write-through`
+  (s3/s3). fsync from the file system above arrives as FLUSH/FUA.
 - **Space policy:** `free_floor` (bytes or % of the host FS), `on_full =
   wait|error`, `full_timeout`, `cache_max` (bytes). The local store never
   exceeds `min(cache_max, fs_free - free_floor)`.
@@ -371,6 +373,9 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   8 MiB), the bulk goes as a segment first and the DELTA references it.
 - **Folding:** FULL commits are cut in the background on the async
   cadence. Mount replays DELTAs on top of the last FULL.
+- **Write-through** (`write_ack = s3`, ADR-27): plain writes join the
+  same flush groups, and each completes when its group's DELTA is on the
+  authority.
 
 ### 8.4 Mount (attach) from a bucket
 
@@ -784,7 +789,8 @@ lunix volume create NAME --size 200G --dir /data/lunix [--chunk 64K] [--encrypt]
 lunix volume import NAME s3://bucket/prefix/<uuid> --dir /data/lunix
 lunix attach NAME            # → /dev/lunix/NAME     lunix detach NAME [--release]
 lunix backend add NAME s3://… [--role authority|mirror]   lunix backend rm NAME <id> [--drain]
-lunix mode NAME async --interval 30s --max-unsynced 1G | sync | local
+lunix mode NAME async --interval 30s --max-unsynced 1G | sync | write-through | local
+lunix durability NAME --write-ack local|s3 --flush local|s3   (ADR-27)
 lunix local NAME none|cache [--size 100G]|store   (live; ADR-26)
 lunix volume create NAME --size 200G --local none s3://…   (S3 only; implies sync)
 lunix space NAME --floor 10% --on-full wait --full-timeout 60s --cache-max 100G
@@ -818,6 +824,8 @@ ADR-16 and ADR-22 set the shape.
 - **NodeExpand:** grows the file system.
 - **Topology:** none, apart from an optional primary-backend region
   preference.
+- **Durability:** the StorageClass parameters `writeAck` and `flush`
+  (`local|s3`, ADR-27).
 - **Local tier:** the StorageClass parameter `localTier: none|cache|store`
   (default `cache`) and `cacheSize`. `none` suits diskless or ephemeral
   nodes (ADR-26).
@@ -851,6 +859,7 @@ ADR-16 and ADR-22 set the shape.
 | host power loss | unflushed writes lost (legal) | journal replay to the last valid record |
 | local disk lost, async | writes after the last commit lost (≤ T/B) | `lunix volume import` from the bucket on any host |
 | local disk lost, sync | nothing acknowledged-by-FLUSH lost | same |
+| local disk lost, write-through | no acknowledged write lost | same |
 | S3 unreachable, async | commits pause; unsynced grows to `B_max`, then writes throttle | retry; alert on RPO age |
 | S3 unreachable, sync | FLUSH waits (hard) or EIO after `flush_timeout` | per-volume policy |
 | network partition, owner isolated | lease renewal fails → self-fence → read-only | the new owner steals after TTL; the zombie gets 412 |

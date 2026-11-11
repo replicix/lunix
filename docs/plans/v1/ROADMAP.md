@@ -90,13 +90,15 @@ baseline table in `bench/`.
 **Scope:**
 - DELTA commits, flush-group coalescing, DELTA folding, the
   `flush_timeout` policy, and runtime mode switches.
+- The `write_ack`/`flush` settings and the `write-through` preset
+  (ADR-27).
 - S3-only volumes (ADR-26): the memfd write buffer and its keeper, RAM
   caches, and the bucket-resident index lookup.
 - Live local-tier changes: the sink switch, `none ↔ cache`.
 
 **Exit:**
 - After any kill, every FLUSH-acknowledged write is present on the
-  bucket.
+  bucket. In write-through, every acknowledged write is.
 - An S3-only volume passes fio verify and the kill -9 loop. A lost
   keeper fails the device and never resumes it.
 - `none → cache → none` under fio load: no I/O errors, and fsck is
