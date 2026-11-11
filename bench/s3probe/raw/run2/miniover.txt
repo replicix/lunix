@@ -1,0 +1,34 @@
+provider MINIOVER (local docker, loopback, versioned bucket), started 2026-11-11T23:03Z
+classification: AUTHORITY-CAPABLE (all authority-gate probes PASS)
+requests: 3795, bytes transferred: 1981 MB, leftover objects under probe prefix: 0
+network: tcp connect p50 0.01 ms (n=10); cold-HEAD 0.4 ms, warm-HEAD 0.4 ms; plain http, no TLS
+  [PASS       ] create_if_absent_first         etag=Some(true) version=Some("f10f841b-334a-4a91-b95d-cc1677be5821")
+  [INFO       ] versioning_state               enabled (version id returned)
+  [INFO       ] etag_quoted                    true
+  [PASS       ] create_if_absent_second_412    412 AlreadyExists
+  [PASS       ] if_match_swap_ok               etag changed=true
+  [PASS       ] if_match_stale_412             412 Precondition
+  [PASS       ] if_match_deleted_key           404 Precondition (both 404 and 412 are acceptable)
+  [PASS       ] concurrent_create_x8           20/20 rounds with exactly one winner; losers 412=140, 409 retries=0
+  [PASS       ] concurrent_swap_x8             100/100 rounds with exactly one winner; losers 412=700, 409 retries=0; 1131 concurrent reads, 0 torn
+  [PASS       ] range_bounded                  bytes=100-4195
+  [PASS       ] range_suffix                   bytes=-777
+  [PASS       ] range_offset                   bytes=1000000-
+  [PASS       ] read_your_write_get            50 PUT,PUT,GET sequences: stale=0 errors=0
+  [PASS       ] read_your_write_list           50 PUT-then-LIST: missing=0; 20 DELETE-then-LIST: still listed=0
+  [PASS       ] multipart_create_abort         abort ok; object absent=true
+  [PASS       ] clock_skew                     Last-Modified minus local clock window: 0 s (flag > 2 s; 1 s resolution; Date header not exposed by object_store)
+  seq_put_4k             size=     4096 conc= 1 n=200 p50=    5.45 p90=    5.68 p99=    5.82 max=    6.00 ttfb50=    NaN ttfb99=    NaN MB/s=     0.8 
+  seq_get_4k             size=     4096 conc= 1 n=200 p50=    0.25 p90=    0.29 p99=    0.33 max=    0.43 ttfb50=   0.23 ttfb99=   0.32 MB/s=    16.6 
+  seq_put_64k            size=    65536 conc= 1 n=200 p50=    9.21 p90=    9.46 p99=   10.86 max=   12.49 ttfb50=    NaN ttfb99=    NaN MB/s=     7.1 
+  seq_get_64k            size=    65536 conc= 1 n=200 p50=    0.24 p90=    0.28 p99=    0.34 max=    0.44 ttfb50=   0.23 ttfb99=   0.33 MB/s=   273.1 
+  seq_put_16m            size= 16777216 conc= 1 n= 40 p50=   55.20 p90=   57.48 p99=   59.67 max=   59.67 ttfb50=    NaN ttfb99=    NaN MB/s=   303.9 
+  seq_get_16m            size= 16777216 conc= 1 n= 16 p50=    4.75 p90=    4.91 p99=    5.20 max=    5.20 ttfb50=   0.78 ttfb99=   0.96 MB/s=  3530.1 
+  par_put                size= 16777216 conc= 1 n=  2 p50=  112.57 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=   298.1 wall_ms in p50 column; 2/2 ok
+  par_get                size= 16777216 conc= 1 n=  2 p50=    9.55 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=  3514.4 wall_ms in p50 column; 2/2 ok
+  par_put                size= 16777216 conc= 8 n=  8 p50=  150.24 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=   893.4 wall_ms in p50 column; 8/8 ok
+  par_get                size= 16777216 conc= 8 n=  8 p50=   36.82 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=  3644.8 wall_ms in p50 column; 8/8 ok
+  par_put                size= 16777216 conc=32 n= 16 p50=  225.70 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=  1189.4 wall_ms in p50 column; 16/16 ok
+  par_get                size= 16777216 conc=32 n= 16 p50=   75.63 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=  3549.2 wall_ms in p50 column; 16/16 ok
+  head                   size=     1024 conc= 1 n=100 p50=    0.18 p90=    0.23 p99=    0.30 max=    0.31 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 
+  list_10_keys           size=        0 conc= 1 n= 50 p50=    0.34 p90=    0.43 p99=    0.60 max=    0.60 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 

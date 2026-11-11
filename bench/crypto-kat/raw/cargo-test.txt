@@ -1,0 +1,53 @@
+     Running unittests src/lib.rs (target/release/deps/crypto_kat-4da7adfc328d97be)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (target/release/deps/crypto_kat-768888f2e1a055ff)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/kat.rs (target/release/deps/kat-f222a875fbb877a7)
+test blake3_empty_hash_and_cloned_context_equals_derive_key ... ok
+test aes256_gcm_zero_key_zero_nonce_mcgrew_viega_cases_13_14 ... ok
+test derive_key_mode_is_separated_from_keyed_hash_mode ... ok
+test extent_key_input_encoding_is_injective_across_id_lengths ... ok
+test extent_key_vectors ... ok
+test full_extent_body_vectors ... ok
+test argon2id_rfc9106_vector ... ok
+test purpose_key_vectors_and_domain_separation ... ok
+test slot_kek_and_xchacha_vectors ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/roundtrip_tamper.rs (target/release/deps/roundtrip_tamper-af65746960d12f46)
+test plaintext_extent_cannot_be_injected_into_an_encrypted_volume ... ok
+test wrong_dek_epoch_family_and_kind ... ok
+test fresh_salt_every_seal_and_ciphertext_differs ... ok
+test adr_derivation_does_not_bind_family_hardened_does ... ok
+test fips_profile_stores_a_fresh_random_nonce ... ok
+test tamper_each_header_and_payload_field_is_rejected ... ok
+test verify_order_tag_then_bounded_decompress_then_chunk_id ... ok
+test relocation_between_chunk_ids_fails ... ok
+test roundtrip_every_profile_codec_and_size ... ok
+test zstd_bomb_is_stopped_at_the_cap ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests/slots_and_meta.rs (target/release/deps/slots_and_meta-791daf8930f3bf3a)
+test attach_policy_blocks_the_encryption_downgrade ... ok
+test metadata_aead_binds_kind_key_identity_and_is_randomised ... ok
+test commit_fork_splice_is_invisible_without_parent_hash ... ok
+test lease_replay_passes_the_aead_and_needs_an_epoch_floor ... ok
+test dek_epoch_rotation_protects_only_new_writes ... ok
+test xchacha_random_nonce_budget ... ok
+test argon2_parameters_are_bounded_when_read_from_the_bucket ... ok
+test removing_a_slot_revokes_nothing_already_exposed ... ok
+test keyfile_and_kms_slots_and_encryption_context ... ok
+test tampered_parameters_or_ids_fail_authentication ... ok
+test passphrase_slot_roundtrip_and_wrong_passphrase ... ok
+test slot_spliced_from_another_family_does_not_open ... ok
+test passphrase_change_is_a_rewrap_and_keeps_every_derived_key ... ok
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+     Running tests/tripwire.rs (target/release/deps/tripwire-dbd3b39b4fa2048b)
+test birthday_bounds_are_negligible ... ok
+test same_salt_under_different_dek_epoch_or_family_does_not_collide ... ok
+test fixes_under_a_stuck_rng ... ok
+test stuck_rng_is_the_residual_risk_of_the_adr_design ... ok
+test cached_salt_anti_pattern_trips ... ok
+test draft_scheme_recompress_trips_the_wire_and_leaks_xor ... ok
+test adr_scheme_survives_10k_reencodes_of_one_chunk_without_any_reuse ... ok
+test salts_from_the_os_rng_do_not_repeat_in_200k_draws ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

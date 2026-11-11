@@ -1,0 +1,7 @@
+system,tag,pattern,D,rep,chunks_dirtied,set_ms,seal_ms,enc_ms,hash_ms,comp_ms,write_ms,hash_share,leaves,interior_nodes,raw_mib,stored_mib,leaf_stored_kib_per_leaf,amp_stored_over_dirty_data,peak_rss_mib,virt_regen_ms_in_set
+radix,t10-f512-rb16-p100-frag0-virt,uniform,1000,0,1000,26.9,53.73,4.21,20.09,22.88,5.10,0.374,1000,509,20.92,17.82,9.20,0.285,60,18
+radix,t10-f512-rb16-p100-frag0-virt,uniform,1000,1,1000,26.1,53.17,4.24,19.85,22.46,5.14,0.373,1000,499,20.68,17.64,9.20,0.282,70,16
+radix,t10-f512-rb16-p100-frag0-virt,uniform,1000,2,1000,26.0,54.23,4.24,20.16,23.06,5.26,0.372,1000,512,20.99,17.87,9.20,0.286,81,16
+radix,t10-f512-rb16-p100-frag0-virt,uniform,10000,0,10000,266.5,191.75,42.49,86.78,33.76,21.65,0.453,10000,643,104.93,101.05,9.20,0.162,384,178
+radix,t10-f512-rb16-p100-frag0-virt,uniform,10000,1,10000,258.3,195.15,44.62,86.70,34.18,22.11,0.444,10000,643,104.93,101.05,9.20,0.162,486,162
+radix,t10-f512-rb16-p100-frag0-virt,uniform,10000,2,10000,248.2,188.55,41.10,86.80,31.42,21.64,0.460,10000,643,104.93,101.05,9.20,0.162,553,151

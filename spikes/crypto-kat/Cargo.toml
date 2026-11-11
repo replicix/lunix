@@ -1,0 +1,25 @@
+[package]
+name = "crypto-kat"
+version = "0.1.0"
+edition = "2021"
+description = "Lunix P0.8: ADR-11 crypto design review spike (KATs, nonce tripwire, key slots)"
+publish = false
+
+# Exact pins (plan 00: pin dependencies exactly; versions checked on crates.io 2026-11-11).
+[dependencies]
+aws-lc-rs = "=1.19.0"            # the real AEAD choice of ADR-11
+blake3 = "=1.8.7"                # derive_key / keyed_hash
+argon2 = "=0.6.0"                # same as Constellation e2e.rs
+chacha20poly1305 = "=0.11.0"     # XChaCha20-Poly1305 for metadata (same as Constellation)
+zeroize = "=1.9.1"
+hex = "=0.4.3"
+zstd = "=0.13.4"
+lz4_flex = "=0.11.6"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
+
+[workspace]

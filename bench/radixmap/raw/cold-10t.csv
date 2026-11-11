@@ -1,0 +1,7 @@
+tag,latency_ms,probe,depth,gets,first_get_ms,second_get_same_leaf_gets,found_hole,rss_mib
+t10-f512-rb16-p100-frag0.3-virt,25,0,4,4,100.5,0,false,4
+t10-f512-rb16-p100-frag0.3-virt,25,1,4,4,100.5,0,false,4
+t10-f512-rb16-p100-frag0.3-virt,25,2,4,4,100.4,0,false,4
+t10-f512-rb16-p100-frag0.3-virt,0,0,4,4,0.2,0,false,3
+t10-f512-rb16-p100-frag0.3-virt,0,1,4,4,0.2,0,false,4
+t10-f512-rb16-p100-frag0.3-virt,0,2,4,4,0.1,0,false,4

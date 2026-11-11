@@ -1,0 +1,6 @@
+first-draft scheme, one chunk sealed Raw then Lz4 under the same (key, nonce):
+  overlap bytes            : 1291
+  c1^c2 == p1^p2 everywhere: true
+  lz4 literal header bytes : 5 (literal run 1024 B)
+  attacker crib            : 5 known plaintext bytes
+  plaintext bytes recovered: 1029

@@ -1,0 +1,20 @@
+[package]
+name = "s3probe"
+version = "0.1.0"
+edition = "2021"
+description = "Lunix P0.10: provider-agnostic S3 conditional-write and latency probe"
+publish = false
+
+# Exact pins. object_store is pinned to the version Constellation's Cargo.lock
+# resolves (0.14.1), as the plan asks.
+[dependencies]
+object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
+futures = "=0.3.34"
+bytes = "=1.12.1"
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[workspace]

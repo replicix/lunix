@@ -1,0 +1,29 @@
+PASS blake3 hash('') official
+PASS key_v0
+PASS key_adr
+PASS info_v2 layout
+PASS key_hardened
+PASS key_fips
+PASS extent body adr
+PASS extent body hardened
+PASS extent body fips_kdf_zero_nonce
+PASS AES-256-GCM test case 14
+PASS purpose addressing
+PASS purpose fips addressing
+PASS purpose dek0
+PASS purpose fips dek0
+PASS purpose dek1
+PASS purpose fips dek1
+PASS purpose meta_commit
+PASS purpose fips meta_commit
+PASS purpose meta_lease
+PASS purpose fips meta_lease
+PASS purpose volume_mac
+PASS purpose fips volume_mac
+PASS purpose pin
+PASS purpose fips pin
+PASS XChaCha20-Poly1305
+PASS argon2id slot KEK
+PASS argon2id RFC 9106 vector (python lib)
+
+all independent checks passed

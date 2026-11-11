@@ -1,0 +1,4 @@
+- CPU: AMD EPYC (Zen 5), 16 vCPUs, SMT active=0, 1 NUMA node(s), ~31 GiB RAM, local NVMe SSD, ext4 root
+- Kernel 7.0.0 (Ubuntu), Ubuntu 26.04; governor: n/a (virtualised, no cpufreq)
+- rustc: rustc 1.96.0 (ac68faa20 2026-05-25)
+- io_uring_disabled: 0 (unused by this spike)

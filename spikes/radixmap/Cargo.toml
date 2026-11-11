@@ -1,0 +1,21 @@
+[package]
+name = "radixmap"
+version = "0.1.0"
+edition = "2021"
+description = "Lunix P0.7 spike: fixed-radix Merkle block map, seal/diff/open/memory cost"
+publish = false
+
+# Standalone spike: no root workspace (phase 1 creates it).
+[workspace]
+
+# Exact pins (CONVENTIONS), versions current on crates.io on 2026-11-11.
+[dependencies]
+blake3 = "=1.8.7"
+lz4_flex = "=0.11.6"
+zstd = "=0.13.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false

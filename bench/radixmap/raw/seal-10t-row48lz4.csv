@@ -1,0 +1,7 @@
+system,tag,pattern,D,rep,chunks_dirtied,set_ms,seal_ms,enc_ms,hash_ms,comp_ms,write_ms,hash_share,leaves,interior_nodes,raw_mib,stored_mib,leaf_stored_kib_per_leaf,amp_stored_over_dirty_data,peak_rss_mib,virt_regen_ms_in_set
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,1000,0,1000,55.7,71.09,2.29,20.55,39.03,7.69,0.289,1000,509,35.37,31.06,22.32,0.497,74,41
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,1000,1,1000,53.7,70.54,2.28,20.34,38.84,7.53,0.288,1000,499,35.13,30.88,22.32,0.494,98,38
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,1000,2,1000,53.5,71.16,2.24,20.62,39.23,7.53,0.290,1000,512,35.44,31.12,22.32,0.498,121,37
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,10000,0,10000,532.7,379.18,21.84,102.66,201.50,45.97,0.271,10000,643,249.45,229.75,22.32,0.368,520,387
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,10000,1,10000,500.5,369.18,21.76,102.46,197.98,39.84,0.278,10000,643,249.45,229.76,22.32,0.368,522,349
+radix,t10-f512-row48lz4-p100-frag0.3-virt,uniform,10000,2,10000,500.8,375.71,21.88,102.54,198.64,44.79,0.273,10000,643,249.45,229.75,22.32,0.368,526,343

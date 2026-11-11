@@ -1,0 +1,17 @@
+[package]
+name = "tracesim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Phase 0 / P0.6: trace-driven chunk-size and cache-policy simulators (throwaway spike)"
+
+# Standalone spike: no root workspace in phase 0.
+[workspace]
+
+# No dependencies on purpose: the host has no registry mirror requirement and
+# the simulators are small enough to keep std-only (deterministic hashing below).
+[dependencies]
+
+[profile.release]
+opt-level = 3
+debug = false

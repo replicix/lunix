@@ -1,0 +1,4 @@
+tag,cache_mib,lookups,found,spot_checked,secs,lookups_per_s,leaf_hits,leaf_miss,interior_reads,evictions,cached_leaves,cache_mib_used,interior_mib,rss_before_mib,rss_end_mib,peak_rss_mib
+t1-f512-rb16-p100-frag0.3,64,1000000,1000000,0,9.0,110506,178105,821895,65,816039,5856,64,1.5,3,74,74
+t1-f512-rb16-p100-frag0.3,256,1000000,1000000,0,4.1,245475,703228,296772,65,273345,23427,256,1.5,3,269,270
+t1-f512-rb16-p100-frag0.3,unbounded,1000000,1000000,0,1.3,775135,967232,32768,65,0,32768,358,1.5,3,368,368
