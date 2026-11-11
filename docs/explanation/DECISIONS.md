@@ -75,6 +75,8 @@ Constellation (ADR-19) but is not a Constellation frontend.
 
 ## ADR-3: Consistency contract: a volatile write cache with prefix-consistent cuts
 
+*Amended by ADR-26:* with no local tier, a FLUSH is durable only as an S3 commit.
+
 **Decision:**
 - The device advertises a volatile write cache and FUA, through
   `UBLK_ATTR_VOLATILE_CACHE | UBLK_ATTR_FUA`.
@@ -101,6 +103,8 @@ Constellation (ADR-19) but is not a Constellation frontend.
 [novel ideas §1.3](research/2026-11-11-novel-ideas.md).
 
 ## ADR-4: Journal-first write path; dedup, compression and encryption at destage
+
+*Amended by ADR-26:* with no local tier, the journal is a RAM sink: a memfd held by a keeper, in the same record format.
 
 **Decision:**
 - A write is appended to a local O_DIRECT journal, which is preallocated,
@@ -315,6 +319,8 @@ hint falls back to the chunk index (ADR-14).
 
 ## ADR-10: Durability modes: local, async (default with a backend), sync
 
+*Amended by ADR-26:* S3-only volumes run in sync mode, unless `--unsafe-flush` is given.
+
 **Decision:**
 - **local:** there is no backend, and FLUSH = journal `fdatasync`.
 - **async:**
@@ -423,6 +429,8 @@ owned by an independent writer.
 
 ## ADR-14: One local store; S3-FIFO cache; out-of-space ladder
 
+*Amended by ADR-26:* the local store is optional. Its role is `store`, `cache` or `none`.
+
 **Decision:**
 - **Local store contents:**
   - the journal;
@@ -485,6 +493,8 @@ W-TinyLFU) in phase 0.
 
 ## ADR-16: Process model: one `lunixd` per host; stateless CSI plugin; user recovery
 
+*Amended by ADR-26:* S3-only volumes add a keeper (the systemd FD store or `lunix-keeper`) that holds the RAM write buffer across daemon restarts.
+
 **Decision:**
 - One `lunixd` per host owns every ublk device and local store on that
   host. It is a privileged DaemonSet under Kubernetes.
@@ -545,7 +555,13 @@ on the queue threads.
 **Pin:** `libublk` 0.4.x until 0.5.0 (tokio executor) is released and
 evaluated.
 
-## ADR-19: Shared crates with Constellation (needs the maintainer's decision)
+## ADR-19: Shared crates with Constellation
+
+**Status: accepted (2026-11-12, maintainer).** All five crates move now,
+including `csi-common`, into the public repository
+[replicix/replicix-core](https://github.com/replicix/replicix-core).
+Constellation is switched to depend on it straight away, with its old
+modules reduced to re-exports, rather than migrating at its own pace.
 
 **Proposal:** extract a public MPL-2.0 `replicix-core` workspace that both
 projects depend on:
@@ -822,3 +838,152 @@ elements:
   backend constraints together add roughly 2-3 weeks of work and test
   surface. The format reservation costs one byte per segment-dictionary
   entry and an empty list.
+
+## ADR-26: Three storage topologies (local only, local + S3, S3 only), switchable live
+
+**Context:**
+- Lunix assumed a local directory on every owning host. Diskless or
+  ephemeral nodes, and pods that move often, want a volume with **no
+  local storage at all**.
+- The maintainer decided (2026-11-12) that a volume must run in any of
+  three topologies, and that adding or removing the local tier or any
+  S3 backend must never disrupt the device.
+
+**Decision:**
+1. **The local tier has a role**, chosen per volume on the owning host:
+
+   | role | contents | needs | evicts |
+   |---|---|---|---|
+   | `store` | a complete copy: journal, every live segment, map, index | — | nothing |
+   | `cache` | journal plus a partial, evictable copy (ADR-14) | ≥ 1 backend | clean data (S3-FIFO) |
+   | `none` | no local files; a RAM write buffer and RAM caches | ≥ 1 backend | RAM caches |
+
+   The three topologies follow from it: **local only** = `store` with no
+   backend; **local + S3** = `cache` (or `store`, which keeps a full local
+   replica) with one or more backends; **S3 only** = `none` with one or
+   more backends.
+2. **Copy invariant.** At every instant, every FLUSH-acknowledged write
+   is durable on at least one durable sink: the local journal or the
+   authority's commit chain. The volume also has at least one complete
+   copy: a `store` local tier or the authority. The daemon refuses any
+   transition that would break either rule. In particular, it refuses to
+   remove the last backend unless the local tier is `store`.
+3. **The S3-only write path.**
+   - **RAM write buffer:** a ring of journal records in a `memfd`,
+     in the same record format as the disk journal (DESIGN §4.1). The
+     overlay, destage and cut code are therefore unchanged; only the sink
+     differs. Writes are acknowledged from RAM.
+   - **Durability:** FLUSH and FUA complete when a DELTA commit is on
+     the authority, as in sync mode (ADR-10). `async` is allowed only
+     with an explicit `--unsafe-flush`, for scratch volumes, the
+     equivalent of QEMU's `cache=unsafe`, because a FLUSH would otherwise
+     claim a durability the volume does not have.
+   - **Bounds:** the buffer has a size limit, `mem_buffer` (default
+     256 MiB per volume). It holds unsynced records and the open
+     segment. When it fills, a memory ladder runs: cut and commit
+     sooner, destage, then throttle admission. There is no ENOSPC; an
+     optional `bucket_quota` can add one.
+4. **Daemon restart without a local disk.**
+   - A daemon crash is not a power loss: the file system above keeps
+     running and still believes its acknowledged writes. The memfd
+     therefore outlives `lunixd`. A **keeper** holds the file
+     descriptor: the systemd file-descriptor store (`FDSTORE=1`), or
+     under Kubernetes a tiny `lunix-keeper` process in the DaemonSet pod
+     that holds it via `SCM_RIGHTS`.
+   - On ublk user recovery, the new `lunixd` takes the memfd back and
+     replays it like a journal.
+   - If the buffer is missing, or its generation does not match the
+     device's, the device is **not** recovered. It is deleted, so I/O
+     fails with EIO, and acknowledged writes never vanish silently under
+     a mounted file system. A host power loss loses the buffer, which is
+     legal (ADR-3).
+5. **Reads and metadata without a local disk.**
+   - Interior map nodes are resident, as in every topology. Leaves and
+     extents go to a bounded RAM cache, `mem_cache` (default 256 MiB,
+     S3-FIFO). Readahead fills it.
+   - **The chunk index lives in the bucket.** Its runs are already
+     published as `index_packs` in every FULL commit (DESIGN §8.2). With
+     no local tier, dedup consults a RAM filter, then a cached ranged GET
+     of the index block on a filter hit. This happens on the destage path
+     only, never on the acknowledgement path.
+   - Compaction and GC fetch live extents with ranged GETs. They are
+     rate-limited and cost-scored as usual.
+6. **Live transitions.** The device stays up throughout, and no request
+   fails.
+   - **Switching the write sink at a seq barrier `b`:** writes with
+     `seq ≤ b` stay in the old sink, and writes with `seq > b` go to the
+     new one. Overlay entries carry their sink. A FLUSH covering both
+     waits for both. The old sink is retired once a commit covering `b`
+     is on the authority.
+   - **`local none → cache`:** create the directory and open the
+     journal, then switch sink. The RAM buffer drains through the
+     normal commits. The cache then warms on demand, optionally from the
+     heat map (ADR-23).
+   - **`local cache → none`:** the volume must be in sync mode, or
+     `--unsafe-flush`, and the CLI says which. Switch sink to RAM, then
+     commit a cut covering `b`, so every journal record and every local
+     segment is on the authority. Then drop the cache and delete the
+     directory.
+   - **`local cache → store`:** hydrate. Every segment reachable from
+     retained commits is copied into the local tier, using the backfill
+     machinery (ADR-15). Eviction stops when hydration completes.
+   - **`local store → cache`:** needs at least one InSync backend, as
+     today (DESIGN §13).
+   - **Removing the last backend:** needs `store`. A final
+     `CONFIG{backends: [], detached: local}` is written on the
+     authority, and the lease is released. Commits continue locally. The
+     bucket keeps a valid but stale read-only image, which `volume
+     import` refuses without `--force`.
+   - **Adding or removing mirrors, and authority transfer**, work as
+     before in every topology (ADR-15, ADR-24).
+   - **S3 only → local only:** add a local cache, hydrate to `store`,
+     then remove the backends.
+7. **Control surface:**
+   - `lunix volume create|attach --local none|cache|store`;
+     `lunix local NAME none|cache [--size]|store`.
+   - The StorageClass parameter `localTier` (default `cache`), with
+     `cacheSize`.
+   - Read-only time-travel mounts (ADR-25) already behave like `none`
+     readers, and now share its code.
+
+**Rejected:**
+- *Acknowledging FLUSH from RAM by default in S3-only.* FLUSH would lie
+  both on power loss and, silently, on a daemon crash.
+- *A tmpfs or zram directory as the "local disk".* It runs today's code,
+  but `fdatasync` on it is a no-op, so FLUSH claims a durability it does
+  not have. Space-ladder errors would also hit RAM limits instead of a
+  file system. The RAM buffer is the same idea, done honestly.
+- *Writing each write straight to S3.* That means one PUT per 4 KiB write,
+  which is impossible on both latency and cost.
+- *Changing topology only at detach.* That breaks the no-disruption
+  requirement.
+- *Making the local tier a member of the CONFIG backend set.* Any host
+  must be able to reach a backend, and a host-local copy is not
+  reachable. The chain records only `detached: local`, so a stale bucket
+  is never mistaken for the live volume.
+
+**Consequences:**
+- **Performance:**
+  - S3-only writes are acknowledged at RAM speed, and FLUSH costs one
+    PUT round trip, as in sync mode.
+  - Read misses cost a GET. Latency-sensitive S3-only volumes should use
+    a same-region bucket, or S3 Express One Zone as the authority.
+- **Memory per S3-only volume:** `mem_buffer + mem_cache` plus interior
+  map nodes (≈ 1.6 MiB/TiB) and the index filter.
+- **Format:**
+  - The journal record format is shared by disk and RAM sinks, and is
+    frozen in phase 1 as before.
+  - CONFIG gains the `detached` field.
+  - The segment, map and commit formats are unchanged.
+- **Gate (phase 0, P0.12):** the P0.3 kill -9 recovery cycle, repeated
+  with a memfd buffer held by a keeper. The checks:
+  - fsck is clean;
+  - no acknowledged-and-flushed write is lost;
+  - a lost keeper fails the device with EIO, and never resumes it with
+    stale data.
+- **Amends:**
+  - ADR-3: durability in S3-only is an S3 commit.
+  - ADR-4: the journal may be a RAM sink.
+  - ADR-10: S3-only implies sync unless `--unsafe-flush`.
+  - ADR-14: the local store is optional.
+  - ADR-16: the keeper process.

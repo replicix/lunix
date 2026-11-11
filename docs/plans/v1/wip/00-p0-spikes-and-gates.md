@@ -41,6 +41,7 @@ leave a reproducible baseline:
 | crypto design review | 11 | P0.8 |
 | `replicix-core` extraction (conditional) | 19 | P0.9 |
 | conditional-write support and latency per provider | 2 | P0.10 |
+| memfd write buffer survives daemon restart via a keeper; lost keeper fails safe | 26 | P0.12 |
 | record outcomes, publish baseline | all | P0.11 |
 
 ## Privileges, hosts and scratch space
@@ -941,6 +942,44 @@ holds for the three launch providers; a launch provider that fails is
 escalated to the maintainer in the report (do not edit ADR-2).
 
 ---
+
+## P0.12 — Keeper-held RAM write buffer (ADR-26)
+
+Run this after P0.3, reusing its file-backed recoverable target and
+driver. It needs root.
+
+**Steps:**
+1. Add a `--sink mem` mode to the P0.3 target.
+   - Writes are appended to a `memfd` ring, in a journal-like record
+     format with a header `{magic, device id, generation}`, and are
+     acknowledged from RAM.
+   - FLUSH copies the ring's records up to the flush point into the
+     backing file and `fdatasync`s it. This stands in for the S3 DELTA
+     commit.
+2. Write a keeper, `spikes/ublk-recovery/keeper`.
+   - It receives the memfd via `SCM_RIGHTS` on a Unix socket under
+     `$LUNIX_SPIKE_DIR` and hands it back to the restarted daemon.
+   - Also try the systemd FD store with a transient unit
+     (`systemd-run -p FileDescriptorStoreMax=4`), if available.
+     Otherwise mark it "not run".
+3. Run the P0.3 cycle with ext4 mounted and fio verify running: kill -9
+   the daemon, restart it, take the memfd from the keeper, replay it,
+   recover. Run at least 20 cycles.
+4. **Lost keeper:** kill both the keeper and the daemon. The restarted
+   daemon must find no buffer (or a generation mismatch), refuse
+   recovery and delete the device. Record what the mounted ext4 and
+   fio see. EIO is expected. Silent success with stale data is a
+   failure.
+5. Measure the acknowledgement latency of the RAM sink against the P0.5
+   journal (4K QD1/QD32), and the replay time of a 256 MiB buffer.
+
+**Gate:**
+- All cycles finish with fsck clean.
+- fio verify finds no mismatch for any write that was acknowledged by a
+  FLUSH before the kill.
+- The lost-keeper case never resumes the device.
+
+Results go in `bench/ublk-recovery/RESULTS.md` §P0.12.
 
 ## P0.11 — Close-out: decision records and `bench/BASELINE.md`
 

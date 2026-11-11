@@ -76,5 +76,18 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Authority transfer:** moving the arbiter role from one backend to
   another while the pod keeps running: TRANSFER on the old authority,
   then EPOCH on the new one (ADR-24).
+- **Local tier:** the owning host's local storage for a volume. Its
+  role is `store` (complete copy), `cache` (partial, evictable) or
+  `none` (no files; S3 only). It can change live (ADR-26).
+- **Topology:** local only (`store`, no backend), local + S3, or S3 only
+  (`none`).
+- **Write buffer:** with no local tier, the memfd ring of journal
+  records that takes writes before they are committed to S3.
+- **Keeper:** the systemd FD store or `lunix-keeper` process that holds
+  the write buffer's memfd, so it outlives a `lunixd` restart.
+- **Sink switch:** moving new writes from one write sink (journal or
+  write buffer) to the other at a seq barrier, without pausing I/O.
+- **Hydrate:** copy every live segment into the local tier, turning
+  `cache` into `store`.
 - **Steal:** taking ownership without a graceful release. It waits for
   the lease TTL, or `--force`.

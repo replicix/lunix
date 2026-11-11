@@ -26,6 +26,14 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
 - **S3 attachable at any time.** `lunix backend add db s3://bucket/prefix`
   starts an initial sync; from then on the local store is a cache with
   eviction and the volume can be **larger than the local disk**.
+- **Three topologies, switchable live (ADR-26).**
+  - **Local only**, **local + S3**, or **S3 only**. S3 only means no
+    local files at all, for diskless or ephemeral nodes.
+  - The local tier (`store`, `cache`, `none`) and every backend can be
+    added or removed while the device is in use, with no I/O errors and
+    no detach.
+  - S3-only FLUSHes are durable on the bucket (sync mode). A keeper
+    process holds the RAM write buffer across daemon restarts.
 - **S3 always holds a mountable, crash-consistent image.** Whatever the
   mode, the newest commit on the bucket is a legal post-power-loss state
   of the device (a prefix cut at a flush boundary). Losing the host and its

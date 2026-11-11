@@ -28,7 +28,8 @@ commit.
 
 A **volume** is a thin block device of a given size. Its data path is:
 
-1. **Admission.** A write is journaled locally and acknowledged.
+1. **Admission.** A write is journaled locally (or, with no local tier,
+   into a keeper-held RAM buffer; ADR-26) and acknowledged.
 2. **Destage.** Zero-detection, hashing, compression and encryption run
    later, and the results are packed into **segments** (ADR-4).
 3. **Map update.** The LBA → chunk **map** (a Merkle radix tree) is
@@ -36,7 +37,8 @@ A **volume** is a thin block device of a given size. Its data path is:
 4. **Commit.** A **commit** records a crash-consistent cut (ADR-3, ADR-9).
 5. **Replication.** With backends attached, segments, map packs and
    commits are replicated to the authority and then to the mirrors
-   (ADR-15). The local store becomes an evicting cache.
+   (ADR-15). The local store becomes an evicting cache, a full replica,
+   or is dropped entirely (ADR-26, §13).
 
 ## 2. Volume model
 
@@ -54,6 +56,9 @@ A **volume** is a thin block device of a given size. Its data path is:
   has a role (`authority` | `mirror`), a state (§12), a cursor, a
   credentials reference and a cost weight. Zero backends means a
   **local-only** volume.
+- **Local tier** (ADR-26): `store` (a complete local copy), `cache`
+  (partial, evictable; needs a backend) or `none` (no local files; needs
+  a backend). It is chosen per attach and changeable live (§13).
 - **Mode:** `local` | `async{T,B,B_max}` | `sync` (ADR-10), changeable
   at runtime.
 - **Space policy:** `free_floor` (bytes or % of the host FS), `on_full =
@@ -102,6 +107,9 @@ The queue thread never blocks. Anything that waits (space, S3, a cold
 RMW) parks the tag and is resumed by a completion.
 
 ## 4. Local store
+
+The local store is optional: a volume's local tier is `store`, `cache` or
+`none` (ADR-26, §13). This section describes the first two.
 
 Directory (any POSIX FS; btrfs CoW and compression discouraged for the
 journal):
@@ -649,7 +657,75 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - **Cost guard:** `lunix migrate plan` estimates the bytes, egress cost
   and time before a backend is added.
 
-## 13. Local-only volumes and attaching S3 later
+## 13. Storage topologies and local tier roles (ADR-26)
+
+| topology | local tier | backends | FLUSH is durable as |
+|---|---|---|---|
+| local only | `store` | 0 | journal `fdatasync` |
+| local + S3 | `cache` (or `store` for a full local replica) | ≥ 1 | `fdatasync` (async) or a DELTA commit (sync) |
+| S3 only | `none` | ≥ 1 | a DELTA commit (sync); `--unsafe-flush` allows async |
+
+**Copy invariant:**
+- Every FLUSH-acknowledged write is on a durable sink: the journal or
+  the authority's chain.
+- At least one complete copy exists: a `store` tier or the authority.
+- Transitions that break either rule are refused.
+
+### 13.1 S3 only (`local none`)
+
+- **Write sink:**
+  - A memfd ring of journal records (§4.1 format), `mem_buffer`
+    bytes (default 256 MiB). It also holds the open segment being
+    packed for upload.
+  - When the buffer fills, admission backs off: cut and commit sooner,
+    destage, throttle. There is no ENOSPC unless `bucket_quota` is set.
+- **Keeper:**
+  - The memfd is held by the systemd FD store (`FDSTORE=1`) or by
+    `lunix-keeper`, a tiny process in the DaemonSet pod, via
+    `SCM_RIGHTS`, so a `lunixd` crash or upgrade keeps acknowledged
+    writes.
+  - On recovery, the buffer header (`volume uuid, device id,
+    generation`) must match. Otherwise the device is deleted (EIO), not
+    recovered.
+- **Reads:**
+  - Overlay, then map (interior nodes resident), then `mem_cache`
+    (default 256 MiB, S3-FIFO, leaves and extents), then a ranged GET
+    (§10.2-10.3).
+- **Dedup:**
+  - A RAM filter over the bucket's `index_packs`. A hit costs a cached
+    ranged GET of one index block, and only on the destage path.
+- **Partial-chunk writes:** need the base chunk. That is a cold RMW via
+  GET, counted in metrics.
+- **GC and compaction:** live extents are read by ranged GET. The work is
+  budgeted as on any backend.
+
+### 13.2 Live transitions
+
+- **Sink switch at a seq barrier `b`:**
+  - Overlay entries carry their sink. Writes with `seq > b` go to the
+    new sink.
+  - A FLUSH spanning `b` waits for both sinks.
+  - The old sink is retired after a commit covering `b` is on the
+    authority.
+- **`none → cache`:** create the directory, open the journal, switch
+  sink. The RAM buffer drains through normal commits. Warm on demand or
+  from `heat/` (§10.4).
+- **`cache → none`:**
+  - Requires sync mode (or `--unsafe-flush`).
+  - Switch sink to RAM, then commit a cut covering `b`: every journal
+    record and local segment is now on the authority.
+  - Drop the cache, then delete the directory.
+- **`cache → store`:** hydrate every segment reachable from retained
+  commits, with the backfill machinery of §12 (hot first, restartable).
+  Eviction stops at completion.
+- **`store → cache`:** needs an InSync backend. Eviction starts.
+- **Remove the last backend:**
+  - Needs `store`.
+  - Write `CONFIG{backends: [], detached: local}` on the authority,
+    then release the lease. Commits continue in `state/commits/`.
+  - `volume import` of that bucket refuses without `--force`.
+
+### 13.3 Local-only volumes and attaching S3 later
 
 - **Local-only:** a local-only volume is the same store with no backend.
   Commits are written to `state/commits/` locally: the same objects,
@@ -709,6 +785,8 @@ lunix volume import NAME s3://bucket/prefix/<uuid> --dir /data/lunix
 lunix attach NAME            # → /dev/lunix/NAME     lunix detach NAME [--release]
 lunix backend add NAME s3://… [--role authority|mirror]   lunix backend rm NAME <id> [--drain]
 lunix mode NAME async --interval 30s --max-unsynced 1G | sync | local
+lunix local NAME none|cache [--size 100G]|store   (live; ADR-26)
+lunix volume create NAME --size 200G --local none s3://…   (S3 only; implies sync)
 lunix space NAME --floor 10% --on-full wait --full-timeout 60s --cache-max 100G
 lunix resize NAME 300G       lunix snapshot NAME SNAP [--freeze MNT]   lunix snapshot rm|ls NAME
 lunix mount-at NAME --snapshot S|--commit <seq>|--time <t>   (read-only time travel)
@@ -740,6 +818,9 @@ ADR-16 and ADR-22 set the shape.
 - **NodeExpand:** grows the file system.
 - **Topology:** none, apart from an optional primary-backend region
   preference.
+- **Local tier:** the StorageClass parameter `localTier: none|cache|store`
+  (default `cache`) and `cacheSize`. `none` suits diskless or ephemeral
+  nodes (ADR-26).
 - **Configuration:** `LunixBackendSet` lists the buckets and the
   credentials refs. Credential providers are pluggable: static secret,
   IRSA, Pod Identity, GKE and Azure workload identity, IMDS.
@@ -779,6 +860,9 @@ ADR-16 and ADR-22 set the shape.
 | bucket object corrupt | the fetch fails verification | read from a mirror; scrub repairs |
 | backend rollback / substitution | MAC or epoch mismatch detected | refuse to mount; needs an anchor (open question) |
 | mirror lags / fails | its state drops to CatchingUp | the authority is unaffected |
+| `lunixd` crash, S3 only | I/O stalls | recover; replay the keeper-held memfd buffer |
+| `lunixd` and keeper both lost, S3 only | the buffer is gone | the device is deleted (EIO), never resumed with stale data; remount from the bucket |
+| host power loss, S3 only | unflushed writes lost (legal) | attach from the bucket |
 
 ## 20. Performance targets (to be validated in phase 0/1)
 

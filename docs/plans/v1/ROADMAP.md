@@ -34,6 +34,10 @@ Phase 0 resolves the ADR gates before any format freezes.
 
 **Crypto review** of ADR-11.
 
+**Keeper recovery spike (ADR-26):** the kill -9 recovery cycle with a
+memfd write buffer held by a keeper, including the lost-keeper case
+(the device must fail with EIO, not resume).
+
 **Shared crates:** extract `replicix-core` (`objcas`, `chunkfmt`,
 `upload-concurrency`, `platform-lite`), if the maintainer accepts ADR-19.
 
@@ -83,12 +87,20 @@ baseline table in `bench/`.
 
 ## Phase 3: Sync mode and the durability ladder
 
-**Scope:** DELTA commits, flush-group coalescing, DELTA folding, the
-`flush_timeout` policy, and runtime mode switches.
+**Scope:**
+- DELTA commits, flush-group coalescing, DELTA folding, the
+  `flush_timeout` policy, and runtime mode switches.
+- S3-only volumes (ADR-26): the memfd write buffer and its keeper, RAM
+  caches, and the bucket-resident index lookup.
+- Live local-tier changes: the sink switch, `none ↔ cache`.
 
 **Exit:**
 - After any kill, every FLUSH-acknowledged write is present on the
   bucket.
+- An S3-only volume passes fio verify and the kill -9 loop. A lost
+  keeper fails the device and never resumes it.
+- `none → cache → none` under fio load: no I/O errors, and fsck is
+  clean.
 - The fsync latency and request-cost report is published.
 
 ## Phase 4: Snapshots, time travel, rollback, retention
@@ -117,10 +129,14 @@ baseline table in `bench/`.
   AIMD, budget) and tail replication.
 - Source selection and hedging across backends.
 - Authority transfer, `steal`, mirror GC, and `migrate plan`.
+- Hydration (`cache → store`), and removing the last backend to a
+  local-only volume (ADR-26).
 - Provider adapters (GCS generation preconditions).
 
 **Exit:**
 - Add and remove a mirror under load with no I/O errors.
+- S3 only → local only → S3 only round trip under load, with no I/O
+  errors.
 - Root equality is verified across AWS, R2 and OVH.
 - DR steal is tested from a mirror.
 
@@ -130,6 +146,8 @@ baseline table in `bench/`.
 - `lunix-csi` controller and node.
 - Block and Filesystem modes, RWO and RWOP, expand, and snapshots (with
   the optional freeze).
+- The `localTier` and `cacheSize` StorageClass parameters (ADR-26), and
+  `lunix-keeper` in the DaemonSet pod.
 - Restore-from-snapshot and PVC clone as a full copy.
 - `LunixBackendSet`, credential providers, and the Helm chart: a
   privileged `lunixd` DaemonSet plus the plugin.
