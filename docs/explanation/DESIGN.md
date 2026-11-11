@@ -242,21 +242,43 @@ trailer = footer offset + length + magic
 ## 7. Block map
 
 - **Shape:** a radix tree over chunk index `ci = lba / chunk_size`.
-  Fanout is 512. A leaf holds 512 entries of 48 B, so a leaf is 24 KiB
-  before compression. Depth is `ceil(log512(chunks))`. At 64 KiB chunks
-  that is 3 levels (leaf + 2 interior) up to 8 TiB, and 4 levels up to
-  4 PiB.
+  Fanout is 512. Depth is `ceil(log512(chunks))`. At 64 KiB chunks that is
+  3 levels (leaf + 2 interior) up to 8 TiB, and 4 levels up to 4 PiB.
 - **Entries:**
-  - Leaf entry: `hole` | `{chunk_id, hint{seg, off, clen}}`.
+  - Leaf entry: `hole` | `{id_prefix, hint{seg, off, clen}}`.
+    - `id_prefix` is the first `id_len` bytes of `chunk_id`, where
+      `id_len` ∈ {16 (default), 32, 0 = lean}, fixed per volume (ADR-8).
+    - Reads verify the prefix against the full `chunk_id` in the
+      extent header.
+  - Leaf encoding (ADR-8):
+    - A segment dictionary.
+    - Runs of chunks contiguous in one segment, each stored as `(seg
+      index, start offset, count)`.
+    - Per-entry `clen` packed into fixed bit width.
+    - The id prefix as a fixed-width column.
+    - A restart point every 16 entries with the running offset.
+    - Holes as runs.
+    - No outer compression.
+  - Leaf size and lookup cost:
+    - A leaf is about 9-11 KiB at 16 B ids: 294-352 MiB per TiB, against
+      768 MiB for plain 48 B rows.
+    - A point lookup takes 121-181 ns on the encoded leaf.
   - Interior entry: `{child_hash, child_location{pack, off, len}}`.
   - Absent subtree: the empty-node hash.
 - **Node identity:** node hash = BLAKE3 of the canonical encoding (keyed
-  if encrypted). Nodes are compressed and, if the family is encrypted,
-  encrypted with ADR-11's scheme keyed by the node hash.
+  if encrypted). Leaves are stored in their bit-packed encoding without
+  compression. Interior nodes are zstd-compressed. If the family is
+  encrypted, both are encrypted with ADR-11's scheme keyed by the node
+  hash.
 - **Hot path:**
   - Map nodes are paged from `map/`, from the local pack store or from
     the backend.
-  - An in-memory LRU node cache is bounded by `map_cache_max`.
+  - An in-memory node cache is bounded by `map_cache_max`. It holds
+    leaves in their encoded form, with a small decoded tier for the
+    hottest leaves (2.4 ns lookup).
+  - At 16 B ids, 1 GiB of cache covers about 3 TiB of LBA.
+  - The interior nodes are about 1.6 MiB per TiB and always stay
+    resident.
   - Modified leaves are held in a mutable copy-on-write overlay keyed by
     leaf index.
 - **Seal (on a FULL commit):**
@@ -264,7 +286,7 @@ trailer = footer offset + length + magic
   2. Recompute hashes up the paths.
   3. Write the new nodes into one map pack.
   4. The new root goes into the commit.
-- **Cost:** `dirty_leaves × 24 KiB` (compressed) plus a few upper nodes.
+- **Cost:** `dirty_leaves × ~10 KiB` (encoded) plus a few upper nodes.
   Scattered-write workloads dirty many leaves. That is bounded by the
   async interval, measured in phase 0, and if needed mitigated by
   map-delta records in DELTA commits.
@@ -273,9 +295,13 @@ trailer = footer offset + length + magic
   - When compaction moves an extent, the current map is rewritten lazily:
     the compactor emits `moved{chunk_id → new hint}`, applied to leaves
     reachable from the head on the next seal.
-  - A stale hint in a retained snapshot fails verification (wrong
-    `chunk_id` at that offset, or the segment is gone). The read then
-    falls back to the chunk index.
+  - A stale hint in a retained snapshot fails verification: either the
+    extent header's `chunk_id` does not start with the leaf's
+    `id_prefix`, or the segment is gone. The read then falls back to the
+    chunk index, which is searched by prefix and confirmed against the
+    full id.
+  - Lean volumes (`id_len = 0`) would instead need forwarding records
+    keyed by `(seg, off)`. That needs its own ADR before it is enabled.
 - **Chunk index:**
   - `chunk_id → (seg, off, clen)` is kept as LSM sorted runs locally,
     persisted to the bucket inside FULL commits as index packs.
@@ -385,7 +411,9 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 1. Overlay (journal data).
 2. Map entry → hole (zero-fill) or `chunk_id`.
-3. Local location: own segment, or a cache-slab entry by `chunk_id`.
+3. Local location: own segment, or a cache-slab entry keyed by the
+   16 B `id_prefix`. The slab entry holds the full `chunk_id`, which is
+   checked.
 4. Otherwise a backend miss: a ranged GET of the extent via the hint (or
    the index), verify, decompress, insert into the slab, serve.
 

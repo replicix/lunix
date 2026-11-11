@@ -1,0 +1,14 @@
+[package]
+name = "leafenc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zstd = "0.13"
+lz4_flex = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false

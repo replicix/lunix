@@ -1,0 +1,13 @@
+<!-- timer overhead p50 = 20 ns; chunk=65536; leaves=512; stride=1; sample=4096; ops=200000 -->
+generated e-sparse in 3.358021ms
+
+### Workload e-sparse (chunk 65536 B)
+
+non-empty leaves 512 of 512; non-hole entries/leaf 254.7; mean runs/leaf 9.4; mean distinct segments/leaf 1.5; segments written 254; extents written 130430
+
+| variant | MiB/TiB | B/entry | enc us/leaf | dec us/leaf | lookup(enc) mean ns | p50 | p99 | lookup(decoded) ns |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+
+Footer sizing for this workload: 254 segments, 130430 extents written (incl. dead): full footer @ ~44 B/extent = 350 MiB/TiB; offset+clen sidecar @ 5.1 B/extent = 41 MiB/TiB; avg extents/segment 514.
+
+rc=0

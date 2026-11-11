@@ -196,8 +196,48 @@ the default.
 
 - **Leaf entries:**
   - Each leaf holds 512 entries, covering 32 MiB of LBA at 64 KiB chunks.
-  - An entry is `chunk_id` (32 B) plus a **location hint** (segment
-    number, offset, `clen`; 16 B), or *hole*.
+  - An entry is a stored **id prefix** plus a **location hint** (segment,
+    offset, `clen`), or *hole*.
+  - The id prefix is the first 16 B of `chunk_id`. The id length is a
+    per-volume parameter fixed at creation, `0 | 16 | 32` B, with 16 as
+    the default.
+- **Leaf encoding (amended 2026-11-11):** leaves are **run-encoded with
+  bit-packed fixed-width columns**:
+  - Each leaf has a dictionary of the segments it references.
+  - A run of consecutive chunks that are contiguous in one segment stores
+    the segment and start offset once.
+  - Each entry adds its `clen`, packed in about 17 bits.
+  - Every 16 entries there is a restart point holding the running offset
+    sum, so any entry can be looked up in O(1) without decoding the leaf.
+  - Holes are runs.
+  - Leaves get no outer zstd or lz4: it saves under 1% and makes a point
+    lookup 2-100× slower.
+- **Leaf encoding costs** (measured on synthetic 1 TiB maps at 64 KiB
+  chunks; see [the leaf-encoding note](research/2026-11-11-map-leaf-encoding.md)):
+
+  | Encoding | Size per TiB |
+  |---|---|
+  | Old layout, 48 B entries | 768 MiB |
+  | Old layout + zstd | 630-650 MiB |
+  | Run-encoded, 16 B ids | **294-352 MiB** (sequential to fragmented) |
+
+  A point lookup on an encoded leaf takes 121-181 ns; a full decode takes
+  0.8-3.6 µs.
+- **Id-length rules:**
+  - **16 B ids are the minimum safe length.** A 16 B prefix stays
+    collision-safe against a hostile bucket or guest, in both keyed and
+    unkeyed mode.
+  - **8 B ids are rejected.** A guest can grind an unkeyed collision in
+    about 2^32 work, and a keyed family has swap probability 2^-9 at
+    16 TiB.
+  - **Dedup is unaffected.** It always compares full ids from footers and
+    the chunk index.
+- **Lean profile (no id, 38-96 MiB/TiB): specified, not enabled.** It is
+  enabled only after an ADR settles two things:
+  - Position-bound extent authentication, or header self-location for
+    unencrypted volumes.
+  - Forwarding records for stale hints, because the chunk index can no
+    longer be keyed from the leaf.
 - **Interior nodes:**
   - An interior entry is the child's hash plus the child's location.
   - A node is identified by its content hash. Nodes are immutable and are
@@ -225,6 +265,11 @@ hint falls back to the chunk index (ADR-14).
   verification would be impossible.
 - *Leaves holding chunk ids only, with no hint.* Every cold read would
   need two GETs.
+- *Slot references* (`segment, slot-in-footer`). The leaf shrinks, but
+  the footer-side offset and length table costs more than it saves
+  (82-107 MiB/TiB). Every cold read would also need a footer GET first.
+- *Varint run streams.* A lookup must scan the stream (1.1-2.7 µs), and
+  the result is 24% larger than bit-packed columns.
 
 **Enables:**
 - Snapshot and backend diffs in O(changed).
