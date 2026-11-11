@@ -287,10 +287,14 @@ hint falls back to the chunk index (ADR-14).
   - The volume's history is a chain of create-only objects
     `commits/<seq:016x>`, written with `If-None-Match: *`. This is
     Constellation's `commits.rs` pattern.
-  - A commit is either a **FULL** commit (map root, size, parent, epoch,
-    `cut_seq`, the segments it introduced, optional heat-map reference)
-    or a **DELTA** commit (journal records inline, compressed and
-    encrypted, on top of the last FULL).
+  - Commit kinds:
+    - **FULL**: map root, size, parent, epoch, `cut_seq`, the segments
+      it introduced, optional heat-map reference.
+    - **DELTA**: journal records inline, compressed and encrypted, on top
+      of the last FULL.
+    - **EPOCH**: owner change.
+    - **CONFIG** and **TRANSFER**: backend membership and authority
+      moves (ADR-24).
   - Every object a commit names is durable before the commit is created.
 - **Ownership:**
   - `lease` is a CAS object (`If-Match`) holding the epoch, owner,
@@ -457,8 +461,10 @@ W-TinyLFU) in phase 0.
 - **Backend lifecycle:** `Joining` (backfill: hot first, restartable,
   AIMD, bandwidth- and budget-capped) → `CatchingUp` → `InSync` →
   `Draining` → `Removed`.
-- **Authority transfer:** `set-authority` runs while the lease is
-  released, and bumps the epoch on both backends.
+- **Authority transfer:** `set-authority` is a live, owner-driven
+  protocol. It is decided by one CAS (a TRANSFER commit) on the old
+  authority, and needs no detach. Membership and backend states are
+  CONFIG commits in the chain (ADR-24).
 - **Policies:** `primary-async` is the default. `sync-quorum k/n` and
   `sync-all` come later.
 - **Reads:** reads choose by EWMA latency and egress cost, with hedging,
@@ -612,3 +618,109 @@ Constellation migrates at its own pace.
 The format is part of v1. Its population is phase 7.
 
 **Rejected:** ML prefetch (cost, opacity).
+
+## ADR-24: Backend membership lives in the commit chain; authority transfer is live
+
+**Context:**
+- Once a volume has a backend, the client is ephemeral. Every host must
+  be able to mount the volume from S3 alone, including which buckets it
+  uses, their states and which one is the authority.
+- The first draft kept the backend set only in the local `volume.json`.
+- It also allowed `set-authority` only while the lease was released,
+  which meant a detach and a pod disruption.
+
+**Decision:**
+1. **CONFIG commits.**
+   - A new commit kind, `CONFIG`, carries the volume's backend
+     configuration:
+     `{config_version, authority: backend_id, backends: [{id, url,
+     role, state, since_seq}], policy}`.
+   - Every membership or state change is a CONFIG commit on the
+     authority's chain, written create-only like every commit:
+     - `backend add` → Joining;
+     - Joining → CatchingUp → InSync;
+     - `set-authority`;
+     - Draining → Removed;
+     - a policy change.
+   - Live progress is advisory and lives in
+     `sync/<backend-id>/progress`, a plain PUT written only by the owner:
+     backfill progress and per-backend cursors. Copies are idempotent
+     because objects are immutable and content-addressed, so progress
+     can always be rebuilt by a LIST/HEAD diff.
+   - No other mutable membership state exists in S3 or in Kubernetes.
+2. **One arbiter.**
+   - Conditional writes happen only on the current authority.
+   - Mirrors receive byte-identical copies of every commit (CONFIG
+     included), in `seq` order, after the objects each commit names. So
+     each mirror holds a valid prefix of the authority's chain, including
+     its config history.
+   - Mirrors need no CAS.
+   - Writing transitions with CAS into *every* bucket is rejected (see
+     below).
+3. **Live authority transfer** from A to B, while the pod keeps doing
+   I/O. The owner runs these steps:
+   1. B must be `InSync` and must pass the authority probe (ADR-2).
+   2. The owner pauses commit *publication*. I/O keeps landing in the
+      journal and the cache, and reads keep using any InSync backend.
+   3. The owner copies A's remaining commits up to tip `t` to B.
+   4. The owner writes `TRANSFER{to: B, epoch: e+1, config_version+1}`
+      at `commits/t+1` on **A** (`If-None-Match`). **This CAS is the
+      linearization point.** Before it A is the authority; after it B is.
+      A zombie committing to A gets 412, reads the TRANSFER and
+      self-fences.
+   5. The owner copies `t+1` to B, creates `lease` on B (`If-None-Match`,
+      epoch `e+1`, same owner), then writes `EPOCH{authority: B}` at
+      `t+2` on B.
+   6. Publication resumes on B. A is demoted to mirror and receives
+      `t+2…` as copies, or is drained per policy: a CONFIG commit on B
+      marks it Draining, then Removed. A's `lease` is updated to
+      `transferred_to: B` (CAS, best effort; the chain is authoritative).
+   - **Visible cost:**
+     - async mode: none;
+     - sync mode: the in-flight flush group waits for about 3 extra PUT
+       round trips, once.
+   - **Crash recovery:** a starting owner that finds TRANSFER at A's tip
+     rolls forward through steps 5-6. A starting owner that finds no
+     TRANSFER treats A as the authority. There is no ambiguous
+     intermediate state.
+4. **Discovery from any bucket:**
+   1. Read `volume`.
+   2. Find that backend's tip and read its latest CONFIG.
+   3. Go to the named authority.
+   4. Follow `TRANSFER.to` pointers until a backend's tip is not a
+      TRANSFER.
+   - A lagging mirror may name an old authority; that old authority's
+     TRANSFER points onward.
+   - **Purge rule:** a former authority is never purged until every
+     remaining backend's cursor is past its TRANSFER commit, so the
+     pointer chain stays intact.
+5. **Credentials stay out of S3.**
+   - CONFIG names backends by `id` and `url` only.
+   - Each host or cluster resolves `id → credentials`: through
+     `LunixBackendSet` and Secrets or workload identity (ADR-22), or
+     through local credential providers when standalone.
+   - Mounting needs credentials for at least one InSync backend plus the
+     authority.
+6. **DR steal stays the one forced exception.**
+   - `lunix steal --backend B --force` writes `EPOCH + CONFIG{authority:
+     B}` on B at B's own tip, losing whatever B had not received.
+   - If the old authority is merely partitioned, its owner can keep
+     committing there until it is fenced, so the old site must be fenced
+     first (ADR-15, DESIGN §12).
+   - When the old authority becomes reachable, a `TRANSFER{to: B,
+     reason: steal}` is written at its tip if its slot is free. If the
+     slot is taken, the old chain beyond the steal point is marked
+     *abandoned* and quarantined for manual export.
+
+**Rejected:**
+- *CAS-writing every transition into every bucket.* There is no
+  atomicity across buckets, so a partial failure leaves two "truths" and
+  needs a two-phase commit with its own recovery state. It also forces
+  CAS on mirrors.
+- *A mutable `backends` object per bucket.* That is a second source of
+  truth beside the chain, and R2 and GCS throttle rewrites of the same
+  key.
+- *Membership in Kubernetes CRs.* It ties the volume to one cluster's
+  etcd, and fails when the client is ephemeral or standalone.
+- *Authority transfer only while the lease is released* (the first
+  draft). It needs a detach, which is a pod disruption.

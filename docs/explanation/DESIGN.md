@@ -230,7 +230,8 @@ trailer = footer offset + length + magic
                   codec policy, crypto params, wrapped key slots (MAC'd)
   lease           CAS object: epoch, owner{host,cluster}, deadline, released
   head            advisory: last known commit seq (plain PUT; never trusted)
-  commits/<seq:016x>       create-only FULL | DELTA | EPOCH commits
+  commits/<seq:016x>       create-only FULL | DELTA | EPOCH | CONFIG | TRANSFER commits
+  sync/<backend-id>/progress   advisory backfill/cursor progress (owner-only plain PUT)
   segments/<seg:016x>      data segments
   map/<pack:016x>          map-node packs
   heat/<seq:016x>          warm-start manifests (ADR-23)
@@ -359,13 +360,21 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 1. Read `volume` and verify its MAC.
 2. Find the tip: start from the `head` hint, LIST `commits/` from it,
    and probe forward until a 404.
-3. Load the newest FULL ≤ tip and replay subsequent DELTAs, in order,
+3. **Find the authority** (ADR-24):
+   - Read the latest CONFIG at or below the tip.
+   - Go to the backend it names as the authority. If that backend's tip
+     is a TRANSFER, follow `TRANSFER.to`.
+   - Repeat until a tip is not a TRANSFER. Continue on that backend.
+   - Any InSync backend may serve data reads during and after the
+     attach.
+4. Load the newest FULL ≤ tip and replay subsequent DELTAs, in order,
    up to the first gap.
-4. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
+5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
    not released, wait for the deadline (or `--steal`).
-5. Write an EPOCH commit at tip + 1. If that write gets 412, another
-   writer appended: re-read, replay, retry.
-6. Start the device. Map nodes are faulted lazily, and prefetch follows
+6. Write an EPOCH commit at tip + 1. If that write gets 412, another
+   writer appended: re-read, replay, retry. If the 412 slot holds a
+   TRANSFER, follow it (step 3).
+7. Start the device. Map nodes are faulted lazily, and prefetch follows
    the heat map (§10.4).
 
 ### 8.5 Lease and fencing
@@ -477,6 +486,18 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ## 12. Multiple backends
 
+- **Membership lives in the chain (ADR-24).**
+  - The backend set, roles, states and the authority are recorded in
+    CONFIG commits on the authority's chain: `{config_version,
+    authority, backends[{id, url, role, state, since_seq}], policy}`.
+  - Every row transition below is one CONFIG commit, written create-only
+    on the authority.
+  - Mirrors receive the commits as byte-identical copies and need no CAS.
+  - Backfill progress and cursors are advisory (`sync/<id>/progress`),
+    rebuildable by a LIST/HEAD diff.
+  - Credentials are never in S3. Backends are resolved by `id` on each
+    host or cluster.
+
 | state | meaning | transitions |
 |---|---|---|
 | Joining | probe passed; tail replication of new objects starts; backfill copies every object reachable from retained commits, hottest first, restartable from a persisted cursor | → CatchingUp when the backfill is done |
@@ -494,16 +515,39 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - **Verification:** `lunix verify --backend X` compares commit chains and
   map roots: equal roots mean equal volumes. It then spot-checks a sample
   of segments by hash.
-- **Authority transfer** (`set-authority`), while the lease is released:
-  1. Write the lease and an EPOCH commit on the new authority, with epoch
-     + 1.
-  2. Write a `transferred_to` EPOCH commit on the old authority, which
-     fences it.
+- **Live authority transfer** (`set-authority B`, ADR-24). The pod keeps
+  doing I/O throughout, and only commit publication pauses.
+  1. Check that B is InSync and authority-capable.
+  2. Pause publication. I/O continues into the journal and cache.
+  3. Copy A's commits up to tip `t` to B.
+  4. Write `TRANSFER{to: B, epoch: e+1}` at `t+1` on A (CAS). This is the
+     linearization point.
+  5. Copy `t+1` to B, create B's `lease` (epoch `e+1`), then write
+     `EPOCH{authority: B}` at `t+2` on B.
+  6. Resume publication on B. A becomes a mirror, or is drained through
+     CONFIG commits on B.
+  - **Cost:** async mode sees nothing; sync mode delays one flush group
+    by about 3 PUT round trips.
+  - **Crash recovery:** a TRANSFER at A's tip means roll forward; no
+    TRANSFER means A is still the authority.
+  - **Purge rule:** a former authority is never purged before every
+    remaining backend's cursor is past its TRANSFER.
+- **Region move with no detach:**
+  1. `backend add B` (Joining → … → InSync).
+  2. `set-authority B`.
+  3. `backend rm A --drain`.
+  - The pod sees no detach.
+  - Moving the *pod* itself is a separate step (§17); after it, the
+    pod's cache warms from B.
 - **DR steal on a mirror** (the authority is unreachable): `lunix steal
   --backend B` makes B the authority at its own tip.
   - It needs `--force` and an acknowledged loss window.
-  - The old authority's chain is marked abandoned when it becomes
-    reachable again.
+  - The steal writes `EPOCH + CONFIG{authority: B}` on B, at B's own
+    tip.
+  - When the old authority becomes reachable again, a `TRANSFER{to: B,
+    reason: steal}` is written at its tip if the slot is free.
+    Otherwise its chain beyond the steal point is marked abandoned and
+    quarantined for manual export.
   - A partitioned old owner that still reaches the old authority can keep
     committing there. That split is unavoidable without a shared arbiter
     and is documented. Operators fence the old site first, using CSI node
@@ -521,8 +565,10 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   2. Write `volume`.
   3. Acquire the lease.
   4. Copy segments, packs and commits.
-  5. Switch the mode to async.
-  6. Enable eviction once the backend is InSync.
+  5. Write the first CONFIG commit, naming this backend as the authority
+     (ADR-24).
+  6. Switch the mode to async.
+  7. Enable eviction once the backend is InSync.
 
 ## 14. Resize
 

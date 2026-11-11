@@ -25,6 +25,11 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   - **FULL** commits name a map root and new segments.
   - **DELTA** commits carry journal records inline (sync mode).
   - **EPOCH** commits mark an owner change.
+  - **CONFIG** commits record the backend set, roles, states and the
+    authority. They are the only S3 record of membership (ADR-24).
+  - **TRANSFER** commits hand the authority to another backend. A
+    TRANSFER is written by CAS on the old authority, and that write is
+    the transfer's linearization point.
 - **Tip:** the highest contiguous commit on a backend.
 - **Journal:** the local, O_DIRECT, append-only record of acknowledged
   but not yet destaged writes.
@@ -59,5 +64,8 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   `error` = ENOSPC).
 - **Heat map:** a `heat/<seq>` object of hot ranges and first-touch
   order, used to warm a new owner's cache.
+- **Authority transfer:** moving the arbiter role from one backend to
+  another while the pod keeps running: TRANSFER on the old authority,
+  then EPOCH on the new one (ADR-24).
 - **Steal:** taking ownership without a graceful release. It waits for
   the lease TTL, or `--force`.
