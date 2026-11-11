@@ -7,7 +7,9 @@ is [DESIGN.md](../../explanation/DESIGN.md).
 Each phase builds on the previous one and ends with its gates green. From
 phase 1 on, the format elements are final: the journal record, the
 segment and its CCH1 extent framing, the map node, the commit kinds, the
-bucket layout and the key hierarchy. Later phases add code, not
+bucket layout (including ADR-25's clone reservations: `volume.lineage`,
+the leaf `lineage_idx`, `holds/` and `readers/`) and the key hierarchy.
+Later phases add code, not
 migrations. Encryption is therefore *designed* in phase 1 even where it is
 implemented later.
 
