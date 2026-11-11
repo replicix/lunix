@@ -55,9 +55,12 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
     acknowledgement path.
   - Cold reads fetch with parallel, coalesced and hedged ranged GETs.
   - Targets are in DESIGN.md §20 and are gated by benchmarks.
-- **Online grow, careful shrink, and cheap snapshots and clones.**
-  Snapshots, clones and time-travel read-only mounts come from retained
-  commits.
+- **Online grow, careful shrink, cheap snapshots and time travel (v1).**
+  - Snapshots, read-only time-travel mounts at any retained commit,
+    rollback, retention policies and per-snapshot space accounting come
+    from retained commits.
+  - Thin clones are post-v1. The format already supports them
+    (ADR-25).
 - **Encryption and integrity.**
   - Optional end-to-end encryption, with keys that never reach the bucket
     in clear.
@@ -82,8 +85,8 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
 - **Non-Linux hosts.** ublk is Linux-only. Kernels older than the floor
   in ADR-17 are not supported.
 - **Cross-tenant global dedup.** Dedup stays inside a volume family:
-  a volume plus its snapshots and clones. Lineage-based sharing is
-  explicit. See ADR-13.
+  a volume plus its frozen lineage bases (post-v1 clones). Lineage-based
+  sharing is explicit. See ADR-13 and ADR-25.
 - **Erasure coding across clouds in v1.** The commit format leaves room for
   it (ADR-15).
 - **Synchronous multi-site write quorums in v1.** Mirrors are asynchronous
@@ -105,8 +108,9 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
    4. Stop the pod; the final commit reaches both buckets; the pod
       starts in Asia.
    5. Retire the US bucket.
-4. **Golden images:** a hundred CI volumes cloned from one base volume share
-   its chunks in the bucket and in each node's cache.
+4. **Golden images (post-v1, thin clones):** a hundred CI volumes cloned
+   from one base volume share its chunks in the bucket and in each node's
+   cache. In v1 a restore is a full copy.
 5. **Ransomware / bad deploy:** mount the volume read-only as it was an
    hour ago, from retained commits; optionally Object-Lock the bucket.
 

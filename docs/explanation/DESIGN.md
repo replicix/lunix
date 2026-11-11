@@ -44,8 +44,12 @@ A **volume** is a thin block device of a given size. Its data path is:
   creation: block size 4096, chunk size (default 64 KiB, ADR-5),
   compression policy, encryption on/off, and family. Size is mutable
   (§14).
-- **Family:** the dedup and key domain (ADR-13): a volume plus its
-  snapshots and clones. `family_id`, keyring (if encrypted).
+- **Family:** the key domain (ADR-13): a volume plus its snapshots and,
+  post-v1, its clones. `family_id`, keyring (if encrypted).
+  - **Dedup domain:** the volume plus its frozen lineage bases (ADR-25).
+- **Lineage:** `volume.lineage` lists the parent volumes and base commits
+  a clone reads through. It is always empty in v1; the format is frozen
+  for post-v1 thin clones (ADR-25).
 - **Backends:** an ordered set of S3 locations `s3://bucket/prefix`. Each
   has a role (`authority` | `mirror`), a state (§12), a cursor, a
   credentials reference and a cost weight. Zero backends means a
@@ -226,8 +230,9 @@ trailer = footer offset + length + magic
 
 ```
 <prefix>/lunix/v1/<volume-uuid>/
-  volume          create-only: format version, uuid, family, block/chunk size,
-                  codec policy, crypto params, wrapped key slots (MAC'd)
+  volume          create-only: format version, uuid, family, lineage[] (empty in v1),
+                  block/chunk size, codec policy, id_len, crypto params,
+                  wrapped key slots (MAC'd)
   lease           CAS object: epoch, owner{host,cluster}, deadline, released
   head            advisory: last known commit seq (plain PUT; never trusted)
   commits/<seq:016x>       create-only FULL | DELTA | EPOCH | CONFIG | TRANSFER commits
@@ -235,7 +240,9 @@ trailer = footer offset + length + magic
   segments/<seg:016x>      data segments
   map/<pack:016x>          map-node packs
   heat/<seq:016x>          warm-start manifests (ADR-23)
-  snapshots/<name>         create-only pins
+  snapshots/<name>         create-only pins {seq, created, consistency, label}
+  readers/<host>-<id>      time-travel mount pins {seq, deadline}, renewed while mounted
+  holds/<child-uuid>       clone base pins {base_seq}; none in v1, but GC honours them (ADR-25)
   gc/                      condemned lists, evidence journal
 <prefix>/lunix/v1/families/<family-id>/keyring   (shared by clones)
 ```
@@ -252,7 +259,9 @@ trailer = footer offset + length + magic
     - Reads verify the prefix against the full `chunk_id` in the
       extent header.
   - Leaf encoding (ADR-8):
-    - A segment dictionary.
+    - A segment dictionary. Each entry is `(lineage_idx: u8, seg)`.
+      `lineage_idx` is always 0 in v1; post-v1 it lets a clone's hint
+      point into a parent's segments (ADR-25).
     - Runs of chunks contiguous in one segment, each stored as `(seg
       index, start offset, count)`.
     - Per-entry `clen` packed into fixed bit width.
@@ -329,7 +338,7 @@ trailer = footer offset + length + magic
 
 ```
 commit { kind: FULL, seq, epoch, parent_seq, cut_seq, size, map_root, map_packs[],
-         new_segments[], index_packs[], heat?, created_at, mac }
+         new_segments[], index_packs[], chain_floor, heat?, created_at, mac }
 ```
 
 Upload order:
@@ -390,6 +399,77 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   are lost, which is correct: they were never committed.
 - **Graceful detach:** final cut, FULL commit, then `lease.released =
   true` (CAS).
+
+### 8.6 Snapshots, restore points, time travel, rollback (v1, ADR-25)
+
+- **Snapshot** (`lunix snapshot NAME SNAP [--freeze MOUNTPOINT]`):
+  1. With `--freeze` (or CSI `snapshot.freeze=true`), run `fsfreeze -f`.
+  2. Force a cut, then a FULL commit `c`.
+  3. Create `snapshots/SNAP` (`If-None-Match`) as `{seq: c, created,
+     consistency: crash|fs-frozen, label}`.
+  4. Unfreeze.
+  - The cost is one cut: no data is copied, and nothing is copied later.
+  - Pins are copied to mirrors after their commit, and survive TRANSFER.
+- **Restore points:**
+  - Every retained commit is a restore point.
+  - A DELTA target is materialised by replaying DELTAs on top of the
+    preceding FULL, in memory.
+  - Granularity:
+
+    | Mode | Restore points |
+    |---|---|
+    | async | one per commit, every `T`/`B` (idle volumes create none) |
+    | sync | one per flush group |
+- **Time-travel mount** (`lunix mount-at NAME --snapshot S | --commit
+  seq | --time t`):
+  1. Resolve the target commit. `--time` means the newest commit with
+     `created ≤ t`.
+  2. Create `readers/<host>-<id>` `{seq, deadline}`, renewed every
+     `TTL/3`.
+  3. Open the map root read-only.
+  4. Expose `/dev/lunix/NAME@S` with `UBLK_ATTR_READ_ONLY`.
+  - No lease is needed, and any number of hosts can mount at once.
+  - It shares the node's cache slab, and reads go to the nearest InSync
+    backend.
+  - Unmount deletes the reader pin. A crashed reader's pin simply
+    expires.
+- **Rollback** (`lunix rollback NAME --to S|seq`):
+  - Requires the owner, with the device detached (or `--offline`) and
+    the journal empty.
+  - It writes a FULL commit with `map_root` = the target's root, a new
+    `seq` and `parent` = the current tip. The rollback is therefore
+    itself a restore point and can be undone.
+  - The cache needs no invalidation: entries are keyed by content.
+- **Diff and export:**
+  - `lunix diff NAME A B` walks the two map roots, skipping equal
+    subtrees, and prints the changed LBA ranges.
+  - `lunix export NAME --snapshot S -o image.raw` streams a raw image
+    (holes stay sparse).
+  - An incremental export stream format is post-v1.
+
+### 8.7 Retention
+
+- **Policy:** `lunix retain NAME last:10,within:24h,every:1h:48,every:1d:30`.
+  - The tiers are clock-free in the sense of Constellation plan 32:
+    thinning is decided from commit `created` order and seq, never by
+    deleting on a timer that could race a writer.
+- **GC roots:**
+  - retained commits;
+  - snapshot pins, reader pins and holds;
+  - the tip's FULL plus its DELTAs.
+- **Chain floor:**
+  - Each FULL records `chain_floor`, the lowest retained seq.
+  - Commit objects below `chain_floor` that are not pinned may be
+    deleted. Mount and tip discovery never look below it.
+  - EPOCH, CONFIG and TRANSFER commits are kept while a TRANSFER pointer
+    chain needs them (ADR-24).
+- **CSI** (§17):
+  - CreateSnapshot maps to a pin (with freeze if configured);
+    DeleteSnapshot deletes the pin.
+  - In v1, restoring a snapshot into a new PVC is a full copy into a new,
+    independent volume. That is server-side CopyObject on the same
+    provider, else a streamed copy.
+  - Thin clone and restore are post-v1 (ADR-25).
 
 ## 9. Backends and S3 client
 
@@ -464,9 +544,9 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ## 11. Garbage collection and compaction
 
-- **Mark:** walk the maps of all retained commits (FULL roots + DELTA
-  references + snapshot pins + the retention window) and accumulate live
-  bytes per segment. Maintain approximate per-segment liveness
+- **Mark:** walk the maps of all GC roots (§8.7: retained commits, the
+  tip's FULL plus DELTAs, snapshot, reader and clone-hold pins) and
+  accumulate live bytes per segment. Maintain approximate per-segment liveness
   incrementally between full marks.
 - **Compact:**
   - Candidates are segments under 50% live, ranked by LFS cost-benefit
@@ -481,6 +561,20 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   `gc/`. Since the single owner runs both destage and GC, a dedup hit can
   never target a condemned chunk: dedup consults only index entries not
   marked condemned.
+- **Space accounting** (ADR-25):
+  - For each snapshot and retained commit, Lunix reports:
+    - `REFER`: the compressed bytes referenced;
+    - `WRITTEN`: bytes changed since the previous retained root, by
+      Merkle diff summing leaf `clen`;
+    - `USED`: bytes referenced only by this root, which deleting it
+      would free.
+  - Results are cached in `gc/space/<seq>` and recomputed incrementally
+    when retention changes.
+  - `lunix gc NAME --dry-run [--retain …]` reports what a policy change
+    would reclaim.
+- **Ownership:** a volume deletes only segments under its own prefix.
+  Data referenced by another volume's clone hold is protected by the
+  hold, never by cross-owner refcounts.
 - **Mirrors:** GC deletes on mirrors only after the authority has deleted
   and the mirror's cursor is past the commit that dropped the reference.
 
@@ -616,8 +710,11 @@ lunix attach NAME            # → /dev/lunix/NAME     lunix detach NAME [--rele
 lunix backend add NAME s3://… [--role authority|mirror]   lunix backend rm NAME <id> [--drain]
 lunix mode NAME async --interval 30s --max-unsynced 1G | sync | local
 lunix space NAME --floor 10% --on-full wait --full-timeout 60s --cache-max 100G
-lunix resize NAME 300G       lunix snapshot NAME SNAP    lunix clone SNAP NEW
-lunix mount-at NAME --commit <seq>|--time <t>   (read-only time travel)
+lunix resize NAME 300G       lunix snapshot NAME SNAP [--freeze MNT]   lunix snapshot rm|ls NAME
+lunix mount-at NAME --snapshot S|--commit <seq>|--time <t>   (read-only time travel)
+lunix rollback NAME --to S|<seq>   lunix retain NAME <policy>   lunix diff NAME A B
+lunix export NAME --snapshot S -o image.raw   lunix gc NAME --dry-run
+lunix clone SNAP NEW         (post-v1, ADR-25; v1 `restore SNAP NEW` = full copy)
 lunix status [NAME]   lunix doctor s3://…   lunix verify NAME   lunix fsck NAME
 lunix warm NAME   lunix migrate plan NAME --add s3://… --remove <id>   lunix steal NAME
 lunix upgrade                # QUIESCE → exec → recover, no unmount
@@ -630,7 +727,10 @@ ADR-16 and ADR-22 set the shape.
 - `lunix-csi` controller:
   - CreateVolume writes `volume` with `If-None-Match`.
   - DeleteVolume moves the volume to trash.
-  - Snapshot and Clone go through `lunixd`'s library over the backend.
+  - CreateSnapshot and DeleteSnapshot go through `lunixd`'s library over
+    the backend (pins, §8.6-8.7).
+  - Restore-from-snapshot and PVC clone are a full copy in v1; thin
+    clones are post-v1 (ADR-25).
   - The controller needs no ublk.
 - **NodeStage:** asks the local `lunixd` to attach (lease acquire), waits
   for the device, then formats if the volume is new and mounts for

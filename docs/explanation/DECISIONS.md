@@ -417,6 +417,10 @@ addressing key.
 channel described by Harnik et al. (2010) and the confirmation-of-file
 attack.
 
+**Amended by ADR-25:** within a family, a volume dedups only against its
+own chunks and its frozen lineage bases. It never dedups against data
+owned by an independent writer.
+
 ## ADR-14: One local store; S3-FIFO cache; out-of-space ladder
 
 **Decision:**
@@ -576,15 +580,9 @@ Constellation migrates at its own pace.
 
 ## ADR-21: Snapshots, clones and time travel from retained commits
 
-**Decision:**
-- A snapshot is a create-only `snapshots/<name>` pin naming a FULL commit.
-  Creating one is O(1): it forces a cut and pins it.
-- A clone is a new volume in the same family whose first FULL commit
-  references the parent root.
-- A time-travel mount exposes any retained commit as a read-only ublk
-  device.
-- Retention: the last *K* FULL commits, plus commits within a `retain`
-  window (CDP at commit granularity), plus pins.
+**Superseded by ADR-25**, which splits this into v1 (snapshots, time
+travel, rollback, retention, space accounting) and post-v1 thin clones,
+with the clone format frozen now.
 
 ## ADR-22: Kubernetes: the bucket is the truth; a minimal CRD surface
 
@@ -598,7 +596,8 @@ Constellation migrates at its own pace.
   - Block and Filesystem modes, RWO and RWOP.
   - `attachRequired: false`.
   - Online expand.
-  - Snapshots and clones per ADR-21.
+  - Snapshots per ADR-25. Restore-from-snapshot is a full copy in v1;
+    thin clones are post-v1.
 - **Deletes:** `DeleteVolume` goes through a trash window. It is refused
   while another cluster's owner holds the lease.
 
@@ -724,3 +723,102 @@ The format is part of v1. Its population is phase 7.
   etcd, and fails when the client is ephemeral or standalone.
 - *Authority transfer only while the lease is released* (the first
   draft). It needs a detach, which is a pod disruption.
+
+## ADR-25: v1 ships snapshots, time travel, rollback and retention; thin clones come later in a format ready now
+
+**Context:**
+- ADR-21 sketched snapshots, clones and time travel in four bullets.
+- Thin clones share the parent's data. If that data sat in a family-wide
+  pool written and garbage-collected by several owners, multi-writer GC
+  and the dedup-versus-delete race would return.
+- The maintainer decided (2026-11-11) that everything except clones is
+  v1, and that clones may come later. The on-bucket format must already
+  support them, because the format freezes in phase 1.
+
+**Decision: in v1** (DESIGN §8.6-8.7, §11):
+1. **Snapshots.**
+   - `snapshot` forces a cut, then creates `snapshots/<name>`
+     (`If-None-Match`) naming that FULL commit.
+   - Consistency is `crash` by default. `fs-frozen` is used when a
+     mountpoint is given: `fsfreeze` wraps the cut, and the CSI node
+     plugin does this for VolumeSnapshots when `snapshot.freeze=true`.
+   - Pins are volume objects. They are copied to mirrors after their
+     commit, and they survive TRANSFER (ADR-24).
+2. **Restore points.**
+   - Every retained commit is a restore point: FULL, or a DELTA
+     replayed on top of the previous FULL.
+   - The granularity is the commit cadence: `T`/`B` in async mode, and
+     every flush group in sync mode.
+   - "Every FLUSH is a restore point" holds only in sync mode. Async
+     users who want finer restore points lower `T`.
+3. **Retention.**
+   - Tiered thinning, such as `last:10, within:24h, every:1h:48,
+     every:1d:30`, plus pins.
+   - Commits that fall out of retention stop being GC roots.
+   - Old commit objects are deleted only below `chain_floor`, which
+     every FULL commit records as the lowest retained seq, so tip
+     discovery and mounting are unaffected.
+4. **Time-travel mounts.**
+   - `mount-at --commit|--time|--snapshot` exposes a read-only ublk
+     device (`UBLK_ATTR_READ_ONLY`) on any host, without the lease.
+   - The mount holds `readers/<host>-<id>`, a pin with a deadline
+     renewed while mounted, which GC treats as a root.
+   - Reads come from the node cache, then the nearest InSync backend.
+5. **Rollback.**
+   - `rollback --to <snapshot|seq>` writes a new FULL commit whose
+     `map_root` is the old one, with `parent` = the current tip. It is
+     itself undoable.
+   - It requires the device detached, or explicitly `--offline`, with an
+     empty journal. The owner and the lease are required.
+6. **Space accounting.**
+   - Per snapshot and retained commit: `USED` (freed if deleted),
+     `WRITTEN` (changed since the previous one) and `REFER` (total
+     referenced, compressed).
+   - These are computed by Merkle diff between consecutive retained
+     roots, summing leaf `clen`, and cached in `gc/space`.
+   - `gc --dry-run` reports what a retention change would reclaim.
+7. **Diff and export.**
+   - `diff A B` lists changed LBA ranges via Merkle diff.
+   - `export --snapshot S` writes a raw image.
+   - An incremental export stream format is post-v1.
+8. **CSI.**
+   - CreateSnapshot maps to a pin; DeleteSnapshot to unpin.
+   - In v1, restoring a snapshot into a new PVC is a **full copy**: a new
+     independent volume. It uses server-side CopyObject on the same
+     provider, otherwise a streamed copy, and is O(size). Thin
+     restore/clone is post-v1.
+
+**Decision: clones are post-v1, but the format is ready now.** Clones
+follow the Ceph RBD parent/child model, and v1 freezes these format
+elements:
+- **Lineage:**
+  - `volume.lineage: [{volume_uuid, base_seq, backend_hint}]`. It is
+    always empty in v1. Index 0 means "this volume"; index *i* means
+    lineage entry *i*.
+  - Every entry in a leaf's segment dictionary carries `lineage_idx: u8`,
+    always 0 in v1. So a hint can point into a parent's segments under
+    the parent's prefix without changing the leaf encoding (ADR-8).
+- **Holds:** `holds/<child-uuid>` objects in a parent's prefix, each
+  naming a base commit. GC treats holds as roots **from v1**. There is
+  therefore never a GC version that could delete a future clone's base.
+- **Dedup domain (amends ADR-13):** the volume plus its frozen lineage
+  bases. A clone dedups only against its own chunks and chunks reachable
+  from its bases, which can never be deleted under it, so no
+  cross-owner handshake is needed.
+- **Ownership:** each volume owns and garbage-collects only the
+  segments it wrote, under its own prefix. Cross-owner GC is never
+  needed.
+- **Reserved for later:**
+  - `flatten`: copy the referenced base data into the child, drop the
+    hold.
+  - "retained-for-clones" parent deletion.
+  - The rule that a clone lives on its parent's backends; moving a clone
+    elsewhere needs a flatten or a lineage backfill.
+
+**Rejected:**
+- *A family-wide shared segment pool with independent owners.* It needs
+  multi-writer GC and the condemn handshake for every volume.
+- *Thin clones in v1.* Lineage, holds, flatten, delete semantics and
+  backend constraints together add roughly 2-3 weeks of work and test
+  surface. The format reservation costs one byte per segment-dictionary
+  entry and an empty list.

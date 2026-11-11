@@ -7,8 +7,17 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Volume:** a thin block device with a uuid, a size and fixed
   chunk/codec/crypto settings, exposed as `/dev/ublkbN` (symlink
   `/dev/lunix/<name>`).
-- **Family:** the dedup and key domain: a volume plus its snapshots and
-  clones. Chunks are shared only inside a family (ADR-13).
+- **Family:** the key domain: a volume plus its snapshots and (post-v1)
+  clones. A volume dedups only against its own chunks and its frozen
+  lineage bases (ADR-13, ADR-25).
+- **Lineage:** the parent volumes and base commits a post-v1 clone reads
+  through (`volume.lineage`). It is always empty in v1.
+- **Hold:** `holds/<child>` in a parent volume, pinning a clone's base
+  commit so that GC keeps it.
+- **Reader pin:** `readers/<host>-<id>`, which keeps a time-travel
+  mount's commit alive while it is mounted.
+- **Chain floor:** the lowest retained commit seq, recorded in each FULL.
+  Unpinned commits below it may be deleted.
 - **Owner:** the single host currently allowed to write a volume. It
   holds the lease.
 - **Lease:** a CAS object on the authority backend holding `epoch`,

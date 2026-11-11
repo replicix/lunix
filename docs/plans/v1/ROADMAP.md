@@ -89,13 +89,24 @@ baseline table in `bench/`.
   bucket.
 - The fsync latency and request-cost report is published.
 
-## Phase 4: Snapshots, clones, time travel, retention
+## Phase 4: Snapshots, time travel, rollback, retention
 
-**Scope:** snapshot pins, clones with a family keyring, read-only
-`mount-at`, retention windows, shrink, and `verify`.
+**Scope** (ADR-25, DESIGN §8.6-8.7, §11):
+- Snapshot pins, with the optional `fsfreeze`.
+- Read-only `mount-at` (snapshot, commit or time), with reader pins.
+- `rollback`.
+- Tiered retention and the `chain_floor`.
+- Per-snapshot USED, WRITTEN and REFER, and `gc --dry-run`.
+- `diff`, raw `export`, a full-copy `restore`, shrink and `verify`.
+- GC honours `holds/` (always empty in v1).
 
-**Exit:** snapshot/clone churn under load passes with the GC oracle, and
-time-travel mounts pass fsck.
+**Exit:**
+- Snapshot churn plus retention thinning under load passes with the GC
+  oracle, and no root is ever reclaimed.
+- Time-travel mounts at random commits pass fsck while the volume is
+  being written.
+- Rollback round-trips.
+- Space figures match a brute-force recount.
 
 ## Phase 5: Multiple backends
 
@@ -115,7 +126,9 @@ time-travel mounts pass fsck.
 
 **Scope:**
 - `lunix-csi` controller and node.
-- Block and Filesystem modes, RWO and RWOP, expand, snapshots and clones.
+- Block and Filesystem modes, RWO and RWOP, expand, and snapshots (with
+  the optional freeze).
+- Restore-from-snapshot and PVC clone as a full copy.
 - `LunixBackendSet`, credential providers, and the Helm chart: a
   privileged `lunixd` DaemonSet plus the plugin.
 
@@ -145,6 +158,11 @@ downtime, and warm against cold time-to-steady-state measured.
 **Exit:** a release checklist modelled on Constellation's RELEASING.md.
 
 ## Later (post-v1 candidates)
+
+- **Thin clones** (ADR-25, Ceph RBD parent/child model): lineage, holds,
+  flatten, "retained-for-clones" parent deletion, golden images, and
+  thin CSI restore. The format is already frozen in v1.
+- Incremental export stream.
 
 - `sync-fast-wal` on S3 Express One Zone.
 - `sync-quorum` / `sync-all` mirror policies.
