@@ -1,0 +1,2 @@
+READY id=0 bdev=/dev/ublkb0 mode=copy work=hash+lz4 workers=0 buf_total_bytes=4294967296
+STATS write_bytes=1234622468096 lz4_in=1234622468096 lz4_out=625989197460 vm_rss_kb=134728 vm_hwm_kb=134728

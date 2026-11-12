@@ -1,0 +1,16 @@
+    1464us bio W     sec=3883112   n=2048  stream
+    1473us iss W     sec=3883112   n=2048  stream
+    6702us bio W     sec=3885160   n=2048  stream
+    6709us iss W     sec=3885160   n=2048  stream
+   11932us bio W     sec=3887208   n=2048  stream
+   11939us iss W     sec=3887208   n=2048  stream
+   17191us bio W     sec=3889256   n=2048  stream
+   17197us iss W     sec=3889256   n=2048  stream
+   19442us bio WS    sec=4168      n=8     small
+   19450us iss WS    sec=4168      n=8     small
+   19495us bio FWFSM sec=4196394   n=4     other
+   19502us iss FF    sec=0         n=0     -
+   19504us cmp FF    sec=18446744073709551615 n=0     -
+   19506us iss WFSM  sec=4196394   n=4     other
+   19507us cmp WFSM  sec=4196394   n=4     other
+   19508us cmp WFSM  sec=4196394   n=0     -

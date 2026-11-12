@@ -1,0 +1,14 @@
+bio FWFSM 1000
+bio RM 4
+bio W 3810
+bio WS 1000
+cmp FF 1000
+cmp RM 4
+cmp W 3810
+cmp WFSM 2000
+cmp WS 1000
+iss FF 1000
+iss RM 4
+iss W 3810
+iss WFSM 1000
+iss WS 1000

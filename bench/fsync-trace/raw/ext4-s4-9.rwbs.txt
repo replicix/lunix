@@ -1,0 +1,11 @@
+bio FWFSM 1
+bio WFS 1200
+bio WSM 2
+cmp FF 1
+cmp WFS 1200
+cmp WFSM 2
+cmp WSM 1
+iss FF 1
+iss WFS 1200
+iss WFSM 1
+iss WSM 1

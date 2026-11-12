@@ -1,0 +1,15 @@
+bio FWFSM 604
+bio FWS 1
+bio RAM 1
+bio WS 1206
+bio WSM 3018
+cmp FF 605
+cmp RAM 1
+cmp WFSM 1208
+cmp WS 619
+cmp WSM 604
+iss FF 605
+iss RAM 1
+iss WFSM 604
+iss WS 618
+iss WSM 604

@@ -1,0 +1,2 @@
+READY id=0 bdev=/dev/ublkb0 mode=batch work=hash workers=0 buf_total_bytes=134217728
+STATS write_bytes=11013894144 lz4_in=0 lz4_out=0 vm_rss_kb=12480 vm_hwm_kb=12480

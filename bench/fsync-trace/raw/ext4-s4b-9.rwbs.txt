@@ -1,0 +1,14 @@
+bio FWFSM 1200
+bio RAM 1
+bio WS 1200
+bio WSM 7197
+cmp FF 1200
+cmp RAM 1
+cmp WFSM 2400
+cmp WS 1200
+cmp WSM 1200
+iss FF 1200
+iss RAM 1
+iss WFSM 1200
+iss WS 1200
+iss WSM 1200

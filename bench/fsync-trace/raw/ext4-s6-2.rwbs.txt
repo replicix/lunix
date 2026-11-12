@@ -1,0 +1,12 @@
+bio FWFSM 910
+bio FWS 1102
+bio WS 2941
+bio WSM 4546
+cmp FF 2012
+cmp WFSM 1820
+cmp WS 3150
+cmp WSM 910
+iss FF 2012
+iss WFSM 910
+iss WS 2048
+iss WSM 910

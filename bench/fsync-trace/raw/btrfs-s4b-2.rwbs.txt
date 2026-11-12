@@ -1,0 +1,12 @@
+bio FWS 4002
+bio WFSM 4002
+bio WS 4000
+bio WSM 34779
+cmp FF 4002
+cmp WFSM 4002
+cmp WS 8002
+cmp WSM 8171
+iss FF 4002
+iss WFSM 4002
+iss WS 4000
+iss WSM 8171

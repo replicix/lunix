@@ -1,0 +1,2 @@
+small ops=1000 ops_per_s=50.0 MBps=0.2 lat_us_p50=256 p99=1201 max=6399
+stream ops=15885 ops_per_s=794.2 MBps=832.8 lat_us_p50=1232 p99=1634 max=15092

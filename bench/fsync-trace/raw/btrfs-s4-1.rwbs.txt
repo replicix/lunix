@@ -1,0 +1,15 @@
+bio FWS 4005
+bio WFSM 4005
+bio WM 259
+bio WS 3999
+bio WSM 33204
+cmp FF 4005
+cmp WFSM 4005
+cmp WM 150
+cmp WS 8004
+cmp WSM 8384
+iss FF 4005
+iss WFSM 4005
+iss WM 194
+iss WS 3999
+iss WSM 8384

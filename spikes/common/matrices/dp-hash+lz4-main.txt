@@ -1,0 +1,9 @@
+# bs rw iodepth numjobs
+4k randwrite 32 8
+4k randwrite 128 8
+4k write 32 8
+4k write 128 8
+64k randwrite 32 8
+64k randwrite 128 8
+64k write 32 8
+64k write 128 8

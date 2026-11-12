@@ -1,0 +1,20 @@
+== phase immediate count=20 delay=0 00:57:19
+phase immediate done: cycles=20 fio_rc=0 fsck_rc=0 sha_equal=1
+== phase delay1s count=10 delay=1 01:03:33
+phase delay1s done: cycles=10 fio_rc=0 fsck_rc=0 sha_equal=1
+== phase delay10s count=3 delay=10 01:07:41
+phase delay10s done: cycles=3 fio_rc=0 fsck_rc=0 sha_equal=1
+== phase double count=3 delay=0 01:09:49
+phase double done: cycles=3 fio_rc=0 fsck_rc=0 sha_equal=1
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+immediate,20,0,0,0,0,
+delay1s,10,0,0,0,0,
+delay10s,3,0,0,0,0,
+double,3,0,0,0,0,
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| immediate | 20 | 167 | 172 | 172 | 259 | 268 | 221 | 238 | 238 |
+| delay1s | 10 | 68 | 70 | 70 | 1161 | 1174 | 1128 | 1141 | 1141 |
+| delay10s | 3 | 66 | 66 | 66 | 10146 | 10162 | 10118 | 10124 | 10124 |
+| double | 3 | 163 | 164 | 164 | 597 | 609 | 229 | 230 | 230 |
+overall rc=0

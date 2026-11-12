@@ -44,8 +44,8 @@ source.
   techniques and the pitch for signature features.
 - [Map leaf encoding](research/2026-11-11-map-leaf-encoding.md): compact
   block-map leaves. It covers a survey of qcow2, dm-thin, VDO, ZFS and
-  LSVD, the security of shortened chunk ids, and benchmarks on an EPYC
-  9R45. The chosen encoding (runs plus bit-packed columns, 16 B ids) cuts
+  LSVD, the security of shortened chunk ids, and benchmarks on an AMD EPYC
+  (Zen 5) host. The chosen encoding (runs plus bit-packed columns, 16 B ids) cuts
   the leaves from 768 to 294-352 MiB/TiB. The benchmark code is in
   [spikes/leafenc](../../spikes/leafenc/).
 - [Fact-check](research/2026-11-11-fact-check.md): primary-source

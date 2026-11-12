@@ -1,0 +1,11 @@
+bio FWFSM 1200
+bio RM 4
+bio WS 1200
+cmp FF 1200
+cmp RM 4
+cmp WFSM 2400
+cmp WS 1200
+iss FF 1200
+iss RM 4
+iss WFSM 1200
+iss WS 1200

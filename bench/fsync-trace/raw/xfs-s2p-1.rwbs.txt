@@ -1,0 +1,17 @@
+bio FWFSM 2252
+bio RM 4
+bio W 92
+bio WM 17
+bio WS 2250
+cmp FF 2252
+cmp RM 4
+cmp W 257
+cmp WFSM 4504
+cmp WM 9
+cmp WS 2250
+iss FF 2252
+iss RM 4
+iss W 257
+iss WFSM 2252
+iss WM 9
+iss WS 2250

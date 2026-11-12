@@ -1,0 +1,12 @@
+bio FWFSM 909
+bio FWS 1102
+bio RM 4
+bio WS 2917
+cmp FF 2011
+cmp RM 4
+cmp WFSM 1818
+cmp WS 4019
+iss FF 2011
+iss RM 4
+iss WFSM 909
+iss WS 2917

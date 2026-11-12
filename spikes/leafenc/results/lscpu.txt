@@ -5,7 +5,7 @@ Byte Order:                              Little Endian
 CPU(s):                                  16
 On-line CPU(s) list:                     0-15
 Vendor ID:                               AuthenticAMD
-Model name:                              AMD EPYC 9R45
+Model name:                              AMD EPYC (Zen 5)
 CPU family:                              26
 Model:                                   2
 Thread(s) per core:                      1

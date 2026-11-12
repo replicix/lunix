@@ -1,0 +1,16 @@
+bio FWFSM 3995
+bio FWS 2
+bio RAM 5
+bio WFSM 4
+bio WS 3995
+bio WSM 23995
+cmp FF 3997
+cmp RAM 5
+cmp WFSM 7994
+cmp WS 4002
+cmp WSM 3998
+iss FF 3997
+iss RAM 5
+iss WFSM 3999
+iss WS 4000
+iss WSM 3998

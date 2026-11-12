@@ -1,0 +1,5 @@
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+immediate,20,0,0,0,0,
+delay1s,10,0,0,0,0,
+delay10s,3,0,0,0,0,
+double,3,0,0,0,0,

@@ -1,0 +1,5 @@
+cell,reps,iops_med,iops_min,iops_max,mbps_med,lat_p50_us,lat_p99_us,lat_p999_us,fio_usr_cpu,fio_sys_cpu,daemon_cpu_us_per_io,noisy
+4k_randwrite_qd1_nj1,3,161835,161460,162362,662.9,5.5,9.0,15.8,11.1,29.3,3.79,
+4k_write_qd1_nj1,3,167033,163494,169586,684.2,5.5,8.9,13.1,11.0,30.1,3.77,
+64k_randwrite_qd1_nj1,3,42348,42277,42413,2775.3,19.8,26.0,81.4,15.9,11.6,17.25,
+64k_write_qd1_nj1,3,42470,42412,42537,2783.4,19.6,26.2,30.6,16.4,11.1,17.20,

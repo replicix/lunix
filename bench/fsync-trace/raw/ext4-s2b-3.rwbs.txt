@@ -1,0 +1,15 @@
+bio FWFSM 998
+bio W 18909
+bio WFSM 1
+bio WS 1000
+bio WSM 4971
+cmp FF 993
+cmp W 18901
+cmp WFSM 1981
+cmp WS 1000
+cmp WSM 998
+iss FF 995
+iss W 18897
+iss WFSM 993
+iss WS 1000
+iss WSM 998

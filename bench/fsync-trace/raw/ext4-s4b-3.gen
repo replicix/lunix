@@ -1,0 +1,1 @@
+dsync-append ops=4000 ops_per_s=200.0 MBps=0.8 lat_us_p50=69 p99=111 max=302

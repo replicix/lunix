@@ -1,0 +1,4 @@
+cell,bs,rw,iodepth,numjobs,rep,daemon_cpu_s
+64k_write_qd32_nj8_r1,64k,write,32,8,1,15.864
+64k_write_qd32_nj8_r2,64k,write,32,8,2,15.928
+64k_write_qd32_nj8_r3,64k,write,32,8,3,15.880

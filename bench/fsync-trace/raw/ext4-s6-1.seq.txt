@@ -1,0 +1,6 @@
+    9513us bio WS    sec=267080    n=16    stream
+    9521us iss WS    sec=267080    n=16    stream
+    9537us bio FWS   sec=0         n=0     -
+    9547us iss FF    sec=0         n=0     -
+    9553us cmp FF    sec=18446744073709551615 n=0     -
+    9555us cmp WS    sec=0         n=0     -

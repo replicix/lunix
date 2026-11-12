@@ -538,8 +538,8 @@ Recommendation:
 
 ## 6. Benchmark method
 
-- **Host** (`results/lscpu.txt`, `results/rustc.txt`): AWS, AMD EPYC 9R45
-  (Zen 5), 16 vCPU, 30 GiB, Linux 7.0.0-1016-aws, rustc 1.96.0 (2026-05-25),
+- **Host** (`results/lscpu.txt`, `results/rustc.txt`): AMD EPYC
+  (Zen 5), 16 vCPU, 30 GiB, Linux 7.0.0 (Ubuntu), rustc 1.96.0 (2026-05-25),
   `-C target-cpu=native`, release, LTO, `opt-level=3`; crates `zstd` 0.13.4
   (libzstd 1.5.7) and `lz4_flex` 0.11.6 (pure Rust block format). Project
   lived under `~/lunix-leafenc/` with a private `CARGO_HOME`; peak disk use

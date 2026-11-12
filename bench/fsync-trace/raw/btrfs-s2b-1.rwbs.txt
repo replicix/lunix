@@ -1,0 +1,15 @@
+bio FWS 1003
+bio W 15963
+bio WFSM 1003
+bio WS 1000
+bio WSM 5300
+cmp FF 1003
+cmp W 15962
+cmp WFSM 1003
+cmp WS 2003
+cmp WSM 3000
+iss FF 1003
+iss W 15962
+iss WFSM 1003
+iss WS 1000
+iss WSM 3000

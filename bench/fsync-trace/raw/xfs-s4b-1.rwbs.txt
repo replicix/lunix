@@ -1,0 +1,11 @@
+bio FWFSM 4000
+bio RM 4
+bio WS 4000
+cmp FF 4000
+cmp RM 4
+cmp WFSM 8000
+cmp WS 4000
+iss FF 4000
+iss RM 4
+iss WFSM 4000
+iss WS 4000

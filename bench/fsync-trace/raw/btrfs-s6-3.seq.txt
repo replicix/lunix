@@ -1,0 +1,15 @@
+    9426us bio WS    sec=1976784   n=16    other
+    9430us iss WS    sec=1976784   n=16    other
+    9452us bio WSM   sec=209600    n=32    other
+    9454us bio WSM   sec=733888    n=32    other
+    9459us bio WSM   sec=209632    n=32    other
+    9461us bio WSM   sec=733920    n=32    other
+    9462us iss WSM   sec=209600    n=64    other
+    9470us iss WSM   sec=733888    n=64    other
+    9489us bio FWS   sec=0         n=0     -
+    9492us iss FF    sec=0         n=0     -
+    9493us cmp FF    sec=18446744073709551615 n=0     -
+    9493us cmp WS    sec=0         n=0     -
+    9501us bio WFSM  sec=128       n=8     other
+    9508us iss WFSM  sec=128       n=8     other
+    9524us cmp WFSM  sec=128       n=8     other

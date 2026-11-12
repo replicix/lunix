@@ -1,0 +1,12 @@
+bio FWS 1000
+bio WFSM 1000
+bio WS 1000
+bio WSM 8664
+cmp FF 1000
+cmp WFSM 1000
+cmp WS 2000
+cmp WSM 2020
+iss FF 1000
+iss WFSM 1000
+iss WS 1000
+iss WSM 2020
