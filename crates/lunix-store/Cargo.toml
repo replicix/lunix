@@ -10,6 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiles the crash points in (tests only; like lunixd's feature, never on a
+# normal build). The crash sweep runs with `cargo test -p lunix-store --features crashpoints`.
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
