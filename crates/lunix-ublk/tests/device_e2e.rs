@@ -299,6 +299,30 @@ fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) {
     }
 }
 
+/// Counters are updated after the commit is queued, so a caller can see the
+/// reply a moment before `completed`: wait for them to settle.
+fn settle(d: &UblkDevice) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while d.in_flight() != 0 && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// udev probes a new device and holds it open for a moment, so `TRY_STOP_DEV`
+/// answers Busy until it lets go. Retry for a bounded time; a mount would not.
+fn detach_when_idle(d: &UblkDevice) {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        match d.detach() {
+            Ok(()) => return,
+            Err(UblkError::Busy { .. }) if Instant::now() < end => {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(e) => panic!("detach: {e}"),
+        }
+    }
+}
+
 fn wait_gone(path: &str) -> bool {
     let end = Instant::now() + Duration::from_secs(10);
     while Instant::now() < end {
@@ -317,6 +341,7 @@ fn full_cycle(queues: u16, mode: CompletionMode, path: DataPath) {
     // The engine saw exactly what the oracle says: compare the whole device once more through the engine.
     let snap = d.engine.snapshot();
     assert_eq!(snap.len() as u64, 32 * MIB);
+    settle(&d.dev);
     let counters = d.dev.queue_counters();
     let started: u64 = counters.iter().map(|c| c.started).sum();
     let completed: u64 = counters.iter().map(|c| c.completed).sum();
@@ -328,7 +353,7 @@ fn full_cycle(queues: u16, mode: CompletionMode, path: DataPath) {
     // Detach with nothing mounted: TRY_STOP_DEV succeeds, the queues drain, DEL_DEV completes.
     let mut d = d;
     drop(d.fd.take());
-    d.dev.detach().expect("detach");
+    detach_when_idle(&d.dev);
     assert!(d.engine.is_quiesced(), "the engine saw the final commit");
     assert!(
         wait_gone(&bdev),
@@ -432,7 +457,7 @@ fn grow_is_validated_and_updates_the_block_device() {
     assert_eq!(o.size_bytes(), 48 * MIB);
     let mut d = d;
     drop(d.fd.take());
-    d.dev.detach().expect("detach");
+    detach_when_idle(&d.dev);
 }
 
 #[test]
@@ -461,5 +486,5 @@ fn the_record_describes_the_device() {
     );
     let mut d = d;
     drop(d.fd.take());
-    d.dev.detach().expect("detach");
+    detach_when_idle(&d.dev);
 }
