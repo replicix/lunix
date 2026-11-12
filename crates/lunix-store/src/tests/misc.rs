@@ -165,12 +165,11 @@ fn create_open_and_the_small_state_files_round_trip() {
 fn create_refuses_an_existing_volume_and_open_refuses_a_missing_one() {
     let dir = tempdir();
     drop(plain(dir.path()));
-    let _g = super::read_guard();
-    let again = LocalVolume::create(
+    let again = super::create_raw(
         dir.path(),
         &super::descriptor(MODE, 16 * 1024),
         &json(dir.path()),
-        TestCodec::new(MODE, UUID),
+        MODE,
         test_opts(),
     );
     assert_eq!(again.expect_err("exists").kind(), ErrorKind::AlreadyExists);
@@ -209,12 +208,11 @@ fn a_volume_on_tmpfs_is_refused_unless_allowed() {
         allow_tmpfs: false,
         ..test_opts()
     };
-    let _g = super::read_guard();
-    let err = LocalVolume::create(
+    let err = super::create_raw(
         dir.path(),
         &super::descriptor(MODE, 16 * 1024),
         &json(dir.path()),
-        TestCodec::new(MODE, UUID),
+        MODE,
         strict.clone(),
     )
     .expect_err("tmpfs");
@@ -808,12 +806,11 @@ fn a_refused_create_on_tmpfs_creates_nothing() {
         allow_tmpfs: false,
         ..test_opts()
     };
-    let _g = super::read_guard();
-    let err = LocalVolume::create(
+    let err = super::create_raw(
         &target,
         &super::descriptor(MODE, 16 * 1024),
         &json(&target),
-        TestCodec::new(MODE, UUID),
+        MODE,
         strict,
     )
     .expect_err("tmpfs");
