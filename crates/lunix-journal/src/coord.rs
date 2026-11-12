@@ -107,11 +107,13 @@ fn group(sh: &Shared, ring: Option<&mut IoUring>, flushes: Vec<(u64, FlushDone)>
     // group; every write at or below `upto` was reaped before the wait ended.
     let mut items = Vec::new();
     let mut min_unsynced = u64::MAX;
+    let mut lane_mins: Vec<(u16, u64)> = Vec::new();
     for (lane, flight) in sh.flights.iter().enumerate() {
         let mut fl = lock(flight);
         let lane = lane as u16;
         let dirty = std::mem::take(&mut fl.dirty);
         min_unsynced = min_unsynced.min(fl.unsynced_min);
+        lane_mins.push((lane, fl.unsynced_min));
         fl.unsynced_min = u64::MAX;
         let pending_min = fl.pending.first().copied();
         drop(fl);
@@ -140,7 +142,17 @@ fn group(sh: &Shared, ring: Option<&mut IoUring>, flushes: Vec<(u64, FlushDone)>
                 .dirty
                 .insert(it.slot);
         }
-        sh.poison(min_unsynced.min(upto));
+        // The writes of this group are unsynced again: put their minimum back so
+        // a later failure poisons no higher than the first unsynced record.
+        for &(lane, m) in &lane_mins {
+            let mut fl = lock(&sh.flights[usize::from(lane)]);
+            fl.unsynced_min = fl.unsynced_min.min(m);
+        }
+        sh.poison(if min_unsynced == u64::MAX {
+            upto
+        } else {
+            min_unsynced
+        });
     }
     sh.cfg.emit(|| TraceEvent::GroupDone { upto, ok });
     let at = sh.poisoned_at();

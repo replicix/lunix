@@ -32,8 +32,19 @@ pub struct FileJournal {
 
 impl FileJournal {
     /// Opens (creating the missing ring files of) the journal directory and
-    /// starts the flush coordinator. Existing files are only read; call
-    /// [`Journal::recover`] next.
+    /// starts the flush coordinator. Existing ring files are only read, but
+    /// `open` is **not read-only**: it creates missing files, removes
+    /// interrupted `*.j.tmp` files, creates the directory and fsyncs it. A
+    /// read-only caller (fsck) must not use it on a directory it must not
+    /// touch. Call [`Journal::recover`] next.
+    ///
+    /// # Preconditions on later calls
+    /// `recover`'s `floor` must be at least every cut passed to `tail_after`
+    /// whose tail was passed to `reclaim`: a lower floor sees a gap where
+    /// reclaimed records were, and the first `open_lane` then wipes every later
+    /// record, acknowledged ones included. The wipe is irreversible and is
+    /// also triggered by `reclaim`; callers that must preserve records beyond
+    /// the stop point call neither.
     ///
     /// # Errors
     /// `Invalid` for a bad configuration, `Unsupported` when the directory has

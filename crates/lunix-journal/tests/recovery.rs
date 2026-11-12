@@ -539,7 +539,7 @@ fn recover_after_a_lane_is_open_is_refused_and_a_second_crash_keeps_stale_record
         let base = if round == 0 { 4 } else { 4 + 8 };
         assert_eq!(r.records.len() as u64, base, "round {round}");
         let mut ls = lanes_of(&j, 2);
-        let e = j.recover(None, WriteSeq(0)).err().expect("refused");
+        let e = j.recover(None, WriteSeq(0)).expect_err("refused");
         assert_eq!(e.kind(), lunix_iface::ErrorKind::Invalid);
         // Eight new records: they pass every stale sequence number (6-10).
         for i in 0..8usize {
@@ -559,4 +559,87 @@ fn recover_after_a_lane_is_open_is_refused_and_a_second_crash_keeps_stale_record
         lbas[4..].iter().all(|&l| l >= 900),
         "a stale record came back: {lbas:?}"
     );
+}
+
+fn mtimes(cfg: &JournalConfig) -> Vec<(String, std::time::SystemTime)> {
+    ring_files(cfg)
+        .into_iter()
+        .map(|n| {
+            let m = std::fs::metadata(cfg.dir.join(&n)).expect("meta");
+            (n, m.modified().expect("mtime"))
+        })
+        .collect()
+}
+
+#[test]
+fn a_clean_restart_writes_nothing_to_the_journal() {
+    let rig = Rig::new(2, 3);
+    {
+        let j = rig.open();
+        recover_all(&j);
+        let mut ls = lanes_of(&j, 2);
+        // Odd sizes so the last record ends mid-block.
+        for i in 0..9usize {
+            write_rec(&mut *ls[i % 2], i as u64, 1 + (i as u32 % 3));
+            complete_appends(&mut *ls[i % 2], 1);
+        }
+        group_flush(&j);
+    }
+    let before = mtimes(&rig.cfg);
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    {
+        let j = rig.open();
+        let r = recover_all(&j);
+        assert_eq!(r.records.len(), 9);
+        let _ls = lanes_of(&j, 2);
+    }
+    assert_eq!(
+        mtimes(&rig.cfg),
+        before,
+        "a clean restart rewrote a ring file"
+    );
+}
+
+#[test]
+fn fixed_and_plain_write_paths_both_work() {
+    use std::sync::{Arc, Mutex};
+    for want in [Some(false), Some(true)] {
+        let rig = Rig::new(1, 2);
+        let mut cfg = rig.cfg.clone();
+        cfg.pool_buffers = 2;
+        cfg.fixed_buffers = want;
+        let seen: Arc<Mutex<Vec<bool>>> = Arc::default();
+        let s2 = Arc::clone(&seen);
+        cfg.trace = Some(Arc::new(move |e| {
+            if let lunix_journal::TraceEvent::LaneOpened { fixed, .. } = e {
+                s2.lock().expect("lock").push(*fixed);
+            }
+        }));
+        let j = open_journal(&cfg);
+        recover_all(&j);
+        let wake = lunix_iface::wake::WakeFd::new().expect("fd");
+        let mut lane = match j.open_lane(lunix_iface::journal::LaneId(0), wake) {
+            Ok(l) => l,
+            Err(e) if want == Some(true) => {
+                eprintln!("SKIP: cannot register fixed buffers here: {e}");
+                continue;
+            }
+            Err(e) => panic!("{e}"),
+        };
+        for i in 0..6u64 {
+            write_wait(&mut *lane, i, 2);
+        }
+        complete_appends(&mut *lane, 6);
+        group_flush(&j);
+        assert_eq!(seen.lock().expect("lock").as_slice(), &[want == Some(true)]);
+    }
+}
+
+#[test]
+fn a_journal_max_below_two_files_per_lane_is_refused() {
+    let rig = Rig::new(2, 2);
+    let mut cfg = rig.cfg.clone();
+    cfg.journal_max = 3 * SMALL_FILE;
+    let e = FileJournal::open(cfg).err().expect("refused");
+    assert_eq!(e.kind(), lunix_iface::ErrorKind::Invalid);
 }

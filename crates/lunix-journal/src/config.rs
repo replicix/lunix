@@ -39,6 +39,13 @@ pub enum TraceEvent {
         /// The group's `upto`.
         upto: u64,
     },
+    /// A lane was opened.
+    LaneOpened {
+        /// The lane.
+        lane: u16,
+        /// True when its batch buffers are registered (`WriteFixed`).
+        fixed: bool,
+    },
     /// An `fdatasync` was issued for one ring file.
     Fdatasync {
         /// The lane.
@@ -86,6 +93,12 @@ pub struct JournalConfig {
     /// Open ring files with `O_DIRECT` (always on in production; off only for
     /// a test file system that refuses it).
     pub direct: bool,
+    /// Fixed (registered) batch buffers: `None` registers them when
+    /// `RLIMIT_MEMLOCK` allows and otherwise writes from plain buffers;
+    /// `Some(true)` makes `open_lane` fail if they cannot be registered;
+    /// `Some(false)` never registers. Registering needs about
+    /// `lanes x pool_buffers x (1 MiB + 4 KiB)` of locked memory.
+    pub fixed_buffers: Option<bool>,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
 }
@@ -103,6 +116,7 @@ impl JournalConfig {
             pool_buffers: 8,
             max_inflight: 2,
             direct: true,
+            fixed_buffers: None,
             trace: None,
         }
     }
@@ -128,6 +142,12 @@ impl JournalConfig {
         }
         if self.file_len == FILE_LEN as u64 && self.journal_max < MIN_JOURNAL_MAX {
             return Err(Error::invalid("journal_max is below the 256 MiB minimum"));
+        }
+        let min_max = u64::from(self.lanes) * 2 * self.file_len;
+        if self.journal_max < min_max {
+            return Err(Error::invalid(
+                "journal_max is below lanes x 2 x file_len (a lane needs two files)",
+            ));
         }
         if self.pool_buffers < 2 || self.pool_buffers > 1024 {
             return Err(Error::invalid("pool_buffers must be 2..=1024"));

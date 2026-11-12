@@ -113,8 +113,12 @@ pub(crate) fn zero_range(file: &File, from: u64, to: u64, zero: &AlignedBuf) -> 
         let base = floor4k(pos);
         let mut blk = read_aligned(file, base, BLOCK)?;
         let keep = (pos - base) as usize;
-        blk.as_mut_slice()[keep..].fill(0);
-        file.write_all_at(blk.as_slice(), base)?;
+        // Never rewrite a block whose tail is already zero: it may hold the end
+        // of an acknowledged record, and a clean restart must write nothing.
+        if !is_zero(&blk.as_slice()[keep..]) {
+            blk.as_mut_slice()[keep..].fill(0);
+            file.write_all_at(blk.as_slice(), base)?;
+        }
         pos = base + B;
     }
     while pos < to {

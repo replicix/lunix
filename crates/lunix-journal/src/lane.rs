@@ -143,7 +143,19 @@ impl FileLane {
         // ring is dropped first because it is declared before the pool is
         // moved out), and its buffers never move. Registration can fail when
         // RLIMIT_MEMLOCK is small; the lane then uses plain writes.
-        let fixed = unsafe { ring.submitter().register_buffers(&iovs) }.is_ok();
+        let fixed = match sh.cfg.fixed_buffers {
+            Some(false) => false,
+            want => {
+                let ok = unsafe { ring.submitter().register_buffers(&iovs) }.is_ok();
+                if want == Some(true) && !ok {
+                    return Err(Error::Io(std::io::Error::other(
+                        "cannot register fixed buffers (RLIMIT_MEMLOCK?)",
+                    )));
+                }
+                ok
+            }
+        };
+        sh.cfg.emit(|| TraceEvent::LaneOpened { lane: id, fixed });
         let free_bufs = (0..pool.len()).rev().collect();
 
         let active = {

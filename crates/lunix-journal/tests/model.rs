@@ -32,20 +32,32 @@ fn cases() -> u32 {
         .unwrap_or(2000)
 }
 
-static TEMPLATES: Mutex<Option<(tempfile::TempDir, HashMap<u16, PathBuf>)>> = Mutex::new(None);
+/// Pre-initialised journal directories per lane count, built on demand and
+/// removed with the test (the `TempDir` drops with this value).
+struct Templates {
+    dir: tempfile::TempDir,
+    map: Mutex<HashMap<u16, PathBuf>>,
+}
 
-/// A pre-initialised journal directory for `lanes`, built once.
-fn template(lanes: u16) -> PathBuf {
-    let mut g = TEMPLATES.lock().unwrap_or_else(|p| p.into_inner());
-    let (dir, map) = g.get_or_insert_with(|| (scratch(), HashMap::new()));
-    map.entry(lanes)
-        .or_insert_with(|| {
-            let p = dir.path().join(format!("tpl-{lanes}"));
-            let cfg = small_cfg(p.clone(), lanes, FILES_PER_LANE);
-            drop(open_journal(&cfg));
-            p
-        })
-        .clone()
+impl Templates {
+    fn new() -> Self {
+        Self {
+            dir: scratch(),
+            map: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, lanes: u16) -> PathBuf {
+        let mut g = self.map.lock().unwrap_or_else(|p| p.into_inner());
+        g.entry(lanes)
+            .or_insert_with(|| {
+                let p = self.dir.path().join(format!("tpl-{lanes}"));
+                let cfg = small_cfg(p.clone(), lanes, FILES_PER_LANE);
+                drop(open_journal(&cfg));
+                p
+            })
+            .clone()
+    }
 }
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -138,7 +150,7 @@ fn check_recovered(
     Ok(())
 }
 
-fn run(s: &Scenario) -> Result<(), TestCaseError> {
+fn run(s: &Scenario, tpl: &Templates) -> Result<(), TestCaseError> {
     let t0 = std::time::Instant::now();
     let tm = |what: &str| {
         if std::env::var_os("MODEL_TIMING").is_some() {
@@ -147,7 +159,7 @@ fn run(s: &Scenario) -> Result<(), TestCaseError> {
     };
     let dir = scratch();
     let jdir = dir.path().join("journal");
-    copy_dir(&template(s.lanes), &jdir);
+    copy_dir(&tpl.get(s.lanes), &jdir);
     let cfg = small_cfg(jdir, s.lanes, FILES_PER_LANE);
     tm("copied");
 
@@ -300,17 +312,18 @@ fn run(s: &Scenario) -> Result<(), TestCaseError> {
 
 macro_rules! model_test {
     ($name:ident, $lanes:expr) => {
-        proptest! {
-            #![proptest_config(ProptestConfig {
+        #[test]
+        fn $name() {
+            let tpl = Templates::new();
+            let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig {
                 cases: cases() / 4,
                 max_shrink_iters: 64,
                 failure_persistence: None,
                 ..ProptestConfig::default()
-            })]
-
-            #[test]
-            fn $name(s in scenario($lanes)) {
-                run(&s)?;
+            });
+            let r = runner.run(&scenario($lanes), |s| run(&s, &tpl));
+            if let Err(e) = r {
+                panic!("{e}");
             }
         }
     };
