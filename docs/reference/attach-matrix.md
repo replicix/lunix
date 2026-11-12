@@ -20,7 +20,7 @@ MAC (§11), the local pin in `state/pins` (§20), the key purposes (§4.2).
 | credential | `key`, `integrity`, `none` | what the attach request supplies. `key` = key material declaring an encrypted volume: a passphrase, key file or KMS reference that unwraps a slot of the family keyring. `integrity` = the credential of an integrity-only volume, declared as such by the request. `none` = no credential. A supplied credential is assumed to unwrap a slot; a credential that unwraps nothing (`WrongCredential`) and a keyring older than the pin (`KeyringRollback`) fail before the MAC check and are outside the matrix. |
 | MAC | `valid`, `invalid` | whether the descriptor MAC verifies: under the descriptor MAC key derived from the unwrapped root (keyed modes), or as an unkeyed checksum (`plain`). |
 | fingerprint | `right`, `wrong`, `absent` | the KMK fingerprint the orchestrator supplies (StorageClass, `LunixBackendSet` or the Secret). `right` = equal to the fingerprint derived from the unwrapped root. A `plain` volume has no fingerprint, so for it `right` and `wrong` both mean "a fingerprint was supplied". |
-| pin | `right`, `wrong`, `absent` | the local trust-on-first-use pin in `state/pins` (interactive CLI). `right` = same mode and, for a keyed mode, same fingerprint. `wrong` = for a keyed descriptor, a different fingerprint or mode; for a `plain` descriptor, a pin that records a keyed mode. |
+| pin | `right`, `wrong`, `absent` | the local trust-on-first-use pin in `state/pins` (interactive CLI). `right` = same mode and, for a keyed mode, same fingerprint. In Tables A and B, `wrong` = for a keyed descriptor, a pin of the **same mode** with a different fingerprint; for a `plain` descriptor, a pin that records a keyed mode. Pins of a different mode on a keyed descriptor are in Table D. |
 
 ## Results
 
@@ -37,6 +37,25 @@ MAC (§11), the local pin in `state/pins` (§20), the key purposes (§4.2).
 `NeedCredential` and `ModeMismatch` are added to M2's error list
 (`Downgrade`, `WrongKmk`, `BadMac`, `KeyringRollback`).
 
+## Row count
+
+The inputs give **3 × 3 × 2 × 3 × 3 = 162 combinations**: three descriptor
+modes (`encrypted`, `integrity`, `plain`), three credential classes (`key`,
+`integrity`, `none`), MAC valid or invalid, three fingerprint values and
+three pin values. They are written as **111 rows**:
+
+| table | rows | combinations | what |
+|---|---|---|---|
+| A | 72 | 72 | the plan's dimensions: descriptor `encrypted` or `plain` × credential `key` or `none` |
+| B | 36 | 36 | descriptor `integrity` × credential `integrity` or `none` |
+| C | 3 | 54 | the three remaining descriptor-credential pairs, 18 combinations each, merged because rule 1 decides them |
+| A + B + C | 111 | 162 | |
+| D | 8 | 24 | beyond the 162: a pin that records a **different mode** from a keyed descriptor (the 3-valued pin input only says right, wrong or absent), each row merged over the 3 fingerprint values |
+
+In all, 119 rows covering 186 combinations. The plan's gate asks for the 72
+of Table A; the others are needed by M2 once three modes exist. A script
+re-checked every row against the check order below.
+
 ## Check order (normative)
 
 The first rule that applies decides the result.
@@ -47,8 +66,12 @@ The first rule that applies decides the result.
      descriptor `encrypted` → `ModeMismatch`.
    - Credential `none` and descriptor `encrypted` or `integrity` →
      `NeedCredential`.
-2. **A `plain` descriptor with a keyed expectation:** a supplied
-   fingerprint, or a pin that records a keyed mode → `Downgrade`.
+2. **A weaker descriptor than expected.**
+   - a. A `plain` descriptor with a supplied fingerprint → `Downgrade`.
+   - b. A pin that records a stronger mode than the descriptor's (the order
+     is `plain` < `integrity` < `encrypted`) → `Downgrade`. This covers a
+     keyed pin on a `plain` descriptor and an `encrypted` pin on an
+     `integrity` descriptor (A0 review finding 4).
 3. Unwrap the slot and verify the keyring (failures are outside the
    matrix).
 4. **Descriptor MAC** (checksum for `plain`) does not verify → `BadMac`. In
@@ -57,14 +80,24 @@ The first rule that applies decides the result.
    writer bug).
 5. **Keyed mode, supplied fingerprint** differs from the derived one →
    `WrongKmk`.
-6. **Keyed mode, pin** present and different (mode or fingerprint) →
-   `WrongKmk`.
+6. **Keyed mode, pin** present and different: a different fingerprint, or a
+   pin of a weaker mode (the volume's identity changed, but it is not less
+   protected than pinned) → `WrongKmk`.
 7. Otherwise `Ok` if a pin is present, `Ok+pin` if it is absent.
 
 The orchestrator path keeps no pin store and passes pin `absent`; its
 `Ok+pin` is an `Ok` with nothing recorded. Without a credential, a
 fingerprint or a pin, a volume recreated as plaintext cannot be told from a
 real one (ADR-11 F7): that is row 63.
+
+**Plain volumes** (maintainer, 2026-11-12: `plain` is allowed everywhere,
+as corruption detection only). Attaching a plain volume needs no
+credential (rows 61 and 63). Supplying a credential for it is refused as
+`Downgrade` (rows 37-54 and 111), not `ModeMismatch`: key material or an
+integrity credential declares that the caller expects a keyed volume, and a
+plain descriptor in its place is exactly the substitution ADR-11 F7 defends
+against. `ModeMismatch` is kept for the one case where the descriptor is
+*more* protected than the request declares (row 110).
 
 ## Table A: the plan's 72 combinations
 
@@ -127,23 +160,23 @@ Descriptor `encrypted` or `unencrypted` (= `plain`) × credential `key` or
 | 52 | unencrypted | key | invalid | absent | right | `Downgrade` | 1 |
 | 53 | unencrypted | key | invalid | absent | wrong | `Downgrade` | 1 |
 | 54 | unencrypted | key | invalid | absent | absent | `Downgrade` | 1 |
-| 55 | unencrypted | none | valid | right | right | `Downgrade` | 2 |
-| 56 | unencrypted | none | valid | right | wrong | `Downgrade` | 2 |
-| 57 | unencrypted | none | valid | right | absent | `Downgrade` | 2 |
-| 58 | unencrypted | none | valid | wrong | right | `Downgrade` | 2 |
-| 59 | unencrypted | none | valid | wrong | wrong | `Downgrade` | 2 |
-| 60 | unencrypted | none | valid | wrong | absent | `Downgrade` | 2 |
+| 55 | unencrypted | none | valid | right | right | `Downgrade` | 2a |
+| 56 | unencrypted | none | valid | right | wrong | `Downgrade` | 2a |
+| 57 | unencrypted | none | valid | right | absent | `Downgrade` | 2a |
+| 58 | unencrypted | none | valid | wrong | right | `Downgrade` | 2a |
+| 59 | unencrypted | none | valid | wrong | wrong | `Downgrade` | 2a |
+| 60 | unencrypted | none | valid | wrong | absent | `Downgrade` | 2a |
 | 61 | unencrypted | none | valid | absent | right | `Ok` | 7 |
-| 62 | unencrypted | none | valid | absent | wrong | `Downgrade` | 2 |
+| 62 | unencrypted | none | valid | absent | wrong | `Downgrade` | 2b |
 | 63 | unencrypted | none | valid | absent | absent | `Ok+pin` | 7 |
-| 64 | unencrypted | none | invalid | right | right | `Downgrade` | 2 |
-| 65 | unencrypted | none | invalid | right | wrong | `Downgrade` | 2 |
-| 66 | unencrypted | none | invalid | right | absent | `Downgrade` | 2 |
-| 67 | unencrypted | none | invalid | wrong | right | `Downgrade` | 2 |
-| 68 | unencrypted | none | invalid | wrong | wrong | `Downgrade` | 2 |
-| 69 | unencrypted | none | invalid | wrong | absent | `Downgrade` | 2 |
+| 64 | unencrypted | none | invalid | right | right | `Downgrade` | 2a |
+| 65 | unencrypted | none | invalid | right | wrong | `Downgrade` | 2a |
+| 66 | unencrypted | none | invalid | right | absent | `Downgrade` | 2a |
+| 67 | unencrypted | none | invalid | wrong | right | `Downgrade` | 2a |
+| 68 | unencrypted | none | invalid | wrong | wrong | `Downgrade` | 2a |
+| 69 | unencrypted | none | invalid | wrong | absent | `Downgrade` | 2a |
 | 70 | unencrypted | none | invalid | absent | right | `BadMac` | 4 |
-| 71 | unencrypted | none | invalid | absent | wrong | `Downgrade` | 2 |
+| 71 | unencrypted | none | invalid | absent | wrong | `Downgrade` | 2b |
 | 72 | unencrypted | none | invalid | absent | absent | `BadMac` | 4 |
 
 Row 63 is the unanchored case ADR-11 F7 accepts: a plain volume with no
@@ -204,3 +237,26 @@ are merged because rule 1 decides them before any of those inputs is read.
 | 109 | integrity | key | any (18) | `Downgrade` | 1 | key material means "must be encrypted" |
 | 110 | encrypted | integrity | any (18) | `ModeMismatch` | 1 | the request declared an integrity-only volume |
 | 111 | unencrypted (`plain`) | integrity | any (18) | `Downgrade` | 1 | the request expects an integrity key the volume lacks |
+
+## Table D: pins of another mode on a keyed descriptor
+
+Rows where the pin records a mode other than the descriptor's, for the two
+keyed descriptors with their matching credential. Each row stands for the 3
+fingerprint values; they are merged because the result does not depend on
+the fingerprint (rule 2b decides before it is read, or rules 5 and 6 both
+give `WrongKmk`).
+
+| # | descriptor | credential | MAC | fingerprint | pin | result | rule |
+|---|---|---|---|---|---|---|---|
+| 112 | integrity | integrity | valid | any (3) | records `encrypted` | `Downgrade` | 2b |
+| 113 | integrity | integrity | invalid | any (3) | records `encrypted` | `Downgrade` | 2b |
+| 114 | integrity | integrity | valid | any (3) | records `plain` | `WrongKmk` | 5 or 6 |
+| 115 | integrity | integrity | invalid | any (3) | records `plain` | `BadMac` | 4 |
+| 116 | encrypted | key | valid | any (3) | records `integrity` | `WrongKmk` | 5 or 6 |
+| 117 | encrypted | key | invalid | any (3) | records `integrity` | `BadMac` | 4 |
+| 118 | encrypted | key | valid | any (3) | records `plain` | `WrongKmk` | 5 or 6 |
+| 119 | encrypted | key | invalid | any (3) | records `plain` | `BadMac` | 4 |
+
+Rows 74 and 80 of Table B (an `integrity` pin with another fingerprint) stay
+`WrongKmk`; an `encrypted` pin on an `integrity` descriptor is row 112 or
+113, `Downgrade`.

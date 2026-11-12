@@ -1,7 +1,8 @@
 # On-disk and on-bucket formats (phase 1 freeze)
 
-Status: **draft of M1.A0, 2026-11-12, awaiting the independent review and
-the maintainer's sign-off** (`crates/lunix-format/FREEZE.md`). Once signed,
+Status: **draft of M1.A0, 2026-11-12, revised after the independent A0
+review (`docs/plans/v1/wip/01-p1-m1a0-review.md`); awaiting the
+maintainer's sign-off** (`crates/lunix-format/FREEZE.md`). Once signed,
 every layout here is frozen for the life of the product: later phases add
 code, not migrations (ROADMAP). A change after sign-off is a format change
 and needs the maintainer.
@@ -100,7 +101,7 @@ re-decide any row.
 | D6 | `heat/`, `gc/` and `dicts/` freeze **envelope and kind id only**; the body is `{ver: u16, bytes}` defined by the phase or crate that writes it (`gc/` by M17 in phase 1: one sealed create-only object per GC pass, `gc/<pass:016x>`, body `{ver: 1, bytes}`; `dicts/` by `replicix-zdict`, M18a). |
 | D7 | Journal lanes: one lane per ublk queue, a global `write_seq` assigned by the caller, lanes merged at recovery. Local `epoch` is 0 in every journal record and every commit. FLUSH is a **group flush** across lanes (interface in M1.B1). Recovery is floor-based: `recover(hint, floor)` with `floor` = the tip FULL's `cut_seq`. |
 | D8 | Local file set: `volume` (the exact descriptor bytes), `volume.json` (local settings only), `families/<id>/keyring`, `state/device` (with `boot_id`), `state/checkpoint`, `state/pins`, the host registry `<state_dir>/volumes.json`; plus, new in this plan, the local mirrors of the GC-root objects `snapshots/`, `readers/`, `holds/` (empty in phase 1) and `gc/` (one sealed evidence object per pass, `gc/<pass:016x>`) and the local-only `state/gc/` (condemned list, the only mutable GC state, atomic replace). |
-| D9 | The object name inside every metadata AAD is **bucket-relative** (`commits/<seq:016x>`, `segments/<seg:016x>`, ...), never the local path, so local bytes upload verbatim in phase 2 (ADR-7, §13.3). |
+| D9 | The object name inside every metadata AAD is **bucket-relative** (`commits/<commit_seq:016x>`, `segments/<seg:016x>`, ...), never the local path, so local bytes upload verbatim in phase 2 (ADR-7, §13.3). |
 | D10 | EPOCH body includes `authority` (optional). Lease body includes `transferred_to` (optional, best effort, ADR-24 step 6). `snapshots/`, `readers/` and `holds/` bodies name their §6.1 fields in the freeze list (`{seq, created, consistency, label}`, `{seq, deadline}`, `{base_seq}`). |
 | D11 | **Plain-extent tag.** Every extent carries the 16-byte tag field. On unencrypted volumes it is BLAKE3-128 (first 16 bytes) over **every byte of the extent before the tag**, that is `CCH1 header ‖ chunk_id ‖ clen ‖ payload`, taken as one contiguous slice (`&extent[..len-16]`), **keyed** by a key derived from the integrity key (purpose `extent tag`) when the family has one, unkeyed otherwise. Local reads and fsck verify it. (Decided by the lead on 2026-11-12, review 2 finding 1: this is the spec's wording, DESIGN §6, ADR-6, ADR-11 and GLOSSARY. It covers `clen`, which sits outside the 16-byte `CCH1` header, at the same cost, and matches the encrypted layout, whose AEAD likewise covers its framing.) On encrypted volumes the field is the AEAD tag as before. |
 | D12 | **Journal framing and packing (DESIGN §4.1).** Each record is a 64-byte inline header plus its data, copied into the lane's own aligned buffer. Records are packed back to back, 8-byte aligned, inside one lane batch; only the **batch** is padded with zeros to a 4 KiB multiple and written with one `O_DIRECT` write. A zero magic means end of batch. Recovery stops at the first CRC failure or gap. Cost: n 4 KiB writes take ceil(n·4160/4096) blocks; an isolated QD1 4 KiB write costs 8 KiB. |
@@ -113,13 +114,20 @@ input is every byte of the extent before the tag, one contiguous slice,
 including `clen`; the `gc/` envelope is one sealed create-only object per
 pass, `gc/<pass:016x>`, body `{ver: 1, bytes}`, written once at pass end,
 and `state/gc/condemned` is the only mutable GC state. Field names follow
-D5. D9 and D10 still write `seq`; in a commit context that is `commit_seq`
-(DESIGN terminology block), and the tables below use `commit_seq`.
+D5. D10 still writes `seq` in the pin bodies; in a commit context that is
+`commit_seq` (DESIGN terminology block), and the tables below use
+`commit_seq`.
 
 Related review-2 rules that this file encodes as invariants: mount never
 falls back to an older commit by itself (finding 8, [§10.7](#107-chain-rules));
 GC never condemns an object above the tip's high-water mark (finding 5) and
 the delete-time index invariant (finding 9) ([§17.4](#174-invariants)).
+Rules from the A0 review: the journal reader resyncs past a damaged record
+([§5.3](#53-batch-packing-and-how-a-reader-finds-records)), `created_at` is
+a writer clamp ([§10.7](#107-chain-rules)), a dedup hit from an index run is
+confirmed before use ([§17.3](#173-authentication)), and the checkpoint and
+`ObjId` allocator rules hold after `--truncate-tip`
+([§18](#18-checkpoint-freeze-item-14), [§3](#3-primitives-freeze-item-1)).
 
 ## 3. Primitives (freeze item 1)
 
@@ -128,7 +136,7 @@ the delete-time index invariant (finding 9) ([§17.4](#174-invariants)).
 | `ChunkId` | 32 | bytes | any | Data extent: BLAKE3-256 of the plaintext chunk (plain and integrity modes); keyed BLAKE3 under the data addressing key (encrypted, default profile); HMAC-SHA-256 under it (encrypted, FIPS profile). In a map-node extent the same field holds the node hash ([§8.5](#85-node-hash-and-empty-hashes)). |
 | `IdLen` | 1 | u8 | 0, 16, 32 | Map id-prefix length, from the descriptor. 0 (lean) decodes but `volume create` refuses it in v1 (ADR-8). |
 | `IdPrefix` | `IdLen` | bytes | | The first `IdLen` bytes of a `ChunkId`. |
-| `ObjId` (`SegId`, `PackId`, `RunId`) | 8 | u64 | `epoch << 40 \| counter`, `epoch` < 2^24, `counter` 1 ..= 2^40 − 1 | One id space per volume for segments, map packs and index runs (one counter). 0 means "none" and is never allocated. Ids are never reused. |
+| `ObjId` (`SegId`, `PackId`, `RunId`) | 8 | u64 | `epoch << 40 \| counter`, `epoch` < 2^24, `counter` 1 ..= 2^40 − 1 | One id space per volume for segments, map packs and index runs (one counter). 0 means "none" and is never allocated. Ids are never reused: at open, before the orphan sweep deletes anything, the allocator's next counter is 1 + the maximum of the checkpoint's `id_high`, the highest id any commit present names, and the highest id of any segment, pack or run file present (A0 review finding 10). |
 | `WriteSeq` | 8 | u64 | ≥ 1 for a record; 0 = before any write | Global write sequence (DESIGN §8.1). `cut_seq` is a `WriteSeq`. |
 | `CommitSeq` | 8 | u64 | 0 = genesis | Commit position in the chain; `parent_seq`, `chain_floor`, `since_seq`, `base_seq`, pin and heat names are `CommitSeq`. |
 | `Epoch` | 8 | u64 | ≥ 0; < 2^24 while it is used in an `ObjId` | Owner generation. 0 for every local record and commit in phase 1. |
@@ -155,6 +163,19 @@ authenticated descriptor, never from an object.
 | `plain` | 0 | none (no keyring) | BLAKE3-256 | BLAKE3-128, unkeyed | envelope form 0, `mac` = BLAKE3-256 checksum | BLAKE3-256 checksum |
 | `integrity` | 1 | integrity key IK (32 bytes) | BLAKE3-256 | BLAKE3-128 keyed with the extent tag key | envelope form 0, `mac` = HMAC-SHA-256 under the integrity HMAC key | HMAC-SHA-256 |
 | `encrypted` | 2 | KMK (32 bytes) | keyed (data addressing key) | AES-256-GCM tag | envelope form 1, XChaCha20-Poly1305 under the per-kind metadata key | HMAC-SHA-256 |
+
+**`plain` is corruption detection only** (maintainer, 2026-11-12). It is
+supported everywhere, including volumes with S3 backends, but every
+checksum in it (commit and footer `mac`, descriptor MAC, extent tag) is an
+unkeyed BLAKE3 that anyone can recompute. It gives **no protection against
+a bucket writer**: a bucket can rewrite commits, footers and extents
+undetected, and since local reads do not recompute the chunk id (D11), a
+swapped extent that carries the right header id returns wrong data. The
+mode is fixed in the create-only descriptor, so a `plain` volume stays
+`plain`. The default of `lunix volume create` is `integrity`, with an
+auto-created key-file slot next to the local volume (`integrity.key`,
+[§22](#22-bucket-and-local-paths-freeze-item-12)); `--passphrase` adds a
+passphrase slot for volumes that move; `--encrypt` selects `encrypted`.
 
 "The integrity key" of ADR-11 and D11 is the root IK of an `integrity`
 family; every key used with it is derived from it by purpose (below). The
@@ -308,62 +329,76 @@ Cost (D12): a batch of *n* 4 KiB writes takes `ceil(n · 4160 / 4096)`
 blocks, under 1.6 % plus one block of overhead at n ≥ 32; an isolated QD1
 4 KiB write is one record of 4160 bytes and costs two blocks (8 KiB).
 
-Reader (normative; recovery and fsck):
+Reader (normative; recovery and fsck). This is D12's reader with the
+resynchronisation amendment of the A0 review (finding 8), which the
+maintainer approves at sign-off: a damaged record no longer ends the lane;
+the lane's global contiguity, checked by the merge, keeps D12's stop
+semantics above the floor.
 
 ```
-p = 4096; prev_write_seq = (last accepted write_seq of this lane, else 0)
-loop:
-    if p == file length: end of file (continue with the lane's next file)
-    m = u32 at p
-    if m == 0:
-        if p is a multiple of 4096: END OF LANE      (no batch starts here)
-        p = round4k(p); continue                      (end of batch: next batch)
-    if m != "LXJR": END OF LANE
-    validate the header at p: ver, kind, reserved = 0, gen = file generation,
-        off = p, len in range, p + 64 + data length ≤ file length,
-        crc32c, write_seq > prev_write_seq
-    if any check fails: END OF LANE
-    accept; prev_write_seq = write_seq; p = p + align8(64 + data length)
+for each file of the lane, in ordinal order (a file whose header is invalid holds no records):
+    p = 4096
+    loop:
+        if p == file length: next file
+        m = u32 at p
+        if m == 0:
+            if p is a multiple of 4096: next file               (no batch starts here)
+            p = round4k(p); continue                            (end of batch: next batch)
+        if valid(p): accept; prev_write_seq = write_seq; p = p + align8(64 + data length); continue
+        RESYNC: find the smallest q = p + 8k (k ≥ 1, q + 64 ≤ file length) with valid(q)
+            if found: report the damaged range [p, q); p = q; continue
+            else: report [p, file length); next file
+
+valid(q) = u32 at q is "LXJR", ver = 1, kind in {1, 2}, reserved = 0,
+           gen = the file's generation, off = q, len in range,
+           q + 64 + data length ≤ file length, crc32c matches,
+           write_seq > prev_write_seq (the last record accepted in this lane)
 ```
 
-After every lane ends, recovery keeps records with `write_seq > floor`,
-merges the lanes by `write_seq` and stops at the first gap (DESIGN §4.1).
-Anything a lane holds after its END OF LANE lies after a gap: recovery
-ignores it, and `fsck` may scan on to report it (`ignored_after_gap`).
+After every lane has been read, recovery keeps records with `write_seq >
+floor`, merges the lanes by `write_seq` and stops at the first gap (DESIGN
+§4.1). A damaged record above the floor is a missing `write_seq`, so the
+merge stops exactly where D12 stopped before; a damaged record at or below
+the floor costs nothing, because the records after it in the lane are still
+read. Valid records after the first gap are ignored and reported
+(`ignored_after_gap`); `fsck` reports every damaged range. The cost of a
+damaged record is reading the rest of its file at 8-byte steps.
 
 **Why a record cannot be mis-parsed across a torn batch.**
 
 1. A file with a valid header is zero beyond its last write ([§5.1](#51-journal-file-header-block-0)),
    so a region a torn write did not reach reads as zero, never as old data.
 2. A record whose header or data includes a region that was not written
-   fails its CRC, which covers header and data, and ends the lane.
-3. A zero magic at a 4 KiB boundary ends the lane: a batch that did not
-   reach the disk is never skipped over, so a later batch is never read
-   past a hole.
+   fails its CRC, which covers header and data; the reader then resyncs.
+3. A zero magic at a 4 KiB boundary ends the scan of that file: the reader
+   never skips over a hole in a file to look for later batches. A later
+   batch of the same lane, in this file past the hole or in the next file,
+   holds `write_seq` values above the lost ones, so the merge does not
+   accept it.
 4. The reader reads a header only at offset 4096, right after a record it
-   accepted, or at the 4 KiB boundary after a zero magic found at a
-   non-aligned offset. If whole 4 KiB blocks are written or not, that zero
-   is the batch's padding and the boundary is the start of the next batch.
-   If the device tears inside a block (at sector granularity), the zero may
-   be an unwritten sector inside the batch, and the boundary may fall
-   inside the batch: on a genuine record header, whose predecessors were
-   lost, so its `write_seq` lies after a gap and the merge does not accept
-   it; or inside a record's data.
-5. Data cannot pass for a header: the header checks require the magic,
-   `gen` equal to the file's random 64-bit generation, which the guest never
-   sees, `off` equal to the position, and the CRC. Guest data that imitates
-   a header, a record from an earlier incarnation of the file, and a record
-   copied to another offset are all rejected.
+   accepted, at the 4 KiB boundary after a zero magic found at a
+   non-aligned offset, or at a resync candidate. If whole 4 KiB blocks are
+   written or not, a non-aligned zero is the batch's padding and the
+   boundary is the start of the next batch. If the device tears inside a
+   block (at sector granularity), the zero may be an unwritten sector inside
+   the batch, and the boundary, like a resync candidate, may fall on a
+   genuine record header whose predecessors were lost (its `write_seq` lies
+   after a gap and the merge does not accept it) or inside a record's data.
+5. Data cannot pass for a header: `valid` requires the magic, `gen` equal to
+   the file's random 64-bit generation, which the guest never sees, `off`
+   equal to the position, the CRC and a rising `write_seq`. Guest data that
+   imitates a header, a record from an earlier incarnation of the file, and
+   a record copied to another offset are all rejected; random damage passes
+   with probability about 2^-160.
 
 A stale record (one from a previous pass of the ring) cannot survive
-reinitialisation; if one did, its `gen` differs and it ends the lane.
+reinitialisation; if one did, its `gen` differs and the reader resyncs past
+it.
 
-Note for the reviewer: D12 ends a lane at the first CRC failure even when
-the damaged record is at or below the floor, so media damage to an already
-committed record also hides the lane's later records. The checkpoint's lane
-tails let recovery skip whole files below the floor, which narrows this;
-`gen` and `off` would let a later rule resynchronise at the next valid
-header without a format change.
+The reserved bytes 56-63 of the record header stay reserved: a separate
+header-only CRC (which would let fsck name the `write_seq` and `len` of a
+record whose data is damaged) was offered as optional by the A0 review and
+is not taken; the resync rule does not need it.
 
 ### 5.4 Reuse of the framing
 
@@ -542,7 +577,7 @@ whose decoded bytes are the footer body:
 |---|---|---|---|---|---|
 | `ver` | 0 | 1 | u8 | 1 | |
 | `container_kind` | 1 | 1 | u8 | = trailer | |
-| reserved | 2 | 2 | | zero | |
+| `n_dict_ids` | 2 | 2 | u16 | 0 ..= `extent_count`; 0 in a map pack | number of distinct zstd dictionary ids used by codec-3 extents of this container (ADR-30) |
 | `extent_count` | 4 | 4 | u32 | 1 ..= `floor(footer_off / 69)` | |
 | `object_id` | 8 | 8 | u64 | = trailer | |
 | `extents_len` | 16 | 8 | u64 | = trailer `footer_off` | |
@@ -550,6 +585,7 @@ whose decoded bytes are the footer body:
 | `write_seq_hi` | 32 | 8 | u64 | ≥ `write_seq_lo` | highest such `write_seq`; 0 when none |
 | `seg_hash` | 40 | 32 | bytes | `BLAKE3-256(container[0 .. footer_off])` | the segment-level BLAKE3 of DESIGN §6 |
 | entries | 72 | `48 × extent_count` | | | sorted by (`chunk_id`, `off`) ascending, strictly |
+| `dict_ids[]` | `72 + 48 × extent_count` | `4 × n_dict_ids` | u32 each | sorted ascending, unique | the `dictID` of the zstd frame header of every codec-3 extent, each once; GC marks the trained dictionaries a container uses from here, without reading extents (A0 review finding 14) |
 
 Entry (48 bytes):
 
@@ -565,8 +601,9 @@ Entry (48 bytes):
 The extents named by the entries, each `OVH + clen` bytes long, tile the
 extent region `[0, footer_off)` exactly: no gap, no overlap. The same
 `chunk_id` may appear twice (two copies written in one cut). The decoder
-caps the zstd output at `72 + 48 × floor(footer_off / 69)` bytes (an extent
-is at least 69 bytes) and rejects a larger frame.
+caps the zstd output at `72 + 52 × floor(footer_off / 69)` bytes (an extent
+is at least 69 bytes; 48 bytes of entry plus at most 4 bytes of dictionary
+id per extent) and rejects a larger frame.
 
 **Authenticated by:** the envelope's MAC (form 0) or AEAD (form 1), which
 also authenticates `seg_hash` and so the extent region as a whole. Each
@@ -578,7 +615,8 @@ extent is also self-authenticating ([§6](#6-extent-freeze-item-3)).
 |---|---|
 | container length | 2^32 − 1 bytes (segment target 16 MiB, DESIGN §6) |
 | `extent_count` | `floor(footer_off / 69)` |
-| decoded footer body | `72 + 48 × extent_count` |
+| decoded footer body | `72 + 48 × extent_count + 4 × n_dict_ids` |
+| `n_dict_ids` | `extent_count` (and ≤ 65 535) |
 
 ## 8. Map node (freeze item 5)
 
@@ -675,7 +713,8 @@ Child entry (48 bytes):
 | `child_hash` | 0 | 32 | bytes | the child's node hash; the empty hash of level `level − 1` for an absent subtree |
 | `pack` | 32 | 8 | u64 (`PackId`) | 0 iff the child is empty |
 | `off` | 40 | 4 | u32 | offset of the child's extent in the pack; 0 if empty |
-| `len` | 44 | 4 | u32 | whole extent length (`OVH + clen`); 0 if empty |
+| `len` | 44 | 3 | u24 | whole extent length (`OVH + clen`, at most 65 644); 0 if empty |
+| `lineage_idx` | 47 | 1 | u8 (`LineageIdx`) | 0 in v1 (a reader rejects any other value): 0 = `pack` is this volume's; `i` ≥ 1 = a pack of `lineage[i-1]`, so a post-v1 clone can point at its base's nodes without copying them (ADR-25) |
 
 An interior node whose children are all empty is the empty node of its
 level and is never stored. Size: 24 579 bytes at fanout 512, 12 291 at 256.
@@ -736,6 +775,13 @@ Every metadata object (commits, lease, footers, pins, `heat/`, `gc/`,
   checksum only).
 - Form 1: XChaCha20-Poly1305 under `metadata key(kind)` (purpose 0x03), AAD
   = `meta_aad(volume, kind, name)` exactly (ADR-11), plaintext = the body.
+  Envelope bytes 0-11 are **not** in the AAD: they are checked, not
+  authenticated. A reader rejects any value other than `magic` = `"LXM1"`,
+  `env_ver` = 1, `kind` = the kind its name implies (1 or 3 for `commits/`;
+  the AEAD then binds it through `meta_aad`), `form` = the descriptor mode's
+  form, reserved = 0, and `body_len` = object length − 52 (the AEAD fixes the
+  length). No unchecked header byte can change how an authenticated body is
+  read.
 - Every body starts with its own version (`body_ver` u8, or `ver` u16 for
   opaque bodies), which the AEAD or MAC covers.
 - **Authenticated by:** the MAC (integrity mode), the AEAD (encrypted
@@ -773,7 +819,7 @@ or AEAD authenticates the whole body; on unencrypted volumes that MAC is the
 | `epoch` | 16 | 8 | u64 | 0 in phase 1; never below the parent's | |
 | `parent_seq` | 24 | 8 | u64 | `has_parent`: `commit_seq − 1`; else 0 | `has_parent` is clear exactly when `commit_seq` = 0 |
 | `parent_hash` | 32 | 32 | bytes | | BLAKE3-256 of the parent commit object's bytes as stored (the whole envelope); for genesis, of the exact `volume` bytes (D5) |
-| `created_at` | 64 | 8 | u64 (`TimeMs`) | ≥ the parent's | used by `mount-at --time` and retention |
+| `created_at` | 64 | 8 | u64 (`TimeMs`) | any | writer rule: `max(now, parent.created_at)`, so it never decreases along a chain written by this rule; readers never reject on it ([§10.7](#107-chain-rules)); used by `mount-at --time` and retention |
 
 ### 10.2 FULL body (kind 1)
 
@@ -786,7 +832,8 @@ or AEAD authenticates the whole body; on unencrypted volumes that MAC is the
 | `map_root.hash` | 96 | 32 | bytes | | root node hash; `E_{levels-1}` for an empty map |
 | `map_root.pack` | 128 | 8 | u64 | 0 iff the map is empty | location of the root node's extent |
 | `map_root.off` | 136 | 4 | u32 | | |
-| `map_root.len` | 140 | 4 | u32 | | whole extent length |
+| `map_root.len` | 140 | 3 | u24 | ≤ 65 644 | whole extent length |
+| `map_root.lineage_idx` | 143 | 1 | u8 | 0 in v1 | as in the interior child entry ([§8.4](#84-interior-node)): a clone's first root can be its base's |
 | `heat_seq` | 144 | 8 | u64 | `has_heat`: the `commit_seq` of `heat/<commit_seq:016x>`; else 0 | `heat?` |
 | `n_map_packs` | 152 | 4 | u32 | 0 ..= 1 024 | |
 | `n_new_segments` | 156 | 4 | u32 | 0 ..= 262 144 | |
@@ -889,14 +936,23 @@ TRANSFER:
 - `commit_seq = parent_seq + 1`; commit numbers are contiguous; genesis is
   0 (D5).
 - `parent_hash` of commit *n* = BLAKE3-256 of the bytes of commit *n − 1*
-  as stored. `epoch` never decreases. `created_at` never decreases.
+  as stored. `epoch` never decreases (a reader rule: it is authenticated
+  monotone state).
+- `created_at` is a **writer** rule, not a reader rule: a writer sets
+  `created_at = max(now, parent.created_at)`, so a host whose clock is behind
+  still writes a non-decreasing chain. Mount and fsck never reject a commit
+  on `created_at`; fsck warns when it decreases. Time-based lookups
+  (`mount-at --time`) take the newest commit with `created_at ≤ t`.
 - Mount and fsck verify the chain from the tip down to `chain_floor`; the
   floor commit's parent may be absent (D5).
 - **No automatic fallback** (review 2, finding 8): a tip that fails to
   decode or authenticate is a typed mount error. Falling back would reuse
   the create-only name `commits/<tip>` and lose journal records already
   reclaimed. The repair is offline: `lunix fsck --repair --truncate-tip`
-  moves the damaged object aside and makes `tip − 1` the tip.
+  moves the damaged object aside and makes `tip − 1` the tip. It also
+  zeroes both checkpoint slots ([§18](#18-checkpoint-freeze-item-14)); the
+  `ObjId` allocator rule ([§3](#3-primitives-freeze-item-1)) keeps the ids of
+  the files the next open sweeps from being reused.
 - Every object a commit names is durable before the commit (ADR-9); a FULL
   names only index runs durable before its C6 (D3).
 - The tip's high-water mark is the highest segment or pack id any retained
@@ -949,7 +1005,12 @@ commits).
 
 `families/<family-id>/keyring` (locally `<dir>/families/<family-id>/keyring`)
 is the one mutable key object of a family: written by CAS on the authority,
-copied byte-identically to mirrors (ADR-11 F6). A plain family has none.
+copied byte-identically to mirrors (ADR-11 F6). **A plain family has no
+key slots and no keyring object**: none is written, locally or in the
+bucket, because nothing reads it (a plain family has no root, so no MAC
+key and no `dek_gen`, and the attach check of a plain volume needs only the
+descriptor and the pin). A keyring found for a family whose descriptor is
+`plain` is ignored by attach and reported by fsck.
 
 | field | offset | width | encoding | legal range | notes |
 |---|---|---|---|---|---|
@@ -970,13 +1031,13 @@ Slot entry:
 | field | offset | width | encoding | legal range | notes |
 |---|---|---|---|---|---|
 | `slot_id` | 0 | 4 | u32 | ≥ 1 | |
-| `kind` | 4 | 1 | u8 | 1 passphrase (Argon2id), 2 key file, 3 KMS | |
+| `kind` | 4 | 1 | u8 | 1 passphrase (Argon2id), 2 key file, 3 KMS; 4 reserved (passphrase with PBKDF2, for the FIPS profile: Argon2id is not FIPS-approved; not defined in v1, rejected) | |
 | reserved | 5 | 1 | | zero | |
 | `params_len` | 6 | 2 | u16 | kind 1: 28; kind 2: 0; kind 3: 1 ..= 1 024 | |
 | `wrap_len` | 8 | 2 | u16 | kinds 1-2: 73; kind 3: 1 ..= 4 096 | |
 | reserved | 10 | 2 | | zero | |
 | `params` | 12 | `params_len` | | | kind 1: `m_kib` u32, `t` u32, `p` u32, `salt` [16]; kind 3: `key_ref` UTF-8 |
-| `wrap` | next | `wrap_len` | | | kinds 1-2: `01` ‖ nonce [24] ‖ XChaCha20-Poly1305 ciphertext of the 32-byte root [32] ‖ tag [16]; kind 3: the KMS ciphertext |
+| `wrap` | next | `wrap_len` | | | kinds 1-2: `wrap_ver` u8 ‖ nonce [24] ‖ ciphertext of the 32-byte root [32] ‖ tag [16], with `wrap_ver` 1 = XChaCha20-Poly1305 (the only value in v1; 2 and up are reserved for an AES-GCM or AES-KW wrap of a FIPS profile); kind 3: the KMS ciphertext |
 
 - KEK: kind 1 = Argon2id(passphrase, `salt`, `m_kib`, `t`, `p`, 32 bytes);
   kind 2 = the key file's 32 bytes; kind 3 = the KMS, with encryption
@@ -991,7 +1052,10 @@ Slot entry:
 - `mac = HMAC-SHA-256(keyring MAC key, meta_aad(family_id, 13,
   "families/<family-id>/keyring") ‖ keyring[0 .. end − 32])`, the key being
   purpose 0x07 of the root a slot unwraps. A reader unwraps a slot, then
-  verifies the MAC, then checks `keyring_seq` against `state/pins`.
+  verifies the MAC, then checks `keyring_seq` against `state/pins`. The
+  `keyring_seq` floor lives only in that local pin, so an attach with no
+  pin store (the orchestrator path) cannot detect a keyring rolled back to
+  an older valid version; see [§25](#25-open-questions-for-the-maintainer).
 - **Authenticated by:** each slot by its AEAD (or KMS context); the whole
   body, including `keyring_seq` and `dek_gen`, by the keyring MAC.
 - Maximum: 32 slots; whole keyring ≤ 192 KiB.
@@ -1006,7 +1070,7 @@ the AEAD or MAC (ADR-11 F12).
 |---|---|---|---|---|---|
 | `body_ver` | 0 | 1 | u8 | 1 | |
 | `released` | 1 | 1 | u8 | 0, 1 | |
-| `host_len` | 2 | 2 | u16 | 1 ..= 255 | |
+| `host_len` | 2 | 2 | u16 | 1 ..= 64 | the `<host>` of §22 (the reader-pin name uses the same host) |
 | `cluster_len` | 4 | 2 | u16 | 0 ..= 255 | 0 = standalone |
 | `transferred_to_len` | 6 | 2 | u16 | 0 = absent, else 1 ..= 64 | `transferred_to?` (D10) |
 | `epoch` | 8 | 8 | u64 | | a lease below the newest verified epoch is rejected |
@@ -1131,7 +1195,7 @@ Trailer:
 |---|---|---|---|---|---|
 | `entries` | 0 | 8 | u64 | = Σ block `count` | |
 | `run_id` | 8 | 8 | u64 | = the id in the name | |
-| `nblocks` | 16 | 4 | u32 | ≥ 1 | |
+| `nblocks` | 16 | 4 | u32 | 1 ..= 2^28 | |
 | `ncovered` | 20 | 4 | u32 | 0 ..= 2^24 | |
 | `run_hash` | 24 | 32 | bytes | `BLAKE3-256(run[0 .. trailer offset])` | |
 | `ver` | 56 | 1 | u8 | 1 | |
@@ -1149,11 +1213,26 @@ CRC, without the rest of the run.
 ### 17.3 Authentication
 
 Index runs are **checksummed, not authenticated or sealed**. They hold only
-what the plaintext extent framing already shows (chunk id, offset, `clen`),
-and every use is verified: a hint from the index is checked against the
-extent header's `chunk_id` and the extent's tag or AEAD before data is
-returned (DESIGN §7). A forged or corrupt run can make a read fail, never
-return wrong data.
+what the plaintext extent framing already shows (chunk id, offset, `clen`).
+They are safe only together with two rules, one for each use (A0 review
+finding 9):
+
+- **Reads.** A hint from the index is checked against the extent header's
+  `chunk_id` and the extent's tag or AEAD before data is returned (DESIGN
+  §7).
+- **Dedup (writers).** A dedup hit taken from an index run, as opposed to
+  the in-process table built from footers this process verified, is
+  **confirmed before the map points at it**: the writer reads the extent at
+  the hinted location, compares all 32 bytes of its header `chunk_id` with
+  the new chunk's id, and verifies its tag (plain and integrity mode) or
+  AEAD (encrypted mode). An unconfirmed hit is a miss and the chunk is
+  stored. Without this rule a wrong run entry `X → (seg, off)` naming a
+  valid extent of another id would make the new chunk `X` never be stored.
+
+With both rules a forged or corrupt run costs availability (a failed read
+or a missed dedup), never integrity or a lost write. A per-block MAC was
+rejected: it would cost room in every 4 KiB block (84 entries instead of
+85) and add nothing the confirmation does not already give.
 
 ### 17.4 Invariants
 
@@ -1165,12 +1244,25 @@ return wrong data.
   names the current copy of every live id those hints resolve to, or that
   copy's segment is named by the chain (so `catch_up` restores the entry
   after a crash).
-- Maximum: `nblocks` ≤ 2^32 − 1; entries ≤ 85 × `nblocks`.
+- Maximum: `nblocks` ≤ 2^28 (a 1 TiB run of about 2.3 × 10^10 entries, far
+  above any volume at the stated limits); entries ≤ 85 × `nblocks`; `ncovered` ≤ 2^24.
+  A reader may load the block index incrementally.
 
 ## 18. Checkpoint (freeze item 14)
 
 `state/checkpoint` is a hint only (DESIGN §4.1): losing it or finding it
-stale changes the cost of recovery, never its result. It is 8 192 bytes: two
+stale changes the cost of recovery, never its result. Two rules make that
+true after an offline repair (A0 review finding 10):
+
+- A reader uses `lane_tail[]` **only if `last_commit_seq` ≤ the tip's
+  `commit_seq`**. A checkpoint written for a commit above the tip (the tip
+  was truncated) may name files holding records the new tip does not
+  cover; it is ignored, and every file is scanned.
+- `lunix fsck --repair --truncate-tip` zeroes both checkpoint slots.
+
+`id_high` is one input of the `ObjId` allocator rule ([§3](#3-primitives-freeze-item-1));
+a stale or lost value is safe because the rule also takes the maximum of
+the ids on disk. It is 8 192 bytes: two
 4 096-byte slots at offsets 0 and 4096. A writer overwrites the slot that
 does not hold the newest valid copy (`pwrite` of 4 KiB, `fdatasync`); a
 reader takes the valid slot with the higher `slot_seq` and ignores the file
@@ -1188,7 +1280,7 @@ if neither is valid.
 | `last_commit_seq` | 40 | 8 | u64 | | the tip when written |
 | `id_high` | 48 | 8 | u64 | | `ObjId` counter high water (segments, packs, runs) |
 | reserved | 56 | 8 | | zero | |
-| `lane_tail[]` | 64 | `8 × lanes` | `{ordinal u32, reserved u32}` | | per lane: files with a lower ordinal hold only records ≤ the floor and may be skipped |
+| `lane_tail[]` | 64 | `8 × lanes` | `{ordinal u32, reserved u32}` | | per lane: files with a lower ordinal hold only records ≤ the floor and may be skipped, used only when `last_commit_seq` ≤ the tip |
 | `stats[]` | `64 + 8 × lanes` | `8 × n_stats` | u64 each | | counters; their meaning is defined by `lunix-engine` and is not frozen |
 | zero | | | | zero | to 4 092 |
 | `crc32c` | 4092 | 4 | u32 | `crc32c(slot[0 .. 4092])` | |
@@ -1309,6 +1401,7 @@ of `[A-Za-z0-9._-]`, not starting with `.`; `<host>` is 1 ..= 64 of
 | `sync/<backend-id>/progress` | — | — | advisory |
 | `families/<family-id>/keyring` (relative to `<prefix>/lunix/v1/`) | `<dir>/families/<family-id>/keyring` | 13 (MAC only) | |
 | — | `volume.json`, `LOCK`, `journal/q<lane:02x>-<ordinal:08x>.j`, `cache/`, `state/checkpoint`, `state/device`, `state/pins`, `state/gc/condemned` | — | local only |
+| — | `integrity.key` (that is `<dir>/<volume-uuid>/integrity.key`) | — | local only, never uploaded: the 32 raw bytes of the auto-created key-file slot (slot kind 2) of an `integrity` volume made by `volume create` without a passphrase; file mode 0600 |
 
 Temporary files end in `.tmp` and are deleted at open. The paths module maps
 a local path to its bucket-relative name by this table (D9); local-only
@@ -1407,7 +1500,8 @@ Record 2 (hole), at `0x1000 + 64 + 16384 = 0x5040` (8-byte aligned):
 The batch is 16 512 bytes of records, written as one 20 480-byte (5-block)
 write at `[0x1000, 0x6000)`. A reader accepts record 1, accepts record 2,
 reads a zero magic at `0x5080` (not aligned: end of batch), moves to
-`0x6000` and, finding zero there at an aligned offset, ends the lane.
+`0x6000` and, finding zero there at an aligned offset, ends the scan of
+this file.
 
 ### 23.2 Plain extent (volume B)
 
@@ -1499,7 +1593,7 @@ Footer body (the 120 bytes at envelope offset 21):
 |---|---|---|---|
 | 0 | `01` | `ver` | 1 |
 | 1 | `00` | `container_kind` | segment |
-| 2 | `00 00` | reserved | |
+| 2 | `00 00` | `n_dict_ids` | 0 (no codec-3 extent) |
 | 4 | `01 00 00 00` | `extent_count` | 1 |
 | 8 | `01 00 00 00 00 00 00 00` | `object_id` | 1 |
 | 16 | `8f 00 00 00 00 00 00 00` | `extents_len` | 143 |
@@ -1512,6 +1606,7 @@ Footer body (the 120 bytes at envelope offset 21):
 | 112 | `00 40 00 00` | entry `ulen` | 16 384 |
 | 116 | `02` | entry `codec` | 2 |
 | 117 | `00 00 00` | entry reserved | |
+| 120 | (none) | `dict_ids[]` | empty |
 
 Trailer at 316:
 
@@ -1566,7 +1661,8 @@ The leaf is stored in map pack 2 at offset 0 as a codec-0 extent of 113
 bytes (`ulen` = `clen` = 45, `chunk_id` = the leaf hash, keyed tag
 `2f 16 49 5d 64 b5 48 2a 66 1e c5 c1 f6 aa 7d 67`). The root (level 1) is
 stored after it at offset 113: header `01 00 02`, child 0 = `{leaf hash,
-pack 2, off 0, len 113}`, children 1-511 = `{E0, 0, 0, 0}`; 24 579 bytes,
+pack 2, off 0, len 113, lineage_idx 0}` (bytes 32-47 of the entry: `02 00 00 00 00 00 00 00 00 00 00 00 71 00 00 00`),
+children 1-511 = `{E0, 0, 0, 0, 0}`; 24 579 bytes,
 extent length 24 647. Root hash = BLAKE3-256(`01 00 02` ‖ leaf hash ‖ `E0` ×
 511) = `69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca`.
 
@@ -1601,7 +1697,8 @@ Genesis, `commits/0000000000000000`, 212 bytes:
 | 108 | `10 c1 52 fb fa aa b0 63 0d b8 b7 86 ee bf 55 9c bd 7b 38 cb 96 4a 20 46 5d 68 e8 44 12 d6 13 17` | `map_root.hash` | `E1` of fanout 512 (§23.7) |
 | 140 | `00 00 00 00 00 00 00 00` | `map_root.pack` | 0 (empty map) |
 | 148 | `00 00 00 00` | `map_root.off` | 0 |
-| 152 | `00 00 00 00` | `map_root.len` | 0 |
+| 152 | `00 00 00` | `map_root.len` | 0 |
+| 155 | `00` | `map_root.lineage_idx` | 0 |
 | 156 | `00 00 00 00 00 00 00 00` | `heat_seq` | 0 |
 | 164 | `00 00 00 00` | `n_map_packs` | 0 |
 | 168 | `00 00 00 00` | `n_new_segments` | 0 |
@@ -1632,7 +1729,8 @@ FULL 2 (D3).
 | 108 | `69 a6 24 9d ad 0e 6c 19 4b 64 00 c3 9e 38 e8 f9 7a 0c 39 cb 37 b0 05 bd a3 a9 b7 91 f5 16 e6 ca` | `map_root.hash` | the root of §23.5 |
 | 140 | `02 00 00 00 00 00 00 00` | `map_root.pack` | 2 |
 | 148 | `71 00 00 00` | `map_root.off` | 113 |
-| 152 | `47 60 00 00` | `map_root.len` | 24 647 |
+| 152 | `47 60 00` | `map_root.len` | 24 647 |
+| 155 | `00` | `map_root.lineage_idx` | 0 |
 | 156 | `00 00 00 00 00 00 00 00` | `heat_seq` | 0 |
 | 164 | `01 00 00 00` | `n_map_packs` | 1 |
 | 168 | `01 00 00 00` | `n_new_segments` | 1 |
@@ -1730,7 +1828,9 @@ maintainer's sign-off covers them all.
 **Crypto**
 
 5. **Three crypto modes** — `plain`, `integrity`, `encrypted` — in one
-   descriptor byte. Reason: D11 and ADR-11 require both "keyed with the
+   descriptor byte; `plain` is allowed everywhere as corruption detection
+   only, has no key slots and no keyring object, and `integrity` is the
+   `volume create` default (maintainer, 2026-11-12). Reason: D11 and ADR-11 require both "keyed with the
    integrity key" and "unkeyed otherwise"; the reader must know which from
    the authenticated descriptor, not guess from the keyring.
 6. **`fips` only with `encrypted`**, and the FIPS metadata form (envelope
@@ -1764,8 +1864,10 @@ maintainer's sign-off covers them all.
     fails too.
 13. **Index runs are checksummed but neither sealed nor MAC'd.** Reason:
     they repeat what the plaintext extent framing shows; every index hint is
-    verified against the extent before data is returned, so a bad run
-    costs availability, never integrity; and an S3-only volume needs
+    verified against the extent before data is returned, and every dedup
+    hit from a run is confirmed against the extent's full `chunk_id` and
+    tag or AEAD before the map points at it (A0 review finding 9), so a bad
+    run costs availability, never integrity or a write; and an S3-only volume needs
     single-block ranged reads (DESIGN §13.1). The sealed-object table of
     ADR-11 does not list them.
 
@@ -1796,10 +1898,18 @@ maintainer's sign-off covers them all.
     same fields serve the memfd sink and DELTA framing.
 20. **Batch boundaries are found by the 4 KiB grid plus the zero-magic
     rule; no batch header.** A zero magic at a non-aligned offset ends the
-    batch, at an aligned offset it ends the lane. Reason: D12's cost formula
-    allows no extra bytes; §5.3 shows that wherever a torn write can make
-    the reader look, it either ends the lane, finds a record after a gap, or
-    rejects the bytes on `gen`, `off` and the CRC.
+    batch, at an aligned offset it ends the scan of the file. Reason: D12's
+    cost formula allows no extra bytes; §5.3 shows that wherever a torn
+    write can make the reader look, it either ends the file, finds a record
+    after a gap, or rejects the bytes on `gen`, `off` and the CRC.
+20a. **A damaged record does not end the lane: the reader resyncs at
+    8-byte steps to the next valid header** (A0 review finding 8, an
+    amendment of D12's reader that the maintainer approves at sign-off; no
+    byte changes). Reason: under D12 as written, damage to an already
+    committed record hid the lane's later flushed records; the merge's
+    global contiguity keeps D12's stop semantics above the floor. The
+    optional header-only CRC in bytes 56-63 is not taken (the resync does
+    not need it; the bytes stay reserved).
 21. **`generation` is random per file incarnation, and a reused file is
     zeroed before its new header is written.** Reason: makes "a file with a
     valid header is zero beyond its last write" true, which the torn-batch
@@ -1848,13 +1958,22 @@ maintainer's sign-off covers them all.
 33. **The FULL commit carries the root's location** (`map_root.pack/off/len`),
     and `levels` is derived from `size`. Reason: the root has no parent
     entry; deriving depth avoids a redundant field.
+33a. **The interior child entry and the FULL `map_root` carry
+    `lineage_idx` u8 in the top byte of the former u32 `len` (now u24),
+    0 in v1** (A0 review finding 13). Reason: ADR-25 reserves `lineage_idx`
+    in the leaf dictionary for hints into a parent's segments, but a thin
+    clone also needs to point at its base's map nodes, or it must copy them
+    all (300-350 MiB per TiB) or wait for a second node encoding. `len` is
+    at most 65 644, so the byte is free; no worked example changes.
 
 **Commits**
 
 34. **The envelope kind is the object kind (1 or 3); the commit kind is in
     the body.** Reason: ADR-11 seals DELTAs under the `delta` key; the
     reader needs the key before it can read the body.
-35. **Every commit kind carries `created_at`.** Reason: `mount-at --time`
+35. **Every commit kind carries `created_at`, set by the writer clamp
+    `max(now, parent.created_at)` and never checked by readers** (A0 review
+    finding 6). Reason: `mount-at --time`
     and retention order by time over every retained commit.
 36. **`map_packs[]` and `new_segments[]` list what the commit introduced;
     `index_packs[]` lists every run of the manifest durable before C6.**
@@ -1906,22 +2025,35 @@ maintainer's sign-off covers them all.
 | plan in this worktree (D11, M2 step 2, freeze item 3) | tag over `CCH1 header ‖ chunk_id ‖ payload` | every byte before the tag, including `clen` (review 2 finding 1, the main checkout's revised D11 and the A0 brief) |
 | plan in this worktree (freeze item 15, M7 step 7) | `gc/<n:016x>` "evidence journal", "appended per line" | one sealed create-only object per pass, `gc/<pass:016x>` (finding 7) |
 | plan in this worktree (D5, freeze item 1) | `seq`, type `Seq` | `commit_seq`, `write_seq`, types `CommitSeq`, `WriteSeq` (finding 3) |
-| D9, D10 (both versions) | `commits/<seq:016x>`, `{seq, …}` | `commit_seq` (DESIGN terminology block); D-rows copied verbatim |
+| D10 | `{seq, …}` in the pin bodies | `commit_seq` (DESIGN terminology block); the row is copied verbatim (D9 now reads `commit_seq` in the plan and here) |
 | DESIGN §4.4 step 2 (this worktree) | `fsck` verifies "the whole chain from genesis" | from the tip down to `chain_floor` (D5, finding 2) |
 | ADR-11 F7 | a descriptor MAC failure under supplied key material is "refused as a downgrade" | reported as `BadMac`, as M2's error list does; `Downgrade` is kept for a mode mismatch |
 | ADR-11 sealed-object table | no row for index runs | checksummed, not sealed (item 13 above) |
-| spec field lists (DESIGN §6.1, §8.2, plan freeze items 2, 6, 9, 14) | lists of fields | fields added here: FULL `map_root` location, `created_at` on every kind, DELTA `prev_cut_seq`/`cut_seq`/`size`/records codec, keyring `root_kind`/`dek_gen`/`next_slot_id`, record `gen`/`off`, device `max_io_buf_bytes`/`volume_uuid`, pins `pin_mode`/`family_id`, header CRCs. The plan says M1 may not change a spec field list; these additions are A0's and need the maintainer's sign-off. |
+| spec field lists (DESIGN §6, §6.1, §7, §8.2, plan freeze items 2, 4, 5, 6, 8, 9, 14) | lists of fields | fields added here: FULL `map_root` location and `map_root.lineage_idx`, `created_at` on every kind, DELTA `prev_cut_seq`/`cut_seq`/`size`/records codec, interior child `lineage_idx` (with `len` narrowed to u24), footer `n_dict_ids`/`dict_ids[]`, descriptor `codec_level` and `lineage_count`, keyring `root_kind`/`dek_gen`/`next_slot_id` and the named `wrap_ver`, record `gen`/`off`, device `max_io_buf_bytes`/`volume_uuid`, pins `pin_mode`/`family_id`, header and trailer CRCs. The plan says M1 may not change a spec field list; these additions are A0's and need the maintainer's sign-off. |
+| D12 ("recovery stops at the first CRC failure"); plan M3 step 4 | a CRC failure ends the lane's scan | the lane resyncs to the next valid header; the merge's contiguity rule stops recovery at the same place above the floor ([§5.3](#53-batch-packing-and-how-a-reader-finds-records); A0 review finding 8). Reader-side amendment of D12, no byte change; the maintainer approves it at sign-off, and M3's step 4 follows it |
+| DESIGN §8.2, §8.6 | `created_at` ordering | a writer clamp `max(now, parent.created_at)`; readers never reject on it (A0 review finding 6) |
+| DESIGN §5 step 4 | a dedup hit points the map at the hit and stops | a hit taken from an index run is first confirmed against the extent's full `chunk_id` and tag or AEAD ([§17.3](#173-authentication); A0 review finding 9); M9's destage follows it |
+| DESIGN §4.1 | the checkpoint is a hint whose loss is harmless | its lane tails are used only when `last_commit_seq` ≤ the tip, and `--truncate-tip` zeroes it ([§18](#18-checkpoint-freeze-item-14); A0 review finding 10) |
+| A0 draft open question; ADR-11 "Rejected: corruption detection only" | plain mode | `plain` is supported everywhere, backends included, as corruption detection only; the default of `volume create` is `integrity` (maintainer, 2026-11-12; [§4.1](#41-crypto-modes)) |
 
 ## 25. Open questions for the maintainer
 
-1. **Default crypto mode of `lunix volume create` without `--encrypt`.**
-   The format supports `integrity` (an integrity key wrapped in a slot, so
-   every attach must supply the credential, and commits, footers and tags
-   are keyed) and `plain` (no keyring: checksums only, corruption
-   detection). ADR-11 chose the integrity key over corruption detection
-   only, while D11 also allows "unkeyed otherwise". Which is the default,
-   and is `plain` offered at all? This changes the CLI (M13) and M2's
-   keyring creation, not any byte layout.
+None open.
+
+1. **Resolved (maintainer, 2026-11-12): default crypto mode.** `plain` is
+   supported and allowed everywhere, including volumes with S3 backends, as
+   corruption detection only. `lunix volume create` without `--encrypt` or
+   `--integrity` creates an `integrity` volume with an auto-created key-file
+   slot next to the local volume; `--passphrase` adds a passphrase slot for
+   volumes that move. See [§4.1](#41-crypto-modes). No byte layout changed.
+
+Recorded gap (A0 review finding 12, no format change): the keyring's
+`keyring_seq` floor lives only in the local pin (`state/pins`), so an attach
+with no pin store cannot detect a keyring rolled back to an older valid
+version. The gain to an attacker is small: an old keyring yields nothing a
+holder of an old credential did not already have. Carrying `keyring_seq` in
+the FULL body would close it (8 bytes now, a migration later); it is not
+taken here and can be raised with ADR-11 if wanted.
 
 The sign-off also confirms review 2's N12 (the tag covers every byte before
 it), which D11 now states.

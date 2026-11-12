@@ -1,6 +1,7 @@
 # `lunix-format` freeze checklist
 
-Draft written by M1.A0 (2026-11-12). The layouts are specified in
+Draft written by M1.A0 (2026-11-12), revised after the independent A0
+review. The layouts are specified in
 [`docs/reference/on-disk-formats.md`](../../docs/reference/on-disk-formats.md)
 and the attach results in
 [`docs/reference/attach-matrix.md`](../../docs/reference/attach-matrix.md).
@@ -26,7 +27,8 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   Goldens: `a0-journal-file-header.bin`, `a0-journal-batch-two-records.bin`
   (§23.1, blocks 0-5 of the file), `02-journal-record-write-1-block.bin`,
   `02-journal-record-hole.bin`, `02-journal-torn-batch.bin` (reader test
-  input: a batch with its last block zeroed).
+  input: a batch with its last block zeroed), `02-journal-resync.bin` (a
+  damaged record followed by valid ones: the reader resyncs).
 - [ ] **3. Extent** (§6): plain and encrypted layouts, AAD builder, `info`
   builder, plain tag input.
   Goldens: `a0-extent-plain-keyed.bin` (§23.2), `03-extent-plain-unkeyed.bin`,
@@ -37,12 +39,14 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   footer envelope (plain and sealed form), tiling rule.
   Goldens: `a0-segment-one-extent.bin` (§23.4), `04-segment-footer-body.bin`,
   `04-segment-trailer.bin`, `04-segment-footer-sealed.bin`,
+  `04-segment-footer-dict-ids.bin` (codec-3 extents, `n_dict_ids` > 0),
   `04-mappack-two-nodes.bin`.
 - [ ] **5. Map node** (§8): node header, leaf `rb16` with the lineage
   column, interior node, node hash, empty hashes for fanouts 256 and 512.
   Goldens: `a0-node-leaf-one-entry.bin` (§23.5), `05-node-leaf-empty-512.bin`,
   `05-node-leaf-empty-256.bin`, `05-node-leaf-full-512.bin`,
-  `05-node-interior-root.bin` (§23.5), `05-empty-hashes.txt` (§23.7).
+  `05-node-interior-root.bin` (§23.5), `05-node-interior-lineage-nonzero.bin`
+  (rejected in v1), `05-empty-hashes.txt` (§23.7).
 - [ ] **6. Commits** (§10): common header and the FULL, DELTA, EPOCH,
   CONFIG and TRANSFER bodies, in envelope forms 0 and 1; genesis per D5.
   Goldens: `a0-commit-full-genesis.bin`, `a0-commit-full-1.bin` (§23.6),
@@ -88,7 +92,7 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   opaque body `ver` 1) and the `state/gc/condemned` envelope.
   Goldens: `15-gc-pass.bin`, `15-gc-condemned-envelope.bin`.
 
-The attach matrix is not a byte layout; M2 loads `attach-matrix.md` as its
-expected table.
+The attach matrix is not a byte layout; M2 loads Tables A-D of
+`attach-matrix.md` as its expected table.
 
 Signed off by: ____ on ____
