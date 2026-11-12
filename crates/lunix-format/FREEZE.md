@@ -73,8 +73,9 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   Goldens: `10-lease.bin`, `10-lease-transferred.bin`.
 - [x] **11. Key-purpose table** (§4.2): purpose ids and messages, default
   and FIPS derivations.
-  Goldens: `11-purposes.txt` (every purpose message and the KAT outputs
-  `purpose_*`, `purpose_fips_*`, `purpose_msg_dek1`).
+  Goldens: `11-purposes.txt` (every purpose message, including 0x0a from the
+  2026-11-12 amendment, and the KAT outputs `purpose_*`, `purpose_fips_*`,
+  `purpose_msg_dek1`).
 - [x] **12. Bucket and local paths** (§22): one function per path, the
   local-to-bucket-relative mapping (D9).
   Goldens: `12-paths.txt` (every path for fixed ids, local and
@@ -86,8 +87,9 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   item 8), `volume.json`, `volumes.json`, `state/checkpoint`,
   `state/device`, `state/pins`.
   Goldens: `14-checkpoint.bin` (both slots valid, and one torn),
-  `14-device.bin`, `14-pins.bin`, `14-pins-none.bin`, `14-volume.json`,
-  `14-volumes.json`.
+  `14-device.bin`, `14-pins.bin` and `14-pins-none.bin` (version 1 files,
+  now read-only inputs), `14-pins-v2.bin` (§23.9), `14-pins-v1-read.bin`
+  (version 1, read as "no floor"), `14-volume.json`, `14-volumes.json`.
 - [x] **15. GC files** (§16): the `gc/<pass:016x>` object (envelope kind 7,
   opaque body `ver` 1) and the `state/gc/condemned` envelope.
   Goldens: `15-gc-pass.bin`, `15-gc-condemned-envelope.bin`.

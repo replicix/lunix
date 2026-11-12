@@ -50,24 +50,24 @@ fn footer_mac(name: &str, frame: &[u8]) -> [u8; 32] {
 fn a0_extent() -> Vec<u8> {
     let mut v = hex("43434831 01 0200 00 0040000000000000");
     v.extend(hex(
-        "c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566",
+        "8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede",
     ));
     v.extend(hex("4b000000"));
     v.extend(hex("1f410100"));
     v.extend(std::iter::repeat_n(0xff, 64));
     v.extend(hex("27 50 41 41 41 41 41"));
     assert_eq!(v.len(), 127);
-    v.extend(hex("5f2205bd62159515ed219a089987bb03"));
+    v.extend(hex("4e700344dd5d9ea60a34ba09c8a5f115"));
     v
 }
 
-const A0_SEG_HASH: &str = "0392362ecdc45ee0634646a9451b187b4456258c25a15c7d172e7999c7df0666";
+const A0_SEG_HASH: &str = "2567f10bff7129dc5da5c206d1ead825adbee6d0f55d02a8baf269cef18f9162";
 const A0_FOOTER_BODY_HEX: &str = "01 00 0000 01000000 0100000000000000 8f00000000000000 \
     0100000000000000 0100000000000000 \
-    0392362ecdc45ee0634646a9451b187b4456258c25a15c7d172e7999c7df0666 \
-    c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566 \
+    2567f10bff7129dc5da5c206d1ead825adbee6d0f55d02a8baf269cef18f9162 \
+    8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede \
     00000000 4b000000 00400000 02 000000";
-const A0_MAC: &str = "d945f9bf84b0995946222 1ec6e2cb154f51d6ad0face0e97878ddb1975ee597f";
+const A0_MAC: &str = "a6d632645323ac81d8d6085399e74e2681506d459a90179f90f6b09c05ee3881";
 const A0_TRAILER_HEX: &str = "8f00000000000000 ad000000 01000000 0100000000000000 01 00 \
     000000000000000000000000000000000000000000000000000000000000 59ed78e9 4c585354";
 
@@ -82,7 +82,7 @@ fn a0_body() -> FooterBody {
         seg_hash: blake3_256(&extent),
         entries: vec![FooterEntry {
             chunk_id: ChunkId(
-                hex("c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566")
+                hex("8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede")
                     .try_into()
                     .unwrap(),
             ),

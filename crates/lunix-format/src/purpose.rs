@@ -32,11 +32,14 @@ pub enum PurposeId {
     IntegrityHmac = 0x08,
     /// Key of the keyed BLAKE3-128 extent tag.
     ExtentTag = 0x09,
+    /// Keyed `chunk_id` of data chunks in `integrity` mode (amendment
+    /// 2026-11-12, on-disk-formats.md section 4.5).
+    IntegrityAddressing = 0x0a,
 }
 
 impl PurposeId {
     /// Every purpose, in id order.
-    pub const ALL: [PurposeId; 9] = [
+    pub const ALL: [PurposeId; 10] = [
         Self::DataAddressing,
         Self::Dek,
         Self::Metadata,
@@ -46,9 +49,10 @@ impl PurposeId {
         Self::KeyringMac,
         Self::IntegrityHmac,
         Self::ExtentTag,
+        Self::IntegrityAddressing,
     ];
 
-    /// Parses an id byte; 0x00 and 0x0a ..= 0xff are reserved.
+    /// Parses an id byte; 0x00 and 0x0b ..= 0xff are reserved.
     pub fn from_u8(v: u8) -> Result<Self> {
         Self::ALL
             .into_iter()
@@ -72,7 +76,7 @@ impl PurposeId {
             Self::DescriptorMac | Self::Fingerprint | Self::KeyringMac => {
                 mode == Encrypted || mode == Integrity
             }
-            Self::IntegrityHmac | Self::ExtentTag => mode == Integrity,
+            Self::IntegrityHmac | Self::ExtentTag | Self::IntegrityAddressing => mode == Integrity,
         }
     }
 
@@ -88,6 +92,7 @@ impl PurposeId {
             Self::KeyringMac => "keyring MAC key",
             Self::IntegrityHmac => "integrity HMAC key",
             Self::ExtentTag => "extent tag key",
+            Self::IntegrityAddressing => "integrity addressing key",
         }
     }
 }
@@ -113,6 +118,8 @@ pub enum Purpose {
     IntegrityHmac,
     /// Extent tag key.
     ExtentTag,
+    /// Integrity addressing key: the keyed chunk id of `integrity` mode.
+    IntegrityAddressing,
 }
 
 impl Purpose {
@@ -128,6 +135,7 @@ impl Purpose {
             Self::KeyringMac => PurposeId::KeyringMac,
             Self::IntegrityHmac => PurposeId::IntegrityHmac,
             Self::ExtentTag => PurposeId::ExtentTag,
+            Self::IntegrityAddressing => PurposeId::IntegrityAddressing,
         }
     }
 
