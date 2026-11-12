@@ -401,6 +401,14 @@ pub struct ScanResult<'a> {
 
 fn valid_at<'a>(file: &'a [u8], q: usize, gen: u64, prev: u64) -> Option<(Record<'a>, usize)> {
     let tail = file.get(q..)?;
+    // Compare gen, off and write_seq before the CRC, which covers up to
+    // 1 MiB: a false candidate then costs a constant.
+    let u64_at = |o: usize| -> Option<u64> {
+        Some(u64::from_le_bytes(tail.get(o..o + 8)?.try_into().ok()?))
+    };
+    if u64_at(40)? != gen || u64_at(48)? != q as u64 || u64_at(8)? <= prev {
+        return None;
+    }
     let (rec, used) = Record::parse(tail).ok()?;
     let ok = rec.header.gen == gen && rec.header.off == q as u64 && rec.header.write_seq.0 > prev;
     ok.then_some((rec, used))
