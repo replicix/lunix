@@ -109,4 +109,4 @@ purpose 0x0a, and `14-pins-v2.bin` (§23.9) and `14-pins-v1-read.bin`
 
 The first sign-off (before the amendment): the maintainer, 2026-11-12.
 
-Re-sign pending (amendment 2026-11-12): ____
+Re-signed by: the maintainer (Attila Nagy) on 2026-11-12 (amendment: keyed integrity chunk ids, rollback floor)
