@@ -2,5 +2,5 @@
 # Changing this file is a format change and needs the maintainer.
 # Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f05_node
 00000000  00 00 02 02 00 01 00 01 00 01 00 00 07 00 01 00
-00000010  00 00 00 00 00 00 00 00 02 10 40 00 4b c6 c4 89
-00000020  01 19 d8 34 da 40 4b 94 c7 07 aa 46 a5
+00000010  00 00 00 00 00 00 00 00 02 10 40 00 4b 8f 6c f4
+00000020  e5 e6 65 b2 1a c1 2b d3 16 39 7d 88 3c

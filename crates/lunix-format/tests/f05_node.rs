@@ -58,12 +58,12 @@ fn interior_rt(fanout: u16) -> impl Fn(&[u8]) -> Result<Vec<u8>, FormatError> {
 }
 
 const E0_512: &str = "8cb313b371458a0bbc13829da36f70d69deb2652ae2c1b0f6318004fd1419d5e";
-const LEAF_HASH: &str = "b2b3b7ec14023024c44cad3ad2595e908b40ebb7fb91d667ddd8153909114469";
-const ROOT_HASH: &str = "69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca";
+const LEAF_HASH: &str = "dca03248122f117b77f7f5aeefbdd4867e0b4c958a051c8a245251324ef3b573";
+const ROOT_HASH: &str = "d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a";
 
 fn a0_leaf() -> Leaf {
     let mut l = Leaf::empty(512);
-    let id = hex("c6c4890119d834da404b94c707aa46a5");
+    let id = hex("8f6cf4e5e665b21ac12bd316397d883c");
     l.entries[0] = Entry::Data(DataEntry {
         lineage: LineageIdx(0),
         seg: ObjId::from_raw(1).unwrap(),
@@ -75,7 +75,7 @@ fn a0_leaf() -> Leaf {
 }
 
 const A0_LEAF_HEX: &str = "000002 0200 0100 0100 01 00 00 07 00 0100000000000000 00 0002104000 4b \
-                           c6c4890119d834da404b94c707aa46a5";
+                           8f6cf4e5e665b21ac12bd316397d883c";
 
 #[test]
 fn a0_leaf_one_entry() {

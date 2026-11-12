@@ -1,7 +1,8 @@
 # Attach matrix
 
-Status: draft of M1.A0, 2026-11-12, part of the format sign-off
-(`crates/lunix-format/FREEZE.md`).
+Status: M1.A0, part of the format sign-off (`crates/lunix-format/FREEZE.md`);
+amended on 2026-11-12 with the rollback-anchor check of Table E (re-sign
+pending).
 
 This is the expected result of the attach check of ADR-11 F7 (the downgrade
 defence) for every combination of its inputs. It was derived by hand from
@@ -33,9 +34,13 @@ MAC (§11), the local pin in `state/pins` (§20), the key purposes (§4.2).
 | `ModeMismatch` | an integrity credential was supplied for an encrypted descriptor |
 | `BadMac` | the descriptor MAC (or checksum) does not verify |
 | `WrongKmk` | the volume's root key differs from the supplied fingerprint or the pin |
+| `Rollback` | the verified tip is below the local floor `max_commit_seq` (Table E) |
+| `Fork` | the commit at the floor's height is not the one recorded in `tip_hash` (Table E) |
 
 `NeedCredential` and `ModeMismatch` are added to M2's error list
-(`Downgrade`, `WrongKmk`, `BadMac`, `KeyringRollback`).
+(`Downgrade`, `WrongKmk`, `BadMac`, `KeyringRollback`). `Rollback` and `Fork`
+(amendment 2026-11-12) are results of the attach's chain step, after
+`verify_chain`, not of `check_attach`.
 
 ## Row count
 
@@ -52,7 +57,10 @@ three pin values. They are written as **111 rows**:
 | A + B + C | 111 | 162 | |
 | D | 8 | 24 | beyond the 162: a pin that records a **different mode** from a keyed descriptor (the 3-valued pin input only says right, wrong or absent), each row merged over the 3 fingerprint values |
 
-In all, 119 rows covering 186 combinations. The plan's gate asks for the 72
+Tables A-D: 119 rows covering 186 combinations. Table E (7 rows) is a
+second stage that runs only when Tables A-D give `Ok` or `Ok+pin`: the
+final result is the first refusal, so the stages compose without a product
+table (126 rows in all). The plan's gate asks for the 72
 of Table A; the others are needed by M2 once three modes exist. A script
 re-checked every row against the check order below.
 
@@ -260,3 +268,44 @@ give `WrongKmk`).
 Rows 74 and 80 of Table B (an `integrity` pin with another fingerprint) stay
 `WrongKmk`; an `encrypted` pin on an `integrity` descriptor is row 112 or
 113, `Downgrade`.
+
+## Table E: the rollback anchor (amendment 2026-11-12)
+
+Decided by the maintainer after the M2 security review ("Attack 8"); the
+byte layout is `state/pins` version 2 (on-disk-formats.md §20). This stage
+runs after Tables A-D gave `Ok` or `Ok+pin` and after `verify_chain`
+succeeded (rule R4), in every crypto mode (in `plain` it detects accidents
+only). The inputs are the verified tip `T` (its `commit_seq` and the hash of
+its stored bytes), the tip's `chain_floor`, and the floor `F` =
+`{max_commit_seq, tip_hash}` of `state/pins`.
+
+Rules, in order:
+
+- E-a. No floor (`state/pins` absent, version 1, or `floor_present` = 0;
+  the orchestrator path, which keeps no pin store, is always here) → the
+  stage passes; a host with a pin store records `F` = `T`.
+- E-b. `T.commit_seq < F.max_commit_seq` → `Rollback`.
+- E-c. The height `F.max_commit_seq` is below the tip's `chain_floor`, so
+  that commit is no longer retained and cannot be compared → the stage
+  passes.
+- E-d. The commit at height `F.max_commit_seq` (the tip itself when the
+  heights are equal) has a stored-bytes hash other than `F.tip_hash` →
+  `Fork`.
+- E-e. Otherwise the stage passes. After every passing attach (and after
+  every FULL's C6) the floor is raised to the verified tip; it never goes
+  down except through `lunix fsck --repair --truncate-tip`.
+
+| # | floor | tip height against `F.max_commit_seq` | commit at the floor's height | result | rule |
+|---|---|---|---|---|---|
+| 120 | absent (no file, version 1, or `floor_present` = 0) | any | — | pass; record `F` = `T` | E-a |
+| 121 | present | below | any | `Rollback` | E-b |
+| 122 | present | equal | hash = `tip_hash` | pass | E-e |
+| 123 | present | equal | hash ≠ `tip_hash` | `Fork` | E-d |
+| 124 | present | above | hash = `tip_hash` | pass; raise `F` to `T` | E-e |
+| 125 | present | above | hash ≠ `tip_hash` | `Fork` | E-d |
+| 126 | present | above | below the tip's `chain_floor` (deleted) | pass; raise `F` to `T` | E-c |
+
+A host with no floor cannot detect a rollback to an older valid chain (row
+120), the history counterpart of row 63. A purely local volume cannot be
+protected from someone who can write its local disk, who can also rewrite
+`state/pins` and `integrity.key` (on-disk-formats.md §20).

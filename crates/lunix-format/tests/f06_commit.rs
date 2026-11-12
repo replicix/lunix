@@ -96,11 +96,11 @@ fn commit1_hex() -> Vec<u8> {
          338e717684fbe16a5d22c7618a3d893a25d6808689df893eb6af53d942bb03c2
          30510ecda1010000
          0200000000000000 0000004000000000 0000000000000000
-         69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca
+         d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a
          0200000000000000 71000000 476000 00
          0000000000000000 01000000 01000000 00000000 00000000
          0200000000000000 0100000000000000
-         4e3dc3b9db3ed5edee1f2bf7414bd1b5b70eb08bec33b9f5d53e00377e84ca00")
+         90291d1de8e5cebcf11f7b0b56d5c3c18925025604df373365cda4762166731d")
 }
 
 fn genesis_commit() -> Commit {
@@ -113,7 +113,7 @@ fn commit1() -> Commit {
     let mut c = Full::genesis(
         blake3_256(&genesis_hex()),
         1 << 30,
-        hex("69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca")
+        hex("d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a")
             .try_into()
             .unwrap(),
         TimeMs(CREATED_AT + 30_000),

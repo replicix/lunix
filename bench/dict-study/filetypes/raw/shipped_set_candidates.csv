@@ -1,0 +1,65 @@
+eco,variant,bucket,objects,saving_pct,ci_lo,ci_hi
+main,generic text,<1KiB,84669,19.11,17.11,21.22
+main,generic text,1-4KiB,76341,18.29,15.4,21.28
+main,generic text,4-16KiB,53640,9.39,8.24,10.74
+main,generic text,16-64KiB,20131,4.66,4.28,5.02
+main,generic text,64-256KiB,4139,1.96,1.76,2.17
+main,generic text,>=256KiB,1226,-0.18,-0.29,-0.07
+main,generic text,<64KiB,234781,9.81,8.76,10.88
+main,generic text,all,240146,4.57,3.78,5.45
+main,family,<1KiB,84669,24.19,22.31,26.15
+main,family,1-4KiB,76341,23.4,20.62,26.06
+main,family,4-16KiB,53640,12.31,10.96,13.85
+main,family,16-64KiB,20131,5.5,5.02,5.99
+main,family,64-256KiB,4139,2.13,1.92,2.34
+main,family,>=256KiB,1226,-0.62,-0.78,-0.45
+main,family,<64KiB,234781,12.45,11.18,13.85
+main,family,all,240146,5.59,4.64,6.66
+main,type,<1KiB,84669,28.25,26.43,30.18
+main,type,1-4KiB,76341,25.91,22.6,28.89
+main,type,4-16KiB,53640,14.84,12.53,17.6
+main,type,16-64KiB,20131,6.61,5.82,7.55
+main,type,64-256KiB,4139,2.31,2.05,2.57
+main,type,>=256KiB,1226,-0.61,-0.76,-0.43
+main,type,<64KiB,234781,14.51,12.88,16.34
+main,type,all,240146,6.54,5.35,7.76
+main,hybrid,<1KiB,84669,27.18,25.47,29.01
+main,hybrid,1-4KiB,76341,25.89,23.01,29.23
+main,hybrid,4-16KiB,53640,14.62,12.11,17.21
+main,hybrid,16-64KiB,20131,6.64,5.73,7.68
+main,hybrid,64-256KiB,4139,2.27,2.03,2.55
+main,hybrid,>=256KiB,1226,-0.22,-0.33,-0.12
+main,hybrid,<64KiB,234781,14.37,12.76,16.32
+main,hybrid,all,240146,6.64,5.53,8.02
+new,generic text,<1KiB,9953,19.17,15.63,23.55
+new,generic text,1-4KiB,13939,15.35,12.64,18.4
+new,generic text,4-16KiB,12215,7.31,6.23,8.53
+new,generic text,16-64KiB,6134,4.07,3.71,4.44
+new,generic text,64-256KiB,1714,1.94,1.75,2.12
+new,generic text,>=256KiB,372,-0.07,-0.34,0.2
+new,generic text,<64KiB,42241,7.11,6.17,8.28
+new,generic text,all,44327,3.83,3.16,4.64
+new,family,<1KiB,9953,23.15,19.38,27.74
+new,family,1-4KiB,13939,18.9,16.26,21.75
+new,family,4-16KiB,12215,9.01,7.95,10.27
+new,family,16-64KiB,6134,4.63,4.29,5.0
+new,family,64-256KiB,1714,2.16,1.94,2.42
+new,family,>=256KiB,372,-0.05,-0.29,0.21
+new,family,<64KiB,42241,8.55,7.58,9.77
+new,family,all,44327,4.58,3.74,5.56
+new,type,<1KiB,9953,25.64,21.47,30.07
+new,type,1-4KiB,13939,20.58,17.69,23.46
+new,type,4-16KiB,12215,10.1,8.91,11.62
+new,type,16-64KiB,6134,5.05,4.6,5.56
+new,type,64-256KiB,1714,2.24,1.98,2.5
+new,type,>=256KiB,372,-0.09,-0.34,0.17
+new,type,<64KiB,42241,9.42,8.19,10.95
+new,type,all,44327,5.01,4.12,6.01
+new,hybrid,<1KiB,9953,24.06,19.8,28.71
+new,hybrid,1-4KiB,13939,19.49,16.31,22.55
+new,hybrid,4-16KiB,12215,9.54,8.27,10.99
+new,hybrid,16-64KiB,6134,4.93,4.48,5.42
+new,hybrid,64-256KiB,1714,2.19,1.87,2.51
+new,hybrid,>=256KiB,372,-0.09,-0.33,0.18
+new,hybrid,<64KiB,42241,8.98,7.85,10.35
+new,hybrid,all,44327,4.78,3.91,5.88

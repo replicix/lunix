@@ -233,6 +233,11 @@ fn child_process() {
     };
     let op = std::env::var("LUNIX_STORE_CHILD_OP").expect("operation");
     let dir = std::path::PathBuf::from(dir);
+    // Tell the parent that exec is done and the inherited descriptors are
+    // closed (see `spawn_child`).
+    if let Some(ready) = std::env::var_os("LUNIX_STORE_CHILD_READY") {
+        std::fs::write(ready, b"1").expect("ready file");
+    }
     let vol = open(&dir, MODE, test_opts()).expect("child opens the volume");
     run_op(&op, &vol, &dir);
 }
@@ -247,8 +252,29 @@ pub(crate) fn spawn_child(dir: &Path, op: &str, crash_at: Option<&str>) -> Child
     if let Some(p) = crash_at {
         cmd.env("LUNIX_CRASH_AT", p);
     }
+    // The parent holds the write guard until the child is running user code:
+    // `spawn` itself can return while the child still holds copies of this
+    // process's flock descriptors (they close at exec, after the parent is
+    // released), which made a sibling test's `open` fail with `Busy`.
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let ready = super::test_root().join(format!(
+        "ready-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    cmd.env("LUNIX_STORE_CHILD_READY", &ready);
     let _g = super::write_guard();
-    cmd.spawn().expect("spawn the child")
+    let mut child = cmd.spawn().expect("spawn the child");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !ready.exists() {
+        if child.try_wait().expect("poll the child").is_some() {
+            break; // died before reaching user code; the caller will see why
+        }
+        assert!(std::time::Instant::now() < deadline, "child never started");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let _ = std::fs::remove_file(&ready);
+    child
 }
 
 /// Everything on disk is whole: each sealed segment and pack verifies, each

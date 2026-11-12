@@ -1,0 +1,367 @@
+comparison,type,n_files,n_projects,gain_of_B_over_A_bytes_pct,ci_lo,ci_hi,frac_B_smaller,frac_B_larger,p_raw,p_holm,significant_0.05
+P: family vs generic,c,10522,60,1.69,0.83,2.83,0.848,0.138,0.0,0.0,True
+P: type vs family,c,10522,60,2.54,0.87,6.81,0.821,0.164,0.0,0.0,True
+P: ext vs type,c,10522,60,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,c,10522,60,14.83,8.28,24.3,0.984,0.008,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),c,10522,60,-0.51,-1.88,0.1,0.401,0.569,3.0689675934023974e-88,5.953797131200651e-86,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),c,10522,60,-0.33,-1.31,0.2,0.424,0.548,2.6298613756017976e-77,4.970437999887398e-75,True
+C: type dict z3 vs nodict z9,c,10522,60,8.22,1.14,18.95,0.749,0.243,0.0,0.0,True
+P: family vs generic,h,5643,62,1.65,1.22,2.16,0.841,0.139,0.0,0.0,True
+P: type vs family,h,5643,62,2.05,1.04,3.71,0.718,0.255,0.0,0.0,True
+P: ext vs type,h,5643,62,-0.35,-2.59,0.97,0.535,0.427,5.2198927262283336e-12,7.046855180408251e-10,True
+P: type dict vs none,h,5643,62,17.03,14.24,20.43,0.977,0.012,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),h,5643,62,0.19,-0.24,0.58,0.53,0.428,7.259483508118116e-16,1.0235871746446544e-13,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),h,5643,62,-0.18,-0.41,0.08,0.395,0.564,9.470558659094566e-51,1.63840664802336e-48,True
+C: type dict z3 vs nodict z9,h,5643,62,12.65,10.03,15.94,0.913,0.076,0.0,0.0,True
+P: family vs generic,cpp,5414,38,1.52,0.94,2.05,0.868,0.115,0.0,0.0,True
+P: type vs family,cpp,5414,38,1.83,0.98,2.51,0.827,0.155,0.0,0.0,True
+P: ext vs type,cpp,5414,38,-0.2,-0.56,0.33,0.405,0.555,5.502188329694744e-27,8.638435677620749e-25,True
+P: type dict vs none,cpp,5414,38,15.57,11.17,18.88,0.989,0.001,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),cpp,5414,38,0.23,-0.17,0.61,0.6,0.37,1.468980118913834e-70,2.688233617612316e-68,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),cpp,5414,38,-0.32,-0.53,-0.03,0.329,0.643,1.692574031316118e-132,3.622108427016493e-130,True
+C: type dict z3 vs nodict z9,cpp,5414,38,9.48,4.04,13.82,0.879,0.113,0.0,0.0,True
+P: family vs generic,rust,5185,22,1.49,1.29,1.96,0.795,0.119,0.0,0.0,True
+P: type vs family,rust,5185,22,3.66,2.56,4.43,0.866,0.058,0.0,0.0,True
+P: ext vs type,rust,5185,22,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,rust,5185,22,10.08,8.69,12.28,0.932,0.003,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),rust,5185,22,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),rust,5185,22,-0.03,-0.22,0.1,0.44,0.454,0.11806370124357583,1.0,False
+C: type dict z3 vs nodict z9,rust,5185,22,2.47,0.7,5.38,0.78,0.154,1.2472165075893547e-288,3.0432082785180252e-286,True
+P: family vs generic,go,4765,22,2.42,1.54,3.49,0.916,0.077,0.0,0.0,True
+P: type vs family,go,4765,22,4.89,4.08,5.96,0.985,0.011,0.0,0.0,True
+P: ext vs type,go,4765,22,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,go,4765,22,19.53,14.35,24.29,0.998,0.0,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),go,4765,22,0.18,-0.02,0.33,0.445,0.316,4.0535846996565116e-32,6.566807213443548e-30,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),go,4765,22,0.29,0.04,0.49,0.574,0.394,1.2403455515029206e-62,2.232621992705257e-60,True
+C: type dict z3 vs nodict z9,go,4765,22,14.69,8.51,20.4,0.949,0.05,0.0,0.0,True
+P: family vs generic,python,9659,93,2.62,2.16,3.21,0.943,0.041,0.0,0.0,True
+P: type vs family,python,9659,93,0.48,0.02,0.86,0.658,0.309,5.178895140304662e-290,1.2740082045149469e-287,True
+P: ext vs type,python,9659,93,0.11,-0.19,0.33,0.494,0.441,2.2708660980858468e-10,2.9294172665307424e-08,True
+P: type dict vs none,python,9659,93,8.79,7.29,10.94,0.984,0.006,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),python,9659,93,0.01,-0.3,0.24,0.468,0.495,0.17346534461273666,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),python,9659,93,-0.02,-0.31,0.45,0.452,0.508,2.9832621191755293e-11,3.937905997311699e-09,True
+C: type dict z3 vs nodict z9,python,9659,93,0.87,-1.3,3.81,0.772,0.217,4.257707791669777e-307,1.0729423635007838e-304,True
+P: family vs generic,java,10590,31,1.2,0.72,1.83,0.73,0.253,0.0,0.0,True
+P: type vs family,java,10590,31,3.69,2.89,4.31,0.932,0.061,0.0,0.0,True
+P: ext vs type,java,10590,31,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,java,10590,31,26.21,23.39,28.61,0.999,0.0,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),java,10590,31,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),java,10590,31,-1.12,-1.68,-0.51,0.223,0.759,0.0,0.0,True
+C: type dict z3 vs nodict z9,java,10590,31,21.3,17.97,24.19,0.959,0.04,0.0,0.0,True
+P: family vs generic,js,7032,95,1.59,1.21,2.19,0.854,0.119,0.0,0.0,True
+P: type vs family,js,7032,95,1.63,0.88,2.64,0.77,0.196,0.0,0.0,True
+P: ext vs type,js,7032,95,-0.46,-0.66,-0.11,0.35,0.602,4.111109549268525e-133,8.838885530927329e-131,True
+P: type dict vs none,js,7032,95,8.85,7.02,11.95,0.975,0.017,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),js,7032,95,-0.31,-1.41,0.44,0.46,0.494,1.0201031186910579e-09,1.2751288983638223e-07,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),js,7032,95,-0.02,-0.11,0.07,0.454,0.488,0.00846307977753631,0.8039925788659494,False
+C: type dict z3 vs nodict z9,js,7032,95,2.23,0.3,4.78,0.838,0.153,0.0,0.0,True
+P: family vs generic,ts,9982,35,1.97,1.69,2.27,0.875,0.105,0.0,0.0,True
+P: type vs family,ts,9982,35,1.35,0.48,2.33,0.77,0.204,0.0,0.0,True
+P: ext vs type,ts,9982,35,0.32,-0.05,0.69,0.539,0.419,1.9492322060693993e-57,3.450141004742837e-55,True
+P: type dict vs none,ts,9982,35,11.63,10.54,12.76,0.991,0.005,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),ts,9982,35,0.2,-0.03,0.46,0.452,0.42,2.007606024712882e-15,2.810648434598035e-13,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),ts,9982,35,0.11,-0.02,0.26,0.468,0.483,0.001988410352751527,0.1988410352751527,False
+C: type dict z3 vs nodict z9,ts,9982,35,5.99,4.3,7.87,0.911,0.085,0.0,0.0,True
+P: family vs generic,ruby,7730,23,2.68,2.35,2.97,0.928,0.062,0.0,0.0,True
+P: type vs family,ruby,7730,23,2.05,1.38,2.98,0.82,0.161,0.0,0.0,True
+P: ext vs type,ruby,7730,23,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,ruby,7730,23,11.2,10.53,12.15,0.996,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),ruby,7730,23,0.32,-0.27,0.92,0.459,0.3,6.328480565922215e-67,1.1517834629978431e-64,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),ruby,7730,23,-0.31,-0.52,-0.06,0.387,0.57,4.727623960785029e-88,9.124314244315106e-86,True
+C: type dict z3 vs nodict z9,ruby,7730,23,4.05,3.27,4.97,0.864,0.134,0.0,0.0,True
+P: family vs generic,php,7139,14,1.35,0.74,2.74,0.796,0.184,0.0,0.0,True
+P: type vs family,php,7139,14,2.14,-0.2,4.79,0.796,0.191,0.0,0.0,True
+P: ext vs type,php,7139,14,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,php,7139,14,15.0,8.47,25.24,0.985,0.012,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),php,7139,14,0.1,-0.03,0.24,0.357,0.306,1.3470569585314259e-11,1.8050563244321106e-09,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),php,7139,14,-0.25,-0.6,-0.08,0.376,0.584,7.111839272227675e-80,1.3583613009954859e-77,True
+C: type dict z3 vs nodict z9,php,7139,14,8.66,1.49,21.3,0.848,0.148,0.0,0.0,True
+P: family vs generic,perl,3470,26,1.88,1.19,2.73,0.922,0.069,0.0,0.0,True
+P: type vs family,perl,3470,26,-1.3,-2.46,0.15,0.333,0.648,7.923996539502333e-106,1.6164952940584758e-103,True
+P: ext vs type,perl,3470,26,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,perl,3470,26,6.58,5.4,8.27,0.99,0.008,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),perl,3470,26,0.67,0.39,0.97,0.755,0.212,1.4367510659931316e-254,3.3763650050838593e-252,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),perl,3470,26,-0.04,-0.28,0.28,0.425,0.537,7.183379372538939e-08,8.26088627841978e-06,True
+C: type dict z3 vs nodict z9,perl,3470,26,0.71,-1.34,3.63,0.785,0.212,7.580458588680974e-123,1.6070572208003664e-120,True
+P: family vs generic,sh,5016,129,3.88,2.43,5.64,0.951,0.036,0.0,0.0,True
+P: type vs family,sh,5016,129,0.43,-0.8,1.95,0.617,0.353,6.30831826381525e-60,1.1291889692229297e-57,True
+P: ext vs type,sh,5016,129,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,sh,5016,129,12.23,9.59,16.32,0.99,0.003,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),sh,5016,129,0.19,0.02,0.37,0.513,0.442,5.658700499596723e-17,8.091941714423314e-15,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),sh,5016,129,-0.01,-0.28,0.25,0.485,0.464,0.3085753102803527,1.0,False
+C: type dict z3 vs nodict z9,sh,5016,129,7.95,3.81,13.59,0.916,0.076,0.0,0.0,True
+P: family vs generic,csharp,5419,16,1.15,0.39,2.25,0.728,0.256,0.0,0.0,True
+P: type vs family,csharp,5419,16,-0.1,-12.14,4.68,0.772,0.225,5.226281887169908e-94,1.0348038136596419e-91,True
+P: ext vs type,csharp,5419,16,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,csharp,5419,16,13.69,11.32,14.64,0.997,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),csharp,5419,16,0.48,-0.09,0.91,0.612,0.348,1.9210087968427427e-119,4.0341184733697595e-117,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),csharp,5419,16,1.19,0.28,1.87,0.789,0.196,0.0,0.0,True
+C: type dict z3 vs nodict z9,csharp,5419,16,6.18,3.58,7.21,0.862,0.138,0.0,0.0,True
+P: family vs generic,kotlin,5723,14,1.81,1.21,2.72,0.841,0.14,0.0,0.0,True
+P: type vs family,kotlin,5723,14,4.17,2.75,5.44,0.934,0.055,0.0,0.0,True
+P: ext vs type,kotlin,5723,14,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,kotlin,5723,14,20.42,17.32,27.89,0.995,0.003,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),kotlin,5723,14,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),kotlin,5723,14,-0.28,-0.69,-0.11,0.394,0.573,7.95158943598478e-51,1.3835765618613515e-48,True
+C: type dict z3 vs nodict z9,kotlin,5723,14,15.4,11.72,23.33,0.946,0.052,0.0,0.0,True
+P: family vs generic,swift,2031,14,1.25,0.7,1.96,0.84,0.147,3.209476466277175e-197,7.221322049123643e-195,True
+P: type vs family,swift,2031,14,3.42,2.52,5.06,0.877,0.107,9.54888429632669e-276,2.2917322311184053e-273,True
+P: ext vs type,swift,2031,14,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,swift,2031,14,15.67,11.69,25.8,0.994,0.001,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),swift,2031,14,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),swift,2031,14,0.01,-0.28,0.27,0.492,0.467,0.4143023840928416,1.0,False
+C: type dict z3 vs nodict z9,swift,2031,14,8.74,3.97,18.52,0.887,0.107,3.0659713281979067e-194,6.867775775163311e-192,True
+P: family vs generic,scala,5819,9,0.96,0.54,1.59,0.793,0.185,0.0,0.0,True
+P: type vs family,scala,5819,9,-1.4,-14.87,3.08,0.769,0.221,3.304388499621454e-181,7.236610814170983e-179,True
+P: ext vs type,scala,5819,9,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,scala,5819,9,16.44,11.91,19.35,0.996,0.003,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),scala,5819,9,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),scala,5819,9,-0.96,-1.6,-0.04,0.28,0.688,0.0,0.0,True
+C: type dict z3 vs nodict z9,scala,5819,9,11.09,6.85,14.01,0.921,0.077,0.0,0.0,True
+P: family vs generic,haskell,2897,10,4.03,3.11,4.86,0.933,0.023,0.0,0.0,True
+P: type vs family,haskell,2897,10,0.26,-0.04,0.54,0.575,0.327,2.5653211003033767e-48,4.412352292521808e-46,True
+P: ext vs type,haskell,2897,10,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,haskell,2897,10,9.25,6.93,11.2,0.959,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),haskell,2897,10,0.46,0.34,0.66,0.515,0.39,7.051053893546447e-31,1.135219676860978e-28,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),haskell,2897,10,0.19,-0.02,0.53,0.476,0.435,1.69166865686849e-07,1.877752209124024e-05,True
+C: type dict z3 vs nodict z9,haskell,2897,10,4.09,1.35,6.46,0.867,0.093,2.417474610964867e-269,5.753589574096384e-267,True
+P: family vs generic,lua,3652,18,1.71,1.39,2.07,0.889,0.09,0.0,0.0,True
+P: type vs family,lua,3652,18,0.33,-0.23,0.95,0.595,0.372,1.2503461972526487e-42,2.113085073356976e-40,True
+P: ext vs type,lua,3652,18,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,lua,3652,18,6.88,5.9,7.85,0.983,0.007,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),lua,3652,18,-0.14,-0.62,0.19,0.472,0.488,0.001380796123291795,0.1394604084524713,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),lua,3652,18,0.04,-0.09,0.19,0.506,0.446,0.0002504877060761913,0.025800233725847704,True
+C: type dict z3 vs nodict z9,lua,3652,18,-0.72,-2.55,1.8,0.746,0.244,1.1282554634901078e-71,2.0759900528217985e-69,True
+P: family vs generic,r,1213,12,2.95,2.34,3.69,0.94,0.029,6.128966311394383e-193,1.3667594874409474e-190,True
+P: type vs family,r,1213,12,2.44,1.15,4.33,0.801,0.163,2.783454606626788e-122,5.873089219982523e-120,True
+P: ext vs type,r,1213,12,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,r,1213,12,11.28,9.61,14.73,0.978,0.002,1.375125773980225e-199,3.121535506935111e-197,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),r,1213,12,0.65,-0.21,1.02,0.645,0.303,2.504442948079875e-43,4.2575530117357875e-41,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),r,1213,12,-0.12,-0.5,0.1,0.452,0.492,0.019622187003616127,1.0,False
+C: type dict z3 vs nodict z9,r,1213,12,6.64,4.93,9.42,0.91,0.071,4.871348283817369e-150,1.0570825775883691e-147,True
+P: family vs generic,sql,2740,21,1.77,1.34,2.32,0.789,0.181,1.5416993042276846e-231,3.5459083997236744e-229,True
+P: type vs family,sql,2740,21,3.07,1.21,4.14,0.849,0.122,0.0,0.0,True
+P: ext vs type,sql,2740,21,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,sql,2740,21,10.3,7.58,13.08,0.974,0.009,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),sql,2740,21,-0.37,-0.97,0.2,0.401,0.54,2.6901366039244594e-23,4.142810370043668e-21,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),sql,2740,21,0.11,-0.63,1.29,0.451,0.493,0.009217981918599842,0.8664903003483851,False
+C: type dict z3 vs nodict z9,sql,2740,21,4.17,0.44,8.09,0.858,0.123,8.720238370854114e-233,2.0143750636673003e-230,True
+P: family vs generic,fortran,3948,9,10.27,0.67,13.0,0.953,0.041,0.0,0.0,True
+P: type vs family,fortran,3948,9,17.78,0.09,20.7,0.895,0.093,0.0,0.0,True
+P: ext vs type,fortran,3948,9,4.01,-0.11,5.89,0.719,0.269,4.29690554043354e-171,9.367254078145116e-169,True
+P: type dict vs none,fortran,3948,9,29.01,3.42,32.82,0.992,0.006,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),fortran,3948,9,-0.1,-0.22,0.05,0.293,0.261,0.02603465367825861,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),fortran,3948,9,2.63,0.09,3.27,0.795,0.182,0.0,0.0,True
+C: type dict z3 vs nodict z9,fortran,3948,9,23.19,-5.63,27.63,0.921,0.076,0.0,0.0,True
+P: family vs generic,ada,5027,8,2.39,-0.07,3.59,0.83,0.147,0.0,0.0,True
+P: type vs family,ada,5027,8,1.54,0.17,2.85,0.788,0.187,0.0,0.0,True
+P: ext vs type,ada,5027,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,ada,5027,8,26.61,8.44,39.27,0.987,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),ada,5027,8,2.15,0.82,5.54,0.708,0.254,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),ada,5027,8,1.47,-0.11,4.19,0.641,0.324,3.39248990405786e-145,7.327778192764978e-143,True
+C: type dict z3 vs nodict z9,ada,5027,8,23.61,5.04,36.49,0.91,0.079,0.0,0.0,True
+P: family vs generic,cobol,182,4,3.47,1.89,9.51,0.835,0.154,1.6015677127566562e-20,2.402351569134984e-18,True
+P: type vs family,cobol,182,4,1.64,0.0,8.17,0.412,0.038,5.464318036151221e-13,7.431472529165661e-11,True
+P: ext vs type,cobol,182,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,cobol,182,4,10.38,9.07,11.02,0.951,0.049,1.1371204362997885e-28,1.796650289353666e-26,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),cobol,182,4,0.18,-0.84,0.24,0.313,0.22,0.1643623758397882,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),cobol,182,4,0.17,-1.39,0.25,0.511,0.434,0.5083376944230994,1.0,False
+C: type dict z3 vs nodict z9,cobol,182,4,0.88,-0.33,1.72,0.725,0.275,2.256936007391504e-05,0.0024149215279089093,True
+P: family vs generic,erlang,1369,5,-2.11,-3.62,1.26,0.351,0.646,1.3366497417842485e-90,2.6331999913149694e-88,True
+P: type vs family,erlang,1369,5,0.75,0.28,0.87,0.711,0.265,2.33858952049906e-98,4.67717904099812e-96,True
+P: ext vs type,erlang,1369,5,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,erlang,1369,5,6.71,6.41,8.38,0.996,0.002,4.6358990112983385e-225,1.0616208735873196e-222,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),erlang,1369,5,-0.0,-0.05,0.0,0.085,0.074,0.491083018402766,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),erlang,1369,5,0.92,-0.03,3.23,0.613,0.362,6.542652597844995e-36,1.0795376786444241e-33,True
+C: type dict z3 vs nodict z9,erlang,1369,5,-0.99,-1.43,1.37,0.69,0.306,2.6478945796137862e-09,3.1774734955365437e-07,True
+P: family vs generic,elixir,1471,9,2.83,2.51,3.29,0.973,0.016,6.250724472239876e-238,1.4501680775596513e-235,True
+P: type vs family,elixir,1471,9,2.52,2.0,3.72,0.882,0.101,4.194968253212723e-199,9.480628252260754e-197,True
+P: ext vs type,elixir,1471,9,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,elixir,1471,9,9.28,8.39,11.36,0.992,0.001,6.092717321600793e-242,1.4256958532545855e-239,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),elixir,1471,9,0.19,-0.09,0.36,0.549,0.388,4.1544611596013996e-13,5.6916117886539174e-11,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),elixir,1471,9,-0.28,-0.54,-0.15,0.373,0.584,1.336345087005564e-24,2.0846983357286799e-22,True
+C: type dict z3 vs nodict z9,elixir,1471,9,1.47,-0.06,4.46,0.78,0.211,3.4339925772405514e-52,6.009487010170965e-50,True
+P: family vs generic,asm,2996,17,1.49,-0.08,2.02,0.752,0.23,1.204954719635409e-271,2.8798417799286277e-269,True
+P: type vs family,asm,2996,17,-1.12,-3.09,-0.63,0.183,0.811,2.4375159312765832e-222,5.5575363233106096e-220,True
+P: ext vs type,asm,2996,17,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,asm,2996,17,13.67,3.9,18.35,0.985,0.014,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),asm,2996,17,0.42,-0.11,0.89,0.419,0.173,4.36885084210443e-74,8.082374057893195e-72,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),asm,2996,17,0.05,-0.4,0.2,0.511,0.456,0.021801177212095173,1.0,False
+C: type dict z3 vs nodict z9,asm,2996,17,3.69,-6.57,13.63,0.77,0.229,1.7490350533795325e-101,3.5330508078266555e-99,True
+P: family vs generic,make,790,84,3.12,1.57,4.33,0.884,0.084,4.6361127939337266e-99,9.318586715806791e-97,True
+P: type vs family,make,790,84,6.02,4.57,7.99,0.903,0.067,7.62098863183485e-116,1.577544646789814e-113,True
+P: ext vs type,make,790,84,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,make,790,84,15.62,12.57,18.88,0.976,0.004,1.9049821983327355e-129,4.057612082448727e-127,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),make,790,84,-0.17,-0.51,0.3,0.397,0.537,7.1582872628404425e-06,0.0007730950243867678,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),make,790,84,0.61,-0.26,1.32,0.537,0.386,5.292152958053816e-09,6.297662020084041e-07,True
+C: type dict z3 vs nodict z9,make,790,84,11.93,8.41,15.45,0.958,0.024,1.9539846487713562e-119,4.083827915932134e-117,True
+P: family vs generic,cmake,1995,33,8.02,5.59,9.37,0.879,0.041,4.1754996854412864e-300,1.0480504210457629e-297,True
+P: type vs family,cmake,1995,33,4.91,4.43,5.14,0.856,0.056,2.357901150971724e-289,5.776857819880723e-287,True
+P: ext vs type,cmake,1995,33,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,cmake,1995,33,19.55,16.18,21.38,0.928,0.005,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),cmake,1995,33,-0.13,-0.3,0.15,0.405,0.455,0.003270715875479284,0.3172594399214906,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),cmake,1995,33,-0.15,-0.91,0.71,0.437,0.44,0.3180139128317545,1.0,False
+C: type dict z3 vs nodict z9,cmake,1995,33,15.29,10.65,17.58,0.911,0.022,3.7054312043222654e-295,9.189469386719218e-293,True
+P: family vs generic,dockerfile,245,54,1.75,0.49,3.66,0.694,0.286,1.4899040494609426e-11,1.9815723857830534e-09,True
+P: type vs family,dockerfile,245,54,5.54,3.94,8.87,0.906,0.086,2.3938810874854473e-38,3.973842605225843e-36,True
+P: ext vs type,dockerfile,245,54,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,dockerfile,245,54,21.19,18.76,25.72,1.0,0.0,6.091529895396779e-42,1.0232521962250476e-39,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),dockerfile,245,54,2.03,0.63,3.3,0.706,0.253,3.444653695306261e-20,5.063640932100204e-18,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),dockerfile,245,54,-0.0,-1.52,0.89,0.58,0.404,0.16412356121955451,1.0,False
+C: type dict z3 vs nodict z9,dockerfile,245,54,20.81,17.79,24.64,1.0,0.0,6.09078688229195e-42,1.0232521962250476e-39,True
+P: family vs generic,json,12707,149,2.34,1.5,3.32,0.774,0.157,0.0,0.0,True
+P: type vs family,json,12707,149,-0.37,-2.77,1.14,0.565,0.347,1.3219174703336832e-116,2.749588338294061e-114,True
+P: ext vs type,json,12707,149,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,json,12707,149,10.21,8.25,12.61,0.92,0.017,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),json,12707,149,-0.39,-0.74,-0.01,0.382,0.508,1.5054621582131872e-88,2.935651208515715e-86,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),json,12707,149,-0.13,-0.6,0.37,0.453,0.446,0.003380144571046046,0.3244938788204204,False
+C: type dict z3 vs nodict z9,json,12707,149,2.06,-0.79,5.78,0.772,0.162,0.0,0.0,True
+P: family vs generic,jsonl,96,21,0.43,0.16,0.66,0.75,0.229,1.4856385385485588e-07,1.6787715485598713e-05,True
+P: type vs family,jsonl,96,21,-1.71,-3.15,-1.02,0.24,0.74,4.970713473338722e-10,6.26309897640679e-08,True
+P: ext vs type,jsonl,96,21,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,jsonl,96,21,-2.61,-4.3,-0.65,0.271,0.708,2.6018619850569162e-09,3.1482530019188686e-07,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),jsonl,96,21,-0.01,-0.22,0.32,0.365,0.417,0.5918188601836853,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),jsonl,96,21,-0.03,-0.35,0.34,0.5,0.438,0.8492194320840599,1.0,False
+C: type dict z3 vs nodict z9,jsonl,96,21,-8.7,-12.28,-3.92,0.062,0.927,2.225357884968748e-15,3.09324746010656e-13,True
+P: family vs generic,yaml,10630,210,3.21,2.1,5.05,0.626,0.25,0.0,0.0,True
+P: type vs family,yaml,10630,210,3.24,2.53,3.87,0.779,0.117,0.0,0.0,True
+P: ext vs type,yaml,10630,210,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,yaml,10630,210,15.79,13.69,18.99,0.917,0.012,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),yaml,10630,210,0.38,-0.31,1.01,0.501,0.365,3.2070312768260494e-78,6.093359425969494e-76,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),yaml,10630,210,-0.24,-0.72,0.36,0.357,0.488,2.977120149822334e-58,5.299273866683754e-56,True
+C: type dict z3 vs nodict z9,yaml,10630,210,11.87,9.03,15.86,0.884,0.043,0.0,0.0,True
+P: family vs generic,toml,2267,85,6.9,3.68,10.12,0.601,0.128,3.5416074010567938e-189,7.826952356335514e-187,True
+P: type vs family,toml,2267,85,7.59,6.11,9.04,0.678,0.067,2.389399221372386e-261,5.662876154652554e-259,True
+P: ext vs type,toml,2267,85,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,toml,2267,85,23.03,18.08,27.77,0.756,0.005,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),toml,2267,85,1.47,0.47,2.71,0.427,0.275,1.79470163616535e-23,2.7817875360562924e-21,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),toml,2267,85,0.44,-0.23,1.06,0.387,0.296,3.827910917472801e-08,4.4786557734431765e-06,True
+C: type dict z3 vs nodict z9,toml,2267,85,22.51,17.38,27.14,0.753,0.009,0.0,0.0,True
+P: family vs generic,xml,7818,83,3.09,1.23,6.34,0.768,0.179,0.0,0.0,True
+P: type vs family,xml,7818,83,1.97,-0.77,6.92,0.707,0.246,0.0,0.0,True
+P: ext vs type,xml,7818,83,-0.46,-0.98,0.31,0.321,0.597,2.2053942330458861e-187,4.851867312700949e-185,True
+P: type dict vs none,xml,7818,83,21.84,12.43,37.7,0.958,0.01,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),xml,7818,83,-0.02,-0.55,0.46,0.453,0.465,0.009586213337671477,0.8915178404034474,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),xml,7818,83,-0.69,-1.2,-0.31,0.303,0.624,1.0103086363075211e-255,2.3843283816857497e-253,True
+C: type dict z3 vs nodict z9,xml,7818,83,17.68,6.89,33.99,0.905,0.063,0.0,0.0,True
+P: family vs generic,html,4906,95,3.3,2.05,4.02,0.794,0.124,0.0,0.0,True
+P: type vs family,html,4906,95,1.35,0.46,3.33,0.728,0.22,2.211854020990544e-291,5.463279431846644e-289,True
+P: ext vs type,html,4906,95,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,html,4906,95,11.27,9.53,14.82,0.954,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),html,4906,95,0.18,-0.07,0.36,0.503,0.397,5.4912560564567615e-21,8.346709205814278e-19,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),html,4906,95,-0.39,-0.99,0.76,0.394,0.513,2.1255352802091092e-44,3.634665329157577e-42,True
+C: type dict z3 vs nodict z9,html,4906,95,6.1,3.3,10.15,0.863,0.091,0.0,0.0,True
+P: family vs generic,css,3034,90,1.78,1.17,3.35,0.772,0.163,6.432659333252566e-298,1.6081648333131413e-295,True
+P: type vs family,css,3034,90,5.77,4.46,8.76,0.841,0.119,0.0,0.0,True
+P: ext vs type,css,3034,90,-0.01,-0.36,0.68,0.509,0.42,0.002994405569437014,0.29345174580482736,False
+P: type dict vs none,css,3034,90,12.52,10.57,17.24,0.964,0.005,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),css,3034,90,0.19,-0.73,0.52,0.529,0.407,6.231056689860372e-11,8.162684263717088e-09,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),css,3034,90,0.81,0.1,1.39,0.628,0.289,3.846603724121944e-107,7.885537634449985e-105,True
+C: type dict z3 vs nodict z9,css,3034,90,6.02,3.43,11.66,0.882,0.087,2.4177961965946633e-284,5.875244757725032e-282,True
+P: family vs generic,md,19173,225,2.66,2.23,3.01,0.835,0.141,0.0,0.0,True
+P: type vs family,md,19173,225,0.72,0.59,0.87,0.676,0.277,0.0,0.0,True
+P: ext vs type,md,19173,225,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,md,19173,225,11.84,11.18,12.71,0.982,0.011,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),md,19173,225,0.14,0.03,0.26,0.538,0.406,3.262575115389329e-76,6.1336412169319385e-74,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),md,19173,225,-0.03,-0.16,0.1,0.461,0.475,0.2489612111692573,1.0,False
+C: type dict z3 vs nodict z9,md,19173,225,8.01,7.05,9.05,0.95,0.042,0.0,0.0,True
+P: family vs generic,rst,2707,30,1.91,1.71,2.09,0.888,0.067,0.0,0.0,True
+P: type vs family,rst,2707,30,1.49,1.18,2.01,0.857,0.106,0.0,0.0,True
+P: ext vs type,rst,2707,30,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,rst,2707,30,10.07,9.59,11.24,0.976,0.005,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),rst,2707,30,0.01,-0.11,0.15,0.474,0.465,0.8743279138522164,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),rst,2707,30,0.0,-0.33,0.24,0.478,0.464,0.3382879644413753,1.0,False
+C: type dict z3 vs nodict z9,rst,2707,30,5.27,4.5,7.1,0.935,0.046,0.0,0.0,True
+P: family vs generic,tex,2181,16,0.83,0.37,0.98,0.453,0.398,3.1234227457915404e-16,4.435260299023987e-14,True
+P: type vs family,tex,2181,16,-0.02,-0.09,0.11,0.118,0.066,0.00012792967390190638,0.01343261575970017,True
+P: ext vs type,tex,2181,16,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,tex,2181,16,5.4,4.07,5.72,0.832,0.086,1.7403281285444777e-280,4.211594071077636e-278,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),tex,2181,16,0.73,-0.39,3.54,0.721,0.211,4.640476960431102e-97,9.234549151257893e-95,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),tex,2181,16,0.04,-0.14,0.15,0.388,0.443,0.2549458364575844,1.0,False
+C: type dict z3 vs nodict z9,tex,2181,16,-0.96,-2.9,4.38,0.796,0.161,1.4036391898113524e-104,2.8493875553170456e-102,True
+P: family vs generic,csv,567,34,-0.02,-0.38,0.15,0.474,0.422,0.06069163364893737,1.0,False
+P: type vs family,csv,567,34,-1.79,-2.72,-1.26,0.168,0.76,1.1198795611627593e-56,1.9709880276464562e-54,True
+P: ext vs type,csv,567,34,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,csv,567,34,-2.16,-2.8,-1.59,0.136,0.79,6.263847233399991e-63,1.1337563492453984e-60,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),csv,567,34,-0.07,-0.15,0.02,0.367,0.489,0.002293685299132098,0.22707484461407773,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),csv,567,34,-0.02,-0.09,0.03,0.39,0.432,0.1545765668708414,1.0,False
+C: type dict z3 vs nodict z9,csv,567,34,-7.12,-9.4,-3.95,0.067,0.862,1.6740369476926025e-74,3.113708722708241e-72,True
+P: family vs generic,ini,715,84,-1.35,-2.11,-0.67,0.208,0.587,2.523848263077386e-30,4.0381572209238176e-28,True
+P: type vs family,ini,715,84,7.03,4.81,10.36,0.738,0.099,5.155842976562541e-85,9.89921851500008e-83,True
+P: ext vs type,ini,715,84,-0.78,-2.73,0.91,0.14,0.387,1.9594548180228615e-18,2.841209486133149e-16,True
+P: type dict vs none,ini,715,84,19.39,13.17,28.11,0.827,0.017,3.688383529456417e-108,7.598070070680218e-106,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),ini,715,84,0.38,-0.28,1.32,0.404,0.361,0.3552422487888478,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),ini,715,84,-0.15,-0.47,0.18,0.394,0.354,0.8907332867260255,1.0,False
+C: type dict z3 vs nodict z9,ini,715,84,17.07,10.0,25.46,0.797,0.045,2.895530162661849e-89,5.675239118817224e-87,True
+P: family vs generic,svg,11755,103,0.38,-0.86,2.73,0.294,0.651,0.0,0.0,True
+P: type vs family,svg,11755,103,6.43,2.83,10.21,0.803,0.188,0.0,0.0,True
+P: ext vs type,svg,11755,103,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,svg,11755,103,18.46,11.63,26.05,0.988,0.011,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),svg,11755,103,-0.13,-0.53,0.3,0.447,0.491,1.3942208303983917e-14,1.9240247459497804e-12,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),svg,11755,103,-0.21,-1.06,0.54,0.457,0.501,1.0614364610864261e-29,1.6876839731274176e-27,True
+C: type dict z3 vs nodict z9,svg,11755,103,15.85,7.94,23.95,0.958,0.041,0.0,0.0,True
+P: family vs generic,pbtxt,1669,2,-2.67,-2.97,-2.18,0.206,0.525,4.2654979653916015e-76,7.976481195282295e-74,True
+P: type vs family,pbtxt,1669,2,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: ext vs type,pbtxt,1669,2,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,pbtxt,1669,2,7.99,5.2,9.6,0.762,0.002,7.277945807966662e-242,1.6957613732562323e-239,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),pbtxt,1669,2,-0.4,-1.15,0.85,0.217,0.495,5.546773741125779e-34,9.096708935446277e-32,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),pbtxt,1669,2,-0.4,-1.15,0.85,0.217,0.495,5.546773741125779e-34,9.096708935446277e-32,True
+C: type dict z3 vs nodict z9,pbtxt,1669,2,5.07,1.64,6.99,0.697,0.035,3.1586758548022987e-192,7.012260397661103e-190,True
+P: family vs generic,po,3195,8,0.45,-1.49,4.09,0.403,0.591,0.0002081267700012826,0.02164518408013339,True
+P: type vs family,po,3195,8,3.38,0.33,6.65,0.921,0.077,0.0,0.0,True
+P: ext vs type,po,3195,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,po,3195,8,11.43,6.13,17.35,0.999,0.0,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),po,3195,8,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),po,3195,8,1.54,0.13,2.15,0.698,0.296,1.8978545745959657e-296,4.725657890743954e-294,True
+C: type dict z3 vs nodict z9,po,3195,8,5.79,-1.08,13.36,0.853,0.146,4.849041662469921e-280,1.1686190406552508e-277,True
+P: family vs generic,syslog,53,4,4.3,3.51,5.87,1.0,0.0,2.384564773373649e-10,3.048559900038308e-08,True
+P: type vs family,syslog,53,4,0.54,0.46,0.7,0.887,0.075,1.2478782802457576e-08,1.472496370689994e-06,True
+P: ext vs type,syslog,53,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,syslog,53,4,9.37,8.44,10.84,1.0,0.0,2.381687421904928e-10,3.048559900038308e-08,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),syslog,53,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),syslog,53,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+C: type dict z3 vs nodict z9,syslog,53,4,1.46,0.2,3.44,0.717,0.283,0.050404107311169066,1.0,False
+P: family vs generic,access,49,4,6.2,5.19,7.32,1.0,0.0,1.1082671543567612e-09,1.3736041425133866e-07,True
+P: type vs family,access,49,4,2.32,2.0,2.73,1.0,0.0,1.108789252828164e-09,1.3736041425133866e-07,True
+P: ext vs type,access,49,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,access,49,4,11.85,11.1,12.74,1.0,0.0,1.1077452762204731e-09,1.3736041425133866e-07,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),access,49,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),access,49,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+C: type dict z3 vs nodict z9,access,49,4,-1.5,-2.7,-0.08,0.612,0.388,0.8539929886382367,1.0,False
+P: family vs generic,applog,55,4,4.79,3.74,5.95,1.0,0.0,1.1061675921731593e-10,1.4380178698251072e-08,True
+P: type vs family,applog,55,4,-2.3,-2.8,-1.95,0.164,0.782,3.9633800624200256e-08,4.59752087240723e-06,True
+P: ext vs type,applog,55,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,applog,55,4,3.26,2.28,4.11,0.818,0.182,1.6344608856863084e-07,1.8305961919686653e-05,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),applog,55,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),applog,55,4,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+C: type dict z3 vs nodict z9,applog,55,4,-6.83,-12.16,-3.33,0.418,0.582,0.017334799017310793,1.0,False
+P: type vs family,elf,121,17,2.86,1.57,3.37,0.893,0.091,3.15577227117931e-20,4.6705429613453786e-18,True
+P: ext vs type,elf,121,17,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,elf,121,17,9.6,8.06,11.91,0.983,0.0,1.4007588694191004e-21,2.1431610702112235e-19,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),elf,121,17,1.51,0.77,1.94,0.843,0.132,3.932906035160659e-18,5.663384690631349e-16,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),elf,121,17,2.95,1.42,3.52,0.942,0.041,1.6419374096577775e-20,2.4464867403900887e-18,True
+C: type dict z3 vs nodict z9,elf,121,17,5.99,3.81,8.67,0.926,0.058,1.4734508489490462e-19,2.1512382394656075e-17,True
+P: type vs family,class,11305,23,2.83,2.46,3.26,0.919,0.071,0.0,0.0,True
+P: ext vs type,class,11305,23,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,class,11305,23,17.48,15.45,19.53,0.998,0.002,0.0,0.0,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),class,11305,23,0.22,-0.04,0.5,0.507,0.467,8.11478975782599e-21,1.2253332534317245e-18,True
+copyleft A/B: perm+copyleft vs perm-only (family dict),class,11305,23,-0.77,-1.18,-0.34,0.311,0.671,0.0,0.0,True
+C: type dict z3 vs nodict z9,class,11305,23,14.21,11.93,16.59,0.977,0.023,0.0,0.0,True
+P: type vs family,wasm,35,6,1.11,0.31,2.01,0.571,0.4,0.09000270554717568,1.0,False
+P: ext vs type,wasm,35,6,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,wasm,35,6,3.09,1.27,6.13,0.8,0.2,0.0006765741517719395,0.06901056348073784,False
+copyleft A/B: perm+copyleft vs perm-only (type dict),wasm,35,6,0.13,-0.78,0.85,0.743,0.171,0.011102738171261587,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),wasm,35,6,-0.04,-0.58,0.49,0.457,0.486,0.8185936662080462,1.0,False
+C: type dict z3 vs nodict z9,wasm,35,6,-1.76,-4.49,2.47,0.543,0.457,0.5390577619682217,1.0,False
+P: type vs family,pdf,37,18,0.82,0.16,2.63,0.568,0.027,3.6414112884066556e-05,0.003859895965711055,True
+P: ext vs type,pdf,37,18,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,pdf,37,18,2.59,1.4,5.06,0.946,0.0,1.2899005570697846e-07,1.4704866350595545e-05,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),pdf,37,18,0.26,0.12,0.42,0.649,0.297,0.02014594708313962,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),pdf,37,18,-0.09,-0.57,0.25,0.514,0.432,0.8445105333737929,1.0,False
+C: type dict z3 vs nodict z9,pdf,37,18,1.96,0.89,4.23,0.838,0.108,3.134634712567064e-06,0.00034167518366981,True
+P: type vs family,sqlite,42,25,0.62,-0.09,1.85,0.524,0.476,0.5195580621444076,1.0,False
+P: ext vs type,sqlite,42,25,0.0,0.0,0.0,0.0,0.0,1.0,1.0,False
+P: type dict vs none,sqlite,42,25,2.49,1.59,5.56,0.905,0.071,3.836742410158295e-07,4.220416651174124e-05,True
+copyleft A/B: perm+copyleft vs perm-only (type dict),sqlite,42,25,-0.44,-1.05,0.08,0.571,0.429,0.8073488116254022,1.0,False
+copyleft A/B: perm+copyleft vs perm-only (family dict),sqlite,42,25,0.13,-0.3,0.32,0.667,0.333,0.15573344305084497,1.0,False
+C: type dict z3 vs nodict z9,sqlite,42,25,-1.46,-2.8,2.27,0.524,0.476,0.7215699474412973,1.0,False

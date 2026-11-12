@@ -8,11 +8,13 @@ use lunix_format::purpose::Purpose;
 use lunix_format::{ChunkId, Codec, DekGen, ExtentKind, FamilyId, FormatError, IdLen, Level};
 use proptest::prelude::*;
 
-const CHUNK_ID_B: &str = "c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566";
-const KEYED_TAG: &str = "5f2205bd62159515ed219a089987bb03";
+const CHUNK_ID_B: &str = "8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede";
+/// The unkeyed id of the same chunk on a plain-mode volume (section 23.2).
+const CHUNK_ID_PLAIN: &str = "c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566";
+const KEYED_TAG: &str = "4e700344dd5d9ea60a34ba09c8a5f115";
 const UNKEYED_TAG: &str = "f21b8c973dcefd5e68954f1c2261587a";
-const LEAF_HASH: &str = "b2b3b7ec14023024c44cad3ad2595e908b40ebb7fb91d667ddd8153909114469";
-const LEAF_TAG: &str = "2f16495d64b5482a661ec5c1f6aa7d67";
+const LEAF_HASH: &str = "dca03248122f117b77f7f5aeefbdd4867e0b4c958a051c8a245251324ef3b573";
+const LEAF_TAG: &str = "26ff3ed4285b58271c9db42e836fb5b8";
 const TAG_KEY_B: &str = "8f5a8aa5bd1c61e6d9b3e275436f35de2673144fc8d12cb7aab4b39398b09322";
 
 fn params(layout: ExtentLayout, kind: ExtentKind, chunk_size: u32) -> DecodeParams {
@@ -56,19 +58,26 @@ fn tag_key_b() -> [u8; 32] {
     common::purpose_key(&common::volume_b_ik(), &msg)
 }
 
-fn doc_plain_untagged() -> Vec<u8> {
+fn addressing_key_b() -> [u8; 32] {
+    let msg = Purpose::IntegrityAddressing
+        .message(&FamilyId(common::VOLUME_B_FAMILY))
+        .unwrap();
+    common::purpose_key(&common::volume_b_ik(), &msg)
+}
+
+fn doc_plain_untagged(id: &str) -> Vec<u8> {
     let mut v = hex("43434831 01 0200 00 0040000000000000");
-    v.extend_from_slice(&hex(CHUNK_ID_B));
+    v.extend_from_slice(&hex(id));
     v.extend_from_slice(&hex("4b000000"));
     v.extend_from_slice(&lz4_block());
     assert_eq!(v.len(), 127);
     v
 }
 
-fn plain_extent<'a>(payload: &'a [u8], tag: [u8; 16]) -> Extent<'a> {
+fn plain_extent<'a>(id: &str, payload: &'a [u8], tag: [u8; 16]) -> Extent<'a> {
     Extent {
         header: plain_header(),
-        chunk_id: ChunkId(hex(CHUNK_ID_B).try_into().unwrap()),
+        chunk_id: ChunkId(hex(id).try_into().unwrap()),
         crypto: None,
         payload,
         tag,
@@ -81,13 +90,21 @@ fn derived_tag_key_matches_the_doc() {
 }
 
 #[test]
+fn derived_addressing_key_matches_the_doc() {
+    assert_eq!(
+        common::to_hex(&addressing_key_b()),
+        "3e596debe98cf9c82d88e17c63d875e3f16dc9334a2dbe870f4dd827679372b8"
+    );
+}
+
+#[test]
 fn a0_plain_keyed_extent() {
     let payload = lz4_block();
-    let untagged = doc_plain_untagged();
+    let untagged = doc_plain_untagged(CHUNK_ID_B);
     let keyed: [u8; 16] = hex(KEYED_TAG).try_into().unwrap();
     // the doc's tag is the first 16 bytes of keyed BLAKE3 over extent[0..127]
     assert_eq!(common::blake3_keyed(&tag_key_b(), &untagged)[..16], keyed);
-    let e = plain_extent(&payload, keyed);
+    let e = plain_extent(CHUNK_ID_B, &payload, keyed);
     let mut v = Vec::new();
     e.encode(&mut v).unwrap();
     let mut doc = untagged.clone();
@@ -106,7 +123,11 @@ fn a0_plain_keyed_extent() {
     obj.extend_from_slice(d.payload);
     let chunk = replicix_chunkfmt::format::decode_object(&obj).unwrap();
     assert_eq!(chunk, vec![0x41u8; 16384]);
-    assert_eq!(common::blake3_256(&chunk), d.chunk_id.0);
+    // the id is keyed BLAKE3 under the integrity addressing key (0x0a)
+    assert_eq!(
+        common::blake3_keyed(&addressing_key_b(), &chunk),
+        d.chunk_id.0
+    );
     // header helpers
     assert_eq!(Cch1Header::parse(&g).unwrap(), plain_header());
     let (h, id, clen) = parse_plain_prefix(&g).unwrap();
@@ -116,10 +137,10 @@ fn a0_plain_keyed_extent() {
 #[test]
 fn plain_unkeyed_extent() {
     let payload = lz4_block();
-    let untagged = doc_plain_untagged();
+    let untagged = doc_plain_untagged(CHUNK_ID_PLAIN);
     let unkeyed: [u8; 16] = hex(UNKEYED_TAG).try_into().unwrap();
     assert_eq!(common::blake3_128(&untagged), unkeyed);
-    let e = plain_extent(&payload, unkeyed);
+    let e = plain_extent(CHUNK_ID_PLAIN, &payload, unkeyed);
     let mut v = Vec::new();
     e.encode(&mut v).unwrap();
     let g = golden("03-extent-plain-unkeyed.bin", &v);
@@ -180,7 +201,7 @@ fn a0_encrypted_kat_extent() {
 fn node_extent() {
     // the 45-byte leaf of section 23.5
     let leaf = hex(
-        "00 0002 0200 0100 0100 01 00 00 07 00 0100000000000000 00 0002104000 4b c6c4890119d834da404b94c707aa46a5",
+        "00 0002 0200 0100 0100 01 00 00 07 00 0100000000000000 00 0002104000 4b 8f6cf4e5e665b21ac12bd316397d883c",
     );
     assert_eq!(leaf.len(), 45);
     assert_eq!(common::to_hex(&common::blake3_256(&leaf)), LEAF_HASH);
@@ -287,7 +308,9 @@ fn aad_depends_on_id_len_not_field_length() {
 fn range_and_tamper_rejections() {
     let payload = lz4_block();
     let mut good = Vec::new();
-    plain_extent(&payload, [7; 16]).encode(&mut good).unwrap();
+    plain_extent(CHUNK_ID_B, &payload, [7; 16])
+        .encode(&mut good)
+        .unwrap();
     let p = params(ExtentLayout::Unencrypted, ExtentKind::Data, 16384);
     let f = rt(p);
     assert!(f(&good).is_ok());

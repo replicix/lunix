@@ -1,0 +1,12 @@
+# lunix-format golden file 14-pins-v2.bin (136 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f14_local
+00000000  4c 55 4e 49 58 50 49 4e 02 00 01 01 01 00 00 00
+00000010  b0 b1 b2 b3 b4 b5 46 b7 88 b9 ba bb bc bd be bf
+00000020  50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f
+00000030  01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000040  92 a4 ec 26 89 f6 2a ab 86 bc 8f 27 87 13 18 3e
+00000050  01 00 00 00 00 00 00 00 64 8d 4f c9 be 60 93 83
+00000060  79 21 d9 a1 73 9f e6 ac 80 a7 41 41 56 64 f5 e2
+00000070  d2 fe ed 4d ef e7 54 de 00 00 00 00 00 00 00 00
+00000080  00 00 00 00 c6 03 74 2b

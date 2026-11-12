@@ -170,64 +170,231 @@ fn pins_with(pin: Option<(CryptoMode, [u8; 16])>) -> LocalPins {
     }
 }
 
+fn file_with(pins: LocalPins, floor: Option<RollbackFloor>) -> LocalPinsFile {
+    LocalPinsFile { pins, floor }
+}
+
+/// Decode and re-encode: version 2 files only (the encoder writes nothing
+/// else), so a version 1 input is "not canonical" here.
 fn pins_rt(b: &[u8]) -> Result<Vec<u8>, FormatError> {
-    let d = LocalPins::decode(b)?;
+    let d = LocalPinsFile::decode(b)?;
     let mut o = Vec::new();
     d.encode(&mut o)?;
     Ok(o)
 }
 
+/// A version 1 file, written by hand: the layout the amendment still reads.
+fn encode_v1(p: &LocalPins) -> Vec<u8> {
+    let mut b = b"LUNIXPIN".to_vec();
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.push(u8::from(p.pin.is_some()));
+    b.push(p.pin.map_or(0, |x| x.mode as u8));
+    b.extend_from_slice(&[0; 4]);
+    b.extend_from_slice(&p.volume_uuid.0);
+    b.extend_from_slice(&p.family_id.0);
+    b.extend_from_slice(&p.max_keyring_seq.to_le_bytes());
+    b.extend_from_slice(&p.max_epoch.to_le_bytes());
+    b.extend_from_slice(&p.pin.map_or([0; 16], |x| x.fingerprint));
+    b.extend_from_slice(&[0; 12]);
+    let c = lunix_format::bytes::crc32c(&b).to_le_bytes();
+    b.extend_from_slice(&c);
+    b
+}
+
+/// Decode a version 1 file and re-encode it as version 1 (the negative suite
+/// of the read-only layout).
+fn pins_v1_rt(b: &[u8]) -> Result<Vec<u8>, FormatError> {
+    if b.len() != 96 {
+        return Err(FormatError::Truncated {
+            what: "local pins",
+            need: 96,
+            have: b.len(),
+        });
+    }
+    let d = LocalPinsFile::decode(b)?;
+    assert_eq!(d.floor, None, "a version 1 file carries no floor");
+    Ok(encode_v1(&d.pins))
+}
+
+fn fixn(b: &mut [u8]) {
+    let at = b.len() - 4;
+    let c = lunix_format::bytes::crc32c(&b[..at]).to_le_bytes();
+    b[at..].copy_from_slice(&c);
+}
+
+/// Section 23.9, transcribed from the document.
+const DOC_PINS_V2: &str = "4c554e4958 50494e 0200 01 01 01 000000 \
+    b0b1b2b3b4b546b788b9babbbcbdbebf 505152535455565758595a5b5c5d5e5f \
+    0100000000000000 0000000000000000 92a4ec2689f62aab86bc8f278713183e \
+    0100000000000000 \
+    648d4fc9be6093837921d9a1739fe6ac80a74141 5664f5e2d2feed4defe754de \
+    000000000000000000000000 c603742b";
+
+fn doc_floor() -> RollbackFloor {
+    RollbackFloor {
+        max_commit_seq: lunix_format::CommitSeq(1),
+        tip_hash: hex("648d4fc9be6093837921d9a1739fe6ac80a741415664f5e2d2feed4defe754de")
+            .try_into()
+            .unwrap(),
+    }
+}
+
+fn doc_pins_b() -> LocalPins {
+    let mut p = pins_with(Some((
+        CryptoMode::Integrity,
+        hex("92a4ec2689f62aab86bc8f278713183e").try_into().unwrap(),
+    )));
+    p.max_keyring_seq = 1;
+    p
+}
+
 #[test]
-fn pins_goldens_and_rejections() {
+fn pins_v2_matches_section_23_9() {
+    let doc = hex(DOC_PINS_V2);
+    assert_eq!(doc.len(), 136);
+    let f = file_with(doc_pins_b(), Some(doc_floor()));
+    let mut o = Vec::new();
+    f.encode(&mut o).unwrap();
+    assert_eq!(o, doc, "encoder differs from the doc");
+    assert_eq!(LocalPinsFile::LEN, 136);
+    // the doc's crc32c is over bytes 0..132
+    assert_eq!(
+        lunix_format::bytes::crc32c(&doc[..132]).to_le_bytes(),
+        doc[132..]
+    );
+    let g = golden("14-pins-v2.bin", &o);
+    assert_eq!(g, doc);
+    assert_eq!(LocalPinsFile::decode(&g).unwrap(), f);
+    negative_suite("14-pins-v2", &pins_rt, &g);
+}
+
+#[test]
+fn pins_v1_is_read_as_no_floor() {
     let fp: [u8; 16] = hex("92a4ec2689f62aab86bc8f278713183e").try_into().unwrap();
+    // The signed layout's goldens stay valid version 1 inputs.
     for (name, p) in [
         ("14-pins.bin", pins_with(Some((CryptoMode::Integrity, fp)))),
         ("14-pins-none.bin", pins_with(None)),
+        ("14-pins-v1-read.bin", doc_pins_b()),
     ] {
-        let mut o = Vec::new();
-        p.encode(&mut o).unwrap();
-        assert_eq!(o.len(), 96);
-        let g = golden(name, &o);
-        assert_eq!(LocalPins::decode(&g).unwrap(), p);
-        negative_suite(name, &pins_rt, &g);
+        let g = golden(name, &encode_v1(&p));
+        assert_eq!(g.len(), 96);
+        let d = LocalPinsFile::decode(&g).unwrap();
+        assert_eq!(d.pins, p, "{name}");
+        assert_eq!(d.floor, None, "{name}");
+        assert_eq!(LocalPins::decode(&g).unwrap(), p, "{name}");
+        negative_suite(name, &pins_v1_rt, &g);
+        // The next write upgrades it: version 2, floor_present 0.
+        let mut up = Vec::new();
+        d.encode(&mut up).unwrap();
+        assert_eq!(up.len(), 136);
+        assert_eq!(&up[8..10], &[2, 0]);
+        assert_eq!(up[12], 0);
+        assert_eq!(LocalPinsFile::decode(&up).unwrap(), d);
     }
+    // The version 1 file is the version 2 file of 23.9 without the floor.
+    let g = encode_v1(&doc_pins_b());
+    let v2 = hex(DOC_PINS_V2);
+    assert_eq!(&g[16..80], &v2[16..80]);
+}
+
+#[test]
+fn pins_goldens_and_rejections() {
+    let fp: [u8; 16] = hex("92a4ec2689f62aab86bc8f278713183e").try_into().unwrap();
     let mut o = Vec::new();
-    pins_with(Some((CryptoMode::Plain, [0; 16])))
+    file_with(pins_with(Some((CryptoMode::Plain, [0; 16]))), None)
         .encode(&mut o)
         .unwrap();
-    assert!(LocalPins::decode(&o).is_ok());
-    assert!(pins_with(Some((CryptoMode::Plain, fp)))
+    assert!(LocalPinsFile::decode(&o).is_ok());
+    assert!(file_with(pins_with(Some((CryptoMode::Plain, fp))), None)
         .encode(&mut Vec::new())
         .is_err());
+    // LocalPins keeps its shape: it writes version 2 without a floor and
+    // drops the floor it reads.
+    let mut w = Vec::new();
+    pins_with(None).encode(&mut w).unwrap();
+    assert_eq!(w.len(), LocalPins::LEN);
+    assert_eq!(LocalPinsFile::decode(&w).unwrap().floor, None);
+    let doc = hex(DOC_PINS_V2);
+    assert_eq!(LocalPins::decode(&doc).unwrap(), doc_pins_b());
 
-    let mut g = Vec::new();
-    pins_with(Some((CryptoMode::Integrity, fp)))
-        .encode(&mut g)
-        .unwrap();
+    // Version 2 rejections.
+    let g = doc;
     let patch = |off: usize, v: &[u8]| {
         let mut b = g.clone();
         b[off..off + v.len()].copy_from_slice(v);
-        fix96(&mut b);
+        fixn(&mut b);
         b
     };
     assert_rejects("present 2", &pins_rt, &patch(10, &[2]));
     assert_rejects("mode 3", &pins_rt, &patch(11, &[3]));
-    assert_rejects("reserved", &pins_rt, &patch(12, &[1]));
-    assert_rejects("reserved 12", &pins_rt, &patch(85, &[1]));
+    assert_rejects("floor_present 2", &pins_rt, &patch(12, &[2]));
+    assert_rejects("reserved 13", &pins_rt, &patch(13, &[1]));
+    assert_rejects("reserved 15", &pins_rt, &patch(15, &[1]));
+    assert_rejects("reserved 120", &pins_rt, &patch(120, &[1]));
+    assert_rejects("reserved 131", &pins_rt, &patch(131, &[1]));
+    assert_rejects("version 3", &pins_rt, &patch(8, &[3]));
+    assert_rejects("version 1 in a 136-byte file", &pins_rt, &patch(8, &[1]));
     assert_rejects("magic", &pins_rt, &patch(0, b"LUNIXPIX"));
-    // plain pin with a fingerprint
+    let mut bad_crc = g.clone();
+    bad_crc[133] ^= 1;
+    assert_rejects("crc", &pins_rt, &bad_crc);
+    // lengths other than 96 and 136
+    for n in [0usize, 95, 97, 135, 137, 232] {
+        let mut b = g.clone();
+        b.resize(n, 0);
+        assert_rejects("length", &pins_rt, &b);
+    }
+    // floor fields without a floor
+    let mut no_floor = Vec::new();
+    file_with(doc_pins_b(), None).encode(&mut no_floor).unwrap();
+    for off in [80usize, 88, 119] {
+        let mut b = no_floor.clone();
+        b[off] = 1;
+        fixn(&mut b);
+        assert_rejects("floor fields without a floor", &pins_rt, &b);
+    }
+    // a floor at commit 0 (a genesis tip) is legal
+    let genesis = RollbackFloor {
+        max_commit_seq: lunix_format::CommitSeq(0),
+        tip_hash: [7; 32],
+    };
+    let mut o = Vec::new();
+    file_with(doc_pins_b(), Some(genesis))
+        .encode(&mut o)
+        .unwrap();
+    assert_eq!(LocalPinsFile::decode(&o).unwrap().floor, Some(genesis));
+    // plain pin with a fingerprint, no pin with a mode or fingerprint
     assert_rejects("plain pin with fingerprint", &pins_rt, &patch(11, &[0]));
-    // no pin but a mode or a fingerprint
+    let mut b = no_floor.clone();
+    b[10] = 0;
+    fixn(&mut b);
+    assert_rejects("pin_present 0 with a mode", &pins_rt, &b);
     let mut n = Vec::new();
-    pins_with(None).encode(&mut n).unwrap();
+    file_with(pins_with(None), None).encode(&mut n).unwrap();
     let mut b = n.clone();
     b[11] = 1;
-    fix96(&mut b);
+    fixn(&mut b);
     assert_rejects("mode without pin", &pins_rt, &b);
     let mut b = n;
     b[64] = 1;
-    fix96(&mut b);
+    fixn(&mut b);
     assert_rejects("fingerprint without pin", &pins_rt, &b);
+
+    // Version 1 rejections.
+    let v1 = encode_v1(&doc_pins_b());
+    let patch1 = |off: usize, v: &[u8]| {
+        let mut b = v1.clone();
+        b[off..off + v.len()].copy_from_slice(v);
+        fixn(&mut b);
+        b
+    };
+    assert_rejects("v1 reserved 12", &pins_v1_rt, &patch1(12, &[1]));
+    assert_rejects("v1 reserved 15", &pins_v1_rt, &patch1(15, &[1]));
+    assert_rejects("v1 reserved 85", &pins_v1_rt, &patch1(85, &[1]));
+    assert_rejects("v1 version 2", &pins_v1_rt, &patch1(8, &[2]));
+    assert_rejects("v1 present 2", &pins_v1_rt, &patch1(10, &[2]));
+    assert_rejects("v1 mode 3", &pins_v1_rt, &patch1(11, &[3]));
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +560,7 @@ proptest! {
     }
 
     #[test]
-    fn pins_roundtrip(u in any::<[u8;16]>(), f in any::<[u8;16]>(), k in any::<u64>(), e in any::<u64>(), fp in any::<[u8;16]>(), mode in 0u8..4) {
+    fn pins_roundtrip(u in any::<[u8;16]>(), f in any::<[u8;16]>(), k in any::<u64>(), e in any::<u64>(), fp in any::<[u8;16]>(), mode in 0u8..4, floor in proptest::option::of((any::<u64>(), any::<[u8;32]>()))) {
         let pin = match mode {
             0 => None,
             1 => Some(Pin { mode: CryptoMode::Plain, fingerprint: [0; 16] }),
@@ -401,9 +568,20 @@ proptest! {
             _ => Some(Pin { mode: CryptoMode::Encrypted, fingerprint: fp }),
         };
         let p = LocalPins { volume_uuid: VolumeUuid(u), family_id: FamilyId(f), max_keyring_seq: k, max_epoch: e, pin };
+        let file = LocalPinsFile {
+            pins: p.clone(),
+            floor: floor.map(|(s, h)| RollbackFloor { max_commit_seq: lunix_format::CommitSeq(s), tip_hash: h }),
+        };
         let mut o = Vec::new();
-        p.encode(&mut o).unwrap();
-        prop_assert_eq!(LocalPins::decode(&o).unwrap(), p);
+        file.encode(&mut o).unwrap();
+        prop_assert_eq!(o.len(), 136);
+        prop_assert_eq!(LocalPinsFile::decode(&o).unwrap(), file);
+        prop_assert_eq!(LocalPins::decode(&o).unwrap(), p.clone());
+        // and the same pins as a version 1 file read as "no floor"
+        let v1 = encode_v1(&p);
+        let d = LocalPinsFile::decode(&v1).unwrap();
+        prop_assert_eq!(d.pins, p);
+        prop_assert_eq!(d.floor, None);
     }
 
     #[test]
