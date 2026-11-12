@@ -80,10 +80,10 @@ do_sync() {
     git -C "$root" archive HEAD | tar -x -C "$stage"
     rsync -a --delete --exclude target/ -e "ssh -o BatchMode=yes" "$stage/" "$LUNIX_HOST:$src/"
     # shellcheck disable=SC2086
-    (cd "$root" && rsync -a --relative -e "ssh -o BatchMode=yes" $LUNIX_OVERLAY "$LUNIX_HOST:$src/")
+    (cd "$root" && rsync -a --no-times --relative -e "ssh -o BatchMode=yes" $LUNIX_OVERLAY "$LUNIX_HOST:$src/")
     return 0
   fi
-  rsync -a --delete --exclude target/ --exclude .git/ -e "ssh -o BatchMode=yes" \
+  rsync -a --delete --exclude target/ --exclude /.git -e "ssh -o BatchMode=yes" \
     "$root/" "$LUNIX_HOST:$src/"
   # The host copy has no .git: hand check-ownership the changed paths.
   if [ -d "$root/.git" ] || [ -f "$root/.git" ]; then

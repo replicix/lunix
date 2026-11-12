@@ -14,6 +14,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 table="${LUNIX_OWNERSHIP_TOML:-$here/ownership.toml}"
 
+# True when $root is a usable git checkout (a worktree's .git is a file that
+# points outside the tree, which is useless on a host that only has a copy).
+has_git() { git -C "$root" rev-parse --git-dir >/dev/null 2>&1; }
+
 m="${LUNIX_M:-}"
 list=""
 base=""
@@ -35,7 +39,7 @@ from_branch() {
   if [[ "$br" == *-* && "$rest" =~ ^[a-z][0-9]?$ ]]; then echo "$first$rest"; else echo "$first"; fi
 }
 if [ -z "$m" ] && [ -n "${LUNIX_BRANCH:-}" ]; then m="$(from_branch "$LUNIX_BRANCH")"; fi
-if [ -z "$m" ] && { [ -d "$root/.git" ] || [ -f "$root/.git" ]; }; then
+if [ -z "$m" ] && has_git; then
   m="$(from_branch "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)")"
 fi
 if [ -z "$m" ]; then
@@ -98,7 +102,7 @@ done <<< "$flat"
 changed=()
 if [ -n "$list" ]; then
   mapfile -t changed < "$list"
-elif [ -d "$root/.git" ] || [ -f "$root/.git" ]; then
+elif has_git; then
   [ -n "$base" ] || base="$(git -C "$root" merge-base HEAD main)"
   mapfile -t changed < <({ git -C "$root" diff --name-only "$base"; git -C "$root" ls-files --others --exclude-standard; } | sort -u)
 elif [ -f "$root/.lunix-changed-files" ]; then
@@ -135,7 +139,7 @@ done
 
 # Cargo.toml/Cargo.lock outside m1a: only in commits titled
 # `deps: add <crate> =<version> for <m>` that touch nothing else.
-if [ "$m" != "m1a" ] && [ -z "$list" ] && { [ -d "$root/.git" ] || [ -f "$root/.git" ]; }; then
+if [ "$m" != "m1a" ] && [ -z "$list" ] && has_git; then
   for c in $(git -C "$root" rev-list "$base"..HEAD 2>/dev/null || true); do
     files="$(git -C "$root" show --name-only --format= "$c")"
     if printf '%s\n' "$files" | grep -Eq '^Cargo\.(toml|lock)$'; then
