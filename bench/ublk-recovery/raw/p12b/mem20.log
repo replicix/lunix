@@ -1,0 +1,9 @@
+== phase immediate count=20 delay=0 10:14:43
+grep: ~/lunix-p0/out/p12b/mem20/daemon.6.log: No such file or directory
+phase immediate done: cycles=20 fio_rc=0 fsck_rc=0 sha_equal=1
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+immediate,20,0,0,0,0,
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| immediate | 20 | 314 | 1264 | 1264 | 452 | 2492 | 594 | 1819 | 1819 |
+overall rc=0

@@ -1,0 +1,3 @@
+fio: pid=0, err=5/file:filesetup.c:241, func=write, error=Input/output error
+fio: open state file: Input/output error
+fio: state file: local-m-0-verify.state (for_write=1)

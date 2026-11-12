@@ -1,0 +1,2 @@
+REFUSED keeper unreachable: keeper connect /var/tmp/lunix-spike/run/keeper.sock: Connection refused (os error 111)
+REFUSED deleted device 0: Ok(0)

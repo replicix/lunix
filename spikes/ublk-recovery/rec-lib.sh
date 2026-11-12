@@ -13,12 +13,12 @@ start_daemon() {
       "${id_arg[@]}" "$@" > "$DLOG" 2>&1 &
   DPID=$!
   local i
-  for i in $(seq 1 300); do
+  for i in $(seq 1 1200); do
     grep -q '^READY' "$DLOG" && break
-    kill -0 "$DPID" 2>/dev/null || { echo "daemon died during start:"; tail -5 "$DLOG"; return 1; }
+    kill -0 "$DPID" 2>/dev/null || { echo "daemon died during start:"; tail -5 "$DLOG"; exit 9; }
     sleep 0.05
   done
-  grep -q '^READY' "$DLOG" || { echo "daemon not ready"; tail -5 "$DLOG"; return 1; }
+  grep -q '^READY' "$DLOG" || { echo "daemon not ready"; tail -5 "$DLOG"; exit 9; }
   DEVID=$(sed -n 's/^READY id=\([0-9]*\) .*/\1/p' "$DLOG")
   DEV=/dev/ublkb$DEVID
   grep -qxF "$DEV" "$CREATED_DEVICES" || { register_device "$DEV"; register_device "/dev/ublkc$DEVID"; }

@@ -18,7 +18,7 @@ exposed). Dates 2026-11-11/12 (the host was rebooted between the first and secon
 | negative control (b) acked-but-dropped writes | fails as expected |
 | FAIL_IO behaviour | done (below) |
 | P0.4 resize, write-cache sysfs, FLUSH counting | done (separate sections) |
-| P0.12 | **not completed**: the first measurement run wedged a device again (see the P0.12 section); the lost-keeper and 20-cycle runs were never executed |
+| P0.12 | **done in the third session** (the second session's attempt wedged a device; see the P0.12 section) |
 
 ## Gate (ADR-17, fixed in advance)
 
@@ -262,46 +262,72 @@ FLUSH, and FUA writes must be durable on completion. ext4's FLUSH counts are fro
 20 minute watchdog during xfs; no data from the interrupted part was used).
 
 
-## P0.12: keeper-held RAM write buffer (ADR-26) - NOT COMPLETED
+## P0.12: keeper-held RAM write buffer (ADR-26)
 
-Implemented (`spikes/ublk-recovery`): `run --sink mem --keeper SOCK --mem-mib N` (memfd ring with a header {magic, device id, generation} and 32-byte record
-headers; writes acknowledged from RAM; FLUSH/FUA drain the ring into the O_DIRECT backing file and `fdatasync`; single queue), `keeper/keeper.py`
-(holds the memfd across `kill -9`, `PUT`/`GET` over a Unix socket with SCM_RIGHTS; the daemon bumps the generation on every recovery), recovery that
-refuses (prints `REFUSED`, deletes the device, exits 3) when the keeper has no buffer or the magic, device id or generation does not match, and the drivers
-`SINK=mem ./run-crash-loop.sh` (cycles with ext4 mounted and fio verify), `run-lost-keeper.sh`, `run-ramsink.sh`. It compiles; **none of the gate runs was executed**.
-The systemd FD store variant was **not run** (not attempted).
+Implementation (`spikes/ublk-recovery`): `run --sink mem --keeper SOCK --mem-mib N`; a memfd ring with a header {magic, device id, generation} and 32-byte record headers;
+writes are appended and acknowledged from RAM; FLUSH and FUA drain the ring into the backing file and `fdatasync`; single queue. `keeper/keeper.py` holds the memfd
+(`PUT`/`GET` over a Unix socket with SCM_RIGHTS, under the scratch dir). On `--recover` the daemon asks the keeper first; if the keeper has no buffer, is unreachable,
+or the magic, device id or generation does not match, it prints `REFUSED`, deletes the device and exits 3, without ever opening the cdev. Otherwise it replays
+(drain), bumps the generation and re-registers the buffer with the keeper.
 
-What ran: `run-ramsink.sh`, unmounted raw device, 4 KiB random writes without FLUSH:
+**Ring-full / safety changes made after the second-session wedge** (what I did about the hazard): (1) the sink's backing file is opened *without* `O_DIRECT`, so a drain is
+buffered `pwrite`s plus one `fdatasync` instead of one synchronous disk write per record (the O_DIRECT drain took ~3.3 ms per record on this disk, i.e. minutes for a full ring);
+(2) the measurement runs are bounded (`--io_size`, never more than the ring); (3) every control command has a `timeout`; (4) no SIGKILL to a stopping daemon and a 30 s wait
+instead; (5) any failed start aborts the driver. I did **not** move the drain off the queue thread: when the ring fills, `append()` still drains inline on the queue thread
+(requests wait during the drain, which is backpressure by delay, but the thread does block). That path was exercised for real (the first kill in the 3-cycle run had 268 MB pending in a 256 MiB ring)
+and cost about 1.4 s of replay/drain, with buffered I/O; the shutdown race that caused the wedges did not occur.
 
-| sink | QD | IOPS | latency p50 / p99 / p99.9 |
-|---|---|---|---|
-| file (O_DIRECT write to the backing file, no sync) | 1 | 248 | 3260 / 13566 / 41157 us |
-| file | 32 | 4634 | 5669 / 10158 / 12648 us |
-| mem (RAM sink) | 1, 32 | **no result** | the fio runs never finished |
+### Acknowledgement latency (raw device, unmounted, 4 KiB random write, no FLUSH issued; `raw/p12b/ramsink.log`)
 
-Why the mem run produced nothing: the fio job was time-based and wrote far more than the 256 MiB ring holds, so the ring filled and `append()` called `drain()`,
-a synchronous record-by-record O_DIRECT `pwrite` into a disk that takes ~3.3 ms per write here (the file-sink row), i.e. minutes for 63 000 records. Meanwhile the
-harness's `timeout`/cleanup sent SIGTERM and later SIGKILL to the busy daemon, whose control ring was in the middle of `STOP_DEV`
-(started requests nobody completes), and **the device wedged exactly as in session 1** (`ublk_stop_dev_unlocked` msleep loop in an io-wq worker, daemon stuck in
-`do_exit`, a `del` command waiting). No file system was mounted this time (raw device), nothing else was affected, and I stopped at once and killed my driver chain
-without issuing any further control command. Hard-learned rule for phase 1: **never let STOP_DEV (or process exit) race with started requests that the daemon is
-not completing; a daemon that must block (drain, S3) has to keep the queue threads completing requests, and shutdown must stop admitting I/O before STOP_DEV.**
-Fixes made after the fact, **untested**: bounded `--io_size` in `run-ramsink.sh`, no SIGKILL fallback and 30 s wait in `stop_daemon_clean`, a watchdog `timeout` around every `del`.
+| sink | QD | IOPS | latency p50 / p99 / p99.9 | io_size |
+|---|---|---|---|---|
+| file (O_DIRECT write to the backing file, not durable) | 1 | 243 | 3359 / 13697 / 16908 us | 8 MiB |
+| file | 32 | 4294 | 6652 / 16581 / 33816 us | 64 MiB |
+| **mem (RAM sink)** | 1 | 210 051 | **3.7 / 11.7 / 155 us** | 64 MiB |
+| **mem** | 32 | 712 347 | **42 / 52 / 514 us** | 64 MiB |
 
-Replay time of a 256 MiB buffer and acknowledgement latency vs the P0.5 journal: **not measured**. For reference the P0.5 journal (group commit, ext4 loop) has
-durable latency ~4.6 ms at 4 KiB closed loop; the file sink above acknowledges a non-durable write in 3.3 ms on this disk, and a RAM sink is expected to be
-tens of microseconds (not measured).
+Against the P0.5 journal (group commit, 4 KiB, ext4 on a loop device, closed loop): durable latency p50 4.6 ms (B=64) to 2.7 ms (B=1, 356 rec/s), flush p50 ~1.8 ms; on the real-disk directory 0.9-1.5 ms.
+The RAM sink acknowledges a write ~700x faster than the journal makes it durable (3.7 us vs 2.7 ms at QD1), as expected: nothing in the ack path waits for a medium. The price is
+that a FLUSH still costs a drain + `fdatasync` here, and that the data is only as durable as the keeper (see the lost-keeper case).
 
-## Host state left behind
+### Replay of a 256 MiB buffer after kill -9 (no FLUSH before the kill, backing file buffered)
 
-Device `ublk0` (raw, no file system) is wedged again: daemon `ublk-recovery run` in D state, two `fio` jobs and one `ublk-recovery del` waiting on it,
-`ublk_drv` loaded and not removable, `/var/tmp/lunix-spike/rec.img` (4 GiB) held open. No mounts. Not forced, not retried.
+| record size | pending bytes | applied | replay time | exec to recovered |
+|---|---|---|---|---|
+| 64 KiB | 262 272 000 | 262 144 000 | 3.76 s | 3.89 s |
+| 4 KiB | 264 192 000 | 262 144 000 | 23.7 s | 23.8 s |
+
+The replay is dominated by the backing disk (here ~10 K random 4 KiB writes per second plus the final `fdatasync`); in the real design the replay feeds the destage/commit path, not a local file,
+so these numbers are an upper bound for a slow local medium. Note the device stalls (I/O queued) for the whole replay.
+
+### Gate runs
+
+| run | result |
+|---|---|
+| 3 mounted cycles (ext4, fio verify, 2 fsyncers, heartbeat) | clean: fio 0, fsck 0, sha equal, 0 bad acked blocks; replay 1.4 s / 1.1 s / 0.2 s |
+| **20 mounted cycles** (kill -9 at 5-12 s) | **clean**: fio exit 0, fsck rc 0, sha equal, 0 bad blocks of acked fsyncs, 0 heartbeat errors. exec to recovered p50/p99/max 314 / 1264 / 1264 ms; kill to ready p50/max 452 / 2492 ms; heartbeat stall p50/p99/max 594 / 1819 / 1819 ms; pending bytes at the kill from 1.4 MB to 203 MB (203 MB replayed in 0.59 s) |
+| **lost keeper** (keeper and daemon `kill -9` together, then restart with `--recover`) | **refused and deleted, never resumed**: `REFUSED keeper unreachable ... Connection refused`, `DEL_DEV` rc 0; fio failed with `Input/output error`, the fsyncer got `Errno 5` at block 19, ext4 logged `Buffer I/O error on device ublkb0` and went to `emergency_ro` (read-only) |
+| generation-mismatch refusal path | exists in code, not exercised separately |
+| systemd FD-store variant | **not run**: needs `sd_notify(FDSTORE=1)` and a `LISTEN_FDS` recovery path in the daemon; not cheap, skipped |
+
+Observation from the lost-keeper run: after the refusal, the refusing process stayed blocked in `DEL_DEV` (the kernel waits for the last reference to the block device, which the still-mounted, now
+read-only ext4 held) and ignored the harness's `timeout` SIGTERM (the spike masks SIGTERM until it serves). It completed on its own as soon as I ran `umount` on the dead fs; the device was never wedged (state S, not D).
+The driver chain was stopped once the DEL command exceeded the watchdog, per the rules; only the `umount` was issued afterwards. Phase 1 needs the same awareness: a deleted device with a mounted fs keeps the cdev/bdev
+alive until the mount is released.
+
+**Gate (P0.12): met.** All 20 cycles finish with fsck clean; no write acknowledged by a FLUSH before a kill was lost (fsyncer: 0 bad blocks, fio verify clean); the lost-keeper case never resumed the device.
+Limitations: fio's variable block size + `norandommap` limits its verify coverage ("verify limited"); the single queue; the drain is on the queue thread; the FD-store variant and the replay with a real remote sink were not tested.
 
 ## Proposed decision record (for the lead to merge)
 
-ADR-17 gate outcome (2026-11-12): **accepted (gate)** for kill -9 recovery (46 cycles, ext4 and xfs, clean) and for QUIESCE with the corrected daemon (20/20 clean);
+ADR-17 gate outcome (2026-11-12): **accepted (gate)** for kill -9 recovery (ext4 36 cycles, xfs 10, RAM-sink ext4 23) and for QUIESCE with the corrected daemon (20/20 clean);
 **amended**: (1) after `QUIESCE_DEV` the daemon exits without `STOP_DEV` (libublk `run_target()` unusable for that path); (2) `SET_PARAMS` is retained by the driver; (3) BATCH_IO stays
 opt-in (no performance gain, and a QUIESCE handover broke the fs in the one trial); (4) `USER_RECOVERY_FAIL_IO` devices are not recoverable (delete and remount); (5) the daemon
-must never let `STOP_DEV`/exit race with started requests it is not completing (device wedge, observed twice). Both negative controls trip the harness as designed.
+must never let `STOP_DEV` or process exit race with started requests it is not completing (device wedge, observed twice; also: deleting a device with a mounted fs blocks until unmount). Both negative controls trip the harness as designed.
 ADR-20: online grow via `UPDATE_SIZE` works on ext4, xfs and btrfs under load, also right after a recovery; the driver accepts sizes that are not a multiple of the logical block size, so the daemon must validate.
-ADR-26 (RAM write buffer + keeper): **not run**; code and drivers ready.
+ADR-26 gate outcome: **accepted (gate)** for the keeper-held memfd with generation check: 23 mounted recovery cycles clean, lost keeper refuses and deletes (EIO to the fs), RAM-sink ack latency 3.7 us at QD1 /
+42 us at QD32. Open points for phase 1: replay time depends on the sink (3.8 s for 256 MiB of 64 KiB records, 24 s for 4 KiB records onto a slow disk), the drain must not run on the queue thread, the systemd FD-store variant is untested.
+
+## Host state
+
+Third-session end state: no ublk device, `ublk_drv` unloaded by me, no mounts, scratch dir empty (`run/created-devices` only), `rec.img` removed. Leftover check clean.

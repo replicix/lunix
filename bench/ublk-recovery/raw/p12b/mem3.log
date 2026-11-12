@@ -1,0 +1,8 @@
+== phase immediate count=3 delay=0 10:12:43
+phase immediate done: cycles=3 fio_rc=0 fsck_rc=0 sha_equal=1
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+immediate,3,0,0,0,0,
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| immediate | 3 | 1206 | 1534 | 1534 | 1592 | 1722 | 1173 | 1716 | 1716 |
+overall rc=0

@@ -6,6 +6,7 @@
 //! followed by `len` payload bytes (a multiple of 4096). Positions are virtual u64 byte counters;
 //! a record never straddles the physical end of the ring (a pad record fills the gap).
 //! The ring header (first page) holds {magic, dev_id, generation, size, head, tail, seq}.
+//! The backing file is opened WITHOUT O_DIRECT for this sink (see main.rs), so a drain is buffered writes plus one fdatasync.
 //! Spike shortcuts: no crc, no torn-record handling beyond "head is published after the payload".
 use anyhow::{bail, Result};
 use std::collections::HashMap;

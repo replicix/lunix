@@ -1,0 +1,4 @@
+# P0.12 lost-keeper test
+- before: keeper log: keeper ready;PUT dev=0 gen=1;
+run-lost-keeper.sh: line 31: 47301 Killed                     python3 "$here/keeper/keeper.py" "$KSOCK" > "$OUT/keeper.log" 2>&1
+- killed keeper and daemon together

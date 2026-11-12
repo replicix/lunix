@@ -422,7 +422,10 @@ fn run(dev_id: i32, backing: String, recover: bool, queues: u16, depth: u16, buf
             }
         }
     });
-    let f = std::fs::OpenOptions::new().read(true).write(true).custom_flags(libc::O_DIRECT).open(&backing)?;
+    // The RAM-sink drain writes through the page cache and fdatasyncs once per FLUSH (a drain of many records must not
+    // become one synchronous O_DIRECT write per record); the file sink keeps O_DIRECT.
+    let oflags = if sink == "mem" { 0 } else { libc::O_DIRECT };
+    let f = std::fs::OpenOptions::new().read(true).write(true).custom_flags(oflags).open(&backing)?;
     let size = f.metadata()?.len();
     let fd = f.into_raw_fd();
     let mut cflags: u64 = (sys::UBLK_F_CMD_IOCTL_ENCODE | sys::UBLK_F_USER_RECOVERY | sys::UBLK_F_QUIESCE | sys::UBLK_F_UPDATE_SIZE) as u64;

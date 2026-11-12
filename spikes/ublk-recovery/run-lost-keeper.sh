@@ -29,7 +29,7 @@ say "- before: keeper log: $(tr '\n' ';' < "$OUT/keeper.log")"
 T0=$(now_ns)
 kill -9 "$KPID" "$DPID"; wait "$DPID" 2>/dev/null
 say "- killed keeper and daemon together"
-taskset -c "$DAEMON_CPUS" "$REC_BIN" run --backing "$IMG" --queues 1 --cpus "$DAEMON_CPUS" --dev-id "$DEVID" --recover \
+timeout 60 taskset -c "$DAEMON_CPUS" "$REC_BIN" run --backing "$IMG" --queues 1 --cpus "$DAEMON_CPUS" --dev-id "$DEVID" --recover \
    --sink mem --keeper "$KSOCK" > "$OUT/daemon.restart.log" 2>&1
 RC=$?
 say "- restarted daemon exit code: $RC (3 = refused); output: $(grep -E 'REFUSED' "$OUT/daemon.restart.log" | tr '\n' ';')"
