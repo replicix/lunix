@@ -542,11 +542,12 @@ fn a_wrapped_ring_with_a_lost_checkpoint_recovers() {
 }
 
 fn small_cuts(cfg: &mut lunix_engine::EngineConfig) {
-    cfg.max_chunks_per_cut = 4;
+    cfg.map_fanout = 4;
+    cfg.max_leaves_per_cut = 2;
 }
 
 #[test]
-fn a_cut_is_bounded_by_max_chunks_per_cut_and_big_discards_are_split() {
+fn a_cut_is_bounded_by_max_leaves_per_cut_and_big_discards_are_split() {
     let cs = 16u64 << 10;
     let mut v = Vol::create(cs as u32, 64, 2, JournalMode::Mixed(6));
     v.tweak = small_cuts;
@@ -570,15 +571,15 @@ fn a_cut_is_bounded_by_max_chunks_per_cut_and_big_discards_are_split() {
         assert!(commits < 50);
     }
     assert!(
-        commits >= 5,
-        "20 chunks in cuts of at most 4: {commits} commits"
+        commits >= 3,
+        "20 chunks, 4 per leaf, at most 2 leaves per cut: {commits} commits"
     );
     // A discard of the whole device is several records.
     v.hooks.take_seqs();
     assert!(r.hole(0, IoOp::Discard, 0, (64 * cs) as u32).is_ok());
     assert!(
-        v.hooks.take_seqs().len() >= 64 / 2,
-        "split into records of 2 chunks"
+        v.hooks.take_seqs().len() >= 64 / 4,
+        "split into records of one leaf (4 chunks)"
     );
     while r.engine.commit_now(false).expect("commit") != CommitOutcome::Idle {}
     let p = r.stop();

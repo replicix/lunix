@@ -24,7 +24,7 @@ use lunix_iface::map::{BlockMap, ChunkNo};
 use lunix_iface::overlay::{OverlayCut, PieceSource};
 use lunix_iface::space::SpaceGate;
 use lunix_iface::store::{SealedSegment, SegmentStore, SegmentWriter};
-use lunix_iface::{Error, Result};
+use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::read::ChunkReader;
 
@@ -47,6 +47,8 @@ pub struct DestageCtx<'a> {
     /// The space gate, for `ReadOnly` and `fatal_io` on a host EIO only: the
     /// ledger reservations of a cut are the coordinator's (C2, C4).
     pub space: &'a dyn SpaceGate,
+    /// The journal's fill is M9's back-pressure input (degrade compression
+    /// under pressure): an adapter derives it from `journal.fill()`.
     /// The volume chunk size.
     pub chunk_size: u32,
     /// The map id-prefix length.
@@ -80,6 +82,62 @@ pub struct DestageOutcome {
     pub cold_rmw: u64,
     /// Nanoseconds per stage: hash, dedup, compress, seal, append.
     pub stage_ns: [u64; 5],
+    /// Extents whose tag, AEAD or id failed in the pipeline's own reads
+    /// (base reads, dedup confirmation). Reads through `DestageCtx::reader`
+    /// are already counted by the engine and must not be added here.
+    pub extent_auth_failures: u64,
+}
+
+/// What the coordinator does about a failed destage (1:1 with M9's
+/// `ErrorClass`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Retry {
+    /// Transient (`Io` that is not a host EIO, `Busy`): fail this commit
+    /// attempt, the next trigger retries.
+    Later,
+    /// No space: retry once the space ladder freed room.
+    AfterSpace,
+    /// `MapFull` with dirty leaves already in the map: cut smaller.
+    AfterMapSeal,
+    /// The cut alone exceeds the map's dirty-leaf cap: cut smaller.
+    CutTooLarge,
+    /// Retrying cannot help (a damaged or forged extent, a malformed cut):
+    /// the engine stops committing; writes fail, reads continue.
+    Never,
+    /// The volume is read-only or shutting down: stop.
+    Stop,
+}
+
+impl Retry {
+    /// The class of `e` (M9's table). `map_dirty` tells the two `MapFull`s
+    /// apart.
+    pub fn classify(e: &Error, map_dirty: bool) -> Self {
+        if matches!(e, Error::Io(io) if matches!(io.raw_os_error(), Some(5 | 30))) {
+            return Self::Stop;
+        }
+        match e.kind() {
+            ErrorKind::NoSpace => Self::AfterSpace,
+            ErrorKind::MapFull if map_dirty => Self::AfterMapSeal,
+            ErrorKind::MapFull => Self::CutTooLarge,
+            ErrorKind::Io | ErrorKind::Busy => Self::Later,
+            ErrorKind::ReadOnly | ErrorKind::Closed => Self::Stop,
+            _ => Self::Never,
+        }
+    }
+}
+
+/// A failed destage. Nothing was applied to the map and the segments of the
+/// cut were deleted; the overlay still holds the data.
+#[derive(Debug, thiserror::Error)]
+#[error("destage failed ({retry:?}, chunk {chunk:?}): {error}")]
+pub struct DestageFailure {
+    /// Why.
+    #[source]
+    pub error: Error,
+    /// What to do about it.
+    pub retry: Retry,
+    /// The chunk the failure happened at, when there is one.
+    pub chunk: Option<u64>,
 }
 
 /// The destage pipeline (M9).
@@ -91,9 +149,14 @@ pub trait Destager: Send + Sync {
     /// sweep). Index inserts are returned, never applied.
     ///
     /// # Errors
-    /// `MapFull` when the cut needs more dirty leaves than the map allows
-    /// (the caller cuts smaller); store, journal and codec errors.
-    fn destage(&self, cut: &OverlayCut, ctx: &DestageCtx<'_>) -> Result<DestageOutcome>;
+    /// A [`DestageFailure`] with its [`Retry`] class and the chunk: `MapFull`
+    /// classes make the caller cut smaller, `Later`/`AfterSpace` fail the
+    /// commit attempt, `Never`/`Stop` stop the engine's commits.
+    fn destage(
+        &self,
+        cut: &OverlayCut,
+        ctx: &DestageCtx<'_>,
+    ) -> std::result::Result<DestageOutcome, DestageFailure>;
 }
 
 /// The in-crate stand-in for M9 (raw codec, one thread).
@@ -105,23 +168,50 @@ fn nanos(t: Instant) -> u64 {
 }
 
 impl Destager for SimpleDestager {
-    fn destage(&self, cut: &OverlayCut, ctx: &DestageCtx<'_>) -> Result<DestageOutcome> {
+    fn destage(
+        &self,
+        cut: &OverlayCut,
+        ctx: &DestageCtx<'_>,
+    ) -> std::result::Result<DestageOutcome, DestageFailure> {
         let mut out = DestageOutcome::default();
-        match destage_into(cut, ctx, &mut out) {
+        let mut chunk = None;
+        let map_dirty = ctx.map.dirty_leaf_count() > 0;
+        let res = if ctx.space.is_read_only() {
+            Err(Error::ReadOnly)
+        } else {
+            destage_into(cut, ctx, &mut out, &mut chunk)
+        };
+        match res {
             Ok(()) => Ok(out),
-            Err(e) => {
+            Err(error) => {
                 for s in &out.segments {
                     if let Err(d) = ctx.segments.delete(s.seg) {
                         tracing::warn!(error = %d, seg = %s.seg, "segment of a failed cut not deleted; the sweep or GC removes it");
                     }
                 }
-                Err(e)
+                let retry = Retry::classify(&error, map_dirty);
+                // A MapFull from the final transaction is about the cut, not a chunk.
+                let chunk = if error.kind() == ErrorKind::MapFull {
+                    None
+                } else {
+                    chunk
+                };
+                Err(DestageFailure {
+                    error,
+                    retry,
+                    chunk,
+                })
             }
         }
     }
 }
 
-fn destage_into(cut: &OverlayCut, ctx: &DestageCtx<'_>, out: &mut DestageOutcome) -> Result<()> {
+fn destage_into(
+    cut: &OverlayCut,
+    ctx: &DestageCtx<'_>,
+    out: &mut DestageOutcome,
+    current: &mut Option<u64>,
+) -> Result<()> {
     {
         let cs = ctx.chunk_size as usize;
         let chunk_blocks = (cs / BLOCK) as u64;
@@ -131,6 +221,7 @@ fn destage_into(cut: &OverlayCut, ctx: &DestageCtx<'_>, out: &mut DestageOutcome
         let mut buf = vec![0u8; cs];
         let mut extent = Vec::with_capacity(cs + 256);
         for chunk in &cut.chunks {
+            *current = Some(chunk.chunk);
             out.chunks_total += 1;
             let ci = ChunkNo(chunk.chunk);
             let base_lba = chunk.chunk * chunk_blocks;

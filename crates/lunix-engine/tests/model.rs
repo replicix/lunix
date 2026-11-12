@@ -430,3 +430,117 @@ fn model_16k() {
 fn model_64k() {
     run_model(64 << 10);
 }
+
+/// Deterministic case (review major 5): writes still in flight when a cut
+/// is taken (`Manual` completions), and reads inside the C2-C9 window. With
+/// C1's wait removed the commit claims a cut that misses the in-flight
+/// writes and the reopen loses them.
+fn in_flight_at_a_cut(cs: u32) {
+    use lunix_iface::journal::LaneId;
+    let csz = u64::from(cs);
+    let mut v = Vol::create(cs, 8, 2, JournalMode::Manual);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    // A committed base.
+    let base = pattern(1, cs as usize);
+    let t = r.submit(0, IoOp::Write, false, 0, cs, &base);
+    while !r.is_done(t) {
+        r.journal.complete_appends(LaneId(0), 64);
+        r.pump();
+    }
+    r.engine.commit_now(false).expect("commit");
+    // Three writes whose appends stay in flight.
+    let a = pattern(2, 8192);
+    let b = pattern(3, 4096);
+    let tags = [
+        r.submit(0, IoOp::Write, false, 4096, 8192, &a),
+        r.submit(1, IoOp::Write, false, csz + 4096, 4096, &b),
+        r.submit(0, IoOp::Write, false, 2 * csz, 4096, &b),
+    ];
+    assert!(tags.iter().all(|t| !r.is_done(*t)), "appends are held");
+    let Running {
+        engine,
+        queues,
+        done,
+        journal,
+        ..
+    } = &mut r;
+    let outcome = std::thread::scope(|s| {
+        let h = s.spawn(|| engine.commit_now(false));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!h.is_finished(), "C1 waits for the in-flight writes");
+        journal.complete_appends(LaneId(0), 64);
+        journal.complete_appends(LaneId(1), 64);
+        while !h.is_finished() {
+            for q in queues.iter_mut() {
+                q.poll(done);
+            }
+            std::thread::yield_now();
+        }
+        h.join().expect("commit thread")
+    });
+    let committed = outcome.expect("commit");
+    for t in tags {
+        assert!(r.wait(&[t])[0].0.is_ok());
+    }
+    let mut want = base.clone();
+    want[4096..12288].copy_from_slice(&a);
+    match committed {
+        CommitOutcome::Committed { cut_seq, .. } => assert!(cut_seq.0 >= 4, "{cut_seq:?}"),
+        CommitOutcome::Idle => panic!("idle"),
+    }
+    // A read inside the C2-C9 window: a partial overwrite of chunk 0, the
+    // commit stopped after the destage, at the map pack and after C6.
+    for point in [
+        "engine.c3.destaged",
+        "engine.c5.map_sealed",
+        "engine.c6.committed",
+    ] {
+        let c = pattern(10, 4096);
+        let t = r.submit(1, IoOp::Write, false, 3 * 4096, 4096, &c);
+        while !r.is_done(t) {
+            r.journal.complete_appends(LaneId(1), 64);
+            r.pump();
+        }
+        assert!(r.wait(&[t])[0].0.is_ok());
+        want[3 * 4096..4 * 4096].copy_from_slice(&c);
+        v.hooks.arm(point, 1);
+        assert!(r.engine.commit_now(false).is_err(), "{point}");
+        let t = r.submit(0, IoOp::Read, false, 0, cs, &[]);
+        let (st, got) = r.wait(&[t]).remove(0);
+        assert!(st.is_ok(), "{point}: {st:?}");
+        assert_eq!(got, want, "read inside the window at {point}");
+        // The engine stopped: reopen with nothing unflushed surviving.
+        let p = r.stop();
+        v.store = p.store.crash(3);
+        v.index = p.index.image();
+        v.journal = p
+            .journal
+            .crash_with(3, lunix_testkit::CrashModel::lose_all());
+        r = v.open().map_err(|e| e.0).expect("reopen");
+        // The committed cut held the formerly in-flight writes; the last
+        // overwrite was never flushed, so it may be gone (C6 keeps it).
+        let t = r.submit(0, IoOp::Read, false, 0, cs, &[]);
+        let (_, got) = r.wait(&[t]).remove(0);
+        assert_eq!(
+            got[4096..12288],
+            a[..],
+            "{point}: the in-flight writes are in the commit"
+        );
+        let t = r.submit(0, IoOp::Read, false, csz + 4096, 4096, &[]);
+        assert_eq!(r.wait(&[t]).remove(0).1, b, "{point}");
+        if point == "engine.c6.committed" {
+            assert_eq!(got, want, "C6 made the overwrite durable");
+        }
+        want = got;
+    }
+}
+
+#[test]
+fn in_flight_writes_at_a_cut_16k() {
+    in_flight_at_a_cut(16 << 10);
+}
+
+#[test]
+fn in_flight_writes_at_a_cut_64k() {
+    in_flight_at_a_cut(64 << 10);
+}

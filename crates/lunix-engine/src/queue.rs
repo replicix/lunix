@@ -119,6 +119,8 @@ enum Kind {
     Read(ReadState),
     /// A FLUSH, or a FUA write whose records are all in: waits for its group.
     Flush,
+    /// Placeholder while a read's state is taken out to be updated.
+    Taken,
 }
 
 struct Req {
@@ -144,6 +146,9 @@ struct JRead {
     gen: u64,
     req_off: usize,
     range: BlockRange,
+    /// The piece's record: a failed read may fall back to the map only if
+    /// the durable tip covers it.
+    write_seq: WriteSeq,
 }
 
 /// The buffer of the request `on_request` is handling.
@@ -214,6 +219,10 @@ impl Queue {
     }
 
     fn handle(&mut self, req: IoRequest, buf: &mut [u8], done: &mut dyn Completer) {
+        if !self.valid(&req) {
+            done.complete(req.tag, IoStatus::err(EINVAL));
+            return;
+        }
         let st = &self.inner.stats;
         match req.op {
             IoOp::Flush => add(&st.ops_flush, 1),
@@ -221,10 +230,6 @@ impl Queue {
             IoOp::Write => add(&st.ops_write, 1),
             IoOp::Discard => add(&st.ops_discard, 1),
             IoOp::WriteZeroes => add(&st.ops_write_zeroes, 1),
-        }
-        if !self.valid(&req) {
-            done.complete(req.tag, IoStatus::err(EINVAL));
-            return;
         }
         let gen = self.next_gen;
         self.next_gen += 1;
@@ -332,9 +337,14 @@ impl Queue {
             let remaining = m.end_block - m.next_block;
             let blocks = match m.record {
                 RecordKind::Write => remaining.min(256),
-                RecordKind::Hole => remaining
-                    .min(u64::from(u32::MAX))
-                    .min((inner.cfg.max_chunks_per_cut / 2).max(1) * inner.cfg.chunk_blocks()),
+                // At most half a cut's leaves per hole record, so a cut can
+                // stop between records.
+                RecordKind::Hole => remaining.min(u64::from(u32::MAX)).min(
+                    (inner.cfg.max_leaves_per_cut / 2)
+                        .max(1)
+                        .saturating_mul(u64::from(inner.cfg.map_fanout.max(1)))
+                        .saturating_mul(inner.cfg.chunk_blocks()),
+                ),
             };
             let blocks32 = u32::try_from(blocks).unwrap_or(u32::MAX);
             let charge = record_bytes(m.record, blocks32);
@@ -481,10 +491,19 @@ impl Queue {
                                     gen,
                                     req_off,
                                     range: p.range,
+                                    write_seq: p.write_seq,
                                 },
                             );
                         }
-                        Err(_) => self.map_parts(req.tag, gen, lba, p.range, &mut st),
+                        Err(_) => self.journal_read_failed(
+                            req.tag,
+                            gen,
+                            lba,
+                            p.range,
+                            p.write_seq,
+                            EIO,
+                            &mut st,
+                        ),
                     }
                 }
                 PieceSource::None => self.map_parts(req.tag, gen, lba, p.range, &mut st),
@@ -515,6 +534,11 @@ impl Queue {
     /// The map side of a read for `range` (blocks the overlay does not hold):
     /// holes are zeros, resident entries are served from the decoded-chunk
     /// cache, everything else goes to a read helper.
+    ///
+    /// A helper reads the entry seen here even if a cut replaces it before
+    /// the read runs. That is correct because the new extent differs from
+    /// the old one only in blocks the cut wrote, and the overlay holds every
+    /// such block until C9 (after C6), so this lookup did not route them here.
     fn map_parts(
         &mut self,
         tag: Tag,
@@ -663,7 +687,8 @@ impl Queue {
         if !matches!(r.kind, Kind::Read(_)) {
             return;
         }
-        let Kind::Read(mut st) = std::mem::replace(&mut r.kind, Kind::Flush) else {
+        // Take the state out while `map_parts` borrows the queue.
+        let Kind::Read(mut st) = std::mem::replace(&mut r.kind, Kind::Taken) else {
             return;
         };
         st.pending = st.pending.saturating_sub(1);
@@ -673,14 +698,44 @@ impl Queue {
                 None => st.failed = Some(EIO),
             }
         } else {
-            // The record was reclaimed after the lookup: its data is in the
-            // map now (the overlay is released only after the commit).
-            self.map_parts(j.tag, j.gen, req_lba, j.range, &mut st);
+            let errno = status.errno().unwrap_or(EIO);
+            self.journal_read_failed(j.tag, j.gen, req_lba, j.range, j.write_seq, errno, &mut st);
         }
         if let Some(r) = self.reqs.get_mut(&j.tag) {
             r.kind = Kind::Read(st);
         }
         self.maybe_finish_read(j.tag, done, inline);
+    }
+
+    /// A journal read of an overlay piece failed. If the durable tip covers
+    /// the piece's record, the record was destaged and possibly reclaimed
+    /// after the lookup, and the map holds that version or a newer one
+    /// (the overlay is released only after the commit): read the map.
+    /// Otherwise the journal is the only copy of an acknowledged write, and
+    /// serving the map's older version would be stale data under a success
+    /// status: fail the read.
+    #[allow(clippy::too_many_arguments)]
+    fn journal_read_failed(
+        &mut self,
+        tag: Tag,
+        gen: u64,
+        req_lba: u64,
+        range: BlockRange,
+        write_seq: WriteSeq,
+        errno: i32,
+        st: &mut ReadState,
+    ) {
+        if write_seq.0 <= self.inner.durable_cut.load(Ordering::Acquire) {
+            self.map_parts(tag, gen, req_lba, range, st);
+        } else {
+            tracing::error!(
+                write_seq = write_seq.0,
+                lba = range.lba,
+                errno,
+                "journal read of an undestaged record failed"
+            );
+            st.failed = Some(if errno > 0 { errno } else { EIO });
+        }
     }
 
     fn on_deferred(&mut self, d: Deferred, done: &mut dyn Completer, inline: &mut Inline<'_>) {
@@ -780,6 +835,27 @@ impl Queue {
             if !progressed {
                 break;
             }
+        }
+    }
+}
+
+impl Drop for Queue {
+    /// A handler dropped with records in flight (the ublk layer should drain
+    /// first, W1/W2) would leave their numbers in the in-flight set forever,
+    /// and each later C1 would wait out its timeout; their data may never
+    /// reach the overlay, so no cut may pass them: they poison the volume.
+    fn drop(&mut self) {
+        let inflight: Vec<u64> = std::mem::take(&mut *lock(&self.shared.inflight))
+            .into_iter()
+            .collect();
+        if let Some(&first) = inflight.first() {
+            self.inner
+                .poison(first, "queue handler dropped with writes in flight");
+        }
+        self.inner.notify_progress();
+        let idx = usize::from(self.shared.id.0);
+        if let Some(slot) = lock(&self.inner.queues).get_mut(idx) {
+            *slot = None;
         }
     }
 }

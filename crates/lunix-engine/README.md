@@ -11,7 +11,7 @@ traits only; `lunixd` (M12) wires the real crates in through `EngineDeps`.
 | `flush.rs` | flush groups: `upto = last_issued()` at formation, one group in flight |
 | `coord.rs` | C1-C10, the commit triggers (`T`, `B`, journal fill, a full ring, pending `moved`), the GC hook |
 | `recover.rs` | `Engine::open`: chain verification (no fallback), R4, orphan sweep and allocator floor, index catch-up, map, checkpoint hint, journal recovery and overlay rebuild, floor raise, ledger |
-| `read.rs` | the R1 reader (the only `read_extent` call), the stale-hint fallback, the open-segment wait, the read helper pool |
+| `read.rs` | the R1 reader (the only `read_extent` call), the stale-hint fallback, the read helper pool |
 | `destage.rs` | the `Destager` seam to M9 and `SimpleDestager`, the in-crate stand-in |
 | `cache.rs` | the decoded-chunk CLOCK cache |
 

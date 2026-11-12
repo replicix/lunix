@@ -125,6 +125,10 @@ pub struct Checks {
     pub index: Mutex<Option<Arc<MemIndex>>>,
     /// The highest cut handed to `tail_after`.
     pub max_tail_cut: AtomicU64,
+    /// Journal reads to fail: at `submit_read` (an `Err`) and at their
+    /// completion (an error status).
+    pub fail_jread_submit: AtomicU64,
+    pub fail_jread_completion: AtomicU64,
     /// Group flushes submitted, and the most outstanding at once.
     pub flush_submitted: AtomicU64,
     pub flush_outstanding: Arc<AtomicU64>,
@@ -366,7 +370,10 @@ impl Journal for GJournal {
         self.inner.lanes()
     }
     fn open_lane(&self, lane: LaneId, wake: WakeFd) -> Result<Box<dyn JournalLane>> {
-        self.inner.open_lane(lane, wake)
+        Ok(Box::new(GLane {
+            inner: self.inner.open_lane(lane, wake)?,
+            checks: Arc::clone(&self.checks),
+        }))
     }
     fn last_issued(&self) -> WriteSeq {
         self.inner.last_issued()
@@ -413,6 +420,87 @@ impl Journal for GJournal {
     }
     fn fill(&self) -> JournalFill {
         self.inner.fill()
+    }
+}
+
+fn take_one(a: &AtomicU64) -> bool {
+    a.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+        .is_ok()
+}
+
+/// A lane whose reads can be made to fail.
+pub struct GLane {
+    inner: Box<dyn JournalLane>,
+    checks: Arc<Checks>,
+}
+
+impl JournalLane for GLane {
+    fn lane(&self) -> LaneId {
+        self.inner.lane()
+    }
+    fn try_reserve(
+        &mut self,
+        kind: lunix_format::journal::RecordKind,
+        blocks: u32,
+    ) -> Result<lunix_iface::journal::SlotOutcome> {
+        self.inner.try_reserve(kind, blocks)
+    }
+    fn append(
+        &mut self,
+        slot: lunix_iface::journal::Slot,
+        lba: u64,
+        data: &[u8],
+    ) -> Result<lunix_iface::journal::Appended> {
+        self.inner.append(slot, lba, data)
+    }
+    fn submit_read(
+        &mut self,
+        loc: JournalLoc,
+        buf: Vec<u8>,
+        token: lunix_iface::journal::Token,
+    ) -> Result<()> {
+        if take_one(&self.checks.fail_jread_submit) {
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "injected read error",
+            )));
+        }
+        self.inner.submit_read(loc, buf, token)
+    }
+    fn poll(&mut self, out: &mut Vec<lunix_iface::journal::JournalCompletion>) {
+        let start = out.len();
+        self.inner.poll(out);
+        for c in &mut out[start..] {
+            if let lunix_iface::journal::JournalCompletion::Read { status, .. } = c {
+                if take_one(&self.checks.fail_jread_completion) {
+                    *status = IoStatus::err(5);
+                }
+            }
+        }
+    }
+    fn completed_watermark(&self) -> WriteSeq {
+        self.inner.completed_watermark()
+    }
+}
+
+/// A destager that fails one call with a chosen class.
+pub struct FaultyDestager {
+    pub fail: Arc<Mutex<Option<lunix_engine::Retry>>>,
+}
+
+impl lunix_engine::Destager for FaultyDestager {
+    fn destage(
+        &self,
+        cut: &lunix_iface::overlay::OverlayCut,
+        ctx: &lunix_engine::DestageCtx<'_>,
+    ) -> std::result::Result<lunix_engine::DestageOutcome, lunix_engine::DestageFailure> {
+        if let Some(retry) = lock(&self.fail).take() {
+            return Err(lunix_engine::DestageFailure {
+                error: lunix_iface::Error::Io(std::io::Error::other("injected destage failure")),
+                retry,
+                chunk: cut.chunks.first().map(|c| c.chunk),
+            });
+        }
+        SimpleDestager.destage(cut, ctx)
     }
 }
 
@@ -476,8 +564,9 @@ impl ChunkIndex for GIndex {
     }
 }
 
-/// The map with the queue-thread rule (only `try_get_cached` is allowed).
-pub struct GMap(pub FlatMap);
+/// The map with the queue-thread rule (only `try_get_cached` is allowed)
+/// and injectable walk failures.
+pub struct GMap(pub FlatMap, pub Arc<AtomicU64>);
 
 impl BlockMap for GMap {
     fn chunk_count(&self) -> u64 {
@@ -514,6 +603,11 @@ impl BlockMap for GMap {
         f: &mut dyn FnMut(ChunkNo, &DataEntry),
     ) -> Result<()> {
         not_on_queue("map walk");
+        if take_one(&self.1) {
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "injected walk failure",
+            )));
+        }
         self.0.walk_leaves_skipping(root, skip, f)
     }
     fn walk_nodes(&self, root: &MapRoot, f: &mut dyn FnMut(&NodeRef)) -> Result<()> {
@@ -534,6 +628,7 @@ pub struct FlatOpener {
     pub packs: Arc<dyn PackRead>,
     pub id_len: IdLen,
     pub dirty_cap: Option<u64>,
+    pub walk_faults: Arc<AtomicU64>,
 }
 
 impl MapOpener for FlatOpener {
@@ -548,7 +643,7 @@ impl MapOpener for FlatOpener {
         if let Some(cap) = self.dirty_cap {
             m = m.with_dirty_leaf_cap(cap);
         }
-        Ok(Arc::new(GMap(m)))
+        Ok(Arc::new(GMap(m, Arc::clone(&self.walk_faults))))
     }
 }
 
@@ -574,6 +669,8 @@ pub struct Vol {
     pub space_cfg: Option<MemSpaceConfig>,
     pub read_faults: Arc<ReadFaults>,
     pub collector: Mutex<Option<Box<dyn lunix_iface::gc::Collector>>>,
+    pub destage_fault: Arc<Mutex<Option<lunix_engine::Retry>>>,
+    pub walk_faults: Arc<AtomicU64>,
 }
 
 pub fn default_tweak(_: &mut EngineConfig) {}
@@ -640,6 +737,8 @@ impl Vol {
             space_cfg: None,
             read_faults: Arc::new(ReadFaults::default()),
             collector: Mutex::new(None),
+            destage_fault: Arc::new(Mutex::new(None)),
+            walk_faults: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -697,8 +796,11 @@ impl Vol {
                 packs: Arc::new(g),
                 id_len: self.id_len,
                 dirty_cap: self.dirty_cap,
+                walk_faults: Arc::clone(&self.walk_faults),
             }),
-            destager: Arc::new(SimpleDestager),
+            destager: Arc::new(FaultyDestager {
+                fail: Arc::clone(&self.destage_fault),
+            }),
             collector: lock(&self.collector).take(),
             hooks: self.hooks.clone(),
         };

@@ -88,6 +88,9 @@ pub(crate) struct Inner {
     /// A failure inside C3..C6 left the in-memory map ahead of the durable
     /// state: no more commits and no more writes in this process.
     pub(crate) failed: AtomicBool,
+    /// The `cut_seq` of the durable tip: every write at or below it is in
+    /// the map, so a journal read of such a record may fall back to the map.
+    pub(crate) durable_cut: AtomicU64,
     /// A write found the journal ring full (a cut is wanted).
     pub(crate) journal_full: AtomicBool,
     /// `JournalReserved` bytes the engine holds (admissions minus reclaims).
@@ -149,6 +152,10 @@ impl Inner {
     /// before `c` was read is always visible here.
     pub(crate) fn wait_inflight(&self, c: u64) -> Result<()> {
         let start = Instant::now();
+        // The check runs under the progress lock and a queue notifies under
+        // it after removing a number, so no wake-up is lost; the timeout is
+        // only the give-up bound.
+        let mut g = lock(&self.progress.0);
         loop {
             let busy = self.all_queues().iter().any(|q| q.has_inflight_upto(c));
             if !busy {
@@ -159,12 +166,12 @@ impl Inner {
                     what: "writes in flight at the cut",
                 });
             }
-            let g = lock(&self.progress.0);
-            let _ = self
+            g = self
                 .progress
                 .1
-                .wait_timeout(g, Duration::from_millis(5))
-                .unwrap_or_else(|p| p.into_inner());
+                .wait_timeout(g, Duration::from_millis(100))
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
         }
     }
 }
@@ -257,6 +264,7 @@ impl Engine {
             poisoned_at: AtomicU64::new(u64::MAX),
             failed: AtomicBool::new(false),
             journal_full: AtomicBool::new(false),
+            durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
             coord: Mutex::new(coord),
             resize_hook: Mutex::new(None),
@@ -296,9 +304,7 @@ impl Engine {
                 if inner.is_failed() {
                     continue;
                 }
-                if let Err(e) = inner.tick() {
-                    tracing::warn!(error = %e, "background commit failed; retrying later");
-                }
+                inner.background_tick();
             })
             .expect("spawn the coordinator thread");
         *lock(&self.bg) = Some((stop, handle));

@@ -27,8 +27,9 @@
 //!   whose `upto` covers every write acknowledged before it (ADR-3, ADR-28).
 //! * Every commit is a cut: the coordinator waits (C1) until every write with
 //!   `write_seq <= c` is in the overlay, so the overlay cut holds all of them.
-//! * Durable order C4 < C5 < C6 < C7 (floor) < C8 < C9: nothing is named before
-//!   it is durable, the rollback floor is never above the durable tip, and the
+//! * Durable order C3 (segments sealed inside the destage) < C5 (map pack) <
+//!   C6 (commit) < C7 (floor) < C8 < C9: nothing is named before it is
+//!   durable, the rollback floor is never above the durable tip, and the
 //!   journal is reclaimed only after the commit covering it is durable.
 
 #![forbid(unsafe_code)]
@@ -51,7 +52,7 @@ mod stats;
 
 pub use config::{EngineConfig, OnJournalDamage};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
-pub use destage::{DestageCtx, DestageOutcome, Destager, SimpleDestager};
+pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
 pub use engine::{CommitOutcome, Engine};
 pub use error::OpenError;
 pub use read::{ChunkReader, Expectation};
@@ -62,7 +63,7 @@ pub const CRASH_POINTS: &[&str] = &[
     "engine.c1.waited",
     "engine.c2.cut",
     "engine.c3.destaged",
-    "engine.c4.sealed",
+    "engine.c4.named",
     "engine.c5.map_sealed",
     "engine.c6.committed",
     "engine.c7.checkpoint",

@@ -1,13 +1,21 @@
 //! The cut and commit coordinator: the local FULL commit protocol C1-C10
 //! (plan M11 step 5, DESIGN §8.1-§8.2, ADR-9).
 //!
-//! Durable order: C4 (segments sealed) and C5 (map pack sealed) before C6
-//! (the commit object, the durability point of the cut), C6 before the
-//! rollback floor (C7) and before any journal reclaim (C9). A failure before
-//! C6 leaves the previous commit as the tip; what C4/C5 wrote is an orphan
-//! of the open-time sweep. A failure inside C3..C6 that is not a crash also
-//! stops further commits in this process (the in-memory map is ahead of the
-//! durable state), and writes fail until the volume is reopened.
+//! Durable order: C3 (the destager seals every segment before its map
+//! transaction commits) and C5 (map pack sealed) before C6 (the commit
+//! object, the durability point of the cut), C6 before the rollback floor
+//! (C7) and before any journal reclaim (C9). C4 fixes `new_segments` and
+//! trues up the ledger. A failure before C6 leaves the previous commit as
+//! the tip; what C3/C5 wrote is an orphan of the open-time sweep.
+//!
+//! Failure handling: a destage failure leaves the map untouched and is
+//! classified ([`Retry`]): `MapFull` classes cut smaller, `Later` and
+//! `AfterSpace` fail this attempt (the next trigger retries), `Never` and
+//! `Stop` stop the engine's commits (writes fail, reads continue). Compaction
+//! re-hints run before the destage in their own transaction; a failure there
+//! keeps them for the next cut. A failure after the destage committed its
+//! transaction (C5, C6) stops further commits in this process (the in-memory
+//! map is ahead of the durable state) until the volume is reopened.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -21,9 +29,9 @@ use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
 use lunix_iface::space::SpaceKind;
-use lunix_iface::{Error, ErrorKind, Result};
+use lunix_iface::{Error, Result};
 
-use crate::destage::DestageCtx;
+use crate::destage::{DestageCtx, Retry};
 use crate::engine::{CommitOutcome, Inner};
 use crate::recover::{high_water, Recovered};
 use crate::stats::add;
@@ -40,6 +48,11 @@ pub(crate) struct Coord {
     pub(crate) last_commit_at: Duration,
     /// Compaction moves to apply at the next cut's C3.
     pub(crate) moved: Vec<Moved>,
+    /// Output segments of re-hints already applied to the in-memory map and
+    /// not yet named by a durable commit (M17 rule 4).
+    pub(crate) pending_named: Vec<SegId>,
+    /// The last background commit error, logged once per change.
+    pub(crate) last_error: Option<String>,
     pub(crate) collector: Option<Box<dyn Collector>>,
     /// When a tick first saw the volume dirty since the last commit (`T`
     /// counts from there, so an idle period does not fire it at once).
@@ -62,6 +75,8 @@ impl Coord {
             retained: rec.retained.clone(),
             last_commit_at: now,
             moved: Vec::new(),
+            pending_named: Vec::new(),
+            last_error: None,
             dirty_since: None,
             collector,
             index_charged: rec.index_charged,
@@ -82,16 +97,40 @@ struct Acct {
 
 const NODE_BOUND: u64 = 66 << 10;
 
+/// Why one cut attempt failed.
+enum CutFail {
+    /// The cut does not fit the map's dirty-leaf cap: try a smaller one.
+    Smaller(Error),
+    /// Anything else.
+    Other(Error),
+}
+
+impl From<Error> for CutFail {
+    fn from(e: Error) -> Self {
+        Self::Other(e)
+    }
+}
+
 impl Inner {
     fn reserve_bounds(&self, cut: &OverlayCut) -> Acct {
         let n = cut.chunks.len() as u64;
         let ovh = u64::from(self.extents.mode().extent_ovh());
         let cs = u64::from(self.cfg.chunk_size);
         let seg_bound = n.saturating_mul(cs + ovh + 64).saturating_add(64 << 10);
-        // Leaves touched: at most one per 256 chunks (the smallest fanout),
-        // plus the interior path, each node at most a full node extent.
-        let leaves: HashSet<u64> = cut.chunks.iter().map(|c| c.chunk / 256).collect();
-        let map_bound = (leaves.len() as u64 + 4).saturating_mul(NODE_BOUND + ovh);
+        // Leaves touched, each with its path to the root (one path per leaf
+        // at worst), each node at most a full node extent.
+        let fanout = u64::from(self.cfg.map_fanout.max(2));
+        let leaves: HashSet<u64> = cut.chunks.iter().map(|c| c.chunk / fanout).collect();
+        let mut depth = 1u64;
+        let mut span = fanout;
+        while span < self.map.chunk_count() {
+            span = span.saturating_mul(fanout);
+            depth += 1;
+        }
+        let map_bound = (leaves.len() as u64)
+            .saturating_mul(depth)
+            .saturating_add(2)
+            .saturating_mul(NODE_BOUND + ovh);
         let head = map_bound + (64 << 10) + n.saturating_mul(64) + (4 << 10);
         let mut acct = Acct::default();
         if self
@@ -132,6 +171,28 @@ impl Inner {
         }
     }
 
+    /// Acts on a classified destage failure (the map is untouched).
+    fn destage_failed(&self, cut: &OverlayCut, f: crate::destage::DestageFailure) -> CutFail {
+        match f.retry {
+            Retry::AfterMapSeal | Retry::CutTooLarge => CutFail::Smaller(f.error),
+            Retry::Later | Retry::AfterSpace => CutFail::Other(f.error),
+            Retry::Never | Retry::Stop => {
+                let cb = self.cfg.chunk_blocks();
+                let lbas = f.chunk.map(|c| (c * cb, (c + 1) * cb));
+                tracing::error!(
+                    error = %f.error,
+                    retry = ?f.retry,
+                    chunk = ?f.chunk,
+                    lba_range = ?lbas,
+                    cut = %cut.cut_seq,
+                    "destage cannot complete this cut: no more commits in this process; writes fail, reads continue"
+                );
+                self.failed.store(true, Ordering::Release);
+                CutFail::Other(f.error)
+            }
+        }
+    }
+
     fn fatal(&self, step: &str, e: &Error) {
         if !self.points.is_dead() {
             tracing::error!(step, error = %e, "commit failed after the map changed: no more commits in this process");
@@ -150,8 +211,25 @@ impl Inner {
         }
     }
 
+    /// The background thread's tick: logs a failure once per distinct error
+    /// instead of every period.
+    pub(crate) fn background_tick(&self) {
+        let res = self.tick();
+        let mut co = crate::engine::lock(&self.coord);
+        match res {
+            Ok(_) => co.last_error = None,
+            Err(e) => {
+                let msg = e.to_string();
+                if co.last_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "background commit failed; retrying at the next trigger");
+                    co.last_error = Some(msg);
+                }
+            }
+        }
+    }
+
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.moved.is_empty() {
+        if !co.moved.is_empty() || !co.pending_named.is_empty() {
             return true;
         }
         let dirty = self.journal.last_issued() > co.tip.cut_seq;
@@ -190,55 +268,79 @@ impl Inner {
             c = c.min(poisoned.saturating_sub(1));
         }
         c = c.max(prev);
-        if c == prev && !force && co.moved.is_empty() && size == co.tip.size {
+        let idle = co.moved.is_empty() && co.pending_named.is_empty();
+        if c == prev && !force && idle && size == co.tip.size {
             return Ok(CommitOutcome::Idle);
         }
         self.wait_inflight(c)?;
+        // A write that failed during the wait left a hole at its number: the
+        // cut stays below it (it would claim a prefix it does not hold).
+        let poisoned = self.poisoned_at.load(Ordering::Acquire);
+        if poisoned != u64::MAX {
+            c = c.min(poisoned.saturating_sub(1)).max(prev);
+        }
         c = self.bound_cut(prev, c);
         point!(self.points, "engine.c1.waited");
         // A cut too big for the map's dirty-leaf cap is retried smaller:
         // any c' in (prev, c] is a cut too.
         loop {
             match self.cut_and_commit(co, c, size) {
-                Err(e) if e.kind() == ErrorKind::MapFull && c > prev + 1 && !self.is_failed() => {
+                Err(CutFail::Smaller(e)) => {
+                    if c <= prev + 1 || self.is_failed() {
+                        return Err(e);
+                    }
                     c = prev + (c - prev) / 2;
                     tracing::info!(cut = c, "map dirty-leaf cap reached: cutting smaller");
                 }
-                r => return r,
+                Err(CutFail::Other(e)) => return Err(e),
+                Ok(o) => return Ok(o),
             }
         }
     }
 
-    /// Lowers `c` so that the cut holds about `max_chunks_per_cut` chunks
-    /// at most: the chunks in `cut(c')` are those with a version `<= c'`, so
-    /// `c'` stops just before the oldest write of the first chunk over the
-    /// cap. Best effort (a superseded older version can add a chunk); a
-    /// `MapFull` that still happens cuts smaller again. Any `c' > prev` with
-    /// every write `<= c` in the overlay is a cut.
+    /// Lowers `c` so that the cut dirties at most `max_leaves_per_cut` map
+    /// leaves (`chunk / map_fanout`): the chunks in `cut(c')` are those with
+    /// a version `<= c'`, so taking chunks in the order of their oldest
+    /// visible write, `c'` stops just before the first chunk whose leaf
+    /// would exceed the cap. Best effort (a superseded older version can add
+    /// a chunk); a `MapFull` that still happens cuts smaller again. Any
+    /// `c' > prev` with every write `<= c` in the overlay is a cut. The probe
+    /// is a second MVCC view, taken only when the overlay holds more blocks
+    /// than the cap could possibly need.
     fn bound_cut(&self, prev: u64, c: u64) -> u64 {
-        let cap = self.cfg.max_chunks_per_cut.max(1);
+        let cap = self.cfg.max_leaves_per_cut.max(1);
         if c <= prev || self.overlay.dirty_bytes() / 4096 <= cap {
             return c;
         }
+        let fanout = u64::from(self.cfg.map_fanout.max(2));
         let probe = self.overlay.cut(WriteSeq(c));
-        if probe.chunks.len() as u64 <= cap {
-            return c;
-        }
-        let mut firsts: Vec<u64> = probe
+        let mut firsts: Vec<(u64, u64)> = probe
             .chunks
             .iter()
-            .map(|ch| ch.pieces.iter().map(|p| p.write_seq.0).min().unwrap_or(c))
+            .map(|ch| {
+                let first = ch.pieces.iter().map(|p| p.write_seq.0).min().unwrap_or(c);
+                (first, ch.chunk / fanout)
+            })
             .collect();
         firsts.sort_unstable();
-        let at = usize::try_from(cap)
-            .unwrap_or(usize::MAX)
-            .min(firsts.len() - 1);
-        let bounded = firsts[at].saturating_sub(1).clamp(prev + 1, c);
-        tracing::debug!(cut = c, bounded, "cut bounded by max_chunks_per_cut");
-        bounded
+        let mut leaves = HashSet::new();
+        for (first, leaf) in firsts {
+            leaves.insert(leaf);
+            if leaves.len() as u64 > cap {
+                let bounded = first.saturating_sub(1).clamp(prev + 1, c);
+                tracing::debug!(cut = c, bounded, "cut bounded by max_leaves_per_cut");
+                return bounded;
+            }
+        }
+        c
     }
 
-    fn cut_and_commit(&self, co: &mut Coord, c: u64, size: u64) -> Result<CommitOutcome> {
+    fn cut_and_commit(
+        &self,
+        co: &mut Coord,
+        c: u64,
+        size: u64,
+    ) -> std::result::Result<CommitOutcome, CutFail> {
         let prev = co.tip.cut_seq.0;
         let cs = u64::from(self.cfg.chunk_size);
         // C2: the MVCC cut and the ledger bounds.
@@ -246,16 +348,18 @@ impl Inner {
         let mut acct = self.reserve_bounds(&cut);
         if let Err(e) = self.points.hit("engine.c2.cut") {
             self.abandon(acct);
-            return Err(e);
+            return Err(CutFail::Other(e));
         }
         lunix_iface::crashpoint!("engine.c2.cut");
-        // C3: destage; the map changes in memory, index inserts held back.
-        if size > co.tip.size {
-            if let Err(e) = self.map.grow(size / cs) {
-                self.abandon(acct);
-                return Err(e);
-            }
+        // C3, first: compaction re-hints, in their own transaction. A
+        // failure keeps them for the next cut (nothing was applied); a later
+        // failure of this cut leaves them applied in memory, pointing at
+        // sealed segments, and still to be named (`pending_named`).
+        if let Err(e) = self.apply_moved(co) {
+            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut");
         }
+        // C3: destage; every segment sealed before the map transaction
+        // commits, index inserts held back.
         let writes = (c > prev).then(|| WriteSeqRange {
             first: WriteSeq(prev + 1),
             last: WriteSeq(c),
@@ -274,17 +378,10 @@ impl Inner {
         };
         let outcome = match self.destager.destage(&cut, &ctx) {
             Ok(o) => o,
-            Err(e) => {
+            Err(f) => {
                 // Nothing reached the map; the destager removed its segments.
                 self.abandon(acct);
-                return Err(e);
-            }
-        };
-        let moved_segs = match self.apply_moved(co) {
-            Ok(s) => s,
-            Err(e) => {
-                self.fatal("c3 rehint", &e);
-                return Err(e);
+                return Err(self.destage_failed(&cut, f));
             }
         };
         let st = &self.stats;
@@ -294,16 +391,20 @@ impl Inner {
         add(&st.stored_ulen, outcome.stored_ulen);
         add(&st.stored_clen, outcome.stored_clen);
         add(&st.cold_rmw, outcome.cold_rmw);
+        add(&st.extent_auth_failures, outcome.extent_auth_failures);
         for (a, v) in st.stage_ns.iter().zip(outcome.stage_ns) {
             add(a, v);
         }
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
-        self.points.hit("engine.c3.destaged")?;
+        self.points
+            .hit("engine.c3.destaged")
+            .map_err(CutFail::Other)?;
         lunix_iface::crashpoint!("engine.c3.destaged");
         // C4: the segments are sealed (footer, trailer, fdatasync, rename, dir
         // fsync) by the destager before its map transaction committed, so no
-        // map entry ever names an unsealed segment; here the ledger is trued up.
+        // map entry ever names an unsealed segment; here `new_segments` is
+        // fixed and the ledger trued up.
         let mut new_segments: Vec<SegId> = segments.iter().map(|s| s.seg).collect();
         let seg_actual: u64 = segments.iter().map(|s| s.size_bytes).sum();
         if let Err(e) = self.space.transfer(
@@ -317,19 +418,28 @@ impl Inner {
         acct.seg_bound = 0;
         // Compaction output is named by the cut that applies its re-hints
         // (M17 rule 4); until then it is above the high-water mark.
-        for s in moved_segs {
-            if !new_segments.contains(&s) {
-                new_segments.push(s);
+        for s in &co.pending_named {
+            if !new_segments.contains(s) {
+                new_segments.push(*s);
             }
         }
-        point!(self.points, "engine.c4.sealed");
-        // C5: seal the map into a pack.
+        self.points.hit("engine.c4.named").map_err(CutFail::Other)?;
+        lunix_iface::crashpoint!("engine.c4.named");
+        // C5: grow the map now (a failed destage above leaves it at the
+        // committed size; this cut holds no chunk past the old size, because
+        // the new size is published only after C6), then seal it into a pack.
+        if size > co.tip.size {
+            if let Err(e) = self.map.grow(size / cs) {
+                self.fatal("c5 grow", &e);
+                return Err(CutFail::Other(e));
+            }
+        }
         let map_bound = acct.head_left.saturating_sub((64 << 10) + (4 << 10));
         let (root, map_packs) = match self.seal_map() {
             Ok(v) => v,
             Err(e) => {
                 self.fatal("c5", &e);
-                return Err(e);
+                return Err(e.into());
             }
         };
         let map_actual = map_packs.iter().map(|(_, b)| *b).sum();
@@ -338,14 +448,14 @@ impl Inner {
         point!(self.points, "engine.c5.map_sealed");
         // C6: the FULL commit, the durability point of the cut.
         let parent = &co.tip;
-        let commit_seq = parent.common.commit_seq.next()?;
+        let commit_seq = parent.common.commit_seq.next().map_err(Error::from)?;
         let keep = u64::from(self.cfg.retain_last.max(1)) - 1;
         let chain_floor = CommitSeq(commit_seq.0.saturating_sub(keep)).max(parent.chain_floor);
         let index_packs = match self.index.runs() {
             Ok(r) => r.into_iter().map(|r| r.id).collect(),
             Err(e) => {
                 self.fatal("c6 index runs", &e);
-                return Err(e);
+                return Err(e.into());
             }
         };
         let full = Full {
@@ -375,7 +485,7 @@ impl Inner {
             Ok(s) => s,
             Err(e) => {
                 self.fatal("c6", &e);
-                return Err(e);
+                return Err(e.into());
             }
         };
         self.settle(
@@ -393,7 +503,9 @@ impl Inner {
         if let Some(&m) = new_segments.iter().max() {
             co.upto_seg = Some(co.upto_seg.map_or(m, |u| u.max(m)));
         }
+        co.pending_named.clear();
         self.size.store(size, Ordering::Release);
+        self.durable_cut.store(c, Ordering::Release);
         add(&self.stats.commits, 1);
         point!(self.points, "engine.c6.committed");
         // C7: the checkpoint hint, then the rollback floor (D19: only after
@@ -429,15 +541,20 @@ impl Inner {
         point!(self.points, "engine.c7.floor");
         // C8: index entries for the sealed segments, then their run (named
         // by the next FULL, D3).
-        let mut index_ok = true;
+        let mut failed_inserts = 0u64;
+        let mut first_error = None;
         for (id, hint) in index_inserts {
             if let Err(e) = self.index.insert(id, hint) {
-                tracing::warn!(error = %e, "index insert failed; catch_up restores it at the next open");
-                index_ok = false;
-                break;
+                failed_inserts += 1;
+                first_error.get_or_insert(e);
             }
         }
-        if index_ok && !new_segments.is_empty() {
+        if let Some(e) = first_error {
+            tracing::warn!(error = %e, failed_inserts, "index inserts failed: those chunks miss dedup until a rebuild");
+        }
+        // `upto_seg` only moves with a cut that wrote segments, so entries
+        // `catch_up` inserted at open wait for such a cut to be persisted.
+        if !new_segments.is_empty() {
             if let Some(upto) = co.upto_seg {
                 if let Err(e) = self.index.persist(upto) {
                     tracing::warn!(error = %e, "index run not persisted");
@@ -509,9 +626,9 @@ impl Inner {
     /// C3, second half: compaction's `moved` records become conditional
     /// re-hints (a newer write wins). `Moved` carries no chunk number, so
     /// the chunks are found by walking the tip's leaves for the old hints.
-    fn apply_moved(&self, co: &mut Coord) -> Result<Vec<SegId>> {
+    fn apply_moved(&self, co: &mut Coord) -> Result<()> {
         if co.moved.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let mut segs: Vec<SegId> = co.moved.iter().map(|m| m.new.seg).collect();
         segs.sort_unstable();
@@ -531,7 +648,12 @@ impl Inner {
         }
         txn.commit()?;
         co.moved.clear();
-        Ok(segs)
+        for seg in segs {
+            if !co.pending_named.contains(&seg) {
+                co.pending_named.push(seg);
+            }
+        }
+        Ok(())
     }
 
     fn gc_step(&self, co: &mut Coord) {
