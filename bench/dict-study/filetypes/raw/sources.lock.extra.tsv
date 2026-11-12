@@ -1,0 +1,91 @@
+jar:commons-lang3-3.17.0	https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.17.0/commons-lang3-3.17.0.jar		Apache-2.0	main
+jar:commons-io-2.17.0	https://repo1.maven.org/maven2/commons-io/commons-io/2.17.0/commons-io-2.17.0.jar		Apache-2.0	main
+jar:commons-collections4-4.4	https://repo1.maven.org/maven2/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar		Apache-2.0	main
+jar:gson-2.11.0	https://repo1.maven.org/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar		Apache-2.0	main
+jar:guava-33.3.1-jre	https://repo1.maven.org/maven2/com/google/guava/guava/33.3.1-jre/guava-33.3.1-jre.jar		Apache-2.0	main
+jar:jackson-databind-2.18.0	https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.18.0/jackson-databind-2.18.0.jar		Apache-2.0	main
+jar:slf4j-api-2.0.16	https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar		MIT	main
+jar:jsoup-1.18.1	https://repo1.maven.org/maven2/org/jsoup/jsoup/1.18.1/jsoup-1.18.1.jar		MIT	main
+jar:joda-time-2.12.7	https://repo1.maven.org/maven2/joda-time/joda-time/2.12.7/joda-time-2.12.7.jar		Apache-2.0	main
+jar:snakeyaml-2.3	https://repo1.maven.org/maven2/org/yaml/snakeyaml/2.3/snakeyaml-2.3.jar		Apache-2.0	main
+jar:commons-compress-1.27.1	https://repo1.maven.org/maven2/org/apache/commons/commons-compress/1.27.1/commons-compress-1.27.1.jar		Apache-2.0	main
+jar:log4j-core-2.24.1	https://repo1.maven.org/maven2/org/apache/logging/log4j/log4j-core/2.24.1/log4j-core-2.24.1.jar		Apache-2.0	main
+jar:kotlin-stdlib-2.0.20	https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.0.20/kotlin-stdlib-2.0.20.jar		Apache-2.0	main
+jar:h2-2.3.232	https://repo1.maven.org/maven2/com/h2database/h2/2.3.232/h2-2.3.232.jar		MPL-2.0	main
+jar:junit-4.13.2	https://repo1.maven.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar		EPL-1.0	main
+jar:asm-9.7	https://repo1.maven.org/maven2/org/ow2/asm/asm/9.7/asm-9.7.jar		BSD-3-Clause	main
+jar:hibernate-core-6.6.1.Final	https://repo1.maven.org/maven2/org/hibernate/orm/hibernate-core/6.6.1.Final/hibernate-core-6.6.1.Final.jar		LGPL-2.1-only	main
+jar:postgresql-42.7.4	https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar		BSD-2-Clause	main
+jar:netty-buffer-4.1.114.Final	https://repo1.maven.org/maven2/io/netty/netty-buffer/4.1.114.Final/netty-buffer-4.1.114.Final.jar		Apache-2.0	main
+jar:jetty-server-11.0.24	https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-server/11.0.24/jetty-server-11.0.24.jar		Apache-2.0	main
+npm:sql.js	https://registry.npmjs.org/sql.js/-/sql.js-1.16.0.tgz	bb6f5c7e4ac6de569e4f3eee38122b56d777c387ec74fbb1a7075adf37097df6	MIT	main
+npm:esbuild-wasm	https://registry.npmjs.org/esbuild-wasm/-/esbuild-wasm-0.28.2.tgz	61594de12ce998652be2aa0ab72dda54bfa49407fb37ee3464468a2aac306baa	MIT	main
+npm:web-tree-sitter	https://registry.npmjs.org/web-tree-sitter/-/web-tree-sitter-0.27.2.tgz	0b1d1b2edcc1476c7b1710a2a4589eef9ca9cf461baa50f89956d57530964362	MIT	main
+npm:tree-sitter-wasms	https://registry.npmjs.org/tree-sitter-wasms/-/tree-sitter-wasms-0.1.13.tgz	66a54a9bbb2685e8f61b458cef1474db54e72979ee2de168e8b602b562350dd0	Unlicense	main
+npm:@swc/wasm-web	https://registry.npmjs.org/@swc/wasm-web/-/wasm-web-1.16.22.tgz	8d76e6e26033bcd352d9a6adb90f3a59bc7c4d9bef31f69fe347a576f6332c7f	Apache-2.0	main
+npm:brotli-wasm	https://registry.npmjs.org/brotli-wasm/-/brotli-wasm-3.0.1.tgz	413c3589dae9b5a9971c24c8649cdf1e5c8cedb110067a381786930ed614f174	Apache-2.0	main
+npm:@sqlite.org/sqlite-wasm	https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz	06aaad2dd0b58a46631000a31a4469afff4abeffbc383f37372b6590396d9bbd	Apache-2.0	main
+npm:vscode-oniguruma	https://registry.npmjs.org/vscode-oniguruma/-/vscode-oniguruma-2.0.1.tgz	3b42911fd9609f2cc3b9c6dd52236b3da73780e633aa7dc381267006b7e7da21	MIT	main
+npm:yoga-wasm-web	https://registry.npmjs.org/yoga-wasm-web/-/yoga-wasm-web-0.3.3.tgz	43e9926408e55116e267f2e85d19f8df3e492e8616cfe0e206843ffc14612d67	MIT	main
+npm:@dqbd/tiktoken	https://registry.npmjs.org/@dqbd/tiktoken/-/tiktoken-1.0.22.tgz	67ae64fbbe889ff19b74d4e95a16da403b24aee6a506b74a9b84908a5d6f15a1	MIT	main
+npm:@resvg/resvg-wasm	https://registry.npmjs.org/@resvg/resvg-wasm/-/resvg-wasm-2.6.2.tgz	ff51acbb5ee0074601b75c3bea9226a18d346752af787f6d2d3adcdd98493d71	MPL-2.0	main
+npm:quickjs-emscripten	https://registry.npmjs.org/quickjs-emscripten/-/quickjs-emscripten-0.32.0.tgz	9170d94d7a7d93f9dd8ff7501979e59b95522c259da687af0d21c38ca314109b	MIT	main
+npm:@duckdb/duckdb-wasm	https://registry.npmjs.org/@duckdb/duckdb-wasm/-/duckdb-wasm-1.33.1-dev57.0.tgz	a3f36b6430dcc40677a343ddcf0baefe8940398ece3dba29ce64a923576d1398	MIT	main
+npm:wabt	https://registry.npmjs.org/wabt/-/wabt-1.0.39.tgz	a10d4f4b15b91de8ab2ccb4700ef12185736f0bc96ee809e53ab17f7ea743fd2	Apache-2.0	main
+npm:binaryen	https://registry.npmjs.org/binaryen/-/binaryen-132.0.0.tgz	6543555fb29bb92548f325c7dc18e9ab7dbb1215edda25993d1e3f71d85b8618	Apache-2.0	main
+npm:argon2-browser	https://registry.npmjs.org/argon2-browser/-/argon2-browser-1.18.0.tgz	cdb11795a4971bde095fe6b836aa424de50c4558ed4b9505bc74111eee7f6d35	MIT	main
+npm:libsodium-sumo	https://registry.npmjs.org/libsodium-sumo/-/libsodium-sumo-0.8.4.tgz	c51e7573c7b048acd07ec7b8677640208e9c00e0ab11416d3895bf6e299e5f7e	ISC	main
+npm:@ffmpeg/core	https://registry.npmjs.org/@ffmpeg/core/-/core-0.12.10.tgz	d00089ce82e1bdf637ddbe42e0c3d41a1ba8cf4c9e825e7fa4d0bb970e844bd4	GPL-2.0-or-later	main
+npm:pyodide	https://registry.npmjs.org/pyodide/-/pyodide-314.0.7.tgz	66b7949e5a0cba2250b586d7e368bf12fb482800748d182c4618254b685ffaa0	MPL-2.0	main
+npm:z3-solver	https://registry.npmjs.org/z3-solver/-/z3-solver-5.4.1.tgz	20497c5a8a95060e44e516b982538a99ab3f220cff0b574760dbd5dc4376ec4a	MIT	main
+npm:@jsquash/webp	https://registry.npmjs.org/@jsquash/webp/-/webp-1.5.0.tgz	b543cb1fc17e99c31e992a71d70da570d1bc1871ce3a88440df067e5b2e6ee9e	Apache-2.0	main
+npm:@jsquash/avif	https://registry.npmjs.org/@jsquash/avif/-/avif-2.1.1.tgz	b6c6204b63f9cb17aac7d6ee92b8a4aeba2403dccd49ffc9a93b778923049b5b	Apache-2.0	main
+npm:@jsquash/oxipng	https://registry.npmjs.org/@jsquash/oxipng/-/oxipng-2.3.0.tgz	e7d523bae6803574dd0e28296b7239f0d4689b0c195a9fbc4ff7657834c3196d	Apache-2.0	main
+npm:shiki	https://registry.npmjs.org/shiki/-/shiki-4.6.0.tgz	13c0c0bad673944ca45983f5fd4318a93da8984063160011e7f145deb0e2539d	MIT	main
+npm:lightningcss-wasm	https://registry.npmjs.org/lightningcss-wasm/-/lightningcss-wasm-1.33.0.tgz	266866c1b0efd7ca5307fe312411e4f1895b997086fb76f392ec5b60aadf31c8	MPL-2.0	main
+npm:@parcel/css-wasm	https://registry.npmjs.org/@parcel/css-wasm/-/css-wasm-1.13.1.tgz	eb4bc04b5056291f346668d2ff397059e668073c1dabc1b99c1c21d2cf3fc7ef	MPL-2.0	main
+npm:wasm-pack	https://registry.npmjs.org/wasm-pack/-/wasm-pack-0.15.1.tgz	c1670c27d2c6dbbb2237d135948dd8b0a672dc55806114166538af656b035d5a	MIT OR Apache-2.0	main
+npm:typst	https://registry.npmjs.org/typst/-/typst-0.10.0-8.tgz	98a7ae247e20df408c67e4b4291775e4ed8a148154f39b8cb78de21ce7176f04	Apache-2.0	main
+npm:@myriaddreamin/typst-ts-web-compiler	https://registry.npmjs.org/@myriaddreamin/typst-ts-web-compiler/-/typst-ts-web-compiler-0.7.0.tgz	07aa4e9a92632eba4898df1e09c9b91456e3c0c6e0ac8d44375979f2375e4cca	Apache-2.0	main
+loghub	https://github.com/logpai/loghub	dd61d0952749ee7963bde24220d1be5ede023033	research-only	main
+deb:zlib1g	dist-archive	zlib1g_1%3a1.3.dfsg+really1.3.1-1dist3.2_amd64v3.deb	Zlib	main
+deb:libzstd1	dist-archive	libzstd1_1.5.7+dfsg-3_amd64v3.deb	BSD-3-Clause	main
+deb:liblz4-1	dist-archive	liblz4-1_1.10.0-8_amd64v3.deb	BSD-2-Clause	main
+deb:libsqlite3-0	dist-archive	libsqlite3-0_3.46.1-9dist0.3_amd64v3.deb	Public-Domain	main
+deb:libpcre2-8-0	dist-archive	libpcre2-8-0_10.46-1dist0.1_amd64v3.deb	BSD-3-Clause	main
+deb:libssl3t64	dist-archive	libssl3t64_3.5.5-1dist3.7_amd64v3.deb	Apache-2.0	main
+deb:libbrotli1	dist-archive	libbrotli1_1.2.0-3dist0.1_amd64v3.deb	MIT	main
+deb:libyaml-0-2	dist-archive	libyaml-0-2_0.2.5-2build3_amd64v3.deb	MIT	main
+deb:liblua5.4-0	dist-archive	liblua5.4-0_5.4.8-1build1_amd64v3.deb	MIT	main
+deb:libuv1t64	dist-archive	libuv1t64_1.51.0-2dist1_amd64v3.deb	MIT	main
+deb:libjansson4	dist-archive	libjansson4_2.14-2build4_amd64v3.deb	MIT	main
+deb:libxxhash0	dist-archive	libxxhash0_0.8.3-2build1_amd64v3.deb	BSD-2-Clause	main
+deb:libcurl4t64	dist-archive	libcurl4t64_8.18.0-1dist2.8_amd64v3.deb	curl	main
+deb:libexpat1	dist-archive	libexpat1_2.7.4-1dist0.2_amd64v3.deb	MIT	main
+deb:libffi8	dist-archive	libffi8_3.5.2-4_amd64v3.deb	MIT	main
+deb:libpng16-16t64	dist-archive	libpng16-16t64_1.6.57-1dist0.1_amd64v3.deb	libpng	main
+deb:libjpeg-turbo8	dist-archive	libjpeg-turbo8_2.1.5-4dist4_amd64v3.deb	BSD-3-Clause	main
+deb:jq	dist-archive	jq_1.8.1-4dist2_amd64v3.deb	MIT	main
+deb:redis-server	dist-archive	redis-server_5%3a8.0.5-1dist0.1_amd64v3.deb	BSD-3-Clause	main
+deb:nginx	dist-archive	nginx_1.28.3-2dist1.12_amd64v3.deb	BSD-2-Clause	main
+deb:libc6	dist-archive	libc6_2.43-2dist2.4_amd64v3.deb	LGPL-2.1-or-later	main
+deb:libstdc++6	dist-archive	libstdc++6_16-20260322-1dist1_amd64v3.deb	GPL-3.0-or-later	main
+deb:bash	dist-archive	bash_5.3-2dist1_amd64v3.deb	GPL-3.0-or-later	main
+deb:coreutils	dist-archive	coreutils_9.5-1dist2+0.0.0~dist25_all.deb	GPL-3.0-or-later	main
+deb:grep	dist-archive	grep_3.12-1_amd64v3.deb	GPL-3.0-or-later	main
+deb:sed	dist-archive	sed_4.9-2dist1_amd64v3.deb	GPL-3.0-or-later	main
+deb:gawk	dist-archive	gawk_1%3a5.3.2-1dist1.1_amd64v3.deb	GPL-3.0-or-later	main
+deb:libglib2.0-0t64	dist-archive	libglib2.0-0t64_2.88.0-1dist0.1_amd64v3.deb	LGPL-2.1-or-later	main
+deb:libgnutls30t64	dist-archive	libgnutls30t64_3.8.12-2dist1.1_amd64v3.deb	LGPL-2.1-or-later	main
+deb:libsystemd0	dist-archive	libsystemd0_259.9-0dist0.1_amd64v3.deb	LGPL-2.1-or-later	main
+deb:libgmp10	dist-archive	libgmp10_2%3a6.3.0+dfsg-5dist2_amd64v3.deb	LGPL-3.0	main
+deb:python3.14-minimal	dist-archive	python3.14-minimal_3.14.4-1dist0.2_amd64v3.deb	Python-PSF	main
+deb:libpython3.14-minimal	dist-archive	libpython3.14-minimal_3.14.4-1dist0.2_amd64v3.deb	Python-PSF	main
+deb:openssh-client	dist-archive	openssh-client_1%3a10.2p1-2dist3.8_amd64v3.deb	BSD-2-Clause	main
+deb:e2fsprogs	dist-archive	e2fsprogs_1.47.2-3dist4_amd64v3.deb	GPL-2.0-only	main
+deb:busybox-static	dist-archive	busybox-static_1%3a1.37.0-7dist1_amd64v3.deb	GPL-2.0-only	main
+deb:vim-tiny	dist-archive	vim-tiny_2%3a9.1.2141-1dist4.10_amd64v3.deb	Vim	main
+deb:util-linux	dist-archive	util-linux_2.41.3-3dist2.2_amd64v3.deb	GPL-2.0-only	main
+deb:git	dist-archive	git_1%3a2.53.0-1dist1.1_amd64v3.deb	GPL-2.0-only	main
+deb:libgcrypt20	dist-archive	libgcrypt20_1.12.0-2dist1.1_amd64v3.deb	LGPL-2.1-or-later	main
+deb:ffmpeg	dist-archive	ffmpeg_7%3a8.0.1-3dist2_amd64v3.deb	GPL-2.0-or-later	main

@@ -7,7 +7,11 @@ follow-ups are listed at the top of DECISIONS.md. Where this spec and an
 accepted ADR disagree, the ADR wins and this file is fixed in the same
 commit. The phase 1 plan review of 2026-11-12 amended this file and
 ADR-4, 6, 7, 8, 9, 11, 14, 16, 19, 24, 26 and 30; the ADRs carry
-"Amended 2026-11-12 (phase 1 review)" blocks.
+"Amended 2026-11-12 (phase 1 review)" blocks. The M2 security review and
+the maintainer's tamper-resistance decisions of the same day (keyed chunk
+ids in `integrity` mode, the local rollback floor, rules R1-R4, OS
+randomness) amend ADR-6 and ADR-11 and add ADR-31; they are stated in §5,
+§6, §7, §8.4, §10.1 and §15.
 
 Two sequence numbers are used and never mixed. **`write_seq`** numbers
 writes (§8.1). **`commit_seq`** numbers commits, by their position in the
@@ -187,7 +191,8 @@ journal):
     commits/         <commit_seq:016x> local-only commits (§13.3)
     checkpoint       a hint only: last commit_seq, per-lane journal tails, id_high (object id high water), counters
     device           ublk device id, boot_id, queue count and depth, size, flags (§3)
-    pins             highest keyring_seq and epoch seen, KMK fingerprint pin
+    pins             version 2: highest keyring_seq and epoch seen, KMK fingerprint pin, and the rollback
+                     floor {max_commit_seq, tip_hash}; raise-only, local, never uploaded (§15, ADR-31)
 <dir>/families/<family-id>/keyring     the family keyring (§6.1)
 <state_dir>/volumes.json               host registry: name → uuid, directory
 ```
@@ -358,8 +363,13 @@ than the async interval, so overwrites are absorbed.
      fetch is prioritised over readahead.
 2. **Zero scan:** OR-accumulate over 64 B lanes. An all-zero chunk
    becomes a hole and the pipeline stops.
-3. **Hash:** BLAKE3 (keyed if the family is encrypted) → `chunk_id`.
-   `integrity` and `plain` volumes use unkeyed BLAKE3.
+3. **Hash:** BLAKE3 → `chunk_id`, keyed with the family's **addressing
+   key** in `encrypted` and `integrity` mode (maintainer, 2026-11-12). The
+   key comes from the KMK in `encrypted` mode and from the integrity key in
+   `integrity` mode, by its own purpose id (ADR-11). Only `plain` volumes
+   use unkeyed BLAKE3. Keying closes the `id_len = 16` collision search in
+   `integrity` mode: nobody without the key can compute an id, so a guest
+   cannot grind two chunks with equal 16-byte prefixes (ADR-6).
 4. **Dedup:**
    - Look up `chunk_id` in the chunk index (in-memory cuckoo or xxh3
      table, then LSM).
@@ -439,6 +449,18 @@ trailer = footer offset + length + magic
     `verify_reads` option recomputes it. `fsck` verifies every tag. An
     extent fetched from a backend is also verified by recomputing the
     chunk id (ADR-11).
+  - **R1, the id expectation (normative).** On an `integrity` or `plain`
+    volume the tag covers the extent's own bytes only; it binds neither
+    kind nor location, so a tag-valid extent of the family is accepted by
+    anything that does not compare the header `chunk_id`. Therefore every
+    data read passes the expected id to the extent codec (`OpenExpect`): the
+    leaf entry's `id_prefix` (or the full id when it came from the index)
+    and the volume's chunk size, and fails on a mismatch. On an encrypted
+    volume the comparison happens before the AEAD (the id is in the AAD and
+    the key derivation); on an unencrypted one after the tag. A read with
+    neither expectation is a **scan** (fsck, rebuild, GC liveness) and must
+    set `verify_id`, which recomputes the chunk id from the plaintext. On a
+    volume with `id_len = 0` every read is a scan.
 - **Field widths.** The stored header keeps `CCH1`'s widths (a 2-byte
   codec and an 8-byte `ulen`). The AAD and the key-derivation `info` are a
   canonical re-encoding that uses the widths of the normative KAT vectors
@@ -450,6 +472,16 @@ trailer = footer offset + length + magic
   never reused: `seg = (epoch << 40) | counter`, so a zombie can never
   collide.
 - Map packs use the same container with node payloads: `map/<pack:016x>`.
+- **R3, footers and regions (normative).** A footer is used only after
+  `MetaCodec::open(Footer, "segments/<seg:016x>", bytes)` (or the `map/`
+  name for a pack) succeeds: the AEAD or MAC, or the unkeyed checksum in
+  `plain` mode, binds the footer to its container name. Whenever the extent
+  region is read whole (`fsck`, compaction, index `catch_up`, a whole-segment
+  GET), the segment-level `seg_hash` is recomputed and compared. A
+  container whose trailer or footer fails either check is absent, never
+  partly used. Location is deliberately unbound in an extent (re-packing,
+  mirroring and dedup copy extents verbatim); `seg_hash` and R1 together
+  catch a rearranged region and a moved extent.
 
 ### 6.1 Bucket layout
 
@@ -556,7 +588,17 @@ trailer = footer offset + length + magic
   codec 0 (raw): there is no zstd on nodes and no codec byte in the node
   header, which carries only `level` and `fanout`. If the family is
   encrypted, both are encrypted with ADR-11's scheme keyed by the node
-  hash.
+  hash. Node hashes are unchanged by the keyed-id decision of §5: in
+  `integrity` mode they stay unkeyed and are authenticated through the
+  HMAC'd commit that names the root.
+  - **R2, node verification (normative).** After opening a node extent
+    (`kind = node`; `codec` must be 0, any other value is an error), the map
+    recomputes the node hash (a leaf: its whole encoding; an interior node:
+    header ‖ child hashes) and requires it to equal the parent's
+    `child_hash` (the FULL commit's `map_root.hash` for the root) **and** the
+    extent header `chunk_id`. This holds for nodes read from the local pack
+    store as much as for fetched ones. In `integrity` mode this is what
+    binds a node to its place: the extent tag alone does not.
 - **Hot path:**
   - Map nodes are paged from `map/`, from the local pack store or from
     the backend.
@@ -780,14 +822,24 @@ never reclaimed before step 5 is durable.
      `volume`.)
    - On an `integrity` volume, verify the HMAC of every commit replayed.
      On a `plain` volume verify its checksum.
+   - **R4, the rollback floor (normative).** After the chain verifies,
+     compare the tip with the local floor in `state/pins` (§15, ADR-31): a
+     tip with `commit_seq` below `max_commit_seq` is refused as `Rollback`,
+     and a tip at that height whose hash differs from `tip_hash` as `Fork`.
+     The checkpoint's `last_commit_seq` is a hint (discarded when above the
+     tip) and is never an anchor. A host with no floor (first attach,
+     ephemeral client) cannot detect rollback.
 5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
-   not released, wait for the deadline (or `--steal`). A lease whose
-   `epoch` is below the newest verified epoch is rejected.
+   not released, wait for the deadline (or `--steal`). **R4, the lease is
+   opened only through `open_lease_fresh(bytes, max(chain epoch,
+   pins.max_epoch))`**, so an old sealed version of the object fails; a
+   lease whose `epoch` is below that floor is rejected.
 6. Write an EPOCH commit at `tip + 1`. If that write gets 412, another
    writer appended: re-read, replay, retry. If the 412 slot holds a
    TRANSFER, follow it (step 3).
-7. Start the device. Map nodes are faulted lazily, and prefetch follows
-   the heat map (§10.4).
+7. Raise the local floor to the verified tip (the EPOCH commit written in
+   step 6 included), then start the device. Map nodes are faulted lazily,
+   and prefetch follows the heat map (§10.4).
 
 ### 8.5 Lease and fencing
 
@@ -926,8 +978,14 @@ never reclaimed before step 5 is durable.
    16 B `id_prefix`. The slab entry holds the full `chunk_id`, which is
    checked. A local read verifies the extent's tag (§6) and does not
    recompute the chunk id unless `verify_reads` is set.
+   - **R1:** the read passes the leaf's `id_prefix` and the volume's chunk
+     size as the expectation, and the extent's header `chunk_id` must match
+     (§6). A read with no expectation is a scan and sets `verify_id`. The
+     same holds for every read in the destage path (partial-chunk base
+     read, dedup confirmation).
 4. Otherwise a backend miss: a ranged GET of the extent via the hint (or
-   the index), verify, decompress, insert into the slab, serve.
+   the index), verify (R1, and the recomputed id), decompress, insert into
+   the slab, serve.
 
 ### 10.2 Miss handling
 
@@ -1249,6 +1307,86 @@ mirrors (phase 5).
     safe later. It is supported everywhere, including with S3 backends,
     and attach needs no credential. The CLI and docs warn when plain is
     chosen and when a backend is added to a plain volume (§16).
+  - **Keyed chunk ids (integrity mode, maintainer 2026-11-12).** In
+    `encrypted` and `integrity` mode `chunk_id = blake3::keyed_hash(
+    addressing_key, plaintext)`; the addressing key comes from the KMK or
+    from the integrity key by purpose (ADR-11). Only `plain` volumes use
+    unkeyed ids. Without the key nobody can compute an id, so the
+    `id_len = 16` residual of the M2 review (a 2^64 BLAKE3 birthday search
+    on guest data, then a bucket writer swapping the two chunks on a local
+    read) does not exist in `integrity` mode. `plain` volumes keep it, and
+    they promise nothing against a bucket writer anyway.
+  - **Reading from a hostile bucket (rules R1-R4, normative).** A bucket
+    writer lacks the KMK (`encrypted`) or the integrity key (`integrity`).
+    The unkeyed parts are index runs, container trailers, `head`, object
+    names and sizes. The design needs no per-kind tag, because these four
+    rules hold in the engine, the map and the store:
+    - **R1** every data read passes `OpenExpect` with the leaf `id_prefix`
+      (or the full id) and the chunk size, and fails on a mismatch; a read
+      without that is a scan and sets `verify_id` (§6, §10.1).
+    - **R2** the map recomputes each node's hash against the parent's
+      `child_hash` (the commit's `map_root.hash` for the root) and the
+      header `chunk_id`, and requires codec 0 (§7).
+    - **R3** a footer is used only after `MetaCodec::open` succeeds on it,
+      and `seg_hash` is checked whenever a region is read whole (§6).
+    - **R4** attach refuses a tip below the local floor and opens the lease
+      through `open_lease_fresh` (§8.4).
+
+    With them, swapping, relocating, replaying an older extent, presenting
+    a node as data or the reverse, substituting a footer, and truncating or
+    deleting objects are detected in both `encrypted` and `integrity` mode;
+    splicing or replaying commits is detected by `parent_hash`, `commit_seq`
+    and `epoch` (§8.4). Binding `kind` into the integrity tag (a per-kind
+    tag key) is not done; see ADR-11. `plain` volumes get none of this.
+  - **Rollback anchor (ADR-31).** An older but fully valid chain cannot be
+    told from the current one by anything in the bucket, so v1 keeps a
+    **local floor** `{max_commit_seq, tip_hash}` in `state/pins` version 2.
+    It is raise-only and is written after every verified attach (the EPOCH
+    commit of the attach included) and after every FULL commit is durable,
+    never before. At attach a tip below `max_commit_seq` is refused as
+    `Rollback`, and a different hash at the same height as `Fork` (an
+    abandoned branch, ADR-24). Offline `fsck --repair --truncate-tip` and an
+    explicit operator reset are the only things that lower it.
+    - Phase 5 adds the maximum tip over the InSync mirrors (an authority
+      tip below a mirror's is refused) and, for Kubernetes, a raise-only
+      floor in the orchestrator's status. A write-only notary bucket in
+      another account is the documented later upgrade.
+    - **Limits, stated plainly.** A host with no floor (first attach, an
+      ephemeral client with no orchestrator floor) cannot detect rollback;
+      this is ADR-11 F7's "by construction" case restated for history. A
+      purely local volume cannot be protected from anyone who can write its
+      local disk: that person also holds `integrity.key` and `state/pins`
+      and can rewrite both. For a stolen or modified local disk the honest
+      claim is corruption detection and crash safety; integrity mode
+      defends the bucket copy, and encrypted mode with a passphrase slot
+      resists a reader of the disk, not a writer who also has the key file.
+  - **Randomness.** Every salt and nonce (the extent salt, the metadata
+    and slot nonces, the Argon2id salt) and every generated root key comes
+    straight from the operating system through `getrandom(2)` on every
+    call. A userspace DRBG, such as the one behind `aws-lc-rs`'s
+    `rand::fill`, is not used: it reseeds from the OS only every few
+    thousand calls and does not see a VM snapshot restore, which would
+    replay salts. The kernel CRNG is reseeded on VM fork (vmgenid, Linux
+    5.18), below the ublk floor.
+  - **Hostile keyring cost.** The format bounds a slot at 1 GiB, t 10 and
+    p 16, and a keyring may hold up to 32 slots, so a bucket writer can make
+    an attach cost minutes of CPU and a gibibyte of memory inside `lunixd`.
+    The daemon therefore applies a policy ceiling beyond the format: a
+    maximum Argon2id memory per slot (default 256 MiB, configurable) and a
+    total time and memory budget over all slots tried in one unlock; a
+    slot over the ceiling is skipped and reported. It tries first the slot
+    that unlocked the last attach on this host, and wipes the Argon2id
+    working blocks after each attempt. Wrong passphrase, corrupted wrap,
+    foreign family and bad MAC remain one error after the same work.
+  - **Key files.** A key file is opened without following symlinks and
+    without blocking (`O_NOFOLLOW | O_NOCTTY | O_NONBLOCK`) and must be a
+    regular file. Group or other permission bits are logged, not refused (a
+    Kubernetes mount is not 0600). `integrity.key` is created `create_new`,
+    0600, with the file and its directory fsynced.
+  - **Forged `dek_gen`.** A header `dek_gen` above the keyring's newest is
+    reported as an authentication failure, like the other checks done
+    before the AEAD: before authentication a forged header cannot be told
+    from a writer bug.
   - **Index runs** are checksummed and never MAC'd or sealed. They are
     hints: reads verify what they find, and a dedup hit from a run is
     confirmed against the extent's `chunk_id` and tag first (§5, §7).
@@ -1257,7 +1395,9 @@ mirrors (phase 5).
     Revocation is migration to a new KMK. DEK rotation (`dek_gen`)
     protects only new writes.
   - **Plaintext at rest locally:** the journal, the dirty overlay and the
-    keeper-held write buffer are plaintext. Run the local directory on
+    keeper-held write buffer are plaintext, and so may be the old
+    allocation of a buffer that held decrypted bytes and was reallocated
+    (ADR-11 F11). Run the local directory on
     dm-crypt or LUKS if the host disk is in the threat model.
   - Keys live in mlocked, zeroized memory, and core dumps are forbidden.
 - **Hardening rules carried over from the Constellation audit:**
@@ -1382,7 +1522,7 @@ ADR-16 and ADR-22 set the shape.
 | local FS full | space ladder → wait or ENOSPC | §4.3 |
 | host FS EIO / corruption | volume read-only, alert | re-import from the bucket |
 | bucket object corrupt | the fetch fails verification | read from a mirror; scrub repairs |
-| backend rollback / substitution | a spliced or re-ordered chain (`parent_hash`, epoch) or a stale lease is detected; an older valid prefix is not | refuse to mount; rollback needs an anchor (open question) |
+| backend rollback / substitution | a spliced or re-ordered chain (`parent_hash`, epoch) or a stale lease is detected; an older valid prefix is detected on a host with a floor (`Rollback`, `Fork`; §8.4, §15) and not on one without | refuse to mount; a host or client with no floor cannot tell |
 | mirror lags / fails | its state drops to CatchingUp | the authority is unaffected |
 | `lunixd` crash, S3 only | I/O stalls | recover; replay the keeper-held memfd buffer |
 | `lunixd` and keeper both lost, S3 only | the buffer is gone | the device is deleted (EIO), never resumed with stale data; a mounted file system goes read-only; remount from the bucket |
@@ -1431,12 +1571,14 @@ queues, not 8.
 
 ## 22. Open questions
 
-1. **Rollback anchor.** A malicious bucket can serve an old but valid
-   prefix of the chain. `parent_hash` and `epoch` (ADR-11) stop splices
-   and forks, but not this. Options: local state of `{commit_seq, epoch,
-   tip_hash}` per volume (cheap, but a fresh host has none), a CSI-object
-   floor hint, the maximum across mirrors, or a write-only notary bucket.
-   A KMS has no monotonic counter.
+1. **Rollback anchor. Closed (maintainer, 2026-11-12; ADR-31).** A
+   malicious bucket can serve an old but valid prefix of the chain, which
+   `parent_hash` and `epoch` (ADR-11) do not stop. v1 keeps a local floor
+   `{max_commit_seq, tip_hash}` in `state/pins` version 2 (§15); phase 5
+   adds the maximum over InSync mirrors and a raise-only Kubernetes floor;
+   a notary bucket is a documented later upgrade. A host with no floor, and
+   a purely local volume against someone who can write its disk, are not
+   protected, and the docs say so. A KMS has no monotonic counter.
 2. **Default chunk size.** 64 KiB against 16 KiB. The MSR Cambridge
    simulation favours 16 KiB on upload bytes but costs 4× the map and
    index entries (ADR-5 gate outcome). Decided after phase 1 benchmarks.

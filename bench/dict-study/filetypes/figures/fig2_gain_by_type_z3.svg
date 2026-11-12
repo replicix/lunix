@@ -1,0 +1,226 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="2286" viewBox="0 0 760 2286" font-family="sans-serif" font-size="11">
+<title>Saving vs zstd:3 by type (arm C dictionaries, all sizes)</title>
+<rect width="760" height="2286" fill="#ffffff"/>
+<text x="380.0" y="18" text-anchor="middle" font-size="13" font-weight="bold">Saving vs zstd:3 by type (arm C dictionaries, all sizes)</text>
+<line x1="112.47191011235955" x2="112.47191011235955" y1="30" y2="2256" stroke="#ddd"/><text x="112.47191011235955" y="2270" text-anchor="middle">0</text>
+<line x1="212.79293739967898" x2="212.79293739967898" y1="30" y2="2256" stroke="#ddd"/><text x="212.79293739967898" y="2270" text-anchor="middle">5</text>
+<line x1="313.11396468699843" x2="313.11396468699843" y1="30" y2="2256" stroke="#ddd"/><text x="313.11396468699843" y="2270" text-anchor="middle">10</text>
+<line x1="413.43499197431777" x2="413.43499197431777" y1="30" y2="2256" stroke="#ddd"/><text x="413.43499197431777" y="2270" text-anchor="middle">15</text>
+<line x1="513.7560192616372" x2="513.7560192616372" y1="30" y2="2256" stroke="#ddd"/><text x="513.7560192616372" y="2270" text-anchor="middle">20</text>
+<text x="350.0" y="2283" text-anchor="middle">saving of stored bytes (%)</text>
+<text x="86" y="55.0" text-anchor="end">ada</text>
+<rect x="112.5" y="34" width="399.1" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="46" width="433.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="58" width="460.7" height="10" fill="#59a14f"/>
+<text x="86" y="97.0" text-anchor="end">java</text>
+<rect x="112.5" y="76" width="387.2" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="88" width="395.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="100" width="459.9" height="10" fill="#59a14f"/>
+<text x="86" y="139.0" text-anchor="end">toml</text>
+<rect x="112.5" y="118" width="232.1" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="130" width="324.6" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="142" width="458.1" height="10" fill="#59a14f"/>
+<text x="86" y="181.0" text-anchor="end">dockerfile</text>
+<rect x="112.5" y="160" width="318.6" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="172" width="332.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="184" width="457.3" height="10" fill="#59a14f"/>
+<text x="86" y="223.0" text-anchor="end">fortran</text>
+<rect x="112.5" y="202" width="54.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="214" width="213.7" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="226" width="388.4" height="10" fill="#59a14f"/>
+<text x="86" y="265.0" text-anchor="end">kotlin</text>
+<rect x="112.5" y="244" width="295.9" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="256" width="316.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="268" width="386.8" height="10" fill="#59a14f"/>
+<text x="86" y="307.0" text-anchor="end">cmake</text>
+<rect x="112.5" y="286" width="151.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="298" width="274.7" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="310" width="350.1" height="10" fill="#59a14f"/>
+<text x="86" y="349.0" text-anchor="end">go</text>
+<rect x="112.5" y="328" width="246.8" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="340" width="275.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="352" width="347.3" height="10" fill="#59a14f"/>
+<text x="86" y="391.0" text-anchor="end">ini</text>
+<rect x="112.5" y="370" width="246.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="382" width="224.7" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="394" width="338.7" height="10" fill="#59a14f"/>
+<text x="86" y="433.0" text-anchor="end">class</text>
+<rect x="112.5" y="412" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="424" width="275.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="436" width="337.5" height="10" fill="#59a14f"/>
+<text x="86" y="475.0" text-anchor="end">xml</text>
+<rect x="112.5" y="454" width="264.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="466" width="291.9" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="478" width="319.6" height="10" fill="#59a14f"/>
+<text x="86" y="517.0" text-anchor="end">scala</text>
+<rect x="112.5" y="496" width="287.3" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="508" width="286.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="520" width="282.1" height="10" fill="#59a14f"/>
+<text x="86" y="559.0" text-anchor="end">swift</text>
+<rect x="112.5" y="538" width="206.5" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="550" width="220.9" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="562" width="274.5" height="10" fill="#59a14f"/>
+<text x="86" y="601.0" text-anchor="end">make</text>
+<rect x="112.5" y="580" width="126.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="592" width="177.2" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="604" width="255.2" height="10" fill="#59a14f"/>
+<text x="86" y="643.0" text-anchor="end">h</text>
+<rect x="112.5" y="622" width="201.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="634" width="215.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="646" width="244.6" height="10" fill="#59a14f"/>
+<text x="86" y="685.0" text-anchor="end">php</text>
+<rect x="112.5" y="664" width="190.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="676" width="207.3" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="688" width="240.2" height="10" fill="#59a14f"/>
+<text x="86" y="727.0" text-anchor="end">svg</text>
+<rect x="112.5" y="706" width="160.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="718" width="165.7" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="730" width="239.8" height="10" fill="#59a14f"/>
+<text x="86" y="769.0" text-anchor="end">sh</text>
+<rect x="112.5" y="748" width="161.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="760" width="224.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="772" width="235.2" height="10" fill="#59a14f"/>
+<text x="86" y="811.0" text-anchor="end">cpp</text>
+<rect x="112.5" y="790" width="192.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="802" width="204.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="814" width="235.0" height="10" fill="#59a14f"/>
+<text x="86" y="853.0" text-anchor="end">r</text>
+<rect x="112.5" y="832" width="129.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="844" width="175.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="856" width="232.5" height="10" fill="#59a14f"/>
+<text x="86" y="895.0" text-anchor="end">asm</text>
+<rect x="112.5" y="874" width="210.5" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="886" width="235.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="898" width="224.9" height="10" fill="#59a14f"/>
+<text x="86" y="937.0" text-anchor="end">ruby</text>
+<rect x="112.5" y="916" width="134.8" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="928" width="170.7" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="940" width="216.7" height="10" fill="#59a14f"/>
+<text x="86" y="979.0" text-anchor="end">ts</text>
+<rect x="112.5" y="958" width="162.5" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="970" width="191.2" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="982" width="214.9" height="10" fill="#59a14f"/>
+<text x="86" y="1021.0" text-anchor="end">csharp</text>
+<rect x="112.5" y="1000" width="181.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1012" width="213.9" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1024" width="207.5" height="10" fill="#59a14f"/>
+<text x="86" y="1063.0" text-anchor="end">c</text>
+<rect x="112.5" y="1042" width="152.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1054" width="174.4" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1066" width="203.3" height="10" fill="#59a14f"/>
+<text x="86" y="1105.0" text-anchor="end">md</text>
+<rect x="112.5" y="1084" width="150.1" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1096" width="182.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1108" width="195.0" height="10" fill="#59a14f"/>
+<text x="86" y="1147.0" text-anchor="end">rst</text>
+<rect x="112.5" y="1126" width="127.8" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1138" width="157.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1150" width="182.0" height="10" fill="#59a14f"/>
+<text x="86" y="1189.0" text-anchor="end">html</text>
+<rect x="112.5" y="1168" width="123.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1180" width="155.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1192" width="175.0" height="10" fill="#59a14f"/>
+<text x="86" y="1231.0" text-anchor="end">rust</text>
+<rect x="112.5" y="1210" width="86.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1222" width="113.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1234" width="174.4" height="10" fill="#59a14f"/>
+<text x="86" y="1273.0" text-anchor="end">haskell</text>
+<rect x="112.5" y="1252" width="97.9" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1264" width="164.9" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1276" width="173.6" height="10" fill="#59a14f"/>
+<text x="86" y="1315.0" text-anchor="end">css</text>
+<rect x="112.5" y="1294" width="75.8" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1306" width="102.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1318" width="170.9" height="10" fill="#59a14f"/>
+<text x="86" y="1357.0" text-anchor="end">cobol</text>
+<rect x="112.5" y="1336" width="108.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1348" width="143.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1360" width="164.1" height="10" fill="#59a14f"/>
+<text x="86" y="1399.0" text-anchor="end">elixir</text>
+<rect x="112.5" y="1378" width="85.5" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1390" width="115.4" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1402" width="162.5" height="10" fill="#59a14f"/>
+<text x="86" y="1441.0" text-anchor="end">python</text>
+<rect x="112.5" y="1420" width="99.5" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1432" width="132.2" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1444" width="139.8" height="10" fill="#59a14f"/>
+<text x="86" y="1483.0" text-anchor="end">pbtxt</text>
+<rect x="112.5" y="1462" width="173.8" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1474" width="132.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1486" width="132.8" height="10" fill="#59a14f"/>
+<text x="86" y="1525.0" text-anchor="end">lua</text>
+<rect x="112.5" y="1504" width="87.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1516" width="113.2" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1528" width="114.2" height="10" fill="#59a14f"/>
+<text x="86" y="1567.0" text-anchor="end">perl</text>
+<rect x="112.5" y="1546" width="92.1" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1558" width="110.6" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1570" width="102.1" height="10" fill="#59a14f"/>
+<text x="86" y="1609.0" text-anchor="end">po</text>
+<rect x="112.5" y="1588" width="51.6" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1600" width="93.1" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1612" width="99.5" height="10" fill="#59a14f"/>
+<text x="86" y="1651.0" text-anchor="end">sql</text>
+<rect x="112.5" y="1630" width="57.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1642" width="73.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1654" width="98.5" height="10" fill="#59a14f"/>
+<text x="86" y="1693.0" text-anchor="end">erlang</text>
+<rect x="112.5" y="1672" width="118.2" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1684" width="92.5" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1696" width="93.3" height="10" fill="#59a14f"/>
+<text x="86" y="1735.0" text-anchor="end">yaml</text>
+<rect x="112.5" y="1714" width="57.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1726" width="70.4" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1738" width="88.3" height="10" fill="#59a14f"/>
+<text x="86" y="1777.0" text-anchor="end">js</text>
+<rect x="112.5" y="1756" width="42.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1768" width="52.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1780" width="64.4" height="10" fill="#59a14f"/>
+<text x="86" y="1819.0" text-anchor="end">json</text>
+<rect x="112.5" y="1798" width="42.9" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1810" width="54.2" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1822" width="52.4" height="10" fill="#59a14f"/>
+<text x="86" y="1861.0" text-anchor="end">tex</text>
+<rect x="112.5" y="1840" width="28.7" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1852" width="36.3" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1864" width="40.5" height="10" fill="#59a14f"/>
+<text x="86" y="1903.0" text-anchor="end">syslog</text>
+<rect x="112.5" y="1882" width="1.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1894" width="2.4" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1906" width="2.4" height="10" fill="#59a14f"/>
+<text x="86" y="1945.0" text-anchor="end">pdf</text>
+<rect x="112.5" y="1924" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1936" width="0.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1948" width="2.2" height="10" fill="#59a14f"/>
+<text x="86" y="1987.0" text-anchor="end">applog</text>
+<rect x="112.5" y="1966" width="5.4" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="1978" width="6.8" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="1990" width="1.8" height="10" fill="#59a14f"/>
+<text x="86" y="2029.0" text-anchor="end">elf</text>
+<rect x="112.5" y="2008" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2020" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2032" width="0.0" height="10" fill="#59a14f"/>
+<text x="86" y="2071.0" text-anchor="end">access</text>
+<rect x="112.5" y="2050" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2062" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2074" width="0.0" height="10" fill="#59a14f"/>
+<text x="86" y="2113.0" text-anchor="end">csv</text>
+<rect x="112.5" y="2092" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2104" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2116" width="0.0" height="10" fill="#59a14f"/>
+<text x="86" y="2155.0" text-anchor="end">sqlite</text>
+<rect x="112.5" y="2134" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2146" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2158" width="0.0" height="10" fill="#59a14f"/>
+<text x="86" y="2197.0" text-anchor="end">jsonl</text>
+<rect x="112.5" y="2176" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2188" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2200" width="0.0" height="10" fill="#59a14f"/>
+<text x="86" y="2239.0" text-anchor="end">wasm</text>
+<rect x="112.5" y="2218" width="0.0" height="10" fill="#4e79a7"/>
+<rect x="112.5" y="2230" width="0.0" height="10" fill="#f28e2b"/>
+<rect x="112.5" y="2242" width="0.0" height="10" fill="#59a14f"/>
+<rect x="620" y="40" width="10" height="10" fill="#4e79a7"/><text x="634" y="49">generic text</text>
+<rect x="620" y="55" width="10" height="10" fill="#f28e2b"/><text x="634" y="64">family</text>
+<rect x="620" y="70" width="10" height="10" fill="#59a14f"/><text x="634" y="79">per-type</text>
+</svg>

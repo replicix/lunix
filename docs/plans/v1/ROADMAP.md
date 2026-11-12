@@ -22,7 +22,11 @@ commit kind. ADR-30's dictionary reservations are frozen too: codec id 3,
 the `dicts/<id>` envelope (`{kind id, ver, bytes}`) and its GC rule. The
 `heat/` and `gc/` bodies freeze only their envelope; later phases version
 their contents.
-Later phases add code, not
+Two amendments of 2026-11-12 (maintainer, after the M2 security review)
+change frozen items and need the maintainer's re-sign of `FREEZE.md`:
+`state/pins` becomes version 2 with the rollback floor `{max_commit_seq,
+tip_hash}` (ADR-31), and the key-purpose table gains the addressing key of
+`integrity` mode (keyed chunk ids, ADR-6). Later phases add code, not
 migrations. Encryption is therefore *designed* in phase 1 even where it is
 implemented later.
 
@@ -85,7 +89,9 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - Encryption: format, the keyring with its key slots, AEAD, the
   attach-time downgrade check (descriptor MAC and KMK fingerprint), and
   hash-chained commits with an HMAC on every commit of unencrypted
-  volumes.
+  volumes, keyed chunk ids in `integrity` mode, the tamper-resistance
+  rules R1-R4 (ADR-11) and the local rollback floor in `state/pins`
+  version 2 (ADR-31).
 
 **Exit:**
 - fio verify passes.
@@ -98,6 +104,10 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
     grow the store beyond the live data plus bounded headroom;
   - the crash loop covers every condemn, compact and delete step, with
     fsck clean.
+- Tamper tests pass for `integrity` and `encrypted` volumes: a swapped,
+  relocated, replayed, node-as-data or footer-substituted extent is
+  refused (R1-R3), and a rolled-back or forked tip is refused at attach
+  (`Rollback`, `Fork`; R4).
 - Dedup and compression ratios are reported.
 - Perf meets the §20 targets for local hits and writes, or the
   shortfall is explained.
@@ -190,6 +200,13 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - Mirror roles and the state machine: backfill (hot-first, restartable,
   AIMD, budget) and tail replication.
 - Source selection and hedging across backends.
+- Rollback anchors beyond the local floor of phase 1 (ADR-31): attach
+  refuses an authority whose tip is below the maximum tip over the InSync
+  mirrors, and on Kubernetes a raise-only floor `{commit_seq, tip_hash}` in
+  the orchestrator's status, written once per FULL, covers a pod that moves
+  to a host with no local floor. A DR steal from a lagging mirror needs the
+  explicit floor reset. A write-only notary bucket in another account is the
+  documented later upgrade, not scheduled.
 - Authority transfer, `steal`, mirror GC, and `migrate plan`.
 - Hydration (`cache → store`), and removing the last backend to a
   local-only volume (ADR-26).
@@ -201,6 +218,9 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
   errors.
 - Root equality is verified across AWS, R2 and OVH.
 - DR steal is tested from a mirror.
+- Rollback: an authority rolled back below a mirror's tip is refused; a
+  raise-only Kubernetes floor refuses a rolled-back tip on a host with no
+  local floor.
 
 ## Phase 6: Kubernetes CSI
 
