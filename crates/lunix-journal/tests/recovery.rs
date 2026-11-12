@@ -508,3 +508,55 @@ fn a_torn_final_batch_loses_only_its_unacknowledged_tail() {
     assert_eq!(r.next_seq, WriteSeq(10));
     check_data(&j, &r);
 }
+
+#[test]
+fn recover_after_a_lane_is_open_is_refused_and_a_second_crash_keeps_stale_records_out() {
+    let rig = Rig::new(2, 3);
+    let w = {
+        let j = rig.open();
+        recover_all(&j);
+        let mut ls = lanes_of(&j, 2);
+        let mut v = Vec::new();
+        for i in 0..10usize {
+            let l = i % 2;
+            v.push(write_rec(&mut *ls[l], 100 + i as u64, 1));
+            complete_appends(&mut *ls[l], 1);
+            if i == 3 {
+                group_flush(&j);
+            }
+        }
+        v
+    };
+    // Seq 5 is lost; 6-10 are intact beyond the gap.
+    zero_bytes(
+        &path_of(&rig.cfg, w[4].lane, w[4].ordinal),
+        w[4].start,
+        w[4].len,
+    );
+    for round in 0..2 {
+        let j = rig.open();
+        let r = recover_all(&j);
+        let base = if round == 0 { 4 } else { 4 + 8 };
+        assert_eq!(r.records.len() as u64, base, "round {round}");
+        let mut ls = lanes_of(&j, 2);
+        let e = j.recover(None, WriteSeq(0)).err().expect("refused");
+        assert_eq!(e.kind(), lunix_iface::ErrorKind::Invalid);
+        // Eight new records: they pass every stale sequence number (6-10).
+        for i in 0..8usize {
+            let l = i % 2;
+            write_rec(&mut *ls[l], 900 + 100 * round as u64 + i as u64, 1);
+            complete_appends(&mut *ls[l], 1);
+        }
+        group_flush(&j);
+        // Crash again: drop everything, recover in the next round / below.
+    }
+    let j = rig.open();
+    let r = recover_all(&j);
+    assert_eq!(seqs(&r), (1..=20).collect::<Vec<_>>());
+    assert_eq!(r.ignored_after_gap, None);
+    let lbas: Vec<u64> = r.records.iter().map(|x| x.record.lba).collect();
+    assert!(
+        lbas[4..].iter().all(|&l| l >= 900),
+        "a stale record came back: {lbas:?}"
+    );
+}
