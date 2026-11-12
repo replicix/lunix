@@ -1,0 +1,163 @@
+# Milestone id -> the paths it may change (plan 01-p1-local-volume.md, the
+# "Owns" lines). Globs: `*` stays inside one directory, `**` crosses
+# directories. `exclude` removes paths from `paths`.
+#
+# Always allowed for every milestone (see tools/check-ownership.sh):
+#   docs/plans/v1/reports/p1-<m>.md      the milestone's report
+#   crates/<owned crate>/README.md      at most 40 lines
+#   Cargo.toml and Cargo.lock           only in a commit titled
+#                                       `deps: add <crate> =<version> for <m>`
+#                                       (the script checks the paths; the
+#                                       commit title is a review rule)
+# `m18a` has no entry: its repository is replicix-core.
+
+[m1a0]
+paths = [
+  "docs/reference/on-disk-formats.md",
+  "docs/reference/attach-matrix.md",
+  "crates/lunix-format/FREEZE.md",
+]
+
+[m1a]
+paths = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".gitignore",
+  ".github/**",
+  "tools/**",
+  "crates/lunix-format/**",
+  "crates/lunix-iface/Cargo.toml",
+  "crates/lunix-iface/src/lib.rs",
+  "crates/lunix-testkit/Cargo.toml",
+  "crates/lunix-testkit/src/lib.rs",
+  "crates/lunix-crypto/Cargo.toml",
+  "crates/lunix-crypto/src/lib.rs",
+  "crates/lunix-journal/Cargo.toml",
+  "crates/lunix-journal/src/lib.rs",
+  "crates/lunix-overlay/Cargo.toml",
+  "crates/lunix-overlay/src/lib.rs",
+  "crates/lunix-map/Cargo.toml",
+  "crates/lunix-map/src/lib.rs",
+  "crates/lunix-index/Cargo.toml",
+  "crates/lunix-index/src/lib.rs",
+  "crates/lunix-store/Cargo.toml",
+  "crates/lunix-store/src/lib.rs",
+  "crates/lunix-space/Cargo.toml",
+  "crates/lunix-space/src/lib.rs",
+  "crates/lunix-destage/Cargo.toml",
+  "crates/lunix-destage/src/lib.rs",
+  "crates/lunix-ublk/Cargo.toml",
+  "crates/lunix-ublk/src/lib.rs",
+  "crates/lunix-ublk/src/bin/lunix-ublk-testd.rs",
+  "crates/lunix-engine/Cargo.toml",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-gc/Cargo.toml",
+  "crates/lunix-gc/src/lib.rs",
+  "crates/lunix-fsck/Cargo.toml",
+  "crates/lunix-fsck/src/lib.rs",
+  "crates/lunix-fsck/src/bin/lunix-fsck.rs",
+  "crates/lunix-cli/Cargo.toml",
+  "crates/lunix-cli/src/lib.rs",
+  "crates/lunix-cli/src/main.rs",
+  "crates/lunixd/Cargo.toml",
+  "crates/lunixd/src/lib.rs",
+  "crates/lunixd/src/main.rs",
+]
+
+[m1b1]
+paths = ["crates/lunix-iface/**"]
+
+[m1b2a]
+paths = ["crates/lunix-testkit/**"]
+
+# B2b extends the crate B2a started; the two run one after the other (B2b
+# "may overlap" only in time, not in files: the lead assigns the files).
+[m1b2b]
+paths = ["crates/lunix-testkit/**"]
+
+[m2]
+paths = ["crates/lunix-crypto/**"]
+
+[m3]
+paths = ["crates/lunix-journal/**"]
+
+[m4]
+paths = ["crates/lunix-overlay/**"]
+
+[m5]
+paths = ["crates/lunix-map/**"]
+
+[m6]
+paths = ["crates/lunix-index/**"]
+
+[m7]
+paths = ["crates/lunix-store/**"]
+
+[m8]
+paths = ["crates/lunix-space/**"]
+
+[m9]
+paths = ["crates/lunix-destage/**"]
+
+[m10]
+paths = ["crates/lunix-ublk/**"]
+
+[m11]
+paths = ["crates/lunix-engine/**"]
+
+# M12a creates src/testsupport.rs with its final signature; M12b fills it.
+[m12a]
+paths = ["crates/lunixd/**"]
+exclude = ["crates/lunixd/tests/stack_*.rs"]
+
+[m12b]
+paths = [
+  "crates/lunixd/tests/stack_*.rs",
+  "crates/lunixd/src/testsupport.rs",
+]
+
+# M13a owns all of lunix-cli, including the stubs of src/fsck.rs and
+# src/key.rs; M13b fills only those two files.
+[m13a]
+paths = ["crates/lunix-cli/**"]
+
+[m13b]
+paths = [
+  "crates/lunix-cli/src/fsck.rs",
+  "crates/lunix-cli/src/key.rs",
+]
+
+# M14 creates src/gc.rs (the stub M17.B fills).
+[m14]
+paths = ["crates/lunix-fsck/**"]
+
+[m17a]
+paths = [
+  "crates/lunix-gc/**",
+  "docs/reference/gc.md",
+]
+exclude = ["crates/lunix-gc/tests/**"]
+
+[m17b]
+paths = [
+  "crates/lunix-gc/tests/**",
+  "crates/lunix-fsck/src/gc.rs",
+  "crates/lunixd/tests/stack_gc*.rs",
+  "bench/phase1/gc/**",
+]
+
+[m15]
+paths = ["tests/exit/**", "bench/phase1/exit/**"]
+
+[m16]
+paths = ["tests/perf/**", "bench/phase1/perf/**", "bench/phase1/chunksize/**"]
+
+[m18b]
+paths = [
+  "tests/dictstudy/**",
+  "bench/dict-study/lunix/**",
+  "bench/dict-study/constellation-arm/**",
+  "docs/explanation/research/*zstd-dictionaries-on-block-devices*",
+  "docs/explanation/research/figures/dict-study/**",
+]

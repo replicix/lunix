@@ -1,0 +1,48 @@
+[package]
+name = "lunixd"
+description = "The Lunix daemon: config, registry, control server, wiring and signals."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The only build that enables crashpoints: cargo build -p lunixd --features crashpoints
+crashpoints = ["lunix-iface/crashpoints"]
+
+[[bin]]
+name = "lunixd"
+path = "src/main.rs"
+
+[dependencies]
+lunix-format.workspace = true
+lunix-iface.workspace = true
+thiserror.workspace = true
+lunix-crypto.workspace = true
+lunix-journal.workspace = true
+lunix-overlay.workspace = true
+lunix-map.workspace = true
+lunix-index.workspace = true
+lunix-store.workspace = true
+lunix-space.workspace = true
+lunix-destage.workspace = true
+lunix-ublk.workspace = true
+lunix-engine.workspace = true
+lunix-gc.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+inventory.workspace = true
+libc.workspace = true
+rustix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+lunix-testkit.workspace = true

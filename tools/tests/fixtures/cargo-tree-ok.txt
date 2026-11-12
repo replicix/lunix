@@ -1,0 +1,6 @@
+lunixd v0.1.0 (/src/crates/lunixd)
+lunix-iface v0.1.0 (/src/crates/lunix-iface)
+lunix-format v0.1.0 (/src/crates/lunix-format)
+lunix-crypto v0.1.0 (/src/crates/lunix-crypto) 
+blake3 v1.8.7 default,std
+lunix-store v0.1.0 (/src/crates/lunix-store) (*)

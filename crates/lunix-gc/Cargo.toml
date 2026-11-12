@@ -1,0 +1,22 @@
+[package]
+name = "lunix-gc"
+description = "Mark, liveness, compaction, condemn, grace, recheck and delete."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lunix-format.workspace = true
+lunix-iface.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+lunix-testkit.workspace = true
+lunix-map.workspace = true

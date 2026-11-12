@@ -1,0 +1,24 @@
+[package]
+name = "lunix-ublk"
+description = "Raw ublk control ring, queues, recovery, QUIESCE, TRY_STOP and resize."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lunix-format.workspace = true
+lunix-iface.workspace = true
+thiserror.workspace = true
+libublk.workspace = true
+io-uring.workspace = true
+libc.workspace = true
+rustix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+lunix-testkit.workspace = true

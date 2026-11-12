@@ -1,0 +1,18 @@
+[package]
+name = "lunix-testkit"
+description = "In-memory fakes and oracles for the Lunix traits (dev-dependency only)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lunix-format.workspace = true
+lunix-iface.workspace = true
+thiserror.workspace = true
+proptest.workspace = true
+tempfile.workspace = true

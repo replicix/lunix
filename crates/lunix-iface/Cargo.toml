@@ -1,0 +1,22 @@
+[package]
+name = "lunix-iface"
+description = "Traits and shared types between Lunix crates, the control protocol and crashpoints."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Compiled out unless on; only the lunixd crashpoints build enables it.
+crashpoints = []
+
+[dependencies]
+lunix-format.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+inventory.workspace = true

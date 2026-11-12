@@ -1,0 +1,4 @@
+[toolchain]
+# Same channel as replicix-core and Constellation.
+channel = "1.98"
+components = ["rustfmt", "clippy"]
