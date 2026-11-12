@@ -1,7 +1,7 @@
 # M1.B2b report: `lunix-testkit` part 2
 
-- Milestone M1.B2b, branch `p1/m1-b2b`, rebased on `origin/main` `9d0671a` (M7 and the M2 review are in it), 2026-11-12.
-- Code commits `e94b946` (everything), `470f73b` (MemStore aligned with the merged `lunix-store`), `fed2595` (MemStore open observes
+- Milestone M1.B2b, branch `p1/m1-b2b`, rebased on `origin/main` `76da111` (M7 and the M2 review are in it), 2026-11-12.
+- Code commits `646a0f0` (everything), `7ebba1f` (MemStore aligned with the merged `lunix-store`), `54e29bc` (MemStore open observes
   the checkpoint `id_high`); this report is the commit after them.
 - Gate run through `tools/remote.sh run`, `LUNIX_CPUS=0-3`, `LUNIX_JOBS=4`, host dirs `lunix-p1/m1b2b/{src,target}`. No root.
 
@@ -92,7 +92,7 @@ later request: M11's check is "`first_match(device, last_flush_n)` is `Some`".
 
 | gate item | result |
 |---|---|
-| every `ci.sh` step: tool tests, fmt, clippy `-D warnings` (workspace; `lunix-iface` and `lunix-store` with crashpoints), workspace tests, iface and store tests with crashpoints, feature edges, `lunixd` crashpoints build | green at `fed2595` (678 tests passed across the steps, no retry needed in the last run); ownership `m1b2b ok (25 changed paths)` |
+| every `ci.sh` step: tool tests, fmt, clippy `-D warnings` (workspace; `lunix-iface` and `lunix-store` with crashpoints), workspace tests, iface and store tests with crashpoints, feature edges, `lunixd` crashpoints build | green at `54e29bc` (rebased on `76da111`) (678 tests passed across the steps, no retry needed in the last run); ownership `m1b2b ok (25 changed paths)` |
 | `lunix-testkit` tests | 191 pass, 0 fail (list below) |
 | every fake passes its `lunix_iface::contract` suite | `MemJournal` 13 tests x2 (two ring-file sizes, 26), `MemIndex` 10, `MemStore` 12 (+ `FlatMap` on `MemStore`'s packs 7), `PlainCodec` crypto suite x2 modes with raw, LZ4 and zstd (18), plus B2a's overlay, map, space suites |
 | `DeviceOracle`/`OracleLog` self-consistency, 1 000 sequences of 100 requests | `model_oracle`: oracle vs a sparse block model (valid and invalid requests), log replay and prefix search (1 000 cases each) |
