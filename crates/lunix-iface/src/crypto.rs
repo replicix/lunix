@@ -36,6 +36,11 @@ pub struct EncodingDesc {
     pub level: Level,
     /// The uncompressed length.
     pub ulen: u32,
+    /// The zstd dictionary id for codec 3 (`Invalid` unless `codec` is
+    /// `ZstdDict`; always `None` in phase 1). On encrypted volumes the
+    /// segment writer cannot read it from the ciphertext, so it is passed
+    /// along explicitly (`SegmentWriter::append_extent`).
+    pub dict_id: Option<u32>,
 }
 
 /// What `open` returns.
@@ -69,15 +74,14 @@ pub struct OpenExpect<'a> {
     pub output: OpenOutput,
 }
 
-/// A verified extent.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Opened {
+/// What `open` reports about a verified extent (the payload goes to the
+/// caller's buffer).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct OpenedMeta {
     /// How the chunk is encoded.
     pub desc: EncodingDesc,
     /// The full chunk id from the header.
     pub chunk_id: ChunkId,
-    /// The payload in the requested [`OpenOutput`] form.
-    pub bytes: Vec<u8>,
 }
 
 /// Seals and opens extents (chunks and map nodes).
@@ -105,16 +109,29 @@ pub trait ExtentCodec: Send + Sync {
         out: &mut Vec<u8>,
     ) -> Result<()>;
 
-    /// Verifies and opens a stored extent. Order: structure and header sanity,
-    /// the plain tag or AEAD tag before anything else is trusted, `ulen`
-    /// against `expect.chunk_size`, id checks, bounded decompression, then the
-    /// id recomputation when asked.
+    /// Verifies and opens a stored extent and **appends** the payload, in the
+    /// form `expect.output` asks for, to `out` (no per-call allocation; `out`
+    /// is untouched on error). Checks: header sanity and the id comparison, the
+    /// plain tag or AEAD tag, `ulen` against `expect.chunk_size`, bounded
+    /// decompression, then the id recomputation when asked. Every failure of a
+    /// tag or an id is the same `Auth`, so the order is not observable.
+    ///
+    /// For `ExtentKind::Node` the `chunk_size` field is ignored and the cap is
+    /// `lunix_format::node::MAX_NODE_ULEN`. `verify_id = true` with
+    /// `OpenOutput::Stored` decompresses internally (bounded) and still
+    /// returns the stored form.
     ///
     /// # Errors
     /// `Auth` for any tag, AEAD or id mismatch (one error for all of them),
     /// `Corrupt`/`Format` for structure, `Unsupported` for codec 3 until
     /// phase 4.
-    fn open(&self, kind: ExtentKind, bytes: &[u8], expect: &OpenExpect<'_>) -> Result<Opened>;
+    fn open(
+        &self,
+        kind: ExtentKind,
+        bytes: &[u8],
+        expect: &OpenExpect<'_>,
+        out: &mut Vec<u8>,
+    ) -> Result<OpenedMeta>;
 }
 
 /// Seals and opens metadata objects: footers, lease, pins, `gc/`, `heat/`,

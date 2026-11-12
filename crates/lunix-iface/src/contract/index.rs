@@ -211,3 +211,32 @@ pub fn rebuild_equals_incremental<F: IndexFixture>(f: &mut F) {
     assert_eq!(before, after);
     assert_eq!(after.len(), 3);
 }
+
+/// `all_runs` lists every run file, a superset of the manifest's `runs()`, and a
+/// deleted run disappears from both.
+pub fn all_runs_lists_every_run_file<F: IndexFixture>(f: &mut F) {
+    f.index().insert(id(1), hint(1, 0)).expect("insert");
+    let made = f.index().persist(seg(1)).expect("persist");
+    assert!(!made.is_empty());
+    let all = f.index().all_runs().expect("all_runs");
+    for r in f.index().runs().expect("runs") {
+        assert!(
+            all.iter().any(|a| a.id == r.id),
+            "named run {:?} is listed",
+            r.id
+        );
+    }
+    f.index().delete_run(made[0]).expect("delete");
+    assert!(!f
+        .index()
+        .all_runs()
+        .expect("all_runs")
+        .iter()
+        .any(|a| a.id == made[0].id));
+    assert!(!f
+        .index()
+        .runs()
+        .expect("runs")
+        .iter()
+        .any(|a| a.id == made[0].id));
+}

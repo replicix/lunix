@@ -135,6 +135,9 @@ impl ChunkIndex for TIndex {
     fn runs(&self) -> Result<Vec<RunRef>> {
         Ok(lock(&self.persisted).runs.clone())
     }
+    fn all_runs(&self) -> Result<Vec<RunRef>> {
+        Ok(lock(&self.persisted).runs.clone())
+    }
     fn catch_up(&self, segments: &[SegId], footers: &dyn SegmentFooters) -> Result<CatchUpReport> {
         let mut rep = CatchUpReport::default();
         for &seg in segments {

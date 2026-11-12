@@ -3,6 +3,7 @@
 //! the macros compile, run and are satisfiable.
 #![allow(dead_code, clippy::type_complexity)]
 
+pub mod crypto;
 pub mod index;
 pub mod journal;
 pub mod map;

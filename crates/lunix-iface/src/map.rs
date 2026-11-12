@@ -168,7 +168,7 @@ pub trait BlockMap: Send + Sync {
     fn dirty_leaf_count(&self) -> u64;
 
     /// Read-only traversal of **any** root (GC, fsck): calls `f` for every
-    /// non-hole entry in ascending chunk order.
+    /// non-hole entry, holes omitted, in ascending chunk order.
     fn walk_leaves(&self, root: &MapRoot, f: &mut dyn FnMut(ChunkNo, &DataEntry)) -> Result<()> {
         self.walk_leaves_skipping(root, &HashSet::new(), f)
     }
@@ -183,7 +183,8 @@ pub trait BlockMap: Send + Sync {
         f: &mut dyn FnMut(ChunkNo, &DataEntry),
     ) -> Result<()>;
 
-    /// Read-only traversal of **any** root: calls `f` once per stored node.
+    /// Read-only traversal of **any** root: calls `f` once per stored node,
+    /// **including the root node itself** (its pack is a live pack).
     fn walk_nodes(&self, root: &MapRoot, f: &mut dyn FnMut(&NodeRef)) -> Result<()>;
 
     /// Like `walk_nodes` but does not descend into, or report, subtrees whose

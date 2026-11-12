@@ -69,7 +69,9 @@ pub struct IoRequest {
     /// Byte offset on the device. The engine rejects values that are not
     /// multiples of 4096 or that reach past the size with `EINVAL`.
     pub offset_bytes: u64,
-    /// Length in bytes (0 for FLUSH).
+    /// Length in bytes (0 for FLUSH). A single DISCARD or WRITE_ZEROES is
+    /// capped at `i32::MAX` bytes: the ublk layer sets `max_discard_sectors`
+    /// and `max_write_zeroes_sectors` to at most `i32::MAX / 512`.
     pub len: u32,
 }
 
@@ -175,6 +177,18 @@ pub trait BlockEngine: Send + Sync {
 
     /// Installs the hook called by `grow` (replaces any earlier one).
     fn set_on_resize(&self, hook: Arc<dyn ResizeHook>);
+
+    /// Called after the ublk layer stopped delivering requests (detach, or
+    /// before a quiesce handover): performs the final cut and commit. Dropping
+    /// the engine afterwards loses nothing. Idempotent. Control thread, may
+    /// block. There is no `detach` here: stopping and deleting the device
+    /// belongs to the ublk layer (W1, W2).
+    ///
+    /// # Errors
+    /// Whatever the final commit reports.
+    fn quiesce(&self) -> Result<()> {
+        Ok(())
+    }
 
     /// A snapshot of the counters. Non-blocking.
     fn stats(&self) -> EngineStats;

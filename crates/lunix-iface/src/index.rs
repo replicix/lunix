@@ -110,13 +110,19 @@ pub trait ChunkIndex: Send + Sync {
 
     /// Writes a run holding the memtable entries whose segment id is
     /// `<= upto_seg`, the highest segment named by a durable commit. Entries of
-    /// higher segments, relocated ones included, stay in memory. Returns the
+    /// higher segments, relocated ones included, stay in memory. Invariant the
+    /// caller keeps (M11's C-step order guarantees it): every existing segment
+    /// with an id `<= upto_seg` is named by a durable commit. Returns the
     /// runs created (possibly none). The run is named by the **next** FULL
     /// (D3).
     fn persist(&self, upto_seg: SegId) -> Result<Vec<RunRef>>;
 
     /// The runs the current manifest names.
     fn runs(&self) -> Result<Vec<RunRef>>;
+
+    /// Every `index/<run>` file present, named by the manifest or not (GC finds
+    /// dead runs here). Blocking.
+    fn all_runs(&self) -> Result<Vec<RunRef>>;
 
     /// After an unclean stop: inserts the entries of the footers of `segments`
     /// (the ids named by the retained commit chain, never "newer than the
@@ -128,8 +134,9 @@ pub trait ChunkIndex: Send + Sync {
     /// `fsck --rebuild-index` engine).
     fn rebuild(&self, segments: &[SegId], footers: &dyn SegmentFooters) -> Result<()>;
 
-    /// Deletes a run file; returns the bytes freed (missing frees 0). The run
-    /// must no longer be named by the manifest or a retained FULL.
+    /// Deletes a run file; returns the bytes freed (missing frees 0). The
+    /// **caller** checks that neither the manifest (`runs()`) nor any retained
+    /// FULL's `index_packs[]` still names it.
     fn delete_run(&self, run: RunRef) -> Result<u64>;
 
     /// Calls `f` for every entry (fsck equality checks, tests). Blocking.

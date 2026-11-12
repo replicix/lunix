@@ -9,9 +9,12 @@
 //!   protocol version; a server answers an unknown `v` with `invalid`.
 //! * **Secrets** ([`secret`]): zeroizing, redacted `Debug`, hex on the wire.
 //!
-//! Unknown request fields are rejected (`deny_unknown_fields` on every params
-//! struct); unknown response fields are ignored so an older client survives a
-//! newer daemon within one protocol version. Every string and list in a request
+//! Unknown request fields are rejected inside `params` (`deny_unknown_fields`
+//! on every params struct); an unknown top-level key beside `v`/`id`/`method` is
+//! tolerated, because serde cannot combine `flatten` with
+//! `deny_unknown_fields`. Unknown error codes decode as `unknown`.
+//! Unknown response fields are ignored so an older client survives a newer
+//! daemon within one protocol version. Every string and list in a request
 //! has a bound checked by [`msg::Request::validate`]; servers call it before
 //! acting.
 

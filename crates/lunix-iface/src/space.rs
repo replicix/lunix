@@ -17,8 +17,10 @@
 //! bytes and segment bytes are both counted) and exact outside that window.
 //! M8, M9, M11 and M17 cite these steps and test them:
 //!
-//! 1. *Admission* of a write: `reserve(JournalReserved, record_bytes)`. May park
-//!    or refuse; this is the only place a guest write waits for space.
+//! 1. *Admission* of a write: `reserve(JournalReserved, journal::record_bytes(kind,
+//!    blocks))`, the encoded record length, before `JournalLane::try_reserve`
+//!    (released again if that returns `Full` or `NoSpace`). May park or
+//!    refuse; this is the only place a guest write waits for space.
 //! 2. *C2* (cut taken): `reserve_headroom(Segments, ulen_of_nonzero_chunks)` as
 //!    an upper bound for the segments the cut will write, and
 //!    `reserve_headroom(Headroom, map_bound + commit_bound + index_bound)` for
@@ -29,7 +31,7 @@
 //!    `transfer(Headroom, Map, bound, actual)`, `transfer(Headroom, Commits,
 //!    bound, actual)`, `transfer(Headroom, Index, bound, actual)`.
 //! 5. *C9* (journal reclaimed): `release(JournalReserved, reclaimed)` with
-//!    `ReclaimReport::bytes`, and `release(Headroom, remainder)` for any bound
+//!    `ReclaimReport::bytes` (the same unit, encoded record length), and `release(Headroom, remainder)` for any bound
 //!    left unused.
 //! 6. *GC delete*: `release(kind, bytes)` for each file removed, after the
 //!    delete is durable.
@@ -285,6 +287,15 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// Returns `bytes` of `kind` (saturating at zero is a bug and is reported
     /// by debug assertions). Wakes parked requests that now fit, FIFO.
     fn release(&self, kind: SpaceKind, bytes: u64);
+
+    /// Startup accounting of files that already exist: charges `bytes` to `kind`
+    /// without a limit check; never parks, never fails for lack of space.
+    ///
+    /// # Errors
+    /// Whatever `transfer` reports.
+    fn charge(&self, kind: SpaceKind, bytes: u64) -> Result<()> {
+        self.transfer(kind, kind, 0, bytes)
+    }
 
     /// Atomically releases `from_bytes` of `from_kind` and charges `to_bytes` of
     /// `to_kind`; the kinds may be equal (a true-up).

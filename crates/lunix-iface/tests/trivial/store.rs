@@ -80,7 +80,12 @@ impl SegmentWriter for SegW {
     fn id(&self) -> SegId {
         self.id
     }
-    fn append_extent(&mut self, chunk_id: &ChunkId, extent: &[u8]) -> Result<Hint> {
+    fn append_extent(
+        &mut self,
+        chunk_id: &ChunkId,
+        _dict_id: Option<u32>,
+        extent: &[u8],
+    ) -> Result<Hint> {
         let header = Cch1Header::parse(extent)?;
         let clen = u32::try_from(
             extent
@@ -353,7 +358,9 @@ impl CheckpointStore for TStore {
     }
     fn store(&self, slot: &CheckpointSlot) -> Result<()> {
         let mut st = lock(&self.st);
-        st.checkpoint.push(slot.clone());
+        let mut slot = slot.clone();
+        slot.slot_seq = st.checkpoint.iter().map(|s| s.slot_seq).max().unwrap_or(0) + 1;
+        st.checkpoint.push(slot);
         st.checkpoint.sort_by_key(|s| s.slot_seq);
         while st.checkpoint.len() > 2 {
             st.checkpoint.remove(0);
@@ -396,6 +403,9 @@ impl PinSource for TStore {
 }
 
 impl VolumeDir for TStore {
+    fn dir(&self) -> &std::path::Path {
+        std::path::Path::new("/t")
+    }
     fn uuid(&self) -> VolumeUuid {
         VolumeUuid([1; 16])
     }

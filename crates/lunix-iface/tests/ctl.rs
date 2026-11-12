@@ -639,3 +639,34 @@ fn error_codes_map_to_exit_codes() {
         assert_eq!(c.exit_code(), n);
     }
 }
+
+#[test]
+fn newer_daemon_codes_and_mode_conversions() {
+    let f: ResponseFrame =
+        from_payload(br#"{"v":1,"id":2,"err":{"code":"from_the_future","message":"x"}}"#)
+            .expect("parse");
+    assert!(matches!(
+        f.result,
+        Outcome::Err(CtlError {
+            code: ErrorCode::Unknown,
+            ..
+        })
+    ));
+    assert_eq!(ErrorCode::Unknown.exit_code(), 1);
+    for m in [
+        VolumeMode::Plain,
+        VolumeMode::Integrity,
+        VolumeMode::Encrypted,
+    ] {
+        assert_eq!(VolumeMode::from(lunix_format::CryptoMode::from(m)), m);
+    }
+    let big = Request::Attach(Attach {
+        name: "v".into(),
+        queues: None,
+        depth: None,
+        cpus: None,
+        max_io_buf_bytes: Some(MAX_IO_BUF + 1),
+        credential: None,
+    });
+    assert!(big.validate().is_err());
+}

@@ -63,7 +63,7 @@ pub fn segment_round_trip<F: StoreFixture>(f: &mut F) {
     assert!(w.is_empty());
     let hints: Vec<_> = exts
         .iter()
-        .map(|(id, e)| w.append_extent(id, e).expect("append"))
+        .map(|(id, e)| w.append_extent(id, None, e).expect("append"))
         .collect();
     assert!(!w.is_full());
     let seg = w.id();
@@ -103,7 +103,7 @@ pub fn abandoned_segment_is_not_listed<F: StoreFixture>(f: &mut F) {
     let before = f.segments().list().expect("list").len();
     let mut w = f.segments().open_segment().expect("open");
     let e = f.data_extent(&cid(1), 100);
-    let hint = w.append_extent(&cid(1), &e).expect("append");
+    let hint = w.append_extent(&cid(1), None, &e).expect("append");
     drop(w);
     assert_eq!(f.segments().list().expect("list").len(), before);
     let mut out = Vec::new();
@@ -114,7 +114,7 @@ pub fn abandoned_segment_is_not_listed<F: StoreFixture>(f: &mut F) {
 pub fn segment_delete_is_idempotent<F: StoreFixture>(f: &mut F) {
     let mut w = f.segments().open_segment().expect("open");
     let e = f.data_extent(&cid(1), 100);
-    w.append_extent(&cid(1), &e).expect("append");
+    w.append_extent(&cid(1), None, &e).expect("append");
     let sealed = w.seal(None).expect("seal");
     assert_eq!(
         f.segments().delete(sealed.seg).expect("delete"),
@@ -133,7 +133,7 @@ pub fn ids_are_never_reused<F: StoreFixture>(f: &mut F) {
     for _ in 0..3 {
         let mut w = f.segments().open_segment().expect("open");
         let e = f.data_extent(&cid(1), 100);
-        w.append_extent(&cid(1), &e).expect("append");
+        w.append_extent(&cid(1), None, &e).expect("append");
         seen.push(w.id().raw());
         w.seal(None).expect("seal");
     }
@@ -292,7 +292,7 @@ pub fn sweep_deletes_only_unnamed_orphans_above_the_mark<F: StoreFixture>(f: &mu
     for n in 1..=3u8 {
         let mut w = f.segments().open_segment().expect("open");
         let e = f.data_extent(&cid(n), 100);
-        w.append_extent(&cid(n), &e).expect("append");
+        w.append_extent(&cid(n), None, &e).expect("append");
         ids.push(w.id());
         w.seal(None).expect("seal");
     }

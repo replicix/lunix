@@ -77,9 +77,8 @@ pub struct OverlayCut {
 /// The overlay. `Send + Sync`; methods take `&self`.
 pub trait Overlay: Send + Sync {
     /// Records that `range` now reads from the journal at `loc`. Non-blocking.
-    /// Called after `try_append` accepted the record (the data is readable at
-    /// once; the overlay entry may be hidden from readers until the write
-    /// completes, which is the engine's rule, not the overlay's).
+    /// The engine calls it on the record's `Append` completion, because
+    /// `submit_read` and `read_at` require a completed append.
     fn insert_write(&self, range: BlockRange, loc: JournalLoc, write_seq: WriteSeq);
 
     /// Records that `range` reads as zeros. Non-blocking.

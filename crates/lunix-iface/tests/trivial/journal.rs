@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lunix_format::journal::RecordKind;
@@ -13,7 +15,7 @@ use super::lock;
 
 #[derive(Clone)]
 struct Stored {
-    record: AppendRecord,
+    record: RecordInfo,
     lane: u16,
     offset: u64,
     data: Vec<u8>,
@@ -25,10 +27,14 @@ struct State {
     records: Vec<Stored>,
     next_offset: Vec<u64>,
     open: Vec<bool>,
+    /// Sequence numbers issued and not yet completed (slot or append).
+    inflight: BTreeSet<u64>,
+    pending_flushes: Vec<(WriteSeq, FlushDone)>,
 }
 
 pub struct TJournal {
     lanes: u16,
+    counter: Arc<AtomicU64>,
     state: Arc<Mutex<State>>,
 }
 
@@ -41,6 +47,7 @@ impl TJournal {
         };
         Self {
             lanes,
+            counter: Arc::new(AtomicU64::new(0)),
             state: Arc::new(Mutex::new(state)),
         }
     }
@@ -64,8 +71,31 @@ fn read(st: &State, loc: JournalLoc, buf: &mut [u8]) -> bool {
     false
 }
 
+/// Runs the flushes whose waits are over.
+fn settle(st: &mut State) {
+    let mut ready = Vec::new();
+    let mut i = 0;
+    while i < st.pending_flushes.len() {
+        let upto = st.pending_flushes[i].0;
+        if st.inflight.range(..=upto.0).next().is_none() {
+            ready.push(st.pending_flushes.remove(i));
+        } else {
+            i += 1;
+        }
+    }
+    for (upto, done) in ready {
+        for r in &mut st.records {
+            if r.record.write_seq <= upto {
+                r.flushed = true;
+            }
+        }
+        done(Ok(()));
+    }
+}
+
 struct Lane {
     id: u16,
+    counter: Arc<AtomicU64>,
     state: Arc<Mutex<State>>,
     wake: WakeFd,
     done: Vec<JournalCompletion>,
@@ -77,32 +107,56 @@ impl JournalLane for Lane {
         LaneId(self.id)
     }
 
-    fn try_append(&mut self, rec: &AppendRecord, data: &[u8]) -> Result<AppendOutcome> {
-        let want = match rec.kind {
-            RecordKind::Write => rec.blocks as usize * 4096,
+    fn try_reserve(&mut self, kind: RecordKind, blocks: u32) -> Result<SlotOutcome> {
+        if blocks == 0 || (kind == RecordKind::Write && blocks > 256) {
+            return Err(Error::invalid("bad record length"));
+        }
+        let mut st = lock(&self.state);
+        let seq = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
+        st.inflight.insert(seq);
+        Ok(SlotOutcome::Reserved(Slot::new(
+            WriteSeq(seq),
+            kind,
+            blocks,
+            0,
+        )))
+    }
+
+    fn append(&mut self, slot: Slot, lba: u64, data: &[u8]) -> Result<Appended> {
+        let want = match slot.kind {
+            RecordKind::Write => slot.blocks as usize * 4096,
             RecordKind::Hole => 0,
         };
-        if data.len() != want || rec.write_seq <= self.last {
-            return Err(Error::invalid("malformed record"));
+        if data.len() != want {
+            return Err(Error::invalid("data does not match the slot"));
         }
         let mut st = lock(&self.state);
         let off = st.next_offset[usize::from(self.id)];
-        st.next_offset[usize::from(self.id)] = off + want as u64 + 64;
+        st.next_offset[usize::from(self.id)] = off + record_bytes(slot.kind, slot.blocks);
+        let record = RecordInfo {
+            kind: slot.kind,
+            write_seq: slot.write_seq,
+            lba,
+            blocks: slot.blocks,
+        };
         st.records.push(Stored {
-            record: *rec,
+            record,
             lane: self.id,
             offset: off,
             data: data.to_vec(),
             flushed: false,
         });
+        st.inflight.remove(&slot.write_seq.0);
+        settle(&mut st);
         drop(st);
-        self.last = rec.write_seq;
+        self.last = slot.write_seq;
         self.done.push(JournalCompletion::Append {
-            write_seq: rec.write_seq,
+            write_seq: slot.write_seq,
             status: IoStatus::ok(0),
         });
         self.wake.signal();
-        Ok(AppendOutcome::Appended {
+        Ok(Appended {
+            write_seq: slot.write_seq,
             loc: JournalLoc {
                 lane: LaneId(self.id),
                 ordinal: 0,
@@ -112,9 +166,6 @@ impl JournalLane for Lane {
     }
 
     fn submit_read(&mut self, loc: JournalLoc, mut buf: Vec<u8>, token: Token) -> Result<()> {
-        if loc.lane.0 != self.id {
-            return Err(Error::invalid("location on another lane"));
-        }
         let ok = read(&lock(&self.state), loc, &mut buf);
         let status = if ok {
             IoStatus::ok(buf.len() as u32)
@@ -150,6 +201,7 @@ impl Journal for TJournal {
         }
         Ok(Box::new(Lane {
             id: lane.0,
+            counter: self.counter.clone(),
             state: self.state.clone(),
             wake,
             done: Vec::new(),
@@ -157,13 +209,14 @@ impl Journal for TJournal {
         }))
     }
 
+    fn last_issued(&self) -> WriteSeq {
+        WriteSeq(self.counter.load(Ordering::SeqCst))
+    }
+
     fn submit_group_flush(&self, upto: WriteSeq, done: FlushDone) -> Result<()> {
-        for r in &mut lock(&self.state).records {
-            if r.record.write_seq <= upto {
-                r.flushed = true;
-            }
-        }
-        done(Ok(()));
+        let mut st = lock(&self.state);
+        st.pending_flushes.push((upto, done));
+        settle(&mut st);
         Ok(())
     }
 
@@ -186,6 +239,7 @@ impl Journal for TJournal {
         let mut records = Vec::new();
         let mut next = floor.0 + 1;
         let mut ignored: Option<WriteSeqRange> = None;
+        let mut gap_at = None;
         for r in all {
             if ignored.is_none() && r.record.write_seq.0 == next {
                 records.push(RecoveredRecord {
@@ -199,6 +253,7 @@ impl Journal for TJournal {
                 next += 1;
             } else {
                 let s = r.record.write_seq;
+                gap_at.get_or_insert(WriteSeq(next));
                 ignored = Some(match ignored {
                     None => WriteSeqRange { first: s, last: s },
                     Some(g) => WriteSeqRange {
@@ -208,10 +263,12 @@ impl Journal for TJournal {
                 });
             }
         }
+        self.counter.store(next - 1, Ordering::SeqCst);
         Ok(Recovered {
             records,
             next_seq: WriteSeq(next),
             ignored_after_gap: ignored,
+            gap_at,
             damaged: Vec::new(),
         })
     }

@@ -19,9 +19,9 @@
 //! non-blocking versus blocking split where it is observable, error classes,
 //! and the crash-model invariants (what a flush guarantees, what recovery may
 //! return). Behaviour a trait leaves to the implementation is not asserted.
-//! The `crypto` traits have no suite here: `lunix-crypto`'s own gates and the
-//! testkit's `PlainCodec` tests cover them.
+//! The crypto suite needs a fixture that can compress for the codecs it offers.
 
+pub mod crypto;
 pub mod index;
 pub mod journal;
 pub mod map;
@@ -44,6 +44,35 @@ pub fn wait_until(what: &str, timeout: Duration, mut cond: impl FnMut() -> bool)
     }
 }
 
+/// Runs the crypto contract suite: `crypto!([name,] || fixture)`.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! contract_crypto_suite {
+    ($make:expr) => {
+        $crate::contract_crypto_suite!(contract_crypto, $make);
+    };
+    ($m:ident, $make:expr) => {
+        mod $m {
+            use super::*;
+            $crate::__contract_tests!(
+                crypto,
+                $make,
+                [
+                    extent_round_trip_per_codec,
+                    any_flipped_byte_fails,
+                    wrong_expectations_fail,
+                    chunk_id_is_stable_across_seals,
+                    meta_objects_are_bound_to_kind_and_name,
+                    commit_round_trips_and_is_bound_to_its_seq,
+                    verify_chain_accepts_good_and_rejects_broken,
+                    verify_chain_rejects_a_decreasing_epoch,
+                    commit_parent_hash_binds_the_parent_object,
+                ]
+            );
+        }
+    };
+}
+
 /// Runs the journal contract suite: `journal!([name,] || fixture)`.
 #[macro_export]
 #[doc(hidden)]
@@ -63,6 +92,7 @@ macro_rules! contract_journal_suite {
                     holes_carry_no_data,
                     watermark_follows_completions,
                     group_flush_makes_completed_records_durable,
+                    flush_waits_for_an_outstanding_slot,
                     recover_filters_by_floor,
                     recover_is_idempotent,
                     recovery_after_crash_is_a_contiguous_prefix,
@@ -147,6 +177,7 @@ macro_rules! contract_index_suite {
                     relocate_follows_newest_wins,
                     persisted_hits_are_hinted,
                     relocated_entries_wait_for_their_segment,
+                    all_runs_lists_every_run_file,
                     drop_segment_removes_entries,
                     catch_up_ingests_only_named_segments,
                     rebuild_equals_incremental,
@@ -281,6 +312,7 @@ macro_rules! __contract_tests_space {
     };
 }
 
+pub use crate::contract_crypto_suite as crypto;
 pub use crate::contract_index_suite as index;
 pub use crate::contract_journal_suite as journal;
 pub use crate::contract_map_suite as map;

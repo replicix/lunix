@@ -25,6 +25,7 @@
 
 use std::collections::HashSet;
 use std::os::fd::OwnedFd;
+use std::path::Path;
 use std::sync::Arc;
 
 use lunix_format::gcfile::Condemned;
@@ -111,11 +112,18 @@ pub trait SegmentWriter: Send {
     fn id(&self) -> SegId;
 
     /// Appends one complete sealed extent for `chunk_id` and returns its hint
-    /// (`off` is the extent's offset, `clen` its payload length).
+    /// (`off` is the extent's offset, `clen` its payload length). `dict_id` is
+    /// the zstd dictionary id of a codec-3 extent (for the footer's `dict_ids`),
+    /// `None` otherwise (always in phase 1).
     ///
     /// # Errors
     /// `NoSpace`, `Io`; `Invalid` for bytes that are not an extent.
-    fn append_extent(&mut self, chunk_id: &ChunkId, extent: &[u8]) -> Result<Hint>;
+    fn append_extent(
+        &mut self,
+        chunk_id: &ChunkId,
+        dict_id: Option<u32>,
+        extent: &[u8],
+    ) -> Result<Hint>;
 
     /// Bytes appended so far.
     fn len(&self) -> u64;
@@ -291,8 +299,8 @@ pub trait CheckpointStore: Send + Sync {
     /// a warning from the implementation): the checkpoint is only a hint.
     fn load(&self) -> Result<Option<CheckpointSlot>>;
 
-    /// Writes the older slot with `slot_seq` above the newest (the caller sets
-    /// it), durably.
+    /// Writes the older slot durably. The store assigns `slot_seq` = newest + 1
+    /// and ignores the value in `slot`.
     fn store(&self, slot: &CheckpointSlot) -> Result<()>;
 
     /// Zeroes both slots (`--truncate-tip`, D17).
@@ -395,6 +403,9 @@ pub struct Leftover {
 pub trait VolumeDir: Send + Sync {
     /// The volume's uuid.
     fn uuid(&self) -> VolumeUuid;
+
+    /// The volume directory (keyring and `integrity.key` paths, fsck output).
+    fn dir(&self) -> &Path;
 
     /// The exact bytes of the `volume` descriptor.
     fn volume_bytes(&self) -> Result<Vec<u8>>;

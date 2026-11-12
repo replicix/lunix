@@ -15,6 +15,8 @@ pub const MAX_NAME: usize = 64;
 pub const MAX_PATH: usize = 4096;
 /// Longest CPU list.
 pub const MAX_CPUS: usize = 256;
+/// Largest `max_io_buf_bytes` an attach may ask for (32 MiB).
+pub const MAX_IO_BUF: u32 = 32 << 20;
 
 /// Why a request failed validation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -90,6 +92,26 @@ pub enum VolumeMode {
     Integrity,
     /// Unkeyed checksums: corruption detection only.
     Plain,
+}
+
+impl From<lunix_format::CryptoMode> for VolumeMode {
+    fn from(m: lunix_format::CryptoMode) -> Self {
+        match m {
+            lunix_format::CryptoMode::Plain => Self::Plain,
+            lunix_format::CryptoMode::Integrity => Self::Integrity,
+            lunix_format::CryptoMode::Encrypted => Self::Encrypted,
+        }
+    }
+}
+
+impl From<VolumeMode> for lunix_format::CryptoMode {
+    fn from(m: VolumeMode) -> Self {
+        match m {
+            VolumeMode::Plain => Self::Plain,
+            VolumeMode::Integrity => Self::Integrity,
+            VolumeMode::Encrypted => Self::Encrypted,
+        }
+    }
 }
 
 /// The compression policy.
@@ -304,7 +326,9 @@ impl Request {
                 if a.cpus.as_deref().is_some_and(|c| !valid_cpus(c)) {
                     return Err(RequestInvalid("cpus"));
                 }
-                if a.max_io_buf_bytes.is_some_and(|b| b < 262_144) {
+                if a.max_io_buf_bytes
+                    .is_some_and(|b| !(262_144..=MAX_IO_BUF).contains(&b))
+                {
                     return Err(RequestInvalid("max_io_buf_bytes"));
                 }
                 if let Some(c) = &a.credential {
@@ -383,6 +407,9 @@ pub enum ErrorCode {
     Io,
     /// A bug or an unclassified failure (exit 1).
     Internal,
+    /// A code a newer daemon sent that this client does not know (exit 1).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ErrorCode {
@@ -395,7 +422,7 @@ impl ErrorCode {
             Self::NoSpace => 5,
             Self::Downgrade | Self::WrongKmk => 6,
             Self::Invalid => 2,
-            Self::Io | Self::Internal => 1,
+            Self::Io | Self::Internal | Self::Unknown => 1,
         }
     }
 }

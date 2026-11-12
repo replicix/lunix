@@ -4,7 +4,7 @@
 //! # Threads and blocking
 //!
 //! * [`JournalLane`] is owned by one queue thread and is **non-blocking**:
-//!   `try_append`, `submit_read`, `poll` and `completed_watermark` never wait.
+//!   `try_reserve`, `append`, `submit_read`, `poll` and `completed_watermark` never wait.
 //! * [`Journal::submit_group_flush`] is non-blocking for the caller; the wait
 //!   and the `fdatasync`s happen on the journal's flush-coordinator thread.
 //!   Lane threads never wait for the coordinator.
@@ -12,16 +12,38 @@
 //!   [`Journal::reclaim`] **block**; destage workers, the engine's startup and
 //!   its cut coordinator call them, never a queue thread.
 //!
-//! # The `write_seq` contract (for the engine)
+//! # Who assigns `write_seq`
 //!
-//! `write_seq` is global and comes from the caller. Recovery stops at the
-//! first gap in the merged `write_seq` order, so a `write_seq` that is handed
-//! out but never reaches a lane is a hole that discards every later record,
-//! including ones already acknowledged to the guest after a FLUSH. The engine
-//! therefore must (1) retry a parked append (`Full`) with the **same**
-//! `write_seq`, never skipping it, and (2) pass to `submit_group_flush` only an
-//! `upto` such that every write with `write_seq <= upto` has **completed** (the
-//! contiguous completed prefix), not merely the highest completed `write_seq`.
+//! The **journal** does (Fix A of the M1.B1 review; D7's "assigned by the
+//! caller" is read as "taken from one global counter by the writer's lane").
+//! Recovery stops at the first gap in the merged `write_seq` order, so a
+//! sequence number that is issued but never reaches a lane would discard every
+//! later record, including acknowledged ones. To make that impossible,
+//! [`JournalLane::try_reserve`] either fails (`Full`, `NoSpace`) **without
+//! consuming a sequence number**, or returns a [`Slot`] holding a freshly
+//! allocated global `write_seq` that the lane has already registered as
+//! in-flight. [`JournalLane::append`] then consumes the slot and cannot fail
+//! except on a fatal I/O error, which poisons the volume (the engine calls
+//! `SpaceEvents::fatal_io`; no further appends happen anywhere, so the gap is
+//! at the tail). A [`Slot`] must be appended before the next call on its lane;
+//! dropping one is a bug.
+//!
+//! # Group flush
+//!
+//! [`Journal::last_issued`] is the highest sequence number handed out. A FLUSH
+//! covers **every write acknowledged before its flush group formed**: the
+//! engine reads `last_issued()` when the group forms and passes it as `upto`.
+//! Every acknowledged write has a sequence number `<= upto`; the coordinator
+//! waits until no slot or append with `write_seq <= upto` is in flight on any
+//! lane (a reserved but not yet appended slot counts), then syncs. A write
+//! whose slot is outstanding at that moment is waited for, never skipped.
+//!
+//! # `JournalReserved` units
+//!
+//! Admission charges, and reclaim releases, the **encoded record length**
+//! ([`record_bytes`], equal to `lunix_format::journal::Record::encoded_len`:
+//! 64-byte header plus data, 8-byte aligned). Ring files are preallocated, so
+//! file capacity is a different quantity and is never used for the ledger.
 
 use std::fmt;
 
@@ -69,14 +91,14 @@ impl JournalLoc {
     }
 }
 
-/// What the caller supplies for a record. `epoch` is 0 in phase 1 and the
-/// file `gen` and the record's own `off` are the journal's business, which is
-/// why this is not `lunix_format::journal::RecordHeader`.
+/// A record as the journal knows it: what was appended or recovered. The file
+/// `gen` and the record's own offset are the journal's business, so this is not
+/// `lunix_format::journal::RecordHeader`. `epoch` is 0 in phase 1.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct AppendRecord {
+pub struct RecordInfo {
     /// Write (with data) or hole (DISCARD / WRITE_ZEROES, no data).
     pub kind: RecordKind,
-    /// The global sequence number, strictly rising within a lane.
+    /// The global sequence number.
     pub write_seq: WriteSeq,
     /// First 4 KiB block.
     pub lba: u64,
@@ -84,22 +106,70 @@ pub struct AppendRecord {
     pub blocks: u32,
 }
 
-/// The outcome of a non-blocking append that did not fail.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AppendOutcome {
-    /// The record was copied into the lane's buffer and queued. The caller's
-    /// buffer is free again. Durability is reported by a later
-    /// [`JournalCompletion::Append`].
-    Appended {
-        /// Where the data now lives (valid for reads from this moment).
-        loc: JournalLoc,
-    },
+/// The encoded length of a record, which is what `JournalReserved` is charged
+/// and released in: 64 + `blocks * 4096` for a write, 64 for a hole.
+pub fn record_bytes(kind: RecordKind, blocks: u32) -> u64 {
+    match kind {
+        RecordKind::Write => 64 + u64::from(blocks) * 4096,
+        RecordKind::Hole => 64,
+    }
+}
+
+/// A reserved place in a lane with its sequence number. Obtained from
+/// [`JournalLane::try_reserve`], consumed by [`JournalLane::append`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Slot {
+    /// The sequence number, already registered as in-flight.
+    pub write_seq: WriteSeq,
+    /// Write or hole.
+    pub kind: RecordKind,
+    /// Length in blocks.
+    pub blocks: u32,
+    /// Implementation-private.
+    #[doc(hidden)]
+    pub token: u64,
+}
+
+impl Slot {
+    /// For journal implementations.
+    pub fn new(write_seq: WriteSeq, kind: RecordKind, blocks: u32, token: u64) -> Self {
+        Self {
+            write_seq,
+            kind,
+            blocks,
+            token,
+        }
+    }
+
+    /// The `JournalReserved` charge for this record.
+    pub fn record_bytes(&self) -> u64 {
+        record_bytes(self.kind, self.blocks)
+    }
+}
+
+/// The outcome of a non-blocking reservation that did not fail.
+#[derive(Debug)]
+pub enum SlotOutcome {
+    /// A slot with a fresh `write_seq`.
+    Reserved(Slot),
     /// No free ring file, or the lane's bounded buffer pool is exhausted.
-    /// Nothing was consumed; retry with the same `write_seq` after a
-    /// completion or a reclaim.
+    /// Nothing was consumed, not even a sequence number; retry after a
+    /// completion or a reclaim. The queue parks the write (and, to keep the
+    /// lane's records in order, every later write of that queue behind it).
     Full,
     /// The host file system is out of space for the lane. Nothing consumed.
     NoSpace,
+}
+
+/// What `append` returns.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Appended {
+    /// The record's sequence number (the slot's).
+    pub write_seq: WriteSeq,
+    /// Where the data now lives. It is readable once the matching
+    /// [`JournalCompletion::Append`] has been delivered.
+    pub loc: JournalLoc,
 }
 
 /// A finished journal operation.
@@ -130,29 +200,49 @@ pub trait JournalLane: Send {
     /// This lane's id.
     fn lane(&self) -> LaneId;
 
-    /// Copies the record into a buffer from the lane's bounded pool of aligned
-    /// buffers and queues the write. Non-blocking. `data` is
-    /// `blocks * 4096` bytes for a write and empty for a hole.
+    /// Reserves room for one record and allocates its global `write_seq`.
+    /// Non-blocking. The sequence number is registered as in-flight in the same
+    /// step, so a group flush can never miss it. On `Full` or `NoSpace` no
+    /// sequence number is consumed. The caller has already charged
+    /// `JournalReserved` with [`record_bytes`] and releases it on a refusal.
     ///
     /// # Errors
-    /// `Invalid` for a malformed record or a non-rising `write_seq`;
-    /// `Io` for a fatal ring error.
-    fn try_append(&mut self, rec: &AppendRecord, data: &[u8]) -> Result<AppendOutcome>;
+    /// `Invalid` for a malformed request (`blocks` 0, or above 256 for a write);
+    /// `Io` for a fatal ring error (poisoned).
+    fn try_reserve(&mut self, kind: RecordKind, blocks: u32) -> Result<SlotOutcome>;
+
+    /// Copies `data` (`blocks * 4096` bytes for a write, empty for a hole) into
+    /// a buffer from the lane's bounded pool of aligned buffers and queues the
+    /// write. Non-blocking, and infallible apart from a fatal `Io`, which
+    /// poisons the volume. The caller's buffer is free on return. Durability is
+    /// reported by a later [`JournalCompletion::Append`] and made permanent by
+    /// the group flush.
+    ///
+    /// # Errors
+    /// `Invalid` if `data` does not match the slot (a caller bug); `Io` (fatal).
+    fn append(&mut self, slot: Slot, lba: u64, data: &[u8]) -> Result<Appended>;
 
     /// Queues a read of `buf.len()` bytes of record data at `loc`. Non-blocking.
-    /// Completes through `poll` with the buffer handed back. A location the
-    /// lane has not written or has reclaimed completes with an error status.
+    /// `loc` may name **any lane**: overlay hits for an LBA were mostly written
+    /// by other queues. Precondition: that append has **completed** (its
+    /// `Append` completion was delivered; the engine inserts into the overlay
+    /// on that completion). Record data is 8-byte packed, so `loc.offset` is not
+    /// 4 KiB aligned: the journal reads the covering aligned range into its own
+    /// `O_DIRECT` buffer and copies into `buf`, which has no alignment
+    /// requirement and may be recycled by the caller. Completes through `poll`
+    /// of **this** lane with the buffer handed back. A location that was
+    /// reclaimed completes with an error status.
     ///
     /// # Errors
-    /// `Invalid` for a location on another lane.
+    /// `Invalid` for a location outside any lane's range.
     fn submit_read(&mut self, loc: JournalLoc, buf: Vec<u8>, token: Token) -> Result<()>;
 
     /// Moves finished operations into `out`. Non-blocking; call after the wake
     /// fd fires. Drains everything ready.
     fn poll(&mut self, out: &mut Vec<JournalCompletion>);
 
-    /// The highest `s` such that every append with `write_seq <= s` accepted on
-    /// this lane has completed its write. With nothing in flight it is the
+    /// The highest `s` such that every append accepted on this lane with
+    /// `write_seq <= s` has completed its write; with nothing in flight, the
     /// highest `write_seq` the lane accepted (0 if none). Non-blocking.
     fn completed_watermark(&self) -> WriteSeq;
 }
@@ -182,13 +272,19 @@ pub struct DamagedRange {
     pub start: u64,
     /// One past the last damaged byte.
     pub end: u64,
+    /// `write_seq` of the last record accepted before the damage in that lane
+    /// (0 if none): with `next_seq` and the floor, fsck classifies the damage
+    /// as above the floor (an error, it ends recovery) or at or below (a warning).
+    pub prev_seq: WriteSeq,
+    /// `write_seq` of the first record accepted after the damage in that lane.
+    pub next_seq: Option<WriteSeq>,
 }
 
 /// A record found by recovery, with where its data lives.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RecoveredRecord {
     /// The record as appended.
-    pub record: AppendRecord,
+    pub record: RecordInfo,
     /// Its data location (holes carry a location but no data).
     pub loc: JournalLoc,
 }
@@ -206,6 +302,8 @@ pub struct Recovered {
     /// They are **ignored**, not an error: nothing on disk records the last
     /// flushed `write_seq`. `lunix fsck` reports them as a warning (N4).
     pub ignored_after_gap: Option<WriteSeqRange>,
+    /// The first missing `write_seq`, set exactly when `ignored_after_gap` is.
+    pub gap_at: Option<WriteSeq>,
     /// Damage the resync rule (D17) skipped, for fsck.
     pub damaged: Vec<DamagedRange>,
 }
@@ -223,8 +321,9 @@ pub struct JournalTail {
 pub struct ReclaimReport {
     /// Ring files recycled or deleted.
     pub files: u32,
-    /// Bytes of the lanes' reserved capacity that became free (the amount for
-    /// `SpaceGate::release(JournalReserved, ..)`).
+    /// The sum of the **encoded record lengths** ([`record_bytes`]) of the
+    /// records in the recycled files: the amount for
+    /// `SpaceGate::release(JournalReserved, ..)`.
     pub bytes: u64,
 }
 
@@ -263,20 +362,26 @@ pub trait Journal: Send + Sync {
     /// `Invalid` for a bad lane or a lane already open.
     fn open_lane(&self, lane: LaneId, wake: WakeFd) -> Result<Box<dyn JournalLane>>;
 
+    /// The highest `write_seq` handed out so far (the sequence number before
+    /// the first one after `recover`). The engine reads it when a flush group
+    /// forms (and at C1) and passes it as `upto`. Non-blocking.
+    fn last_issued(&self) -> WriteSeq;
+
     /// Group flush. Non-blocking for the caller. On the coordinator thread:
-    /// wait until every lane has no in-flight append with `write_seq <= upto`
-    /// (equivalently each lane's `completed_watermark() >= upto`, or the lane
-    /// has nothing at or below `upto`), then issue one `fdatasync` per lane
-    /// that has unflushed appends, in parallel, and call `done` when all have
-    /// finished. At most one group is in flight; a second submission queues
-    /// behind it. A flush covers writes **completed before the group formed**;
-    /// `upto` must satisfy the contiguity rule in the module docs.
+    /// wait until no slot or append with `write_seq <= upto` is in flight on any
+    /// lane, then issue one `fdatasync` per lane that has unflushed appends, in
+    /// parallel, and call `done` when all have finished. At most one group is
+    /// in flight; a second submission queues behind it. A flush covers every
+    /// write **acknowledged before the group formed**: with
+    /// `upto = last_issued()` read at formation, all of them have a sequence
+    /// number `<= upto` (see the module docs).
     ///
     /// # Errors
     /// `Closed` after shutdown. A later failure is passed to `done`.
     fn submit_group_flush(&self, upto: WriteSeq, done: FlushDone) -> Result<()>;
 
-    /// Blocking read of record data (destage workers, recovery replay).
+    /// Blocking read of record data from any lane (destage workers, recovery
+    /// replay). Same precondition as `submit_read`.
     ///
     /// # Errors
     /// `NotFound` for a reclaimed location; `Io`.
@@ -290,7 +395,8 @@ pub trait Journal: Send + Sync {
     /// is ignored by the caller before it gets here (D17). Corruption is never
     /// a hard error: damage at or below the floor costs nothing and damage
     /// above it ends the scan (the rest is `ignored_after_gap`). Idempotent.
-    /// Call before any lane is opened.
+    /// Call before any lane is opened; it also sets the counter behind
+    /// `last_issued` and the next sequence number to `next_seq`.
     ///
     /// # Errors
     /// `Io` only.
