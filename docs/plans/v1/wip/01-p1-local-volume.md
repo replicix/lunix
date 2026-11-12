@@ -25,6 +25,13 @@ same; where this plan states a rule the spec does not yet state, the
 plan's text governs and your report notes the discrepancy. The plan never
 edits the spec.
 
+**Revised again 2026-11-12** after the second review
+(`wip/01-p1-review-2.md`, findings 1-16 and gap resolutions N6-N13). The
+spec edits it asked for have landed in DESIGN.md, DECISIONS.md and
+GLOSSARY.md (floor no longer genesis, `gc/` evidence body, mount never
+falls back, delete-time index invariant, plain-tag coverage). The lead
+decided finding 1 (the plain-extent tag covers every byte before the tag).
+
 ## Goal
 
 Build the first product code: a local-only Lunix volume (topology "local
@@ -90,13 +97,13 @@ independent review; no milestone has run.
 | M9 `lunix-destage` | `crates/lunix-destage` | design-heavy | required (with M11) | not started |
 | M10 `lunix-ublk` | `crates/lunix-ublk` | design-heavy | required (independent) | not started |
 | M11 `lunix-engine` | `crates/lunix-engine` | design-heavy | required (commit protocol) | not started |
-| M12a `lunixd` daemon, control plane, wiring | `crates/lunixd` (except `tests/stack_*.rs`, `src/testsupport.rs`) | design-heavy | recommended (wiring) | not started |
+| M12a `lunixd` daemon, control plane, wiring | `crates/lunixd` (except `tests/stack_*.rs`; creates the `testsupport` stub) | design-heavy | recommended (wiring) | not started |
 | M12b in-process stack tests, `lunixd::testsupport` | `crates/lunixd/tests/stack_*.rs`, `crates/lunixd/src/testsupport.rs` | design-heavy | recommended | not started |
-| M13a `lunix-cli`, socket commands | `crates/lunix-cli` (all but `fsck`/`key`) | routine | lead skim | not started |
+| M13a `lunix-cli`, socket commands | `crates/lunix-cli` (all, including the `fsck`/`key` stubs and their wiring) | routine | lead skim | not started |
 | M13b `lunix-cli` `fsck` and `key` | `crates/lunix-cli/src/{fsck,key}.rs` | routine | lead skim | not started |
-| M14 `lunix-fsck` | `crates/lunix-fsck` (except `src/gc.rs`) | routine | recommended | not started |
-| M17.A `lunix-gc` against fakes (mark, liveness, compaction, condemn/grace/recheck/delete) | `crates/lunix-gc`, `docs/reference/gc.md` | design-heavy | required (independent) | not started |
-| M17.B GC on the real stack: fsck integration, oracle churn test | `crates/lunix-gc/tests/`, `crates/lunix-fsck/src/gc.rs`, `crates/lunixd/tests/stack_gc*.rs`, `bench/phase1/gc/` | design-heavy | required (with M17.A) | not started |
+| M14 `lunix-fsck` | `crates/lunix-fsck` (M14 creates the `src/gc.rs` stub; M17.B fills it) | routine | recommended | not started |
+| M17.A `lunix-gc` against fakes (mark, liveness, compaction, condemn/grace/recheck/delete) | `crates/lunix-gc` (except `tests/`), `docs/reference/gc.md` | design-heavy | required (independent) | not started |
+| M17.B GC on the real stack: fsck integration, oracle churn test | `crates/lunix-gc/tests/**`, `crates/lunix-fsck/src/gc.rs`, `crates/lunixd/tests/stack_gc*.rs`, `bench/phase1/gc/` | design-heavy | required (with M17.A) | not started |
 | M15 exit tests: fio verify, xfstests, crash loops, ratios | `tests/exit/`, `bench/phase1/exit/` | routine (triage by lead) | n/a | not started |
 | M16 performance gate and the ADR-5 chunk-size benchmark | `tests/perf/`, `bench/phase1/perf/`, `bench/phase1/chunksize/` | routine (analysis reviewed) | n/a | not started |
 | M18a replicix-core: codec id 3, dictionary blob, `replicix-zdict` | `/home/bra/cvs/replicix/replicix-core` (`crates/chunkfmt`, new `crates/zdict`) | design-heavy | required (independent, statistical for the evaluator) | not started |
@@ -132,8 +139,11 @@ independent review; no milestone has run.
    its scratch on tmpfs SKIPs loudly (exit 77 in scripts; `eprintln` and
    early return in `#[test]`s that cannot be ignored).
    **Disk budgets.** The test host's root file system had about 336 GB
-   free on 2026-11-12. Lunix test use is capped at **about 200 GB in
-   total**, which leaves headroom for other work on the host:
+   free on 2026-11-12. **The cap (stated once, here):** Lunix test use is
+   limited to **about 200 GB in total**, which is that free space minus
+   `LUNIX_MIN_FREE_GIB` (default 120) and leaves headroom for other work on
+   the host. The cap and `LUNIX_MIN_FREE_GIB` move together: the lead's
+   brief changes both or neither, and no other section restates the figure:
    - unprivileged scratch ≤ 15 GiB per milestone (at most 4 run at once:
      60 GiB); cargo target directories ≤ 8 GiB each (`cargo clean` the
      largest when over; 32 GiB);
@@ -146,7 +156,7 @@ independent review; no milestone has run.
      the volume and recreates it between cells by default; (c) sets
      `journal_max` explicitly (256 MiB for M18b, 512 MiB for M15, 1 GiB
      for M16; the 2 GiB default is for production); (d) runs under an outer
-     `timeout -k` (W8); (e) records the disk it used in its report.
+     `timeout -k` that signals the script, never a daemon (W8); (e) records the disk it used in its report.
    Delete large files at the end of a session (keep `raw/` results).
 4. **Root and ublk tests are serialised across the whole project.** Only
    M10, M12a (its device smoke test only), M15, M16 and M18b (`mkfs`, loop
@@ -155,8 +165,9 @@ independent review; no milestone has run.
    `tools/remote.sh root ...`, which takes the host-wide lock
    `$LUNIX_HOST_BASE/root.lock` (`flock`, waits up to 1 h, prints who holds
    it), runs `spikes/common/ublk-leftovers.sh` before and after, and
-   refuses to start if leftovers exist that the caller did not create. At
-   most one root run exists on the host at any time, so a milestone that
+   refuses to start if leftovers exist that the caller did not create. Its
+   outer timeout follows W8: it signals the **script** with `TERM`, never
+   the daemon process. At most one root run exists on the host at any time, so a milestone that
    waits for the lock does something else (unit tests) meanwhile. Root
    tests are `#[ignore]` (Rust) or scripts that check `LUNIX_ROOT_TESTS=1`
    and SKIP otherwise.
@@ -191,9 +202,16 @@ independent review; no milestone has run.
      default. `USER_COPY` is opt-in per volume (ADR-17).
    - **W7.** The daemon's own files, log and swap are never on a device it
      serves (`mlockall`, `PR_SET_IO_FLUSHER`).
-   - **W8.** Every root script runs under an outer `timeout -k` (the
-     wrapper in `tools/remote.sh root` enforces a default per script and the
-     script states its own cap); a wall-clock budget is stated for every
+   - **W8.** Every root script runs under an outer timeout (the wrapper
+     in `tools/remote.sh root` enforces a default per script and the script
+     states its own cap). The timeout signals the **script** (`TERM`), whose
+     `trap` runs stop-fio, then `umount`, then detach with the W4
+     watchdogs; the wrapper never signals the daemon process itself (a
+     `SIGKILL` reaching a daemon blocked in `DEL_DEV` with a mounted file
+     system is exactly what W4 forbids). The `-k` grace is at least the
+     `DEL_DEV` watchdog (60 s) plus 60 s. A script still alive at `-k` is
+     reported as a wedge (W9) and the wrapper writes the leftovers file, so
+     the next run refuses to start. A wall-clock budget is stated for every
      loop (for example M15's crash-point runs), and a run that exceeds it is
      aborted and reported, not extended.
    - **W9.** At the top of every root milestone (M10, M12a, M15, M16, M18b):
@@ -309,7 +327,8 @@ M1.A  workspace, tools, lunix-format ──(type checkpoint A5)──┐
  │                        MemStore, MemBlockEngine,   wave 1b: need B2a    M4 overlay   M5 map
  │                        contract tests)
  │                              │                     wave 1c: need B2b    M9 destage   M10 ublk
- │                              └─────────────────────────────────────────  M11 engine  M17.A gc (against fakes)
+ │                              └─────────────────────────────────────────  M11 engine  M17.A gc (against fakes;
+ │                                                                          also needs M5 as a dev-dependency)
  │
  │   cap: 4 milestones at a time (rule 6); start the long poles first.
  │
@@ -325,7 +344,7 @@ M1.A  workspace, tools, lunix-format ──(type checkpoint A5)──┐
  └─ wave 3 (root, serialised on the host):
       M15 exit tests   needs M12a M12b M13a M13b M14 M17.B
       M16 perf + ADR-5 needs M12a M13a M17.B (start after M15's first green fio verify)
-      M18b stage 3     one Lunix validation cell; needs M12a M13a; any time after M12a
+      M18b stage 3     one Lunix validation cell; needs M12a M13a M14; any time after M12a
 ```
 
 GC (M17) sits before the exit tests and before every long-running
@@ -339,7 +358,9 @@ else. `lunix-crypto`, `lunix-journal`, `lunix-map`, `lunix-index`,
 `lunix-iface` only. `lunix-destage`, `lunix-engine`, `lunix-gc` and
 `lunix-ublk` depend on `lunix-format` and `lunix-iface` only, plus
 `lunix-testkit` as a dev-dependency (engine, destage and gc are built and
-tested against the fakes in wave 1). `lunix-fsck` depends on format,
+tested against the fakes in wave 1); `lunix-gc` also takes `lunix-map` as a
+dev-dependency (M17.A needs real pack ids and `rehint`, which `FlatMap`
+does not model; `FlatMap` stays the content oracle). `lunix-fsck` depends on format,
 iface, crypto, map, index, store and (from M17.B) gc. `lunixd` depends on
 every crate. `lunix-cli` depends on iface (the control protocol) and, from
 M13b, on crypto (offline key slots) and fsck (library).
@@ -490,13 +511,13 @@ conflict is reported to the lead, not resolved locally.
 | D2 | The stored `CCH1` header keeps its 2-byte codec id and 8-byte `ulen`. The AAD and the key-derivation `info` use the KAT vectors' canonical 1/1/4/4-byte widths. The AAD is a canonical re-encoding, not the header bytes (safe: chunk ≤ 1 MiB, codec ≤ 255). |
 | D3 | Index runs are bucket objects `index/<pack:016x>` (§6.1 gains the prefix) with their own run format. **Lag rule:** `index_packs[]` of FULL *n* lists the runs that were durable before step C6 of *n*; they cover segments named by commits ≤ *n−1*. The run written at C8 of *n* is named by FULL *n+1*. |
 | D4 | All byte layouts are decided in M1.A0, with maintainer sign-off, before any code. |
-| D5 | Genesis commit: `seq` 0, `parent_seq` none, `parent_hash` = BLAKE3 of the exact `volume` object bytes. Every later commit has `seq = parent_seq + 1`. The commit counter is independent of the write `seq` (FULL carries both `seq` and `cut_seq`). `chain_floor` is the seq of the oldest retained FULL commit. Phase 1 retention is `last:N` FULL commits, default N = 2 (the tip and its predecessor), so the floor moves with every FULL once N FULLs exist; it is not genesis. Mount and fsck verify the chain from the tip down to `chain_floor`; the floor commit's parent may be absent. |
-| D6 | `heat/`, `gc/` and `dicts/` freeze **envelope and kind id only**; the body is `{ver: u16, bytes}` defined by the phase or crate that writes it (`gc/` by M17 in phase 1, `dicts/` by `replicix-zdict`, M18a). |
-| D7 | Journal lanes: one lane per ublk queue, a global write `seq` assigned by the caller, lanes merged at recovery. Local `epoch` is 0 in every journal record and every commit. FLUSH is a **group flush** across lanes (interface in M1.B1). Recovery is floor-based: `recover(hint, floor)` with `floor` = the tip FULL's `cut_seq`. |
-| D8 | Local file set: `volume` (the exact descriptor bytes), `volume.json` (local settings only), `families/<id>/keyring`, `state/device` (with `boot_id`), `state/checkpoint`, `state/pins`, the host registry `<state_dir>/volumes.json`; plus, new in this plan, the local mirrors of the GC-root objects `snapshots/`, `readers/`, `holds/` (empty in phase 1) and `gc/` (evidence journal) and the local-only `state/gc/` (condemned list). |
-| D9 | The object name inside every metadata AAD is **bucket-relative** (`commits/<seq:016x>`, `segments/<seg:016x>`, ...), never the local path, so local bytes upload verbatim in phase 2 (ADR-7, §13.3). |
+| D5 | Genesis commit: `commit_seq` 0, `parent_seq` none, `parent_hash` = BLAKE3 of the exact `volume` object bytes. Every later commit has `commit_seq = parent_seq + 1`. The commit counter is independent of the `write_seq` (FULL carries both `commit_seq` and `cut_seq`; `cut_seq` is a `write_seq`). Field names are `commit_seq`, `parent_seq`, `cut_seq` and `write_seq`; the `lunix-format` types are `CommitSeq` and `WriteSeq`, never a bare `Seq`. `chain_floor` is the `commit_seq` of the oldest retained FULL commit. Phase 1 retention is `last:N` FULL commits, default N = 2 (the tip and its predecessor), so the floor moves with every FULL once N FULLs exist; it is not genesis. Mount and fsck verify the chain from the tip down to `chain_floor`; the floor commit's parent may be absent. |
+| D6 | `heat/`, `gc/` and `dicts/` freeze **envelope and kind id only**; the body is `{ver: u16, bytes}` defined by the phase or crate that writes it (`gc/` by M17 in phase 1: one sealed create-only object per GC pass, `gc/<pass:016x>`, body `{ver: 1, bytes}`; `dicts/` by `replicix-zdict`, M18a). |
+| D7 | Journal lanes: one lane per ublk queue, a global `write_seq` assigned by the caller, lanes merged at recovery. Local `epoch` is 0 in every journal record and every commit. FLUSH is a **group flush** across lanes (interface in M1.B1). Recovery is floor-based: `recover(hint, floor)` with `floor` = the tip FULL's `cut_seq`. |
+| D8 | Local file set: `volume` (the exact descriptor bytes), `volume.json` (local settings only), `families/<id>/keyring`, `state/device` (with `boot_id`), `state/checkpoint`, `state/pins`, the host registry `<state_dir>/volumes.json`; plus, new in this plan, the local mirrors of the GC-root objects `snapshots/`, `readers/`, `holds/` (empty in phase 1) and `gc/` (one sealed evidence object per pass, `gc/<pass:016x>`) and the local-only `state/gc/` (condemned list, the only mutable GC state, atomic replace). |
+| D9 | The object name inside every metadata AAD is **bucket-relative** (`commits/<commit_seq:016x>`, `segments/<seg:016x>`, ...), never the local path, so local bytes upload verbatim in phase 2 (ADR-7, §13.3). |
 | D10 | EPOCH body includes `authority` (optional). Lease body includes `transferred_to` (optional, best effort, ADR-24 step 6). `snapshots/`, `readers/` and `holds/` bodies name their §6.1 fields in the freeze list (`{seq, created, consistency, label}`, `{seq, deadline}`, `{base_seq}`). |
-| D11 | **Plain-extent tag.** Every extent carries the 16-byte tag field. On unencrypted volumes it is BLAKE3-128 (first 16 bytes) over `CCH1 header ‖ chunk_id ‖ payload`, **keyed** by a key derived from the integrity key (purpose `extent tag`) when the family has one, unkeyed otherwise. Local reads and fsck verify it. (The review proposed the payload only; covering the header too is the same cost and stronger.) On encrypted volumes the field is the AEAD tag as before. |
+| D11 | **Plain-extent tag.** Every extent carries the 16-byte tag field. On unencrypted volumes it is BLAKE3-128 (first 16 bytes) over **every byte of the extent before the tag**, that is `CCH1 header ‖ chunk_id ‖ clen ‖ payload`, taken as one contiguous slice (`&extent[..len-16]`), **keyed** by a key derived from the integrity key (purpose `extent tag`) when the family has one, unkeyed otherwise. Local reads and fsck verify it. (Decided by the lead on 2026-11-12, review 2 finding 1: this is the spec's wording, DESIGN §6, ADR-6, ADR-11 and GLOSSARY. It covers `clen`, which sits outside the 16-byte `CCH1` header, at the same cost, and matches the encrypted layout, whose AEAD likewise covers its framing.) On encrypted volumes the field is the AEAD tag as before. |
 | D12 | **Journal framing and packing (DESIGN §4.1).** Each record is a 64-byte inline header plus its data, copied into the lane's own aligned buffer. Records are packed back to back, 8-byte aligned, inside one lane batch; only the **batch** is padded with zeros to a 4 KiB multiple and written with one `O_DIRECT` write. A zero magic means end of batch. Recovery stops at the first CRC failure or gap. Cost: n 4 KiB writes take ceil(n·4160/4096) blocks; an isolated QD1 4 KiB write costs 8 KiB. |
 | D13 | Control protocol: length-prefixed JSON frames (u32 big-endian length, then a JSON object). |
 | D14 | `max_io_buf_bytes` is a per-volume attach option (default 1 MiB, minimum 256 KiB). |
@@ -511,6 +532,15 @@ nothing. **Model:** design-heavy, or the lead. **Review:** required,
 independent, then maintainer sign-off. No code.
 
 **Steps:**
+
+**Binding corrections from review 2.** The tables A0 writes follow
+finding 1 and finding 7: (1) the plain-extent tag input is every byte of
+the extent before the tag, one contiguous slice, including `clen` (D11;
+the freeze-list item 3 and the worked plain-extent example say so); (2)
+the `gc/` envelope is one sealed create-only object per pass,
+`gc/<pass:016x>`, body `{ver: 1, bytes}`, written once at pass end, and
+`state/gc/condemned` is the only mutable GC state (D6, freeze item 15, and
+the paths module of item 12). Field names follow D5.
 
 1. Write the decisions table above into `on-disk-formats.md`.
 2. For each item 1-15 of the freeze list in M1.A, write the byte-level
@@ -558,7 +588,8 @@ line is filled before any wave 1 branch merges.
 **Owns:** root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
 `.gitignore`, `.github/`, `tools/`, `crates/lunix-format` (except
 `FREEZE.md`'s text, which A0 wrote and A only ticks), and a skeleton
-(`Cargo.toml` with its final dependency list, `src/lib.rs` with a one-line
+(`Cargo.toml` with its final dependency list, including `lunix-gc`'s
+dev-dependency on `lunix-map`, `src/lib.rs` with a one-line
 doc) of **every other crate in the layout**. **Depends on:** A0 drafted.
 **Model:** design-heavy. **Review:** required, independent, against the
 freeze checklist below.
@@ -586,7 +617,9 @@ freeze checklist below.
      <cmd>`, `fmt` (runs `cargo fmt --all` remotely and pulls back only
      `*.rs` files under the milestone's owned paths from
      `tools/ownership.toml`), `root <cmd>` (the lock and leftovers wrapper
-     of rule 4, with the outer `timeout -k` of W8), `leftovers`, `df`,
+     of rule 4; its outer timeout signals the script with `TERM`, never the
+     daemon, with a `-k` grace of at least 120 s, and writes the leftovers
+     file when the script outlives it: W8), `leftovers`, `df`,
      and `df-guard <path> <GiB>` (rule 3: exits non-zero unless the file
      system holding `<path>` would still have at least
      `$LUNIX_MIN_FREE_GIB` (default 120) GiB free after `<GiB>` more are
@@ -614,7 +647,18 @@ freeze checklist below.
      `tools/check-ownership.sh <m>` (changed files against `git merge-base
      HEAD main` ⊆ allowed globs ∪ the always-allowed list of the git
      workflow section). Test it with a synthetic diff in `tools/tests/`.
-     `m18a` has no entry: its repository is replicix-core.
+     `m18a` has no entry: its repository is replicix-core. Two milestones
+     may own paths inside one crate only if the globs are disjoint:
+     `m17a` lists `crates/lunix-gc/**` minus `crates/lunix-gc/tests/**`,
+     `m17b` lists `crates/lunix-gc/tests/**` (and no other `lunix-gc`
+     path); `m12a` lists `crates/lunixd/**` minus `tests/stack_*.rs`
+     (it creates `src/testsupport.rs` as a stub), `m12b` lists
+     `crates/lunixd/tests/stack_*.rs` and `crates/lunixd/src/testsupport.rs`.
+     Files that a later item fills are created by the earlier item with
+     their final signatures (M12a, M13a, M14 below), so the later item
+     edits only those files and never `mod` lines, `Cargo.toml` or
+     `main.rs`. The globs of `m14` include `crates/lunix-fsck/src/gc.rs`
+     (the stub), those of `m13a` include `src/fsck.rs` and `src/key.rs`.
    - `.github/workflows/ci.yml` runs `tools/ci.sh` on a hosted runner
      (unprivileged tests only).
 3. **`lunix-format` rules.** Pure Rust, no I/O, no crypto operations, no
@@ -631,7 +675,7 @@ freeze checklist below.
    items are listed here with the content they must cover. M1 may not
    change a field list the spec gives.
    1. **Primitives:** `ChunkId([u8;32])`, `IdLen` (0, 16, 32), `IdPrefix`,
-      `SegId` (`epoch << 40 | counter`, checked), `PackId`, `Seq` (write
+      `SegId` (`epoch << 40 | counter`, checked), `PackId`, `WriteSeq` (write
       sequence) and `CommitSeq` (commit counter; distinct types, D5),
       `Epoch`, `DekGen(u32)`, `FamilyId([u8;16])`, `VolumeUuid([u8;16])`,
       `Codec` (0 raw, 1 zstd, 2 LZ4, **3 zstd with dictionary**, matching
@@ -639,24 +683,27 @@ freeze checklist below.
       off, clen}`, `LineageIdx(u8)`.
    2. **Journal file and record** (§4.1, D7, D12): the 64 MiB ring file
       header (magic, version, volume uuid, lane id, file ordinal,
-      generation), and the record `{magic, seq, epoch (0), lba, len,
+      generation), and the record `{magic, write_seq, epoch (0), lba, len,
       kind(write|hole), crc32c}` with its 64-byte inline header, CRC over
       header and data; a hole record has `len` and no data. The same
       framing is reused for DELTA inline records and the future memfd sink.
    3. **Extent** (§6, ADR-11, D2, D11): `CCH1` header as in
       replicix-chunkfmt, then `chunk_id`, `clen`, and for encrypted volumes
       `dek_gen(4) + salt(24) + nonce(12)`, payload, `tag(16)` (present in
-      **every** extent, D11). Provide the **AAD builder** (`ver ‖ codec ‖
+      **every** extent, D11). `clen` follows `chunk_id` and is outside the
+      16-byte `CCH1` header. Provide the **AAD builder** (`ver ‖ codec ‖
       level ‖ ulen ‖ kind ‖ dek_gen ‖ family_id ‖ id_len ‖ chunk_id`), the
       **key-derivation `info` builder** (`"lunix extent v2\0" ‖ family_id ‖
       kind ‖ dek_gen ‖ codec ‖ level ‖ clen ‖ id_len ‖ chunk_id ‖ salt`) and
-      the **plain tag input** (the byte range D11 names). The AAD and
+      the **plain tag input**: every byte of the extent before the tag,
+      one contiguous slice `&extent[..len-16]` (header, `chunk_id`, `clen`,
+      payload; D11). The AAD and
       `info` must reproduce the bytes `aad_hardened`/`info_v2` of
       `bench/crypto-kat/raw/kat-vectors.json` exactly (copy the file to
       `crates/lunix-format/tests/vectors/`); they use the canonical
       widths of D2.
    4. **Segment** (§6): extents, footer (sorted `[chunk_id, offset, clen,
-      ulen, codec]`, zstd-compressed, plus segment-level BLAKE3 and seq
+      ulen, codec]`, zstd-compressed, plus segment-level BLAKE3 and `write_seq`
       range; sealed with the `footer` metadata key when encrypted, so the
       footer type has a plain and a sealed form), trailer (footer offset,
       length, magic, version). Map pack: the same container with
@@ -710,12 +757,12 @@ freeze checklist below.
        KMK fingerprint, the integrity (HMAC) key, and the **extent tag
        key** (D11).
    12. **Bucket and local paths:** one module with a function per path of
-       §6.1 (`commits/<seq:016x>`, `segments/<seg:016x>`, `map/<pack:016x>`,
+       §6.1 (`commits/<commit_seq:016x>`, `segments/<seg:016x>`, `map/<pack:016x>`,
        `index/<pack:016x>`, `heat/<seq:016x>`, `dicts/<id:08x>`,
        `snapshots/<name>`, `readers/<host>-<id>`, `holds/<child-uuid>`,
-       `gc/`, `sync/<backend-id>/progress`, `head`, `lease`, `volume`,
+       `gc/<pass:016x>`, `sync/<backend-id>/progress`, `head`, `lease`, `volume`,
        `families/<id>/keyring`) and the local layout of §4, including
-       `state/commits/<seq:016x>`, `index/`, `snapshots/`, `readers/`,
+       `state/commits/<commit_seq:016x>`, `index/`, `snapshots/`, `readers/`,
        `holds/`, `gc/` and `state/gc/`. A function maps a local path to its
        bucket-relative name (D9).
    13. **Index run** (D3; `index_packs[]` in FULL names them): sorted
@@ -725,15 +772,19 @@ freeze checklist below.
        `backend add` can upload them verbatim), `volume.json` (local
        settings only: name, directory, space policy, commit cadence,
        `retain_last`, `gc_grace`, `journal_max`), `state/checkpoint` (hint
-       only: last commit seq, per-lane journal tail, segment counter high
+       only: last `commit_seq`, per-lane journal tail, segment counter high
        water, stats counters, with a checksum and a double-slot atomic
        layout), `state/device` (device id, `boot_id`, queue count and depth,
        size, flags), `state/pins` (highest `keyring_seq` seen, highest epoch
        seen, KMK fingerprint pin).
-   15. **GC files:** the `gc/<n:016x>` evidence-journal object (envelope
-       frozen, body `{ver, bytes}` defined by M17 in `docs/reference/gc.md`)
-       and the local-only, versioned, non-frozen `state/gc/condemned` list
-       (losing it is safe: everything is re-marked).
+   15. **GC files:** the `gc/<pass:016x>` evidence object, one sealed
+       create-only object per GC pass (envelope frozen; body `{ver: 1,
+       bytes}` with the pass's JSON lines, defined by M17 in
+       `docs/reference/gc.md`, written once at pass end, and once by an
+       urgent pass), and the local-only, versioned, non-frozen
+       `state/gc/condemned` list (atomic replace; the only mutable GC
+       state; losing it is safe: everything is re-marked, and it is never
+       uploaded). `gc/space/<commit_seq:016x>` stays reserved.
 5. **Golden and property tests** in `crates/lunix-format/tests/`:
    - one checked-in golden file per type and variant under
      `tests/golden/` (binary plus a `.hex` rendering), generated by a
@@ -799,10 +850,10 @@ change after B1 merges costs a rebase of every wave 1 branch.
      is also returned when the pool is exhausted. The caller's buffer is
      free on return.
    - `JournalLane::submit_read(loc, buf, token)`, `poll(&mut
-     Vec<Completion>)`, and `completed_watermark() -> Seq` (the highest
-     seq `s` such that every append with `seq ≤ s` on this lane has
+     Vec<Completion>)`, and `completed_watermark() -> WriteSeq` (the highest
+     write_seq `s` such that every append with `write_seq ≤ s` on this lane has
      completed its write).
-   - `Journal::submit_group_flush(upto: Seq, token)`: runs on a ring owned
+   - `Journal::submit_group_flush(upto: WriteSeq, token)`: runs on a ring owned
      by the engine's flush coordinator (a dedicated thread; the lane fds
      are shared), waits until every lane's `completed_watermark() ≥ upto`
      (or the lane has nothing at or below `upto`), then issues one
@@ -810,17 +861,17 @@ change after B1 merges costs a rebase of every wave 1 branch.
      completes when all have. A FLUSH covers writes **completed before the
      group formed**. Lane threads never wait for the coordinator.
    - Blocking: `read_at(loc, buf)`, `recover(hint: Option<&Checkpoint>,
-     floor: Seq) -> Recovered {records, next_seq, ignored_after_gap:
-     Option<SeqRange>}` (all lanes scanned, records with `seq > floor`
-     merged in `seq` order up to the first gap; the hint only says which
+     floor: WriteSeq) -> Recovered {records, next_seq, ignored_after_gap:
+     Option<WriteSeqRange>}` (all lanes scanned, records with `write_seq > floor`
+     merged in `write_seq` order up to the first gap; the hint only says which
      files can be skipped and a lost or stale hint is harmless), and
      `reclaim(upto: &JournalTail)`. `JournalLoc` is `(lane, file ordinal,
      offset)`.
 3. **Overlay** (`overlay`): `Overlay` with `insert_write(lba_4k_range, loc,
-   seq)`, `insert_hole(range, seq)`, `lookup(range, &mut Vec<Piece>)`
-   (Piece = journal data, hole or none), `cut(c: Seq) -> OverlayCut`
-   (MVCC view: entries with `seq ≤ c`, grouped by chunk), and
-   `release(cut)` (removes only entries with `seq ≤ c` that are still the
+   write_seq)`, `insert_hole(range, write_seq)`, `lookup(range, &mut Vec<Piece>)`
+   (Piece = journal data, hole or none), `cut(c: WriteSeq) -> OverlayCut`
+   (MVCC view: entries with `write_seq ≤ c`, grouped by chunk), and
+   `release(cut)` (removes only entries with `write_seq ≤ c` that are still the
    visible version).
 4. **Map** (`map`): `BlockMap` with `get(ci) -> Option<MapEntry>` (blocking)
    and `try_get_cached(ci) -> Cached::{Hit, Hole, Miss}` (non-blocking),
@@ -848,11 +899,11 @@ change after B1 merges costs a rebase of every wave 1 branch.
    with `append_extent(id, bytes) -> Hint` and `seal(...)`; `read_extent(
    hint, out)`; `list` with sizes, `footers`, `delete(seg)`), `PackWrite`/
    `PackRead` for map packs plus `delete_pack`, `CommitStore` (`put`, `get`,
-   `list`, `tip`, `delete(seq)` which refuses at or above the tip's
+   `list`, `tip`, `delete(commit_seq)` which refuses at or above the tip's
    `chain_floor`), `CheckpointStore`, `PinSource` (`roots() ->
    Vec<PinRoot>` from the local `snapshots/`, `readers/`, `holds/`
    directories, empty in phase 1), `GcStateStore` (`load`/`store` the local
-   condemned list; `append_evidence(body)` for `gc/`), `VolumeDir`
+   condemned list; `put_evidence(pass, body)` for `gc/<pass:016x>`, create-only), `VolumeDir`
    (create/open, `LOCK`).
 7. **Space** (`space`): `SpaceGate::reserve(kind, bytes) -> Reserved |
    Parked(waiter) | NoSpace`, `release(kind, bytes)`, `transfer(from_kind,
@@ -982,7 +1033,8 @@ never `ReplicixDomain`).
    (best effort) and `MADV_DONTDUMP`.
 2. **`ExtentCodec` implementations:** `PlainExtents` (unencrypted:
    `chunk_id = blake3(plaintext)`; every extent carries the 16-byte tag of
-   D11, BLAKE3-128 over `CCH1 header ‖ chunk_id ‖ payload`, keyed by the
+   D11, BLAKE3-128 over every byte of the extent before the tag (`CCH1
+   header ‖ chunk_id ‖ clen ‖ payload`, one contiguous slice), keyed by the
    family's integrity key when it has one; no AEAD) and
    `AesGcmExtents` (keyed `chunk_id`, the keyed per-extent key over the
    `info` of M1, AES-256-GCM with the all-zero nonce through `aws-lc-rs`,
@@ -1037,7 +1089,7 @@ never `ReplicixDomain`).
   3 round-trips the framing and is rejected by the decompressor until
   phase 4.
 - **Tamper matrix:** flipping any single byte of an extent (header, id,
-  salt, nonce, payload, tag) fails `open`, on encrypted volumes and (plain
+  `clen`, salt, nonce, payload, tag) fails `open`, on encrypted volumes and (plain
   tag, D11) on unencrypted ones; one test per AAD field changed
   independently fails; an extent moved to another family, kind or `id_len`
   fails.
@@ -1093,7 +1145,7 @@ README and report):**
 
 - **Lanes.** One lane per ublk queue. A lane owns its ring of files
   (`journal/q<lane>-<ordinal:08x>.j`, 64 MiB each, preallocated and
-  physically zero-filled, `O_DIRECT`, `chattr +C` on btrfs). `seq` is
+  physically zero-filled, `O_DIRECT`, `chattr +C` on btrfs). `write_seq` is
   global and comes from the caller; `epoch` is 0. FLUSH is a **group
   flush** assembled by the engine's flush coordinator through
   `Journal::submit_group_flush(upto, token)` on a ring the coordinator owns:
@@ -1122,19 +1174,19 @@ README and report):**
    `submit_read`, `poll`, `completed_watermark`. A 64 KiB write is one
    record. The flush coordinator (`submit_group_flush`) on its own ring.
 3. Blocking `read_at` for destage workers and for recovery.
-4. `recover(hint: Option<&Checkpoint>, floor: Seq)`: `floor` is the tip
+4. `recover(hint: Option<&Checkpoint>, floor: WriteSeq)`: `floor` is the tip
    FULL's `cut_seq` (trusted, authenticated; 0 at genesis). Scan **every
    file of every lane**, accept records with a valid CRC and a valid file
-   header, keep those with `seq > floor`, merge lanes by `seq`, and stop at
-   the first gap in contiguous `seq`, the first CRC failure or the first
+   header, keep those with `write_seq > floor`, merge lanes by `write_seq`, and stop at
+   the first gap in contiguous `write_seq`, the first CRC failure or the first
    zero magic that ends a batch with nothing valid after it. Stale records
-   of a previous ring pass have `seq ≤` the expected one and are discarded
+   of a previous ring pass have `write_seq ≤` the expected one and are discarded
    by the gap rule. Everything after the stop point is **ignored** and
-   reported in `Recovered::ignored_after_gap` (the seq range of valid
+   reported in `Recovered::ignored_after_gap` (the write_seq range of valid
    records beyond the gap); there is no hard error (nothing on disk records
-   the last flushed seq). The checkpoint hint only says which files can be
+   the last flushed write_seq). The checkpoint hint only says which files can be
    skipped; a lost or stale hint changes nothing but speed. Return the
-   records (with their `JournalLoc`) and the next free `seq`.
+   records (with their `JournalLoc`) and the next free `write_seq`.
 5. `reclaim(tail)`: files wholly below the tail are recycled (re-zeroed in
    the background) or deleted.
 6. Crash points: `journal.after_append_submit`, `journal.before_fdatasync`,
@@ -1151,8 +1203,8 @@ README and report):**
   that, for each lane, keeps every byte up to the last flush point and
   replaces the unflushed tail by a random mix of intact, torn
   (random-length prefix) and missing records. After `recover`: the result
-  is exactly a `seq`-prefix, contains every record whose `seq` ≤ the last
-  completed flush, contains no record with a bad CRC, and the next `seq`
+  is exactly a `write_seq`-prefix, contains every record whose `write_seq` ≤ the last
+  completed flush, contains no record with a bad CRC, and the next `write_seq`
   is correct.
 - **Ring wrap with a lost checkpoint** recovers the same prefix (stale
   records of the previous pass are discarded by the floor and the gap
@@ -1196,8 +1248,8 @@ lane thread.
 `FlatOverlay` in M1.
 **Steps:** an LBA-sharded interval map at 4 KiB granularity (default 64
 shards by `lba / chunk` so that a chunk never spans shards), entries
-`{range, loc | hole, seq}`, newest `seq` wins per 4 KiB block; `cut(c)`
-returns a frozen view with entries `seq ≤ c` grouped by chunk (copy-on-
+`{range, loc | hole, write_seq}`, newest `write_seq` wins per 4 KiB block; `cut(c)`
+returns a frozen view with entries `write_seq ≤ c` grouped by chunk (copy-on-
 write of the shard's persistent structure, or versioned entries — choose
 and document); `release(cut)`; `lookup` that returns pieces for a read
 range. Insert and lookup are called from queue threads (no blocking beyond
@@ -1210,7 +1262,7 @@ thread.
   ranges) agree on every lookup and every cut's contents, at chunk sizes 16
   KiB and 64 KiB.
 - A cut taken at `c` is unaffected by later inserts; `release` removes
-  only `seq ≤ c` entries that are still visible; a later overwrite of the
+  only `write_seq ≤ c` entries that are still visible; a later overwrite of the
   same 4 KiB survives the release.
 - Stress: 8 writer threads on disjoint and overlapping ranges plus 2
   readers and a cutter for 10 s; a final comparison with a serial replay.
@@ -1316,7 +1368,9 @@ run format in M1.
    GC support (M17): `mark_condemned`/`unmark_condemned` (a persisted
    per-segment flag in the manifest; `get_for_dedup` never returns a
    condemned entry, `get`/`get_by_prefix` still do), `relocate(id, old,
-   new)` (inserts the new hint, newest wins), `drop_segment(seg)` (removes
+   new)` (inserts the new hint, newest wins; it follows the persist rule of
+   step 2: a relocated entry stays in the memtable and is never persisted
+   until the segment it names is named by a durable commit), `drop_segment(seg)` (removes
    its entries from lookups at once and from runs at the next run
    compaction), `delete_run`.
 5. Memory budget: ≤ 16 B of RAM per indexed chunk for the filter and
@@ -1339,7 +1393,9 @@ run format in M1.
   condemned segment from the moment of `mark_condemned` (also after a
   reopen); `relocate`, `drop_segment` and `unmark_condemned` match the
   `HashMap` oracle; a catch_up over a segment that no commit names does
-  nothing.
+  nothing; a `relocate` entry is absent from every persisted run until the
+  new segment is named by a durable commit, and a crash before that leaves
+  the old entry current.
 - Perf: ≥ 1 M lookups/s on 10 M entries single thread (memtable and run
   hits mixed 50/50); ≤ 16 B/chunk RAM measured with a counting allocator.
 
@@ -1376,7 +1432,7 @@ order lives). **Review:** recommended, durable order.
 4. Map packs: `PackWrite`/`PackRead` with the same container and
    `map/<pack:016x>`; index run files are owned by M6 but live in `index/`
    created here.
-5. `CommitStore` (`state/commits/<seq:016x>`: write tmp, `fdatasync`,
+5. `CommitStore` (`state/commits/<commit_seq:016x>`: write tmp, `fdatasync`,
    rename, directory fsync; `tip()`, `get`, `list`), `CheckpointStore`
    (double slot, checksummed; a bad or stale checkpoint is ignored with a
    warning, since it is only a hint), `state/device` and `state/pins`
@@ -1390,11 +1446,12 @@ order lives). **Review:** recommended, durable order.
    for GC (M17), which treats them as dead objects; the store only lists
    them.
 7. GC support: `SegmentStore::delete`, `delete_pack`, `delete_run`,
-   `CommitStore::delete(seq)` (refuses at or above the tip's
+   `CommitStore::delete(commit_seq)` (refuses at or above the tip's
    `chain_floor`), the local `snapshots/`, `readers/`, `holds/` and `gc/`
    directories (empty in phase 1) behind `PinSource` and `GcStateStore`
-   (`state/gc/condemned` atomic write, evidence-journal append), listing
-   with sizes. Every delete is `unlink` then directory `fsync`.
+   (`state/gc/condemned` atomic write; `put_evidence(pass, body)` writes
+   the sealed create-only object `gc/<pass:016x>`: tmp, `fdatasync`,
+   rename, directory fsync), listing with sizes. Every delete is `unlink` then directory `fsync`.
 8. Crash points: `store.segment.before_fdatasync`, `.after_fdatasync`,
    `.after_rename`, `.after_dirsync`; `store.pack.*` (same four);
    `store.commit.*` (same four); `store.checkpoint.*`;
@@ -1403,7 +1460,8 @@ order lives). **Review:** recommended, durable order.
 **Gate:**
 
 - Round trips for segments of 1, 255 and 4 096 extents (16 KiB and 64 KiB,
-  all codecs, plain and encrypted through a fake `ExtentCodec`).
+  all codecs, plain and encrypted through a ~30-line in-crate test `ExtentCodec`; M7 is
+  wave 1a and `PlainCodec` is B2a's, so the crate carries its own fake).
 - **Truncation sweep:** a sealed segment truncated at every 4 KiB boundary
   and at 100 random byte offsets fails to open with a typed error and
   never panics; a flipped byte in the footer, trailer or an extent header
@@ -1426,7 +1484,8 @@ order lives). **Review:** recommended, durable order.
 - Delete sweep: a crash at each delete point leaves either the file or no
   file, the directory entry consistent after reopen; `CommitStore::delete`
   refuses the tip and anything at or above `chain_floor`; the evidence
-  append is atomic per line.
+  object is create-only and atomic (a crash leaves it whole or absent; a
+  second `put_evidence` for the same pass is refused).
 - Every extent read verifies its 16-byte tag through the codec; a flipped
   payload byte on a plain volume is an error, not data.
 
@@ -1639,7 +1698,9 @@ and end):
 - **Negative controls fail as designed:** without `REISSUE`, fio sees EIO
   or the fs errors; with the drop-last-write toggle, verify fails.
 - `UPDATE_SIZE` 16 → 64 GiB grow under fio on ext4, xfs and btrfs: no
-  error, fsck clean; unaligned and shrink requests rejected by the
+  error, fsck clean. The backing file is sparse and fio is bounded (W3):
+  `--io_size` ≤ 8 GiB per run, so the test stays within the ≤ 40 GiB M10
+  budget; unaligned and shrink requests rejected by the
   daemon.
 - Watchdog test: a deliberately stuck control call (a test hook that never
   returns) is reported at the timeout without killing the daemon.
@@ -1669,14 +1730,14 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
 **Steps:**
 
 1. **Write path** (queue thread, non-blocking): reserve journal space
-   (`SpaceGate`), `seq = next()` (one global atomic), `try_append`, update
+   (`SpaceGate`), `write_seq = next()` (one global atomic), `try_append`, update
    the overlay, complete on journal completion; `Full`/`NoSpace` parks the
    tag and resumes from a wake-up. Writes past the volume size or not
    4096-aligned are rejected with `EINVAL`. FUA: as WRITE, then join the
    next flush group.
 2. **FLUSH and flush groups:** waiters gather into a group; one
    `submit_flush` per group; while it is in flight the next group
-   accumulates; each completion names a `seq`. Mode `local`: FLUSH is the
+   accumulates; each completion names a `write_seq`. Mode `local`: FLUSH is the
    journal group commit.
 3. **DISCARD and WRITE_ZEROES:** a hole record in the journal and an
    overlay hole; partial-chunk holes are handled at destage.
@@ -1697,10 +1758,14 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
 5. **Cut and commit coordinator** (background thread):
    triggers: the commit interval `T` (default 30 s, idle volumes cut
    nothing), `B` dirty bytes (default 1 GiB), journal fill above 50 %, a
-   `MapFull` signal, detach, and an explicit request. **The local FULL
+   `MapFull` signal, detach, an explicit request, and **pending `moved`
+   records from the compactor** (the idle rule does not apply to them: a
+   compaction output segment is named by a durable commit only through the
+   cut that applies its `rehint`, and an idle volume would otherwise leave
+   it unnamed; M17 rule 4). **The local FULL
    commit protocol, in durable order** (each step has a crash point named
    `engine.cN.<what>`):
-   - C1 pick `c` = current `seq`; wait until every write with `seq ≤ c`
+   - C1 pick `c` = current `write_seq`; wait until every write with `write_seq ≤ c`
      has reached the journal (in-flight only; new writes are not stalled);
    - C2 `overlay.cut(c)`;
    - C3 destage the cut (M9): extents appended to the open segment, map
@@ -1708,11 +1773,11 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
    - C4 seal the open segment(s): footer, trailer, `fdatasync`, rename,
      directory fsync;
    - C5 `map.seal` into a map pack: `fdatasync`, rename, directory fsync;
-   - C6 build the FULL commit (`seq = parent_seq + 1` (D5; not the write
-     seq), `epoch` 0, `parent_seq`, `parent_hash`, `cut_seq = c`, `size`,
+   - C6 build the FULL commit (`commit_seq = parent_seq + 1` (D5; not the
+     `write_seq`), `epoch` 0, `parent_seq`, `parent_hash`, `cut_seq = c`, `size`,
      `map_root`, `map_packs`, `new_segments`, `index_packs` (the runs that
      were durable **before** this step, covering segments of commits ≤
-     `seq − 1`, D3), `chain_floor` (the older of the `retain_last` FULLs
+     `commit_seq − 1`, D3), `chain_floor` (the older of the `retain_last` FULLs
      that remain after this one; it never moves backwards), `created_at`), seal or
      MAC it through `CommitCodec`, `CommitStore::put` (tmp, `fdatasync`,
      rename, directory fsync). **This is the durability point of the cut.**
@@ -1732,9 +1797,14 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
    reclaimed before C6 is durable.
 6. **Startup recovery** (`Engine::open`): take the lock; read and verify
    `volume`; unlock keys (the caller passes `Keys`); `check_attach`; read
-   the tip commit and verify the last link (full chain at fsck); open the
+   the tip commit and verify the last link (the chain down to
+   `chain_floor` at fsck); **no automatic fallback**: a tip that does not
+   authenticate is a typed mount error, because falling back to the
+   previous commit would reuse the create-only name `commits/<tip>` and lose
+   journal records already reclaimed; the repair is offline, `lunix fsck
+   --repair --truncate-tip` (M14); open the
    map at `map_root`; read the checkpoint hint; `Journal::recover(hint, floor = the tip FULL's cut_seq)`; rebuild
-   the overlay from the records it returns; set the next `seq`; **orphan
+   the overlay from the records it returns; set the next `write_seq`; **orphan
    sweep first** (delete every sealed segment and map pack above the tip's
    high-water mark that no retained commit names, N2); then
    `index.catch_up(segment ids named by the chain, ...)`; resume a pending
@@ -1759,8 +1829,8 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
 - **Model test** (proptest, ≥ 500 sequences of 2 000 ops per chunk size;
   ops: write, read, flush, FUA, discard, write-zeroes, force-cut, grow,
   `crash+reopen`): reads always equal the flat oracle while running; after
-  `crash+reopen`, the device equals the oracle as of **some** `seq` ≥ the
-  last completed FLUSH's `seq` with writes applied in `seq` order (prefix
+  `crash+reopen`, the device equals the oracle as of **some** `write_seq` ≥ the
+  last completed FLUSH's `write_seq` with writes applied in `write_seq` order (prefix
   consistency), and no FLUSH-acknowledged write is missing. The fakes' crash
   model drops or tears unflushed journal records and unsynced store files
   at random.
@@ -1803,10 +1873,14 @@ cuts; no path completes a write before its journal record completes.
 
 ## M12 — `lunixd` and the in-process stack tests
 
-**Owns:** M12a: `crates/lunixd` except the stack tests. M12b:
-`crates/lunixd/tests/stack_*.rs` and `crates/lunixd/src/testsupport.rs` (a
-`testsupport` cargo feature that exports the in-process volume builder,
-which M14 and M17.B reuse). **Depends on:** starts when M11, M3, M4 and M7
+**Owns:** M12a: `crates/lunixd` except `tests/stack_*.rs` and the body of
+`src/testsupport.rs`. M12a adds the `testsupport` cargo feature to
+`Cargo.toml`, `pub mod testsupport` behind it in `lib.rs`, and creates
+`src/testsupport.rs` with the final signature of the builder
+(`not implemented` bodies). M12b:
+`crates/lunixd/tests/stack_*.rs` and `crates/lunixd/src/testsupport.rs`
+(the in-process volume builder, which M14 and M17.B reuse), editing no
+other file. **Depends on:** starts when M11, M3, M4 and M7
 have merged and wires the real crates incrementally, with fakes for the
 rest (the stack test is parametrised by which crates are real); its gates
 need M2, M5, M6, M8, M9, M10, M17.A (and M13a for CLI-driven tests). Two
@@ -1833,7 +1907,7 @@ device smoke test.
    outcome; secrets redacted), bounded frame size (1 MiB), per-call
    timeouts. Handlers: `Ping`, `VolumeCreate`, `VolumeList`, `VolumeStatus`
    (state, size, chunk size, encrypted, device path, counters, space,
-   journal fill, last commit seq/time, dedup and compression ratios),
+   journal fill, last `commit_seq`/time, dedup and compression ratios),
    `Attach` (with `max_io_buf_bytes`), `Detach`, `Resize`, `Space`,
    `QuiesceAll`, `Gc` and `GcStatus`.
 4. **Volume create:** make the directory, `volume` descriptor with its MAC,
@@ -1896,7 +1970,7 @@ device smoke test.
   allowed to fail, attaching an unencrypted volume with a credential
   returns `Downgrade`, and a wrong fingerprint returns `WrongKmk`, over the
   socket.
-- Device smoke (root, serialised, ≤ 8 GiB of host disk): create, attach, `mkfs.ext4`, mount,
+- Device smoke (root, run through `tools/remote.sh root`, serialised, ≤ 8 GiB of host disk): create, attach, `mkfs.ext4`, mount,
   write 1 GiB with fio verify, `umount`, detach, re-attach, verify, `lunix
   fsck` clean; one `kill -9` and recovery under the same load.
 - Idle daemon CPU ≤ 1 % of one core; resident memory with one idle 1 TiB
@@ -1913,7 +1987,10 @@ Two work items so the wave 1 part never links crates that do not exist yet.
 
 ### M13a — socket commands (wave 1a)
 
-**Owns:** `crates/lunix-cli` except `src/fsck.rs` and `src/key.rs`.
+**Owns:** `crates/lunix-cli` (all of it, including stubs for `src/fsck.rs`
+and `src/key.rs`: `pub fn run_fsck(args) -> ExitCode` and `pub fn
+run_key(args) -> ExitCode`, final signatures, bodies print "built in M13b"
+and exit 2, wired in `main.rs` and the `clap` tree here).
 **Depends on:** M1.B1 (the fake control server is in M1.B2b; M13a tests
 against it once it lands, and against a throw-away in-test server before).
 **Model:** routine. **Reads:** DESIGN §16 (CLI sketch); `lunix-iface::ctl`.
@@ -1943,9 +2020,10 @@ wrong key. `status` prints human text and `--json`.
 
 ### M13b — `fsck` and `key` (wave 2)
 
-**Owns:** `crates/lunix-cli/src/fsck.rs`, `crates/lunix-cli/src/key.rs`.
-**Depends on:** M13a, M2, M7, M14. **Model:** routine.
-**Steps:** `fsck NAME [--deep] [--rebuild-index] [--repair] [--gc] [--json]`
+**Owns:** `crates/lunix-cli/src/fsck.rs`, `crates/lunix-cli/src/key.rs`
+(only the bodies of M13a's `run_fsck` and `run_key`; no edit to `main.rs`
+or `Cargo.toml`). **Depends on:** M13a, M2, M7, M14. **Model:** routine.
+**Steps:** `fsck NAME [--deep] [--rebuild-index] [--repair [--gc] [--truncate-tip]] [--json]`
 (offline, links `lunix-fsck`; refuses if the volume is attached), and
 offline key-slot commands `key ls|add-slot|rm-slot NAME` (operate on the
 local keyring with the volume detached, through `lunix-crypto`).
@@ -1959,7 +2037,10 @@ two subcommands; exit codes as in M13a.
 
 ## M14 — `lunix-fsck`
 
-**Owns:** `crates/lunix-fsck` (except `src/gc.rs`, M17.B). **Depends on:**
+**Owns:** `crates/lunix-fsck` (all of it). M14 creates `src/gc.rs` with
+the final signature `pub fn check_gc(...) -> Vec<Finding>` (empty body),
+declares `mod gc;` and calls it from `lib.rs`; M17.B then edits only
+`src/gc.rs`. **Depends on:**
 M2, M5, M6, M7; its stack-built-volume gate reuses `lunixd::testsupport`
 once M12b lands (until then M14 uses its own builder but must not be the
 first integration). **Model:**
@@ -1972,8 +2053,8 @@ routine. **Review:** recommended. **Reads:** DESIGN §4, §6, §7, §11
    disagreement is a warning).
 2. **Commit chain** from the tip down to `chain_floor` (the floor
    commit's parent may be absent; the chain runs from genesis only while
-   the floor is the genesis seq): `seq` contiguous (`seq = parent_seq + 1`,
-   D5), `parent_hash`, non-decreasing `epoch`, HMAC or AEAD of every
+   the floor is the genesis `commit_seq`): `commit_seq` contiguous
+   (`commit_seq = parent_seq + 1`, D5), `parent_hash`, non-decreasing `epoch`, HMAC or AEAD of every
    commit, the recorded `chain_floor` equals the older of the `retain_last`
    retained FULLs, no commit file at or above the floor missing; commit
    files below the floor are legal only while condemned (pending delete).
@@ -1983,7 +2064,9 @@ routine. **Review:** recommended. **Reads:** DESIGN §4, §6, §7, §11
    resolves to an existing extent: through its hint (inside an existing
    sealed segment, id prefix matching the extent header at that offset) or,
    for a stale hint, through the index by prefix confirmed against the full
-   id; an entry that does neither is an error.
+   id; an entry that does neither is an error. The same check runs again
+   after `index/` is deleted and rebuilt from the footers (the delete-time
+   index invariant of M17 rule 5).
 4. **Segments:** trailer, footer BLAKE3, footer entries against a scan of
    the extents (offsets, `clen`, `ulen`, codec); `--deep` also opens every
    extent (plain or AEAD tag), decompresses within the chunk-size cap and recomputes the
@@ -2001,7 +2084,12 @@ routine. **Review:** recommended. **Reads:** DESIGN §4, §6, §7, §11
    `lunix status` and M15.
 8. `--repair` does only safe things: delete `*.tmp`/`*.open`, delete
    orphans when `--delete-orphans` is also given, rebuild the index,
-   rewrite the checkpoint.
+   rewrite the checkpoint. `--repair --truncate-tip` is the only answer to
+   a tip that does not authenticate (mount never falls back): it moves the
+   damaged commit object aside (never deletes it) and makes the previous
+   commit the tip; it is offline, refuses when the previous commit does
+   not authenticate or is absent, and reports the journal records that the
+   older floor can no longer cover.
 Output is human text or `--json`; exit 0 clean, 1 warnings only, 2 errors.
 **Gate:**
 
@@ -2021,7 +2109,12 @@ Output is human text or `--json`; exit 0 clean, 1 warnings only, 2 errors.
   the flip is in covered bytes (`--deep` makes every byte of a stored
   extent covered; the report lists the uncovered padding explicitly).
 - `--rebuild-index` after deleting `index/` restores the index to equality
-  with the original (via `ChunkIndex` iteration).
+  with the original (via `ChunkIndex` iteration), and every retained-root
+  entry still resolves by hint or index afterwards.
+- `--repair --truncate-tip` on a volume whose tip is corrupt makes the
+  previous commit the tip, keeps the damaged object aside, and the volume
+  authenticates at store level (M12b's stack test then mounts it); without
+  the flag the mount returns the typed error.
 - Memory: fsck of a 1 TiB sparse volume with 1 M mapped chunks stays under
   500 MiB.
 
@@ -2029,11 +2122,14 @@ Output is human text or `--json`; exit 0 clean, 1 warnings only, 2 errors.
 
 ## M17 — Local garbage collection and compaction
 
-**Owns:** M17.A: `crates/lunix-gc`, `docs/reference/gc.md`. M17.B:
-`crates/lunix-gc/tests/`, `crates/lunix-fsck/src/gc.rs`,
+**Owns:** M17.A: `crates/lunix-gc` except `tests/`, `docs/reference/gc.md`.
+M17.B: `crates/lunix-gc/tests/**` (listed under `m17b` only in
+`ownership.toml`), `crates/lunix-fsck/src/gc.rs` (the stub M14 created),
 `crates/lunixd/tests/stack_gc*.rs`, `bench/phase1/gc/`.
-**Depends on:** M17.A: M1.B2b (fakes), M5, M6, M7 only as the traits they
-implement. M17.B: M5, M6, M7, M11, M14, M17.A and M12b's `testsupport`.
+**Depends on:** M17.A: M1.B2b (fakes); M5 (`lunix-map`, wave 1b) as a
+**dev-dependency**, because pack liveness needs real pack ids, `walk_nodes`
+and `rehint` and `FlatMap` has no packs (`FlatMap` stays the content
+oracle); M6 and M7 only as the traits they implement. M17.B: M5, M6, M7, M11, M14, M17.A and M12b's `testsupport`.
 **Model:** design-heavy. **Review:** required, independent, for both
 parts (one reviewer reads both; the checklist is at the end).
 **Reads:** DESIGN §7 ("Hints", "Chunk index"), §8.7, §11, §4.3; ADR-25,
@@ -2053,13 +2149,14 @@ in Spec gaps (N6-N9).
 
 1. **Roots.** A pass marks from: the `retain_last` retained FULL commits
    (DESIGN §11 and §8.7: `last:N`, default N = 2, the tip and its
-   predecessor, so a damaged tip has a fallback; DELTA commits do not
+   predecessor, so an offline `fsck --repair --truncate-tip` can drop a
+   damaged tip; mount never falls back by itself; DELTA commits do not
    exist in local-only mode, but a tip FULL's DELTAs would be roots);
    snapshot, reader and hold pins from `PinSource` (all empty in phase 1,
    but read, so no GC version can delete a future pin's base); and the
    trained dictionaries referenced by live extents (none in phase 1;
    codec-3 extents are counted when they appear). `chain_floor` is the
-   older retained FULL's seq.
+   older retained FULL's `commit_seq`.
 2. **When it runs.** On the engine's coordinator thread, between cuts, and
    only when the in-memory map root equals the tip's `map_root` (M11
    guarantees it; the hook asserts it). Mark, condemn and compaction steps
@@ -2084,22 +2181,30 @@ in Spec gaps (N6-N9).
    the normal `SegmentStore`, and
    returns `Moved {id, old, new}` records. The engine applies them to the
    map with `MapTxn::rehint` at the next cut and the compactor updates the
-   index with `relocate`, **only after** the new segment is sealed. A new
-   segment is named by the next FULL's `new_segments[]` like any other.
+   index with `relocate`, **only after** the new segment is sealed.
+   `relocate` entries follow M6's persist rule: they stay in the memtable
+   and are never persisted until the new segment is named by a durable
+   commit. A new segment is named by the next FULL's `new_segments[]` like
+   any other. **Pending `moved` records are a cut trigger** (M11 step 5):
+   the idle rule (an idle volume cuts nothing) does not apply to them, so
+   the output segment is named within one commit interval.
    Compaction is rate-limited (default 64 MiB/s, `gc_rate`) and its scratch
    is bounded (one output segment open at a time).
 5. **Delete: condemn → grace → recheck → delete**, for segments, map
    packs, index runs and commit objects below `chain_floor`:
-   - *condemn*: an object with no live reference is added to the condemned
-     list (`state/gc/condemned`, with the condemn time); a segment is
+   - *condemn*: an object with no live reference **and whose id is not
+     above the tip's high-water mark** (the highest id any retained commit
+     names) is added to the condemned list (`state/gc/condemned`, with the condemn time); a segment is
      marked in the index (`mark_condemned`), after which `get_for_dedup`
-     never returns its entries; a one-line evidence record is appended to
-     `gc/`;
+     never returns its entries; a one-line evidence record is added to the
+     pass's evidence lines, which are written at pass end as one sealed
+     create-only object `gc/<pass:016x>` (rule 11);
    - *grace*: `gc_grace` (a `volume.json` setting, default 60 s, tests use
      the fake clock). DESIGN §11: a local-only volume has no lease, mirror
      or reader pin, so the grace covers only in-flight cuts, destage and
      reads, and is never shorter than that; the setting has a floor of
-     10 s plus twice the read helper's timeout, below which it is refused.
+     30 s (10 s plus twice `read_timeout`, default 10 s, a `volume.json`
+     setting), below which it is refused.
      The ladder's *urgent* pass (rule 8) uses the floor, not zero, and the
      recheck is unchanged;
    - *recheck*: re-run mark from the current roots; delete only objects
@@ -2109,6 +2214,12 @@ in Spec gaps (N6-N9).
      then `drop_segment` in the index; the deletion is fenced on the local
      epoch (0), so the check is a no-op that phase 2 turns into the lease
      fence.
+   - *delete-time index invariant*: a segment that stale hints still point
+     into may be deleted only if the index durably names the current copy
+     of every live id those hints resolve to, or that copy's segment is
+     named by the chain (so `catch_up` restores the entry after a crash).
+     This holds by construction (`relocate` is never persisted before the
+     new segment is named, D3); M17.A tests it and M14 checks it.
 6. **Order with commits.** A segment, pack or run named by a retained
    commit is live by the roots rule. Commit objects below `chain_floor`
    are condemned only after the FULL that **recorded** the new
@@ -2119,8 +2230,11 @@ in Spec gaps (N6-N9).
    names it.
 7. **Orphans.** Sealed segments and packs that nothing references (crash
    between C4 and C6, abandoned compaction output) have zero live bytes and
-   are condemned like any dead object. The open-time sweep of M7/M11
-   (ids above the tip's high-water mark) still runs first.
+   are condemned like any dead object, **except** that GC never condemns a
+   segment or pack whose id is above the tip's high-water mark: inside a
+   running process such a file is the open segment, sealed-but-uncommitted
+   output or compaction output, never garbage; after a crash the open-time
+   sweep of M7/M11 deletes it (and runs first).
 8. **Space ladder.** `lunixd` registers `Collector`'s urgent pass as the
    ladder's *compact* step: it runs mark, condemns, and (floor grace, recheck)
    deletes dead objects whose floor grace has elapsed, then compacts if still short; it returns the bytes
@@ -2132,16 +2246,35 @@ in Spec gaps (N6-N9).
     `gc.condemn.after_list_write`, `gc.compact.after_segment_seal`,
     `gc.compact.after_relocate`, `gc.delete.before_unlink`,
     `gc.delete.after_unlink`, `gc.delete.after_dirsync`,
-    `gc.commit_delete.before_unlink`, `gc.evidence.after_append`. Every
+    `gc.commit_delete.before_unlink`, `gc.evidence.after_put`. Every
     state between two crash points is recoverable: the condemned list is a
     hint (lost or stale ⇒ re-mark), deletes are idempotent, a missing file
     that the list names is skipped.
 11. **Formats.** `docs/reference/gc.md` (M17.A) defines the `gc/` evidence
-    body (`{ver: 1, bytes}`, JSON lines: time, action, kind, id, bytes,
-    reason), the `state/gc/condemned` file (versioned, local only) and the
-    GC settings with defaults (`retain_last`, `gc_grace`, `gc_rate`,
-    live-fraction threshold, step budget). Nothing here changes a frozen
-    envelope (D6).
+    body: one sealed create-only object per pass, `gc/<pass:016x>`, body
+    `{ver: 1, bytes}` with the pass's JSON lines (time, action, kind, id,
+    bytes, reason), written once at pass end (and once by an urgent pass);
+    a crash before it loses only that pass's evidence. The only mutable GC
+    state is the local `state/gc/condemned` (versioned, atomic replace,
+    never uploaded). Phase 2 uploads the evidence objects verbatim.
+    `gc.md` also defines the GC settings with defaults (`volume.json`):
+    `read_timeout` 10 s, `gc_grace` 60 s (floor 30 s), `gc_rate` 64 MiB/s,
+    live-fraction threshold 0.5, step budget 50 ms, `retain_last` 2.
+    Nothing here changes a frozen envelope (D6).
+12. **Mark staleness (why the design is safe; `gc.md` records it and M17.A
+    tests it).** Mark, condemn and recheck are separate budgeted steps with
+    cuts between them, so the mark that a condemn uses may predate a FULL
+    that gained a reference (a dedup hit on a not-yet-condemned segment).
+    (i) A pass pins its root set `R` (commit seqs) when mark starts and
+    walks exactly `R`. (ii) Condemn excludes any object named by a
+    **currently** retained commit's `new_segments[]`, `map_packs[]` or
+    `index_packs[]` (rule 6, made operational). (iii) After condemn no new
+    reference to the object can arise (dedup excludes condemned entries,
+    compaction output is new, `rehint` only targets compaction output), so
+    a recheck that walks a root set pinned at **its** start finds every
+    reference: any root created later derives from a pinned root and can add
+    no reference to a condemned object. (iv) If the root set changes during
+    a recheck walk, the walk is still sufficient for the same reason.
 
 ### M17.A — `lunix-gc` against fakes (wave 1c)
 
@@ -2149,7 +2282,7 @@ in Spec gaps (N6-N9).
 subtree skipping; resolution through hint or index; per-segment, per-pack
 and per-run liveness; cost-benefit ranking; the compactor; condemn, grace,
 recheck and delete state machine over `GcStateStore`; the urgent pass; the
-evidence journal; `GcStats` (live bytes, dead bytes, bytes freed, segments
+per-pass evidence object; `GcStats` (live bytes, dead bytes, bytes freed, segments
 compacted, write amplification of compaction); `lunix gc --dry-run` data
 (what a pass would condemn and compact, and the bytes), without changing
 anything; `docs/reference/gc.md`.
@@ -2168,7 +2301,18 @@ anything; `docs/reference/gc.md`.
 - **Dedup race.** A write that dedups against a segment while it is being
   condemned never targets it: `get_for_dedup` returns nothing from the
   moment of condemn, and a test interleaves destage cuts with every step
-  of a pass. A recheck that finds a new reference un-condemns.
+  of a pass. A recheck that finds a new reference un-condemns. **Case:** a
+  cut with a dedup hit on a segment between mark and condemn (the mark is
+  stale, rule 12); the recheck un-condemns it and nothing is deleted.
+- **In-flight output.** A compaction output segment sealed but not yet
+  named by a commit (an idle volume with pending `moved` records) is never
+  condemned (id above the high-water mark); the pending records force a cut
+  and the output is named; a crash after `relocate` but before that cut
+  deletes the output at open and leaves the old segment named and indexed.
+  `relocate` entries are absent from persisted runs until named.
+- **Delete-time index invariant.** Deleting a segment with stale hints
+  never leaves a live id without a durable index entry or a chain-named
+  copy; the test deletes `index/` and rebuilds it after each deletion.
 - **Stale hints.** After compaction a retained root's stale hint still
   reads (through index fallback) before and after the old segment is
   deleted.
@@ -2180,6 +2324,9 @@ anything; `docs/reference/gc.md`.
   implementation; no candidate at or above the threshold is compacted.
 - **Ledger.** After any pass the ledger equals the bytes of the files that
   exist (fake store), exactly.
+- **Mark staleness.** The four points of rule 12 each have a test with
+  interleaved cuts (root set pinned at mark start; condemn skips objects
+  named by a currently retained commit; recheck finds the late reference).
 - Compaction output extents decode to the same plaintext and chunk id as
   their source and carry a new salt on encrypted volumes (the tripwire
   build runs the oracle); the index relocation is applied only after the new
@@ -2243,7 +2390,10 @@ condemn, grace and recheck except the documented urgent pass (which still
 rechecks); `get_for_dedup` excludes condemned entries from the moment of
 condemn; roots include pins even when empty; the coordinator is the only
 caller and the map root equals the tip's at every mark; chain-floor ordering
-(floor recorded durable before commits below it are condemned); compaction
+(floor recorded durable before commits below it are condemned); no object
+above the tip's high-water mark is condemned; pending `moved` records force
+a cut; `relocate` is never persisted before the segment is named; mark
+staleness (rule 12) and the delete-time index invariant (rule 5); compaction
 re-seals with a fresh salt; relocate happens after seal; stale-hint fallback is
 exercised; the ledger release follows durable deletion; idempotence of every
 state after a crash; `id_len = 0` behaviour; the urgent pass cannot starve
@@ -2438,9 +2588,9 @@ its corpora list and its conventions where they overlap** (project list,
 pinned refs, sampling caps, manifest and lock-file format, extension
 classes), does not edit them, and **never writes into
 `bench/dict-study/filetypes/`**. M18b's outputs go to
-`bench/dict-study/lunix/` and `bench/dict-study/constellation-arm/`. If the
-running study changes its conventions mid-way, the note records which
-version M18b used.
+`bench/dict-study/lunix/` and `bench/dict-study/constellation-arm/`. M18b
+records the commit of `spikes/dict-filetypes/` it used in `PROTOCOL.md` and
+in the note, and lists any convention drift from the running study (N13).
 
 ---
 
@@ -2465,7 +2615,8 @@ they differ):**
    (`CODEC_ZSTD_DICT = 3` already exists as a constant; the decoder for it
    is new). Run replicix-core's own `cargo test --workspace` and, in the
    Constellation checkout, `cargo check --workspace` with a `[patch]` to the
-   branch (read-only use of Constellation; no change there).
+   branch, run with the `zstd-dict` feature **off and on** (read-only use
+   of Constellation; no change there).
 3. **Before the branch is merged, the lead announces the change to the
    Constellation maintainers' session** (what is added, which public items,
    the version, the test vectors). M18a produces the announcement text as
@@ -2477,7 +2628,11 @@ they differ):**
 
 1. **Codec 3 in `replicix-chunkfmt`.** Encode and decode of zstd with a
    dictionary under the existing `CCH1` framing, behind a new cargo feature
-   `zstd-dict` (default off, like `lz4`): the dictionary is supplied by the
+   `zstd-dict` (default off, like `lz4`): the new `Codec::ZstdDict` variant
+   is `#[cfg(feature = "zstd-dict")]`, exactly as `Lz4` is
+   `#[cfg(feature = "lz4")]`, because `Codec` is not `#[non_exhaustive]` and
+   adding a variant unconditionally would break exhaustive matches in
+   Constellation. The dictionary is supplied by the
    caller as a prepared handle (`DictId`, `EncoderDict`, `DecoderDict`
    types), the dictionary id is read from the zstd frame header's `dictID`
    (ADR-30: top bit set = built-in), decompression stays bounded by the
@@ -2519,7 +2674,7 @@ they differ):**
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
   warnings`, `cargo test --workspace` green in replicix-core, with and
   without `--features zstd-dict`; Constellation still checks with the
-  branch patched in.
+  branch patched in, with the feature on as well as off.
 - Codec 3 round trip at 4, 16, 64 KiB and 1 MiB chunks; a chunk without
   its dictionary returns `MissingDictionary`; decompression never exceeds
   the ceiling (fuzz-style test, 10 000 mutated frames, counting
@@ -2553,8 +2708,8 @@ note `docs/explanation/research/<date>-zstd-dictionaries-on-block-devices.md`
 (with its `.pdf` render when `pandoc` exists on the host; SVG figures under
 `docs/explanation/research/figures/dict-study/`). No product crate changes.
 **Depends on:** M18a for the trainer/evaluator (stages 1-2 may start with
-the corpus and capture tooling before M18a merges); stage 3 needs M12a and
-M13a. **Model:** design-heavy for the method and the analysis; a routine
+the corpus and capture tooling before M18a merges); stage 3 needs M12a, M13a and M14 (its
+validation uses `lunix-fsck`'s walk). **Model:** design-heavy for the method and the analysis; a routine
 implementer may collect data. **Review:** required, independent, and
 statistical: a reviewer with statistics experience reads the method, the
 analysis code and the note before merge, against the checklist at the end.
@@ -2570,8 +2725,10 @@ recorded; the lead approves the list):** the corpora of
 `spikes/dict-filetypes/projects.tsv` (fetched by its `fetch.py`
 conventions), the latest stable Linux kernel tarball (kernel.org),
 PostgreSQL and `pgbench`, MySQL (or MariaDB, stated) with `sysbench`, an
-Ubuntu cloud image, Docker or containerd with several common container
-images (for example `ubuntu`, `debian`, `alpine`, `python`, `node`,
+Ubuntu cloud image, several common container images (pulled with `skopeo`
+and unpacked with `umoci`, or with rootless `podman --root` under the
+scratch directory; installing Docker or containerd on the shared host is a
+system change and is not done without the lead's explicit approval) (for example `ubuntu`, `debian`, `alpine`, `python`, `node`,
 `postgres`, `nginx`, `golang`), the Silesia corpus, ZFS (`zfsutils`, kernel
 module or DKMS), `f2fs-tools`, `btrfs-progs`, `zstd`, `brotli`, `xz`,
 `lz4`. bcachefs, NTFS3 and exFAT are included only if the kernel or DKMS
@@ -2630,8 +2787,9 @@ the study does not wait for the daemon:
 3. *Databases:* PostgreSQL filled with pgbench (scale stated, about 10-20
    GB); MySQL/InnoDB filled with sysbench OLTP (similar size).
 4. *More real-world cases where they fit:* an installed Ubuntu cloud VM
-   image; a container image store (several common images pulled into a
-   Docker or containerd root on the file system); the Silesia corpus as a
+   image; a container image store (several common images pulled with
+   `skopeo`/`umoci` or rootless `podman --root` into a store on the file
+   system); the Silesia corpus as a
    published reference; an incompressible control (random data plus
    already-compressed media) to verify the LZ4 probe's raw path.
 
@@ -2807,10 +2965,11 @@ existing file-type study's directory was not touched.
 Status as of 2026-11-12 after the independent review
 (`wip/01-p1-review.md`) and the maintainer's decisions. "Resolved" means a
 decision is recorded in "Decisions already taken" (D-numbers, in M1) and
-the spec text is being updated to match in a parallel edit of DESIGN.md,
-DECISIONS.md, GLOSSARY.md and ROADMAP.md; if the spec still disagrees
-when you read it, this plan's rule governs and your report notes the
-discrepancy.
+the spec text has been updated to match (DESIGN.md, DECISIONS.md,
+GLOSSARY.md, ROADMAP.md, including the edits of review 2); if the spec
+still disagrees when you read it, this plan's rule governs and your report
+notes the discrepancy. Review 2 (`wip/01-p1-review-2.md`) resolved N6-N13
+below.
 
 | # | gap | status | resolution (where applied) |
 |---|---|---|---|
@@ -2819,7 +2978,7 @@ discrepancy.
 | 3 | `CCH1` widths against the KAT vectors | resolved (D2) | stored header keeps CCH1 widths; AAD and `info` use canonical widths |
 | 4 | index pack path | resolved (D3) | `index/<pack:016x>`; a FULL names runs durable before its C6 |
 | 5 | byte layouts | resolved as a process (D4) | decided in M1.A0 with maintainer sign-off before code; genesis `parent_hash` = BLAKE3 of `volume`, genesis seq 0 (D5) |
-| 6 | `heat/`, `gc/`, `gc/space/` bodies | resolved (D6) | envelope and kind id only; `{ver: u16, bytes}`; `dicts/` joins the rule; `gc/` body is defined by M17 |
+| 6 | `heat/`, `gc/`, `gc/space/` bodies | resolved (D6) | envelope and kind id only; `{ver: u16, bytes}`; `dicts/` joins the rule; `gc/` body is defined in phase 1 by `docs/reference/gc.md`: one sealed object per pass, `gc/<pass:016x>`, `{ver: 1, bytes}` (review 2 finding 7) |
 | 7 | no GC in phase 1 | **resolved by decision 5 (D15)**: GC is in phase 1 | M17 (local GC and compaction); the 16 B/chunk index budget, 2 GiB `journal_max` and 256 MiB headroom stay as plan defaults in `volume.json`, not the spec |
 | 8 | journal lanes | resolved (D7) | lanes, global seq, group flush, floor-based recovery, `epoch` 0 |
 | 9 | local file set | resolved (D8) | exact descriptor in `volume`, `volume.json`, keyring path, `state/device` with `boot_id`, registry; GC dirs added |
@@ -2841,15 +3000,15 @@ New gaps found by the review and the decisions:
 | N2 | orphan segments adopted by dedup after a crash | resolved: open-time sweep of unnamed sealed files above the tip's high-water mark runs before `catch_up`; `catch_up` takes the segment ids named by the chain; M17 reclaims the rest (M6, M7, M11) |
 | N3 | plain-extent integrity | resolved (D11) |
 | N4 | recovery floor; `MidRingCorruption` | resolved: `recover(hint, floor)`; no hard error; records beyond the first gap are ignored and reported (`ignored_after_gap`); fsck warns |
-| N5 | commit seq against write seq; `chain_floor` | resolved (D5): genesis seq 0, `seq = parent + 1`; floor is the older retained FULL (default N = 2), so it moves |
-| N6 | GC defaults: `gc_grace` (60 s, floor 10 s + 2 × read timeout), `gc_rate` (64 MiB/s), live-fraction threshold (0.5), step budget (50 ms), `retain_last` (2) | **open**: plan defaults, settings in `volume.json`; maintainer confirms or changes after M17.B's numbers |
-| N7 | liveness by chunk id with index fallback for stale hints; `id_len = 0` volumes use hint-only liveness and refuse compaction | **open**: DESIGN §7 describes the fallback; the plan makes it the liveness rule; maintainer confirms |
-| N8 | map packs are deleted whole only; a pack with one live node survives, so dead share can accumulate | **open**: M17.B measures it; a follow-up (re-emit live nodes of mostly-dead packs at the next seal) is deferred unless the measured share is unacceptable |
-| N9 | `gc/` evidence-journal body and the local `state/gc/condemned` list are defined in phase 1 by `docs/reference/gc.md`, not by DESIGN | **open**: confirm that phase 2 uploads the evidence journal verbatim |
+| N5 | commit seq against write seq; `chain_floor` | resolved (D5): genesis `commit_seq` 0, `commit_seq = parent_seq + 1`; floor is the older retained FULL (default N = 2), so it moves |
+| N6 | GC defaults: `gc_grace` 60 s with a floor of 30 s (10 s + 2 × `read_timeout`, `read_timeout` default 10 s in `volume.json`), `gc_rate` 64 MiB/s, live-fraction threshold 0.5, step budget 50 ms, `retain_last` 2 | **resolved** (review 2): adopted with `read_timeout` defined (the old 30 s read timeout would have put the floor above the grace default); revisit after M17.B (M17 rule 11) |
+| N7 | liveness by chunk id with index fallback for stale hints; `id_len = 0` volumes use hint-only liveness and refuse compaction | **resolved** (review 2): accepted, with the delete-time index invariant (M17 rule 5; M14 checks it, including after `index/` is rebuilt; DESIGN §11 states it) |
+| N8 | map packs are deleted whole only; a pack with one live node survives, so dead share can accumulate | **resolved** (review 2): whole-pack deletion accepted; trigger fixed: if M17.B measures the dead share of surviving packs above 50 % of pack bytes, open a follow-up (re-emit the live nodes of packs under 25 % live at the next seal), otherwise defer to phase 4 |
+| N9 | `gc/` evidence body and the local `state/gc/condemned` list are defined in phase 1 by `docs/reference/gc.md` | **resolved** (review 2 finding 7): `gc/` is one sealed create-only object per pass, `gc/<pass:016x>`, body `{ver: 1, bytes}`, written at pass end, so phase 2 uploads it verbatim by construction; the condemned list is local-only and never uploaded |
 | N10 | compaction re-seals with a fresh salt, so every compacted byte costs a decrypt/encrypt (or a copy on plain volumes) | informational; M17.B reports write amplification |
-| N11 | journal batch packing cost: n 4 KiB writes take ceil(n·4160/4096) blocks and an isolated QD1 4 KiB write costs 8 KiB | resolved in DESIGN §4.1 (D12); M3's perf gate compares with the spike's group commit at batch ≥ 32 |
-| N12 | the extent tag covers `CCH1 header ‖ chunk_id ‖ payload` rather than the payload alone | plan choice inside D11; the maintainer confirms at A0 sign-off |
-| N13 | the file-type dictionary study (`spikes/dict-filetypes/`, `bench/dict-study/filetypes/`) is still running; M18b reuses its conventions and must follow any change | open until that study finishes |
+| N11 | journal batch packing cost: n 4 KiB writes take ceil(n·4160/4096) blocks and an isolated QD1 4 KiB write costs 8 KiB | **resolved** in DESIGN §4.1 (D12); the stale ADR-4 sentence ("in one record padded to a 4 KiB multiple") is deleted (review 2 finding 4); M3's perf gate compares with the spike's group commit at batch ≥ 32 |
+| N12 | the extent tag covers every byte before the tag (`CCH1 header ‖ chunk_id ‖ clen ‖ payload`, one contiguous slice) | **resolved** by the lead on 2026-11-12 (review 2 finding 1): D11, M2 step 2 and freeze item 3 say so; DESIGN §6 and GLOSSARY already did |
+| N13 | the file-type dictionary study (`spikes/dict-filetypes/`, `bench/dict-study/filetypes/`) is still running; M18b reuses its conventions | **resolved as a process** (review 2): M18b records the commit of `spikes/dict-filetypes/` it used and lists any convention drift in the note |
 
 ## Out of scope
 

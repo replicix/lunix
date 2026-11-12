@@ -288,7 +288,10 @@ Recovery is idempotent: a crash during it is another recovery.
 1. Take `LOCK`; read and verify `volume`; unlock the keys; run the attach
    check (ADR-11).
 2. Read the tip commit and verify the last chain link (`fsck` verifies the
-   whole chain from genesis).
+   chain from the tip down to `chain_floor`). There is no automatic
+   fallback: a tip that does not authenticate is a typed mount error, and
+   the repair is offline, `lunix fsck --repair --truncate-tip`, which moves
+   the damaged object aside and makes the previous commit the tip.
 3. Open the map at the tip's `map_root`; read the checkpoint hint.
 4. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1);
    rebuild the overlay from the records; set the next `write_seq`.
@@ -377,8 +380,9 @@ trailer = footer offset + length + magic
   is one extent layout for both volume kinds.
   - Encrypted volume: the AEAD tag.
   - Unencrypted volume: BLAKE3-128 (the first 16 bytes of the BLAKE3
-    output) over the extent header and payload, that is, every byte of the
-    extent before the tag. It is keyed with the integrity key from the
+    output) over the extent header, `chunk_id`, `clen` and payload, that is,
+    every byte of the extent before the tag, taken as one contiguous
+    slice. It is keyed with the integrity key from the
     family keyring if one exists, else unkeyed.
   - A read from the local store verifies the tag, the header and the id
     prefix against the map. It does not recompute the chunk id; the
@@ -440,8 +444,12 @@ trailer = footer offset + length + magic
     listed above.
   - `heat/`, `gc/` (including `gc/space/`) and `dicts/` freeze only their
     envelope in phase 1: `{kind id, ver, bytes}`. Their contents are
-    versioned by the phase that defines them (4 and 7 for `heat/` and
-    `gc/`; `dicts/` holds the dictionary blob of `replicix-zdict`, ADR-30).
+    versioned by the phase that defines them: `heat/` by phase 4; `gc/`
+    by phase 1 (the evidence body, ver 1, is defined by
+    `docs/reference/gc.md`: one sealed create-only object per GC pass,
+    `gc/<pass:016x>`, body `{ver: 1, bytes}`; the condemned list is local
+    state, never uploaded); `gc/space/` by phase 4; `dicts/` holds the
+    dictionary blob of `replicix-zdict` (ADR-30).
 - **Index runs.** A chunk index run is an immutable file of sorted
   `[chunk_id, seg, off, clen]` blocks with a block index and a checksum. It
   is stored locally in `index/` and, from phase 2, in the bucket under the
@@ -577,7 +585,8 @@ EPOCH  { kind: EPOCH, commit_seq, epoch, parent_seq, parent_hash, authority?,
   `cut_seq` is a `write_seq` (§8.1); a FULL carries both numbers and they
   are independent. `parent_seq` and `since_seq` are commit numbers.
 - **`chain_floor`** is a `commit_seq`: the lowest retained commit. It
-  starts at genesis and moves up as retention releases commits. In
+  starts at genesis and moves up as retention releases commits; it is
+  not genesis once `N` FULLs exist. In
   phase 1 the retention policy is `last:N` FULL commits (default 2, the
   tip and its predecessor), so `chain_floor` is the older of the two
   (§8.7, §11).
@@ -690,8 +699,9 @@ never reclaimed before step 5 is durable.
    - Verify the chain from that FULL to the tip: each commit's
      `parent_hash` must equal the BLAKE3 of the parent object's bytes, and
      `epoch` must never decrease. A broken link or a decreasing epoch
-     refuses the mount. (The chain starts at the genesis commit, whose
-     `parent_hash` is the BLAKE3 of `volume`; `fsck` verifies from there.)
+     refuses the mount. (Verification stops at `chain_floor`, whose parent
+     may be absent; the genesis commit's `parent_hash` is the BLAKE3 of
+     `volume`.)
    - On an unencrypted volume, verify the HMAC of every commit replayed.
 5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
    not released, wait for the deadline (or `--steal`). A lease whose
@@ -887,8 +897,8 @@ mirrors (phase 5).
 
 - **Phase 1 roots.** A local-only volume has no snapshots, readers or
   holds yet. Its roots are the last `N` FULL commits (retention `last:N`,
-  default 2: the tip and its predecessor, so a damaged tip has a
-  fallback). GC drops segments, map packs and index runs no root reaches,
+  default 2: the tip and its predecessor, so an offline repair can
+  truncate a damaged tip; mount never falls back by itself, §4.4). GC drops segments, map packs and index runs no root reaches,
   and deletes commit objects below `chain_floor` after the grace. Chain
   verification (mount, `fsck`) walks from the tip down to `chain_floor`;
   the floor commit's parent may be absent. Phase 4 adds tiered retention
@@ -915,6 +925,13 @@ mirrors (phase 5).
   `gc/`. Since the single owner runs both destage and GC, a dedup hit can
   never target a condemned chunk: dedup consults only index entries not
   marked condemned.
+  - Delete-time index invariant: a segment that stale hints still point
+    into may be deleted only if the index durably names the current copy of
+    every live id those hints resolve to, or that copy's segment is named
+    by the chain, so `catch_up` restores the entry after a crash.
+  - GC never condemns a segment or pack whose id is above the tip's
+    high-water mark (the highest id any retained commit names): such files
+    are the open segment or uncommitted output, never garbage.
 - **Space accounting** (ADR-25):
   - For each snapshot and retained commit, Lunix reports:
     - `REFER`: the compressed bytes referenced;

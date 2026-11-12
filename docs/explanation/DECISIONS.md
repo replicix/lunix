@@ -187,7 +187,7 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   appends. At most one group is in flight. A FLUSH covers the writes
   completed before its group formed.
 - **Record framing.** A record is an inline 64-byte header followed by the
-  data, in one record padded to a 4 KiB multiple. The data is copied into
+  data. The data is copied into
   the lane's batch buffer. Records are packed back to back inside a lane
   batch and only the batch is padded to 4 KiB, so n 4 KiB writes cost
   `ceil(n · 4160 / 4096)` blocks (under 1.6 % overhead at n ≥ 32; an
@@ -494,8 +494,8 @@ hint falls back to the chunk index (ADR-14).
   `parent_seq + 1`, and is distinct from the write `seq`. The genesis
   commit is `commit_seq` 0 with no parent. Its `parent_hash` is the BLAKE3
   of the `volume` object's bytes as stored. In phase 1 `chain_floor` is the
-  genesis `commit_seq` until GC or retention moves it, and no commit object
-  is deleted.
+  `commit_seq` of the older of the last `N` FULL commits (default 2); commits
+  below it are deleted after the GC grace.
 - **Index runs.** "Every object a commit names is durable before the commit
   is created" holds for `index_packs[]` because a FULL names only the runs
   that were durable before it. The run for a FULL's own segments is named

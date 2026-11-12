@@ -17,8 +17,9 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Reader pin:** `readers/<host>-<id>`, which keeps a time-travel
   mount's commit alive while it is mounted.
 - **Chain floor:** the lowest retained `commit_seq`, recorded in each FULL.
-  Unpinned commits below it may be deleted. In phase 1 it is the genesis
-  commit.
+  Unpinned commits below it may be deleted. In phase 1 it is the older of
+  the last `N` retained FULL commits (default 2), so it moves with every
+  FULL; commits below it are deleted after the GC grace.
 - **Owner:** the single host currently allowed to write a volume. It
   holds the lease.
 - **Lease:** a CAS object on the authority backend holding `epoch`,
