@@ -503,3 +503,35 @@ fn after_truncate_tip_and_the_sweep_no_old_id_is_reissued() {
     assert_eq!(r.read(0, 16384, 16384).1, pattern(2, 16384));
     assert_eq!(r.read(0, 32768, 16384).1, pattern(3, 16384));
 }
+
+#[test]
+fn a_wrapped_ring_with_a_lost_checkpoint_recovers() {
+    let mut v = Vol::create(16 << 10, 64, 2, JournalMode::Mixed(4));
+    v.set_journal(lunix_testkit::MemJournalConfig {
+        lanes: 2,
+        file_bytes: lunix_testkit::journal::MIN_FILE_BYTES,
+        max_files: 6,
+        pool_depth: 64,
+        mode: JournalMode::Mixed(4),
+    });
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let size = r.engine.size_bytes();
+    let mut want = vec![0u8; size as usize];
+    for i in 0..300u64 {
+        let off = (i * 3 * 16384) % size;
+        let d = pattern(i, 16384);
+        assert!(r.write(i as usize, off, &d, false).is_ok());
+        want[off as usize..off as usize + 16384].copy_from_slice(&d);
+        if i % 10 == 9 {
+            let _ = r.engine.tick();
+        }
+    }
+    assert!(r.journal.reclaim_calls() > 0, "the ring wrapped");
+    assert!(r.flush(0).is_ok());
+    lunix_iface::store::CheckpointStore::zero(&r.store).unwrap();
+    let p = r.stop();
+    v.absorb(p, 9);
+    let mut r = v.open().map_err(|e| e.0).expect("reopen");
+    assert!(!r.engine.recovery_report().checkpoint_used);
+    assert_eq!(r.read_all(), want);
+}

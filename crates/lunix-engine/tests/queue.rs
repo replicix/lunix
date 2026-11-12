@@ -181,3 +181,70 @@ fn cache_hits_are_unaffected_by_a_slow_store_and_no_tag_is_lost() {
         assert_eq!(data, pattern(i as u64 + 1, CS as usize));
     }
 }
+
+#[test]
+#[should_panic(expected = "blocking call")]
+fn the_queue_thread_check_fires_on_a_blocking_call() {
+    use lunix_engine::EngineHooks;
+    let v = Vol::create(CS, 16, 1, JournalMode::Immediate);
+    let r = v.open().map_err(|e| e.0).expect("open");
+    let g = GStore {
+        inner: r.store.clone(),
+        checks: std::sync::Arc::clone(&v.checks),
+        faults: std::sync::Arc::clone(&v.read_faults),
+    };
+    v.hooks.queue_thread(true);
+    let _ = lunix_iface::store::SegmentStore::list(&g);
+}
+
+fn background(cfg: &mut lunix_engine::EngineConfig) {
+    cfg.background = true;
+    cfg.background_period = Duration::from_millis(1);
+    cfg.dirty_bytes = 64 << 10;
+}
+
+#[test]
+fn the_background_coordinator_commits_under_load_without_losing_a_write() {
+    let mut v = Vol::create(CS, 64, 2, JournalMode::Mixed(21));
+    v.tweak = background;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let size = r.engine.size_bytes();
+    let mut want = vec![0u8; size as usize];
+    let start = Instant::now();
+    let mut i = 0u64;
+    while start.elapsed() < Duration::from_secs(3) || r.engine.tip().0 .0 < 3 {
+        let off = (i * 12288) % (size - 16384);
+        let d = pattern(i, 12288);
+        let tags: Vec<_> = (0..4u64)
+            .map(|k| {
+                let o = (off + k * 4096) % (size - 12288);
+                (o, r.submit(k as usize, IoOp::Write, k == 3, o, 12288, &d))
+            })
+            .collect();
+        for (o, t) in &tags {
+            assert!(r.wait(&[*t])[0].0.is_ok());
+            want[*o as usize..*o as usize + d.len()].copy_from_slice(&d);
+        }
+        let ro = (i * 7 * 4096) % (size - 8192);
+        let (st, got) = r.read(1, ro, 8192);
+        assert!(st.is_ok());
+        assert_eq!(
+            got,
+            want[ro as usize..ro as usize + 8192].to_vec(),
+            "read at {ro}"
+        );
+        i += 1;
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "no background commit"
+        );
+    }
+    assert!(r.engine.tip().0 .0 >= 3, "background commits happened");
+    assert_eq!(r.read_all(), want);
+    let p = r.stop();
+    v.absorb(p, 5);
+    v.tweak = default_tweak;
+    let mut r = v.open().map_err(|e| e.0).expect("reopen");
+    assert_eq!(r.read_all().len() as u64, size);
+    assert!(v.violations().is_empty(), "{:?}", v.violations());
+}
