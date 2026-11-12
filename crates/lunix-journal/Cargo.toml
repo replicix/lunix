@@ -10,6 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiled out unless on (see lunix_iface::crashpoint); only the crash-point
+# tests of this crate and the lunixd crashpoints build enable it.
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
@@ -17,6 +22,7 @@ thiserror.workspace = true
 crc32c.workspace = true
 libc.workspace = true
 rustix.workspace = true
+io-uring.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
