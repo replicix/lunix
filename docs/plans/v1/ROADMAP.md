@@ -134,8 +134,12 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - `rollback`.
 - Tiered retention and the `chain_floor`.
 - Per-snapshot USED, WRITTEN and REFER, and `gc --dry-run`.
-- `lunix compress estimate` (ADR-30): what a higher zstd level or a
-  built-in dictionary would save on this volume.
+- Compression advisor (ADR-30, a v1 requirement):
+  - first, a benchmark of dictionaries against plain zstd levels at 4,
+    16 and 64 KiB on real block-device data, which sets the adoption
+    thresholds and the built-in dictionaries;
+  - `lunix compress estimate`, then `train`, `apply` and `ls|rm`;
+  - the dictionary read path (codec id 3, `dicts/`, the GC rule).
 - `diff`, raw `export`, a full-copy `restore`, shrink and `verify`.
 - GC honours `holds/` (always empty in v1).
 
@@ -145,6 +149,9 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - Time-travel mounts at random commits pass fsck while the volume is
   being written.
 - Rollback round-trips.
+- `compress estimate` on a sample lands within its stated confidence
+  interval of `--exact`; `apply --rewrite` under load keeps fio verify
+  and fsck clean, and the volume reads back identically.
 - Space figures match a brute-force recount.
 
 ## Phase 5: Multiple backends
@@ -212,8 +219,6 @@ downtime, and warm against cold time-to-steady-state measured.
 - `sync-fast-wal` on S3 Express One Zone.
 - `sync-quorum` / `sync-all` mirror policies.
 - Peer-to-peer cache warm-up during migration.
-- `lunix compress train|apply` and the dictionary read path (ADR-30),
-  gated on a dictionary benchmark at 4, 16 and 64 KiB.
 - Cold-segment recompression.
 - The SHARDS cost advisor.
 - File-system-aware cache hints.

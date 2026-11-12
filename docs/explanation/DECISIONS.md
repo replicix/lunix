@@ -1770,8 +1770,10 @@ Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
      and extents stored raw are skipped, and their share is reported
      because it caps any gain.
    - Reads come from the local tier, else by ranged GET. When the sample
-     needs backend reads, the command first prints the GET count, the
-     bytes and the cost, and asks for confirmation.
+     needs backend reads, the command first prints the GET count and the
+     bytes to read, and asks for confirmation. It does not price them:
+     prices depend on the provider, the region, the network path and the
+     contract.
 3. **Training:**
    - zstd's trainer (`ZDICT`, fastCover) runs on 80 % of the sample in a
      low-priority background task inside `lunixd`.
@@ -1783,10 +1785,11 @@ Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
      applies to, and the ratio with and without it;
    - volume-wide: stored bytes now and projected, with a 95 % confidence
      interval (from a bootstrap over the sample);
-   - destage CPU change, monthly S3 storage change at the configured
-     prices, and the GET/PUT count and cost of `--rewrite`.
-   - `--exact` compresses every eligible chunk instead of a sample. It is
-     priced first like any backend read.
+   - destage CPU change, the change in stored bytes per backend, and the
+     GET and PUT counts and bytes that `--rewrite` would need. No money
+     figures: the operator applies their own provider's prices.
+   - `--exact` compresses every eligible chunk instead of a sample. Its
+     backend reads are counted and confirmed first, like any sample.
 5. **Adoption rule:** `train` marks a candidate "recommended" only if it
    gains at least 5 % on its class and 1 % volume-wide. Otherwise the
    volume stays without a dictionary.
@@ -1797,8 +1800,8 @@ Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
    bucket. Nothing is trained on user data for them.
 7. **Security:** training happens inside `lunixd`, which already holds
    the keys. Trained dictionaries derive from plaintext, so they are
-   sealed like other metadata. The report shows only sizes, ratios and
-   costs.
+   sealed like other metadata. The report shows only sizes, ratios,
+   request counts and CPU.
 
 **Format reservations (frozen in phase 1, unused until the feature
 ships):**
@@ -1833,13 +1836,13 @@ ships):**
   state, a few hundred KiB to a few MiB per dictionary and level.
 - **Dedup and encryption** are unaffected: chunk ids hash the plaintext,
   and every extent gets a fresh salt, so a rewrite is safe.
-- **Phasing:**
+- **Phasing:** a v1 requirement (maintainer, 2026-11-12).
   - Phase 1 freezes the reservations.
-  - `estimate` lands in phase 4, next to `gc --dry-run` and the space
-    accounting. It changes nothing on disk.
-  - `train` and `apply` need the dictionary read path, so they come
-    later, gated on a benchmark of dictionaries against plain zstd
-    levels at 4, 16 and 64 KiB.
+  - Phase 4 delivers the whole feature next to `gc --dry-run` and the
+    space accounting: first a benchmark of dictionaries against plain
+    zstd levels at 4, 16 and 64 KiB (it sets the adoption thresholds and
+    the built-in set), then `estimate`, `train`, `apply`, `ls|rm` and the
+    dictionary read path.
 - **Amends:** ADR-12 (dictionaries are no longer simply deferred; the
   read path and the command are planned) and ADR-11 (`dicts/` joins the
   sealed-object table).

@@ -291,7 +291,7 @@ trailer = footer offset + length + magic
   readers/<host>-<id>      time-travel mount pins {seq, deadline}, renewed while mounted
   holds/<child-uuid>       clone base pins {base_seq}; none in v1, but GC honours them (ADR-25)
   gc/                      condemned lists, evidence journal
-  dicts/<id:08x>           create-only trained zstd dictionaries (ADR-30; reserved, unused in v1 until the feature ships)
+  dicts/<id:08x>           create-only trained zstd dictionaries (ADR-30; reserved in phase 1, used from phase 4)
 <prefix>/lunix/v1/families/<family-id>/keyring   (shared by clones)
                   mutable, sealed: keyring_seq, key slots, MAC'd body.
                   CAS (If-Match) on the authority only; copied to mirrors
@@ -954,7 +954,7 @@ lunix mount-at NAME --snapshot S|--commit <seq>|--time <t>   (read-only time tra
 lunix rollback NAME --to S|<seq>   lunix retain NAME <policy>   lunix diff NAME A B
 lunix export NAME --snapshot S -o image.raw   lunix gc NAME --dry-run
 lunix compress estimate NAME [--level N] [--dict …] [--sample 1%] [--exact]   (ADR-30)
-lunix compress train|apply|ls|rm NAME …                                       (ADR-30, later)
+lunix compress train|apply|ls|rm NAME …                                       (ADR-30)
 lunix clone SNAP NEW         (post-v1, ADR-25; v1 `restore SNAP NEW` = full copy)
 lunix status [NAME]   lunix doctor s3://…   lunix verify NAME   lunix fsck NAME
 lunix warm NAME   lunix migrate plan NAME --add s3://… --remove <id>   lunix steal NAME

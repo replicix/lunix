@@ -74,6 +74,13 @@ Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
     from retained commits.
   - Thin clones are post-v1. The format already supports them
     (ADR-25).
+- **Measured compression advice (ADR-30).** `lunix compress estimate`
+  reports, from a sample of the volume's own data, what a higher zstd
+  level or a dictionary would save, with a confidence interval, before
+  anything changes. `lunix compress train` builds dictionaries from that
+  data, and `apply` turns one on, for new writes or with a background
+  rewrite. Reports give bytes, ratios, request counts and CPU, never
+  prices.
 - **Encryption and integrity.**
   - Optional end-to-end encryption, with keys that never reach the bucket
     in clear.
