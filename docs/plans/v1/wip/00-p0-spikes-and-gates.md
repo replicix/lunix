@@ -44,6 +44,41 @@ leave a reproducible baseline:
 | memfd write buffer survives daemon restart via a keeper; lost keeper fails safe | 26 | P0.12 |
 | record outcomes, publish baseline | all | P0.11 |
 
+## Status (2026-11-12)
+
+Phase 0 is closed out except for the items under "Remaining". The
+outcomes are in `docs/explanation/DECISIONS.md` (the dated Gate outcome
+blocks) and the numbers in `bench/BASELINE.md`. The plan stays in `wip/`
+until the coordinator reviews it.
+
+| milestone | status | reason |
+|---|---|---|
+| P0.1 ublk baseline | done | ADR-18 accepted (gate); the loop comparison is inconclusive (disk-bound) |
+| P0.2 copy, `USER_COPY`, `BATCH_IO` | done | reduced matrices; rules not met, copy stays the default |
+| P0.3 recovery and feature table | done | ADR-16 and ADR-17 accepted (gate) with amendments; `BATCH_IO` with QUIESCE failed |
+| P0.4 `UPDATE_SIZE`, FLUSH/FUA | done | ADR-20 accepted (gate); the daemon validates sizes |
+| P0.5 journal | done | ADR-4 accepted (gate); group commit; one run per cell |
+| P0.6 trace simulation | not run | no trace could be obtained without a licence acceptance; simulators built and tested |
+| P0.7 radix map | done | ADR-8 accepted (gate) with amendments |
+| P0.8 crypto review | partial | review done; six format-changing findings; ADR-11 stays proposed |
+| P0.9 `replicix-core` | done outside this plan | commit `caa47b4`; Constellation `6e25bad6`; ADR-19 accepted |
+| P0.10 S3 probe | partial | AWS S3 Standard, OVH and MinIO done; R2, GCS, B2 and others have no credentials |
+| P0.11 close-out | done | this status, `bench/BASELINE.md` and the ADR blocks |
+| P0.12 keeper-held RAM buffer | done | ADR-26 accepted (gate) for the keeper; the systemd FD-store variant is not run |
+
+**Remaining:**
+- **P0.6 traces.** A person accepts the SNIA licence and downloads MSR
+  (and Tencent CBS, or Alibaba through its survey) onto the test host,
+  then runs `spikes/tracesim/run.sh`. That decides ADR-5 and ADR-14.
+- **P0.10.** R2, GCS and B2 credentials; S3 Express One Zone; the lane
+  test with a shaped 200 MB/s bulk upload and enough samples for p99;
+  PUT latency per size with 8 parallel streams.
+- **P0.12.** The systemd FD-store variant (`sd_notify(FDSTORE=1)` and a
+  `LISTEN_FDS` recovery path).
+- **Crypto amendment.** The maintainer decides F2, F5, F6, F7, F9 and F10
+  (ADR-11) before phase 1 freezes the extent, commit and bucket formats.
+  The external reviewer's answers are also outstanding.
+
 ## Privileges, hosts and scratch space
 
 - **Needs root** for P0.1–P0.5 (`modprobe ublk_drv`, `/dev/ublk-control`,

@@ -26,4 +26,4 @@ Execution protocol:
 
 | # | file | status | milestone | depends on |
 |---|---|---|---|---|
-| 00 | `wip/00-p0-spikes-and-gates.md` | wip (not started) | phase 0: ublk spikes, trace-driven simulations, radix-map prototype, crypto review, S3 probe sweep, `replicix-core` extraction (conditional on ADR-19); decision records for the ADR gates and `bench/BASELINE.md` | — |
+| 00 | `wip/00-p0-spikes-and-gates.md` | wip (mostly done 2026-11-12; P0.6 needs traces) | phase 0: ublk spikes, trace-driven simulations, radix-map prototype, crypto review, S3 probe sweep, `replicix-core` extraction (conditional on ADR-19); decision records for the ADR gates and `bench/BASELINE.md` | — |

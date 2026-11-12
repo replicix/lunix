@@ -5,9 +5,26 @@ context is in [DESIGN.md](DESIGN.md), and the evidence is in the dated
 notes under [research/](research/). New decisions, and changes of mind,
 are appended here.
 
-**Status:** every ADR below is **proposed** (2026-11-11). It becomes
+**Status:** every ADR below was **proposed** (2026-11-11). It becomes
 *accepted* when the maintainer says so, or when a phase 0 spike confirms
-it (marked *gate:*).
+it (marked *gate:*). Phase 0 closed on 2026-11-12; each gated ADR now
+carries a dated **Gate outcome** block, and the numbers are in
+[the baseline](../../bench/BASELINE.md).
+
+- **Accepted by gate:** ADR-4, 8, 16, 17, 18, 20 and, for the
+  keeper-held write buffer, 26. ADR-8, 16, 17 and 20 carry
+  amendments from the measurements. ADR-2 is accepted by gate for AWS S3
+  Standard, OVH and MinIO only (partial: R2, GCS, B2 and the rest were
+  not run).
+- **Accepted by the maintainer:** ADR-19 (2026-11-12), now executed.
+- **Proposed, amendment awaiting the maintainer's decision:** ADR-11.
+  The review found six format-changing issues (F2, F5, F6, F7, F9,
+  F10), and the external reviewer has not answered.
+- **Proposed, gate not run:** ADR-5 and ADR-14 (no trace could be
+  obtained without a licence acceptance).
+- **Proposed, phase 3 gate open:** ADR-28 (the phase 0 lane and
+  two-PUT evidence is recorded).
+- **Proposed, no phase 0 gate:** all the others.
 
 ## ADR-1: A new Rust daemon on ublk + io_uring, separate from Constellation
 
@@ -35,6 +52,41 @@ Constellation (ADR-19) but is not a Constellation frontend.
 [prior art](research/2026-11-11-prior-art.md).
 
 ## ADR-2: Single writer per volume; conditional writes required on the authority backend
+
+**Gate outcome (phase 0, 2026-11-12):** partial — `spikes/s3probe` ran
+the authority probes against AWS S3 Standard (three full sweeps, from
+the same region and from another continent), OVH Object Storage Milan
+(one full sweep) and MinIO RELEASE.2026-11-10 (unversioned and versioned
+bucket). All three meet the authority rule: create-only PUT and stale
+`If-Match` answer 412, the 8-way create has one winner in 20/20 rounds,
+the 8-way swap has one winner in 100/100 rounds with no torn read, and
+read-your-write holds by GET and LIST. **AWS S3 Standard and OVH are
+confirmed authority backends**, and MinIO passes. Cloudflare R2, GCS,
+B2, Scaleway, Wasabi, Hetzner, Tigris and DigitalOcean Spaces are *not
+run: no credentials*; their lines under Consequences stay fact-check
+claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
+
+- AWS and OVH answer concurrent `If-Match` swaps with 409
+  `ConditionalRequestConflict` (310-408 per 100-round race on AWS, 128
+  on OVH), and concurrent creates with 412. A client must retry the same
+  attempt on 409. Each round still had exactly one winner. MinIO never
+  returned 409. No bug against `replicix-objcas`.
+- `If-None-Match: *` on `CompleteMultipartUpload` works on both:
+  Complete on an absent key 30/30, on an existing key 412 10/10, and an
+  8-way race has one winner in 70/70 rounds on AWS and 50/50 on OVH. A
+  multipart commit is therefore a valid fencing primitive.
+- Unexplained: in two of the three AWS races, one loser was answered
+  with a 5xx whose code was not captured. The third run captured codes
+  and saw none. The one-winner rule held in those rounds.
+- OVH returns a version id on PUT, yet `GetBucketVersioning` shows no
+  status, and a read-only listing of the probe prefix found 0 versions
+  after cleanup. The versioning rule is met as OVH serves the bucket.
+  OVH should be asked what its versioning state is.
+- The versioned-bucket rule is unchanged. MinIO passed on a versioned
+  bucket; Ceph RGW (tracker 80925) was not available, so the one case
+  where the rule matters was not run.
+- Open: R2 (a launch provider) and S3 Express One Zone need credentials
+  before ADR-2 can be called confirmed for all launch providers.
 
 **Decision:**
 - A volume has exactly one writer, the *owner*, at a time.
@@ -117,6 +169,32 @@ Constellation (ADR-19) but is not a Constellation frontend.
 
 *Amended by ADR-26:* with no local tier, the journal is a RAM sink: a memfd held by a keeper, in the same record format.
 
+**Gate outcome (phase 0, 2026-11-12):** accepted (gate) — one
+group-committed `fdatasync` per sync point is confirmed. Linked
+`WRITE→FSYNC` did not meet the rule on ext4, xfs or the real-disk
+directory: its latency is 1.4-2.8x higher at sustainable load, and at
+saturation it reaches 0.11-0.55x of group commit's records per second.
+btrfs is the exception that does not meet the rule: linked chains reach
+1.4-4.9x there, but the p99 clause holds in only two of four cells, so
+there is no per-file-system default. `O_DSYNC` or `RWF_DSYNC` per write
+is rejected (43-1041 rec/s against 2.6-36.5 K for group commit). Limits:
+3 s cells, one run per cell, loop-backed images, and the plan's 50 K
+rec/s offered load is not sustainable on this disk, so the rule was
+evaluated at 2 K and 5 K rec/s. Evidence:
+[journal-bench](../../bench/journal-bench/RESULTS.md).
+
+- The journal files are preallocated and zero-filled. A growing file had
+  1.07-1.31x the p99 of a preallocated one; the 20 % rule fires on the
+  real-disk 4 KiB case.
+- On btrfs the journal directory must be `nodatacow` (`chattr +C`):
+  group commit reached 7 674 rec/s there against 380 rec/s on default
+  btrfs.
+- A sync point costs one FUA write plus one FLUSH on every file system
+  tested ([ublk-recovery](../../bench/ublk-recovery/RESULTS.md), P0.4).
+  Groups of 16 or more records amortise it. A loop-backed file system
+  sustained about 550 flushes per second.
+- DESIGN §4.1 drops the linked-batch alternative.
+
 **Decision:**
 - A write is appended to a local O_DIRECT journal, which is preallocated,
   checksummed and 4 KiB-granular. The dirty-extent overlay is updated,
@@ -139,6 +217,19 @@ Constellation (ADR-19) but is not a Constellation frontend.
 - Journal space is reserved before a write is accepted.
 
 ## ADR-5: Fixed, aligned chunks; default 64 KiB; no content-defined chunking
+
+**Gate outcome (phase 0, 2026-11-12):** not run — no trace could be
+obtained without a licence acceptance; simulators ready
+(`spikes/tracesim`). MSR Cambridge and Tencent CBS sit behind a SNIA bot
+challenge and licence step, and Alibaba's link is behind a survey.
+Nothing was downloaded and no synthetic data is presented as a trace. 64
+KiB stays the proposed default and ADR-5 stays proposed. To close the
+gate, a person accepts the licence, downloads MSR (about 5 GB) onto the
+test host and runs `spikes/tracesim/run.sh`; the fixed rule then
+decides: 64 KiB is confirmed if at p50 and p90 S3(64) ≤ 1.25× the best
+S3(C), RMW(64) ≤ 2× RMW(16) and map write amplification p90 ≤ 25 %.
+Evidence: [tracesim](../../bench/tracesim/RESULTS.md),
+[traces](../../bench/tracesim/TRACES.md).
 
 **Decision:**
 - The logical chunk size is a per-volume power of two from 16 KiB to
@@ -206,6 +297,39 @@ the default.
   and double code.
 
 ## ADR-8: The block map is a fixed-radix Merkle tree with location hints
+
+**Gate outcome (phase 0, 2026-11-12):** amended (gate) — rules 1-4 pass
+(rule 5 is a report) at 10 TiB, fanout 512, 64 KiB chunks, one core. Seal of 1 000
+uniformly scattered dirty leaves takes 59.7 ms and writes 23.1 MiB raw
+(20.4 MiB stored); 10 000 leaves take 275 ms. A diff of 1 000 differing
+leaves takes 1.04 ms and reads 998 nodes (bound 8 000). Cold open plus
+the first lookup is 4 reads, equal to the depth. A 256 MiB leaf cache
+gives a 294 MiB peak RSS over 1 M random lookups (limit 320 MiB). The
+full table would be 7.5 GiB flat; the encoded leaves are 3.5 GiB (358
+MiB/TiB). The flat alternative writes 43× more bytes per seal with 1 MiB
+blocks and 3× more with 64 KiB blocks, and cannot localise a diff
+without reading the changed blocks. Evidence:
+[radixmap](../../bench/radixmap/RESULTS.md).
+
+- An interior node's hash covers its child hashes (and level), never the
+  child locations. Locations are hints, not content. Otherwise roots
+  would differ per backend and "identical content, identical roots"
+  would be false. Verified: 1 TiB built sequentially, in random order
+  and from the model gives one root.
+- The mutable overlay has a cap that forces a seal. A decoded dirty leaf
+  costs 24 KiB against 11.4 KiB sealed; 100 000 dirty leaves peak at
+  2.65 GiB RSS, and all leaves of a 10 TiB volume would be 7.5 GiB. The
+  cap and the `B_max` throttle are stated in dirty leaves.
+- Scattered writes cost 0.18-0.55 of the dirty logical bytes in map
+  bytes, worst when each dirty leaf has one dirty chunk. Map-delta
+  records in DELTA commits remain the mitigation if phase 1 finds that
+  too high. Sync mode pays about 70-90 KiB of map per fsync.
+- Depth at 10 TiB is 4 (3 up to 8 TiB at 64 KiB), as DESIGN §7 states.
+- Not adopted by the gate, left to phase 1: leaving interior nodes
+  uncompressed or LZ4 (zstd-1 costs about 40 µs per node and hashes do
+  not compress), and fanout 256 (36-45 % fewer bytes per seal at twice
+  the resident interior nodes, 30 MiB at 10 TiB). Gates 2-4 were not run
+  at fanouts 256 and 1024.
 
 **Decision:** the LBA → chunk map is a fixed-fanout radix tree.
 
@@ -363,6 +487,80 @@ measured rate.
 
 ## ADR-11: Encryption: AES-256-GCM with per-chunk derived keys; Constellation's key hierarchy
 
+**Gate outcome (phase 0, 2026-11-12):** partial — the crypto review
+(P0.8) is done and found the salted per-extent key, constant nonce and
+AES-256-GCM construction sound: the amended nonce rule held in every
+modelled case (10 000 mixed re-encodes, no repeat), 40 tests pass and 27
+independent cross-checks agree. The model reproduces the first draft's
+hole (recompress leaks the XOR of plaintexts). Six findings (F2, F5, F6,
+F7, F9, F10) change the frozen format and block the format freeze.
+ADR-11 stays **proposed**: the amendment below is **proposed, and needs
+the maintainer's decision**, and the external reviewer's answers to the
+15 questions in the review note are still outstanding. Cost on one Zen 5
+core: the per-extent key schedule adds about 0.35 µs (0.55-0.65 µs with
+a fresh salt and the proposed derivation); a full seal of 64 KiB takes
+3.77 µs as written (17.4 GB/s) and 3.98 µs proposed (16.5 GB/s), and of
+4 KiB 0.65 µs against 0.92 µs. Argon2id at 64 MiB, t = 3 costs 75-83 ms
+per wrap. Not run: the FIPS-validated build, a real KMS, parser fuzzing,
+AArch64. Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
+[review note](research/2026-11-11-adr-11-crypto-review.md).
+
+- **Amendment proposed, needs the maintainer's decision (F2).** The
+  extent header gains an authenticated `dek_epoch: u32`, renamed
+  `dek_gen` so it is not confused with the lease and commit `epoch`. The
+  AAD becomes `ver ‖ codec ‖ level ‖ ulen ‖ kind ‖ dek_epoch ‖ family_id
+  ‖ id_len ‖ chunk_id`. "Encrypted" is read from the authenticated
+  volume descriptor, never from an extent.
+- **Amendment proposed, needs the maintainer's decision (F5).** Every
+  commit kind carries `parent_hash` (BLAKE3 of the parent object's
+  bytes) and `epoch`. Mount verifies the chain from the newest FULL and
+  rejects decreasing epochs. A FULL commit of an unencrypted volume
+  carries an HMAC under an integrity key held in the key slots, or is
+  documented as corruption detection only. The lease carries its epoch
+  in the plaintext, and a lease below the newest verified epoch is
+  rejected.
+- **Amendment proposed, needs the maintainer's decision (F6).** One
+  mutable `families/<id>/keyring`, written by CAS on the authority and
+  copied to mirrors, with `keyring_seq` inside a MAC'd body. The slot
+  wrap AAD is `"lunix slot v1\0" ‖ family ‖ slot_id ‖ kind ‖ KDF params
+  ‖ salt`, and KMS slots use the encryption context `{family, slot,
+  key_ref}`. Argon2id parameters are bounded when read (≤ 1 GiB, t ≤ 10,
+  p ≤ 16) and floored when written (≥ 19 MiB, t ≥ 2). Removing a slot or
+  changing a passphrase does not revoke a KMK the holder has seen;
+  revocation is migration to a new KMK, and DEK-epoch rotation protects
+  only new writes.
+- **Amendment proposed, needs the maintainer's decision (F7).** If the
+  caller supplies key material at attach, the volume must be encrypted
+  and its descriptor MAC (keyed by a KMK-derived key) must verify, else
+  the attach is refused as a downgrade. The orchestrator supplies the
+  KMK fingerprint; the local pin stays for the CLI.
+- **Amendment proposed, needs the maintainer's decision (F9).** Sealed
+  objects are listed: `volume` (plaintext fields plus MAC), `keyring`
+  (wrapped, MAC'd), `lease`, `commits/*` and DELTA bodies, `map/*`
+  nodes, segment footers, `heat/*`, `gc/*`, `readers/*`, `holds/*` and
+  `snapshots/*` bodies. They are sealed with XChaCha20-Poly1305 under a
+  per-kind metadata key; extents and map nodes use the extent scheme.
+  Object names stay plaintext.
+- **Amendment proposed, needs the maintainer's decision (F10).** The
+  extent header reserves `nonce[12]`: zero in the default profile, the
+  module-generated nonce in the FIPS profile, where aws-lc-rs offers no
+  fixed-nonce seal. The FIPS profile derives the key with HKDF-SHA-256
+  Expand over the same `info`. Suggested layout: `… + clen +
+  [dek_epoch(4) + salt(24) + nonce(12)] + payload + tag`.
+- Proposed with them, not blocking the freeze (F1b, F3, F8, F11, F12):
+  the extent key becomes `keyed_hash(DEK_epoch, info)` with `info =
+  "lunix extent v2\0" ‖ family_id ‖ kind ‖ dek_epoch ‖ codec ‖ level ‖
+  clen ‖ id_len ‖ chunk_id ‖ salt`, where the 192-bit salt is drawn
+  inside the seal function on every call and no retry, re-encode or
+  compaction path may carry one. Debug and fuzz builds run a (key,
+  nonce) tripwire. The local journal and overlay are plaintext at rest
+  (dm-crypt is recommended), and unencrypted volumes detect corruption
+  without authentication.
+- Test vectors in `bench/crypto-kat/raw/kat-vectors.json` would be
+  normative for phase 1 tests. DESIGN sections that would change if the
+  amendment is accepted: §5 step 6, §6, §6.1, §8.2, §8.5, §15, §22.1.
+  They are not edited yet.
+
 **Decision:** encryption is chosen at volume-family creation.
 
 - **Key hierarchy (taken from Constellation's `e2e.rs`):**
@@ -446,6 +644,17 @@ owned by an independent writer.
 
 *Amended by ADR-26:* the local store is optional. Its role is `store`, `cache` or `none`.
 
+**Gate outcome (phase 0, 2026-11-12):** not run — no trace could be
+obtained without a licence acceptance; simulators ready
+(`spikes/tracesim`). All four policies (S3-FIFO, SIEVE, W-TinyLFU, LRU)
+are implemented and unit-tested, including the scan test, but nothing
+was measured. S3-FIFO stays proposed and ADR-14 stays proposed. The
+fixed rule that will decide: S3-FIFO is accepted if at 1, 5 and 10 %
+cache sizes its median miss ratio is ≤ 1.05× the best and ≤ LRU's, it
+loses to LRU on under 25 % of volumes, and it does not fail the scan
+test (more than 2 % absolute worse than LRU). Evidence:
+[tracesim](../../bench/tracesim/RESULTS.md).
+
 **Decision:**
 - **Local store contents:**
   - the journal;
@@ -510,6 +719,42 @@ W-TinyLFU) in phase 0.
 
 *Amended by ADR-26:* S3-only volumes add a keeper (the systemd FD store or `lunix-keeper`) that holds the RAM write buffer across daemon restarts.
 
+**Gate outcome (phase 0, 2026-11-12):** amended (gate) — user recovery
+with `REISSUE` keeps a mounted file system consistent. kill -9 with a
+restart: 36 cycles on ext4 and 10 on xfs, zero fio errors, zero verify
+failures, fsck clean after every phase. Kill to serving again takes 0.26
+s with an immediate restart (heartbeat stall p50 221 ms, max 238 ms on
+ext4) and 1.16 s with a 1 s restart delay; no stall exceeded the restart
+delay by more than 0.2 s. Both negative controls (no `REISSUE`;
+acknowledged-but-dropped writes) fail as expected, so the clean runs
+mean something. A planned QUIESCE handover passed 20 of 20 cycles on
+ext4 with the corrected daemon (median stall 180 ms, one 2.0 s outlier
+while in-flight I/O drained). Evidence:
+[ublk-recovery](../../bench/ublk-recovery/RESULTS.md).
+
+- `lunix upgrade`: after `QUIESCE_DEV` succeeds the daemon exits without
+  `STOP_DEV`. libublk's `run_target()` sends `STOP_DEV` when the queue
+  threads end; that deadlocked the kernel thread in
+  `ublk_wait_tagset_rqs_idle` while the mounted file system, fio and
+  jbd2 sat in D state, and only a reboot cleared it. `run_target()`
+  cannot be used on this path.
+- A daemon never stops a device, and never exits, while started requests
+  are not being completed. This wedged a device twice.
+- `detach` uses `TRY_STOP_DEV`: it fails with EBUSY while the device is
+  mounted and succeeds after `umount`. Plain `STOP_DEV` yanks the device
+  from a mounted file system, which then returns EIO.
+- `DEL_DEV` with a mounted file system blocks until the file system is
+  unmounted, because the kernel waits for the last reference to the
+  block device.
+- The driver retains `SET_PARAMS`, `dev_info` and queue affinity across
+  recovery. Recovery sends no `SET_PARAMS`.
+- A device created with `USER_RECOVERY_FAIL_IO` cannot be recovered
+  (requests fail with EIO about 150 ms after the kill). It is a give-up
+  policy: delete the device and remount. `FAIL_IO` and `REISSUE` cannot
+  be combined (`ADD_DEV` returns EINVAL).
+- Not tried: flipping a live device to fail-I/O from the control plane
+  (the `on_hang` watchdog).
+
 **Decision:**
 - One `lunixd` per host owns every ublk device and local store on that
   host. It is a privileged DaemonSet under Kubernetes.
@@ -526,6 +771,44 @@ W-TinyLFU) in phase 0.
   cache and dedup.
 
 ## ADR-17: Kernel floor and ublk feature set
+
+**Gate outcome (phase 0, 2026-11-12):** amended (gate) — the kill -9
+recovery rule is met (see ADR-16), all mandatory flags are present on
+the 7.0 kernel (the `GET_FEATURES` mask is `0x7ffff`, all 19 flags), and
+online grow works (ADR-20). Both performance rules fail, so the copy
+path stays the default. Evidence:
+[ublk-datapath](../../bench/ublk-datapath/RESULTS.md),
+[ublk-recovery](../../bench/ublk-recovery/RESULTS.md).
+
+- **USER_COPY: rule not met; copy stays the default and USER_COPY is
+  opt-in.** It wins at 64 KiB and above: 64k writes give +11 % to +43 %
+  IOPS and 10-30 % less CPU per I/O, 64k random read at QD128 gives
+  2.55×, and the resident set falls from 148 MB to 26 MB. It loses at 4
+  KiB: writes lose 8-12 % IOPS, and several QD1 cells lose 5-10 %,
+  because each request pays an extra `pread` or `pwrite` from the queue
+  thread. Untested for phase 1: issuing that copy through io_uring
+  alongside the backend SQEs, which may remove the 4 KiB loss.
+- **BATCH_IO: rule not met; it is used only when asked for.** With
+  libublk 0.4.8's batch transport, 64k writes give 0.73× (QD32) and
+  0.97× (QD128) of copy's IOPS at 1.03-1.37× the CPU per I/O, and 64k
+  random read at QD32 gives 0.50×. 4 KiB cells are within -10 % to +9 %.
+  **BATCH_IO is not used with QUIESCE:** a QUIESCE handover broke the
+  file system on its second cycle (kill -9 passed 20 of 20). The result
+  describes libublk's implementation (queue-thread-only commit, 64-tag
+  fetch buffers), not the kernel interface. libublk also refuses
+  BATCH_IO with USER_COPY, though the kernel accepts the combination.
+- Flag rules found by probing `ADD_DEV`: `QUIESCE` needs
+  `USER_RECOVERY`; `REISSUE` and `FAIL_IO` exclude each other;
+  `INTEGRITY` needs `USER_COPY`. The driver sets `COMP_IN_TASK`,
+  `PER_IO_DAEMON`, `BUF_REG_OFF_DAEMON` and `SAFE_STOP_DEV` itself.
+- libublk 0.4.8 cannot set `NO_AUTO_PART_SCAN`, `SAFE_STOP_DEV`,
+  `FAIL_IO` or `PER_IO_DAEMON`. The spike adds the device through the
+  control ring and libublk attaches afterwards; this works.
+  `NO_AUTO_PART_SCAN` behaves as documented (`/dev/ublkbNp1` appears
+  only after `partx -a`).
+- The kernel floor stays provisional. The "first kernel" column of the
+  feature table comes from the fact-check note and was not re-verified:
+  there was no kernel tree on the host.
 
 **Decision:**
 - Probe `UBLK_U_CMD_GET_FEATURES` at startup.
@@ -553,6 +836,33 @@ W-TinyLFU) in phase 0.
 
 ## ADR-18: Threads and runtimes
 
+**Gate outcome (phase 0, 2026-11-12):** accepted (gate) — libublk 0.4.8
+is an adequate base. At 4 KiB random read, 8 jobs, QD128, `ublk-null`
+reaches 3.83 M IOPS against 4.90 M for `null_blk` (0.78×; rule: ≥ 1.0 M
+and ≥ 0.5×). At QD1 the median latency is 3.1 µs against 0.7 µs, +2.4 µs
+(rule: ≤ +15 µs). Copy mode costs about 0.85 µs of daemon CPU per 4 KiB
+I/O. The comparison with the kernel loop device is inconclusive: the
+disk limited both to about 6 K IOPS. Four queue threads were used, on a
+shared host. libublk 0.5.0 was not published, so it was not evaluated
+and the 0.4.x pin holds. Evidence:
+[ublk-baseline](../../bench/ublk-baseline/RESULTS.md),
+[ublk-datapath](../../bench/ublk-datapath/RESULTS.md).
+
+- At 64 KiB to 1 MiB with 8 jobs, copy-mode ublk reached 17-41 % of
+  `null_blk` (the per-byte copy dominates: 64k write 4-10 µs per I/O).
+  That is the USER_COPY question in ADR-17.
+- The worker pool hands completions back to the queue thread (eventfd
+  plus a queue), the only commit model libublk 0.4.8 offers. `--workers
+  4` was slower than inline in every mode: at QD1 the 4 KiB random write
+  p50 rose from 4.9 to 8.8 µs, about +4 µs per hop. Small synchronous
+  requests run inline on the queue thread, as this ADR already says. A
+  pool is still needed for hash and LZ4 at high write rates (4-10 µs per
+  64 KiB write).
+- libublk 0.4.8 gaps that the daemon works around: no control flags
+  beyond the basic set (ADR-17), `run_target()` issues `STOP_DEV`
+  (ADR-16), and batch completions can be committed only from the queue
+  thread.
+
 **Decision:**
 - One pinned thread per ublk queue runs libublk's executor (4-16 queues,
   QD 128-256, mlocked buffers, `PR_SET_IO_FLUSHER`). It handles I/O, the
@@ -575,8 +885,16 @@ evaluated.
 **Status: accepted (2026-11-12, maintainer).** All five crates move now,
 including `csi-common`, into the public repository
 [replicix/replicix-core](https://github.com/replicix/replicix-core).
-Constellation is switched to depend on it straight away, with its old
-modules reduced to re-exports, rather than migrating at its own pace.
+Constellation is switched to depend on it straight away, importing the
+new crates directly (no re-export shims), rather than migrating at its
+own pace.
+
+**Gate outcome (phase 0, 2026-11-12):** accepted (maintainer), executed
+— milestone P0.9 ran outside the spike plan. `replicix-core` exists at
+<https://github.com/replicix/replicix-core> (commit `caa47b4`) with the
+five crates named below extracted from Constellation, and Constellation
+is migrated onto it (Constellation main `6e25bad6`). There is no
+`bench/` result file for this gate.
 
 **Proposal:** extract a public MPL-2.0 `replicix-core` workspace that both
 projects depend on:
@@ -600,6 +918,26 @@ Constellation migrates at its own pace.
 **Evidence:** [constellation reuse](research/2026-11-11-constellation-reuse.md).
 
 ## ADR-20: Resize: online grow; explicit shrink
+
+**Gate outcome (phase 0, 2026-11-12):** amended (gate) — online grow
+through `UPDATE_SIZE` works under load on ext4, xfs and btrfs: a 16 → 64
+GiB grow during fio random write with verify gave no I/O error and a
+clean fsck; the new size appeared in sysfs and `blockdev --getsize64`
+without a remount, and `resize2fs`, `xfs_growfs` and `btrfs filesystem
+resize max` grew the file system online. Grow right after a kill -9
+recovery also works. The device reports `write back` and `fua 1` by
+default and `write through`, `fua 0` without `VOLATILE_CACHE`. Evidence:
+[ublk-recovery](../../bench/ublk-recovery/RESULTS.md), P0.4.
+
+- The driver does not validate the new size. It accepted a size that is
+  not a multiple of the 4096-byte logical block (64 GiB + 12 KiB + 512
+  B), a resize to the current size, and a shrink from 64 to 8 GiB on an
+  idle, unmounted device (the 64 GiB file system then refused to mount,
+  and growing back restored it). libublk's wrapper refuses the unaligned
+  size; the raw command does not. The daemon therefore validates every
+  size: a multiple of the block size, and a shrink only by the rules
+  below.
+- Shrink with a mounted file system was not tested.
 
 **Decision:**
 - **Grow** records the new size in the next commit and calls
@@ -856,6 +1194,40 @@ elements:
 
 ## ADR-26: Three storage topologies (local only, local + S3, S3 only), switchable live
 
+**Gate outcome (phase 0, 2026-11-12):** accepted (gate) for the
+keeper-held RAM write buffer; the systemd FD-store variant is *not run*.
+A memfd ring with a header `{magic, device id, generation}`, held by a
+keeper over `SCM_RIGHTS`, survived 23 mounted ext4 kill -9 cycles (3 +
+20) with fio verify and two fsync writers: fsck clean, zero bad blocks
+of acknowledged fsyncs. Exec to recovered took p50 314 ms and max 1.26 s
+over the 20 cycles; heartbeat stall p50 594 ms, max 1.82 s. **Lost
+keeper:** with the keeper and daemon both killed, the restarted daemon
+found no buffer, printed `REFUSED`, deleted the device and never resumed
+it; the file system saw EIO and went read-only. The generation-mismatch
+refusal exists in code but was not exercised separately. Acknowledgement
+latency of the RAM sink on a raw device, 4 KiB random write, no FLUSH:
+3.7 µs p50 at QD1 (p99 11.7 µs) and 42 µs at QD32 (712 K IOPS), against
+2.7-4.6 ms for a durable journal write on the P0.5 loop-backed file
+system. Evidence: [ublk-recovery](../../bench/ublk-recovery/RESULTS.md),
+P0.12.
+
+- Replay of a 256 MiB buffer after kill -9: 3.76 s with 64 KiB records
+  and 23.7 s with 4 KiB records, onto a slow local file (about 10 K
+  random 4 KiB writes per second). The device stalls for the whole
+  replay. In the real design the replay feeds the commit path, so these
+  are upper bounds for a slow medium.
+- The spike's RAM sink drains inline on the queue thread when the ring
+  fills (backpressure by delay, about 1.4 s once). In phase 3 the drain
+  must not block the queue thread.
+- A refusing process stays blocked in `DEL_DEV` while a mounted file
+  system holds the block device, and completes when the file system is
+  unmounted (see ADR-16).
+- Not run: the systemd FD-store variant (it needs `sd_notify(FDSTORE=1)`
+  and a `LISTEN_FDS` recovery path in the daemon), and replay against a
+  real remote sink. fio's verify coverage was limited by variable block
+  sizes with `norandommap`; the fsync writers and the checksums of the
+  data files are independent of that.
+
 **Context:**
 - Lunix assumed a local directory on every owning host. Diskless or
   ephemeral nodes, and pods that move often, want a volume with **no
@@ -1069,6 +1441,47 @@ ADR-10 modes become presets of them.
   `write-through` is added.
 
 ## ADR-28: FLUSH and FUA stay prefix cuts; flush-lane discipline instead of staging or a FUA fast path
+
+**Gate outcome (phase 0, 2026-11-12):** partial — the P0.10 lane test
+and the two-PUT measurement are done on AWS S3 Standard and OVH; the
+phase 3 end-to-end gate stays open. **Two serial 4 KiB create-only
+PUTs** (the FLUSH-then-FUA pattern), AWS same region: p50 54 ms, p90 62
+ms, p99 94 ms (n = 200), 1.8× a single 4 KiB PUT (p50 29.7 ms). OVH from
+a remote client (RTT 20 ms): p50 97 ms, p99 133-212 ms. A 1 MiB data PUT
+then a 4 KiB commit PUT on AWS: p50 81 ms, p99 133-189 ms; the commit
+PUT after a data PUT is no slower than a stand-alone one. This supports
+"about 2 PUT RTT for an ext4/xfs fsync"; on AWS Standard the measured
+pair is about 54 ms, below the about 140 ms estimated under
+Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
+[fsync-trace](../../bench/fsync-trace/RESULTS.md),
+[ublk-recovery](../../bench/ublk-recovery/RESULTS.md).
+
+- **Lane rule (4 KiB PUT p99 under load ≤ 1.5× idle):** not resolved.
+  With 8 concurrent 16 MiB uploads (about 0.5 GB/s, unthrottled) on AWS,
+  the p50 of a 4 or 64 KiB PUT rose 6-11 % with or without a separate
+  client. The 4 KiB p99 was 51 ms on a separate client (idle 59 ms,
+  0.87×) and 198 ms on the shared client (3.4×, one outlier in about 45
+  samples). On a saturated 31 MB/s link to OVH the p99 was 1.13×
+  (separate) and 1.18× (shared). A separate connection pool, as rule 2
+  specifies, is the safe choice; p99 needs more samples.
+- `CompleteMultipartUpload` (conditional or not, 1-4 parts under 20 MiB)
+  is one request of about 87 ms on AWS and 76 ms on OVH, about 3× and 2×
+  a 4 KiB PUT. A multipart commit is not cheaper on the flush path:
+  Create, parts and Complete cost about 146 ms on AWS against 30 ms for
+  one create-only PUT.
+- Segment upload form (ADR-7): keep one PUT per segment up to 16 MiB. On
+  AWS a 16 MiB single PUT has p50 194 ms against 249-252 ms for two or
+  three parallel parts, because Create (about 23 ms) and Complete (about
+  90 ms) cost more than the parallel parts save. Multipart pays from
+  about 25-32 MiB (32 MiB in four 8 MiB parts: 265 ms against 336 ms).
+  Both providers reject non-final parts under 5 MiB. `flush_segment` (4
+  MiB) is a single PUT.
+- FLUSH per sync (P0.4): one FUA write and one FLUSH per single-job sync
+  on ext4, xfs and btrfs, and no file system issues more than 1 FLUSH
+  per sync. This matches the fsync-trace.
+- Not run: PUT latency per size with 8 parallel streams, the shaped 200
+  MB/s bulk upload, and R2 and S3 Express One Zone (no credentials). The
+  phase 3 end-to-end gate below is unchanged.
 
 **Context:**
 - Recommended by the design review in

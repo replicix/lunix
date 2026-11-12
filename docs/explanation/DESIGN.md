@@ -2,7 +2,9 @@
 
 This is the system spec. Rationale lives in [DECISIONS.md](DECISIONS.md)
 (ADR-n) and evidence in [research/](research/). Terms are defined in
-[GLOSSARY.md](GLOSSARY.md). All ADRs are *proposed*. Where this spec and an
+[GLOSSARY.md](GLOSSARY.md). ADR status is at the top of DECISIONS.md:
+the phase 0 gates accepted ADR-4, 8, 16, 17, 18, 20 and part of 2 and 26
+on 2026-11-12, and the rest are *proposed*. Where this spec and an
 accepted ADR disagree, the ADR wins and this file is fixed in the same
 commit.
 
@@ -76,6 +78,14 @@ A **volume** is a thin block device of a given size. Its data path is:
   `min(8, cpus/4)`) and QD is 128. There is one pinned thread per queue.
   Buffers are preallocated and mlocked. The daemon runs with
   `PR_SET_IO_FLUSHER` and in its own mount namespace (libublk issue #50).
+- **Data path mode:** the copy path is the default. `USER_COPY` and
+  `BATCH_IO` are opt-in per volume. `USER_COPY` wins at 64 KiB and above
+  and loses about 10% at 4 KiB; `BATCH_IO` showed no gain. `BATCH_IO` is
+  not used with `QUIESCE` (ADR-17).
+- **Control flags:** libublk 0.4.8 cannot set `NO_AUTO_PART_SCAN`,
+  `SAFE_STOP_DEV`, `FAIL_IO` or `PER_IO_DAEMON`. The daemon adds the
+  device through the control ring itself and libublk attaches
+  afterwards (ADR-17).
 - **Parameters:**
   - `BASIC`:
     - `logical_bs = physical_bs = 4096`, `io_opt` = chunk size,
@@ -92,8 +102,19 @@ A **volume** is a thin block device of a given size. Its data path is:
   the QUIESCED or recovering state and runs `START_USER_RECOVERY`, then
   reattaches the queues. `USER_RECOVERY_REISSUE` replays in-flight
   requests. This is safe because writes are idempotent at the block level
-  and the journal deduplicates by `seq`. A per-volume `on_hang` watchdog
-  can switch a wedged device to fail-I/O.
+  and the journal deduplicates by `seq`. The driver retains the
+  parameters, so recovery sends no `SET_PARAMS`.
+- **Fail-I/O:** a per-volume `on_hang` watchdog can switch a wedged
+  device to fail-I/O. A device in fail-I/O cannot be recovered; the
+  policy is to delete it and remount. `FAIL_IO` and `REISSUE` cannot be
+  combined.
+- **Planned upgrade:** `QUIESCE_DEV`, then the daemon exits *without*
+  `STOP_DEV` (libublk's `run_target()` issues it and deadlocks the
+  kernel), then the new binary recovers the device.
+- **Detach:** `detach` uses `TRY_STOP_DEV`, which fails with EBUSY while
+  the device is mounted. The daemon never stops a device, and never
+  exits, while started requests are not being completed. `DEL_DEV` with
+  a mounted file system blocks until the file system is unmounted.
 
 ### 3.1 Operations
 
@@ -134,9 +155,11 @@ journal):
 - The journal is a ring of 64 MiB files opened O_DIRECT. Records are
   4 KiB-aligned: `{magic, seq, epoch, lba, len, kind(write|hole), crc32c}`
   followed by the data.
-- Writes are batched per queue into io_uring submissions. FLUSH issues a
-  group-committed `fdatasync`, or a linked WRITE→FSYNC batch if a
-  benchmark shows that is faster.
+- Writes are batched per queue into io_uring submissions. FLUSH issues
+  one group-committed `fdatasync` (ADR-4). Linked WRITE→FSYNC chains
+  and `O_DSYNC` per write were measured and rejected. The files are
+  preallocated and zero-filled; on btrfs the journal directory is
+  `nodatacow`.
 - **Recovery:**
   1. Scan from the checkpoint's `journal_tail`.
   2. Accept records with valid CRCs in contiguous `seq` order.
@@ -286,7 +309,9 @@ trailer = footer offset + length + magic
   - Interior entry: `{child_hash, child_location{pack, off, len}}`.
   - Absent subtree: the empty-node hash.
 - **Node identity:** node hash = BLAKE3 of the canonical encoding (keyed
-  if encrypted). Leaves are stored in their bit-packed encoding without
+  if encrypted). For an interior node the hash covers the child hashes
+  only, never the child locations, so identical content gives identical
+  roots on any backend. Leaves are stored in their bit-packed encoding without
   compression. Interior nodes are zstd-compressed. If the family is
   encrypted, both are encrypted with ADR-11's scheme keyed by the node
   hash.
@@ -300,16 +325,21 @@ trailer = footer offset + length + magic
   - The interior nodes are about 1.6 MiB per TiB and always stay
     resident.
   - Modified leaves are held in a mutable copy-on-write overlay keyed by
-    leaf index.
+    leaf index. A decoded dirty leaf costs 24 KiB, twice its sealed size,
+    so the overlay has a cap, counted in dirty leaves, that forces a
+    seal (ADR-8).
 - **Seal (on a FULL commit):**
   1. Serialise dirty leaves.
   2. Recompute hashes up the paths.
   3. Write the new nodes into one map pack.
   4. The new root goes into the commit.
-- **Cost:** `dirty_leaves × ~10 KiB` (encoded) plus a few upper nodes.
-  Scattered-write workloads dirty many leaves. That is bounded by the
-  async interval, measured in phase 0, and if needed mitigated by
-  map-delta records in DELTA commits.
+- **Cost:** `dirty_leaves × ~11.4 KiB` (encoded, worst case of one dirty
+  chunk per leaf) plus the upper nodes, which were 45% of the bytes at
+  1 000 dirty leaves. Measured at 10 TiB on one core: 1 000 scattered
+  dirty leaves seal in 60 ms and 10 000 in 275 ms. Scattered-write
+  workloads dirty many leaves. That is bounded by the async interval and
+  by the overlay cap, and if needed mitigated by map-delta records in
+  DELTA commits.
 - **Hints:**
   - A hint makes a read 1 GET.
   - When compaction moves an extent, the current map is rewritten lazily:
@@ -528,6 +558,14 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   The results decide whether the backend may be the authority. A
   versioned bucket qualifies only if the concurrent-CAS probe passes
   (Ceph RGW tracker 80925).
+- **Measured provider behaviour** (phase 0):
+  - AWS S3 Standard and OVH answer concurrent `If-Match` swaps with 409,
+    so the client retries the same attempt on 409. Creates answer 412.
+  - Both accept `If-None-Match: *` on `CompleteMultipartUpload`.
+  - OVH returns a version id on PUT while `GetBucketVersioning` shows no
+    status, so `doctor` decides from the probe and not from the status.
+  - A segment of up to 16 MiB goes as one PUT. Multipart pays from about
+    25-32 MiB and costs a Create and a Complete (about 115 ms on AWS).
 - Provider adapters: GCS uses generation preconditions
   (`x-goog-if-generation-match`). Tigris needs `X-Tigris-Consistent:
   true`. Express One Zone (directory buckets) is a later accelerator.
@@ -717,7 +755,12 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
     writes.
   - On recovery, the buffer header (`volume uuid, device id,
     generation`) must match. Otherwise the device is deleted (EIO), not
-    recovered.
+    recovered. A mounted file system then goes read-only, and the
+    deletion completes only when it is unmounted.
+  - The phase 0 spike used a standalone keeper process. The systemd
+    FD-store variant is untested.
+  - The RAM sink's drain must not block the queue thread. The phase 0
+    spike drains inline when the ring fills.
 - **Reads:**
   - Overlay, then map (interior nodes resident), then `mem_cache`
     (default 256 MiB, S3-FIFO, leaves and extents), then a ranged GET
@@ -773,9 +816,13 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ## 14. Resize
 
+- **Validation:** the driver accepts any size, including one that is not
+  a multiple of the 4096-byte block and a shrink under a mounted file
+  system. The daemon validates every size before `UPDATE_SIZE`.
 - **Grow:** CAS the new size into the next commit, then `UPDATE_SIZE`
   (`set_capacity_and_notify`), then the file system's grow (CSI
-  `NodeExpandVolume` or the user).
+  `NodeExpandVolume` or the user). Measured online on ext4, xfs and
+  btrfs under load.
 - **Shrink:** `lunix resize --shrink --discard-tail`. It is refused while
   the tail maps data, unless `--force`. Sequence: commit the new size,
   `UPDATE_SIZE`, then GC drops the tail's chunks.
@@ -827,7 +874,7 @@ lunix export NAME --snapshot S -o image.raw   lunix gc NAME --dry-run
 lunix clone SNAP NEW         (post-v1, ADR-25; v1 `restore SNAP NEW` = full copy)
 lunix status [NAME]   lunix doctor s3://…   lunix verify NAME   lunix fsck NAME
 lunix warm NAME   lunix migrate plan NAME --add s3://… --remove <id>   lunix steal NAME
-lunix upgrade                # QUIESCE → exec → recover, no unmount
+lunix upgrade                # QUIESCE → daemon exits (no STOP_DEV) → exec → recover, no unmount
 ```
 
 ## 17. Kubernetes
@@ -896,7 +943,7 @@ ADR-16 and ADR-22 set the shape.
 | backend rollback / substitution | MAC or epoch mismatch detected | refuse to mount; needs an anchor (open question) |
 | mirror lags / fails | its state drops to CatchingUp | the authority is unaffected |
 | `lunixd` crash, S3 only | I/O stalls | recover; replay the keeper-held memfd buffer |
-| `lunixd` and keeper both lost, S3 only | the buffer is gone | the device is deleted (EIO), never resumed with stale data; remount from the bucket |
+| `lunixd` and keeper both lost, S3 only | the buffer is gone | the device is deleted (EIO), never resumed with stale data; a mounted file system goes read-only; remount from the bucket |
 | host power loss, S3 only | unflushed writes lost (legal) | attach from the bucket |
 
 ## 20. Performance targets (to be validated in phase 0/1)
@@ -911,10 +958,15 @@ hits. They are targets, not measurements.
 | sequential write ingest | ≥ 3 GB/s with `auto` compression on 8 workers |
 | sequential read, hits | ≥ 5 GB/s |
 | cold sequential read, same region | ≥ 1 GB/s with readahead and parallel ranged GETs |
-| sync-mode fsync latency | ≈ 2 PUT RTT for an ext4/xfs fsync (FLUSH, then FUA; ADR-28), 1 RTT for a data-only fdatasync, plus `sync_dirty_max / goodput` under a bulk writer. S3 Standard: one measured run, PUT p50 70 ms / p99 137 ms at 500 KB. Express One Zone: PUT p99 ~7 ms at 4 KB, same AZ ([fact-check §C](research/2026-11-11-fact-check.md)) |
+| sync-mode fsync latency | ≈ 2 PUT RTT for an ext4/xfs fsync (FLUSH, then FUA; ADR-28), 1 RTT for a data-only fdatasync, plus `sync_dirty_max / goodput` under a bulk writer. S3 Standard, measured in phase 0 from the same region: 4 KiB PUT p50 30 ms, 1 MiB p50 70-78 ms, two serial 4 KiB create-only PUTs p50 54 ms / p99 94 ms ([s3probe](../../bench/s3probe/RESULTS.md)). Express One Zone: PUT p99 ~7 ms at 4 KB, same AZ ([fact-check §C](research/2026-11-11-fact-check.md)) |
 
-The baseline comes from the phase 0 spikes: libublk null and loop
-targets against `null_blk`.
+The measured baseline is in [bench/BASELINE.md](../../bench/BASELINE.md),
+with the §20 target table and a "ceiling measured / target / status"
+column. The framework ceiling of libublk's null target at 4 KiB random
+read is 978 K IOPS (p99 38.7 µs) on one queue and 3.8 M IOPS with four
+queue threads, against `null_blk` at 4.9 M, so the framework leaves
+headroom for the product's own work. These were measured at 4 active
+queues, not 8.
 
 ## 21. Testing
 
@@ -940,18 +992,25 @@ targets against `null_blk`.
 1. **Rollback anchor.** A malicious bucket can serve an old but valid
    chain. Options: a CSI-object or KMS monotonic counter, the maximum
    across mirrors, or a signed epoch in the local state.
-2. **Default chunk size.** 64 KiB against 16 KiB; ADR-5 gate.
-3. **Map write amplification** under scattered writes. Measure; DELTA-
-   style map-delta records are the fallback.
-4. **Cache policy** on block traces; ADR-14 gate.
-5. **USER_COPY against the copy path, and BATCH_IO gains, on 7.0.**
-   Spikes.
-6. **`replicix-core` extraction**; ADR-19, the maintainer's decision.
-7. **License.** The private repo currently carries MPL-2.0 like
+2. **Default chunk size.** 64 KiB against 16 KiB; ADR-5 gate, not run
+   (no trace could be obtained).
+3. **Map write amplification** under scattered writes. Measured in
+   phase 0: 0.18-0.55 of the dirty logical bytes in map bytes. DELTA-
+   style map-delta records are the fallback if phase 1 finds that too
+   high.
+4. **Cache policy** on block traces; ADR-14 gate, not run.
+5. **License.** The private repo currently carries MPL-2.0 like
    Constellation. Keep it, or decide before any publication.
-8. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
-9. **Cross-volume dedup on the node cache** (golden images) without
+6. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
+7. **Cross-volume dedup on the node cache** (golden images) without
    leaking across families.
-10. **Staging raw journal batches ahead of FLUSH** (`refs.kind =
-    journal`). Opened as ADR-29 only if the ADR-28 phase 3 gate shows
-    fsync p99 under a 200 MB/s mix above 2× the two-PUT floor.
+8. **Staging raw journal batches ahead of FLUSH** (`refs.kind =
+   journal`). Opened as ADR-29 only if the ADR-28 phase 3 gate shows
+   fsync p99 under a 200 MB/s mix above 2× the two-PUT floor.
+9. **USER_COPY through io_uring.** The blocking `pread`/`pwrite` copy
+   lost about 10% at 4 KiB; issuing it with the backend SQEs may
+   remove that loss (ADR-17). Untested.
+10. **Interior-node compression and fanout 256** for the map (ADR-8):
+    zstd-1 costs about 40 µs per interior node for little gain, and
+    fanout 256 writes 36-45% fewer bytes per seal at twice the resident
+    interior nodes. Left to phase 1.

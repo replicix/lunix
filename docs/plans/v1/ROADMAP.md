@@ -44,6 +44,9 @@ memfd write buffer held by a keeper, including the lost-keeper case
 **Exit:** a decision record per gate appended to DECISIONS.md, and a
 baseline table in `bench/`.
 
+**Status (2026-11-12):** baseline in [bench/BASELINE.md](../../../bench/BASELINE.md);
+done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gates.md).
+
 ## Phase 1: Local-only volume
 
 **Scope:**

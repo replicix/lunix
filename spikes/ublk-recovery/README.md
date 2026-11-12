@@ -27,4 +27,4 @@ below it with `nosuid,nodev`, run fio under `timeout -k`, clean up on exit and
 call `../common/ublk-leftovers.sh` at start and end. See
 `docs/plans/v1/CONVENTIONS.md` for the safety rules.
 
-P0.12 (never run): `run --sink mem --keeper SOCK`, `keeper/keeper.py`, `run-lost-keeper.sh`, `run-ramsink.sh`.
+P0.12 (gate met 2026-11-12; see bench/ublk-recovery/RESULTS.md §P0.12): `run --sink mem --keeper SOCK`, `keeper/keeper.py`, `run-lost-keeper.sh`, `run-ramsink.sh`.
