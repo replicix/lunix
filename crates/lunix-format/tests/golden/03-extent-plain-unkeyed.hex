@@ -1,0 +1,12 @@
+# lunix-format golden file 03-extent-plain-unkeyed.bin (143 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f03_extent
+00000000  43 43 48 31 01 02 00 00 00 40 00 00 00 00 00 00
+00000010  c6 c4 89 01 19 d8 34 da 40 4b 94 c7 07 aa 46 a5
+00000020  79 d7 7f 12 22 11 d1 45 98 2c 8c eb 83 e7 f5 66
+00000030  4b 00 00 00 1f 41 01 00 ff ff ff ff ff ff ff ff
+00000040  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+00000050  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+00000060  ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+00000070  ff ff ff ff ff ff ff ff 27 50 41 41 41 41 41 f2
+00000080  1b 8c 97 3d ce fd 5e 68 95 4f 1c 22 61 58 7a
