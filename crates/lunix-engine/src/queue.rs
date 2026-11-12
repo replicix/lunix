@@ -332,7 +332,9 @@ impl Queue {
             let remaining = m.end_block - m.next_block;
             let blocks = match m.record {
                 RecordKind::Write => remaining.min(256),
-                RecordKind::Hole => remaining.min(u64::from(u32::MAX)),
+                RecordKind::Hole => remaining
+                    .min(u64::from(u32::MAX))
+                    .min((inner.cfg.max_chunks_per_cut / 2).max(1) * inner.cfg.chunk_blocks()),
             };
             let blocks32 = u32::try_from(blocks).unwrap_or(u32::MAX);
             let charge = record_bytes(m.record, blocks32);

@@ -29,6 +29,11 @@ pub struct EngineConfig {
     pub commit_interval: Duration,
     /// The dirty-bytes trigger `B` (overlay bytes).
     pub dirty_bytes: u64,
+    /// The most chunks one cut may hold, so a cut stays well under the map's
+    /// dirty-leaf cap (default: half of `map_dirty_leaves_max`, one leaf
+    /// per chunk at worst). DISCARD and WRITE_ZEROES records are split to
+    /// half of it, so a cut can always stop between records.
+    pub max_chunks_per_cut: u64,
     /// Cut when the journal ring is fuller than this (0.5).
     pub journal_fill_trigger: f64,
     /// FULL commits retained (`last:N`), at least 1.
@@ -70,6 +75,7 @@ impl EngineConfig {
             id_len,
             commit_interval: Duration::from_millis(json.commit.interval_ms),
             dirty_bytes: json.commit.dirty_bytes,
+            max_chunks_per_cut: (json.map_dirty_leaves_max / 2).max(2),
             journal_fill_trigger: 0.5,
             retain_last: json.retain_last.max(1),
             verify_reads: json.verify_reads,

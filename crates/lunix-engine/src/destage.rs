@@ -8,8 +8,9 @@
 //! obligations: whole-chunk assembly with an R1 base read for partial chunks,
 //! zero chunks as holes, dedup against the cut and the index (a `Hinted` hit
 //! is confirmed first, D17), one map transaction applied atomically, index
-//! inserts held back for the caller. Like M9 it seals full segments during
-//! the cut and leaves the last one open for C4.
+//! inserts held back for the caller. Like M9 (after its review) it seals
+//! every segment before the map transaction commits, so no map entry ever
+//! names an unsealed segment, and deletes its segments when the cut fails.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -55,13 +56,11 @@ pub struct DestageCtx<'a> {
 }
 
 /// What a destage produced, for C4 and the counters.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DestageOutcome {
-    /// Segments written and **not sealed** (C4 seals them, in this order).
-    pub writers: Vec<Box<dyn SegmentWriter>>,
-    /// Segments the pipeline already sealed during the cut (M9 seals full
-    /// ones as it goes). Durable but unnamed until C6, like the rest.
-    pub sealed: Vec<SealedSegment>,
+    /// Every segment the cut wrote, sealed (durable) before the map
+    /// transaction committed; unnamed until C6.
+    pub segments: Vec<SealedSegment>,
     /// Index entries for the new extents, inserted by the caller once the
     /// commit naming their segments is durable.
     pub index_inserts: Vec<(ChunkId, Hint)>,
@@ -85,14 +84,15 @@ pub struct DestageOutcome {
 
 /// The destage pipeline (M9).
 pub trait Destager: Send + Sync {
-    /// Destages `cut` (C3): every chunk of it ends up in the map, through one
-    /// transaction committed before returning. On an error nothing was
-    /// applied to the map; segments already written are abandoned (dropped)
-    /// and become orphans of the open-time sweep at worst.
+    /// Destages `cut` (C3, which also covers C4's sealing): every segment it
+    /// writes is sealed before one map transaction, holding every chunk of
+    /// the cut, commits. On an error nothing was applied to the map and the
+    /// segments it wrote are deleted (a crash leaves them to the open-time
+    /// sweep). Index inserts are returned, never applied.
     ///
     /// # Errors
-    /// `MapFull` when the cut needs more dirty leaves than the map allows;
-    /// store, journal and codec errors.
+    /// `MapFull` when the cut needs more dirty leaves than the map allows
+    /// (the caller cuts smaller); store, journal and codec errors.
     fn destage(&self, cut: &OverlayCut, ctx: &DestageCtx<'_>) -> Result<DestageOutcome>;
 }
 
@@ -106,9 +106,25 @@ fn nanos(t: Instant) -> u64 {
 
 impl Destager for SimpleDestager {
     fn destage(&self, cut: &OverlayCut, ctx: &DestageCtx<'_>) -> Result<DestageOutcome> {
+        let mut out = DestageOutcome::default();
+        match destage_into(cut, ctx, &mut out) {
+            Ok(()) => Ok(out),
+            Err(e) => {
+                for s in &out.segments {
+                    if let Err(d) = ctx.segments.delete(s.seg) {
+                        tracing::warn!(error = %d, seg = %s.seg, "segment of a failed cut not deleted; the sweep or GC removes it");
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+fn destage_into(cut: &OverlayCut, ctx: &DestageCtx<'_>, out: &mut DestageOutcome) -> Result<()> {
+    {
         let cs = ctx.chunk_size as usize;
         let chunk_blocks = (cs / BLOCK) as u64;
-        let mut out = DestageOutcome::default();
         let mut txn = ctx.map.begin_update()?;
         let mut writer: Option<Box<dyn SegmentWriter>> = None;
         let mut in_cut: HashMap<ChunkId, Hint> = HashMap::new();
@@ -195,11 +211,11 @@ impl Destager for SimpleDestager {
                         .seal(ExtentKind::Data, &id, &desc, &buf, &mut extent)?;
                     out.stage_ns[3] += nanos(t);
                     let t = Instant::now();
-                    // A full segment is sealed now, as M9 does; the last one
-                    // stays open for C4.
+                    // A full segment is sealed now; the last one before
+                    // the map transaction commits.
                     if writer.as_ref().is_some_and(|w| w.is_full()) {
                         if let Some(w) = writer.take() {
-                            out.sealed.push(w.seal(ctx.writes)?);
+                            out.segments.push(w.seal(ctx.writes)?);
                         }
                     }
                     if writer.is_none() {
@@ -228,8 +244,10 @@ impl Destager for SimpleDestager {
                 },
             )?;
         }
-        out.writers.extend(writer.take());
+        if let Some(w) = writer.take() {
+            out.segments.push(w.seal(ctx.writes)?);
+        }
         txn.commit()?;
-        Ok(out)
+        Ok(())
     }
 }

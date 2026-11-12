@@ -194,6 +194,7 @@ impl Inner {
             return Ok(CommitOutcome::Idle);
         }
         self.wait_inflight(c)?;
+        c = self.bound_cut(prev, c);
         point!(self.points, "engine.c1.waited");
         // A cut too big for the map's dirty-leaf cap is retried smaller:
         // any c' in (prev, c] is a cut too.
@@ -206,6 +207,35 @@ impl Inner {
                 r => return r,
             }
         }
+    }
+
+    /// Lowers `c` so that the cut holds about `max_chunks_per_cut` chunks
+    /// at most: the chunks in `cut(c')` are those with a version `<= c'`, so
+    /// `c'` stops just before the oldest write of the first chunk over the
+    /// cap. Best effort (a superseded older version can add a chunk); a
+    /// `MapFull` that still happens cuts smaller again. Any `c' > prev` with
+    /// every write `<= c` in the overlay is a cut.
+    fn bound_cut(&self, prev: u64, c: u64) -> u64 {
+        let cap = self.cfg.max_chunks_per_cut.max(1);
+        if c <= prev || self.overlay.dirty_bytes() / 4096 <= cap {
+            return c;
+        }
+        let probe = self.overlay.cut(WriteSeq(c));
+        if probe.chunks.len() as u64 <= cap {
+            return c;
+        }
+        let mut firsts: Vec<u64> = probe
+            .chunks
+            .iter()
+            .map(|ch| ch.pieces.iter().map(|p| p.write_seq.0).min().unwrap_or(c))
+            .collect();
+        firsts.sort_unstable();
+        let at = usize::try_from(cap)
+            .unwrap_or(usize::MAX)
+            .min(firsts.len() - 1);
+        let bounded = firsts[at].saturating_sub(1).clamp(prev + 1, c);
+        tracing::debug!(cut = c, bounded, "cut bounded by max_chunks_per_cut");
+        bounded
     }
 
     fn cut_and_commit(&self, co: &mut Coord, c: u64, size: u64) -> Result<CommitOutcome> {
@@ -234,7 +264,7 @@ impl Inner {
             journal: &*self.journal,
             map: &*self.map,
             index: &*self.index,
-            segments: &*self.tracked,
+            segments: &*self.segments,
             codec: &*self.extents,
             reader: &*self.reader,
             space: &*self.space,
@@ -245,8 +275,7 @@ impl Inner {
         let outcome = match self.destager.destage(&cut, &ctx) {
             Ok(o) => o,
             Err(e) => {
-                // Nothing reached the map; abandoned writers are dropped.
-                self.open_segs.clear();
+                // Nothing reached the map; the destager removed its segments.
                 self.abandon(acct);
                 return Err(e);
             }
@@ -255,7 +284,6 @@ impl Inner {
             Ok(s) => s,
             Err(e) => {
                 self.fatal("c3 rehint", &e);
-                self.open_segs.clear();
                 return Err(e);
             }
         };
@@ -270,38 +298,14 @@ impl Inner {
             add(a, v);
         }
         let index_inserts = outcome.index_inserts;
-        let mut writers = outcome.writers;
-        let pre_sealed = outcome.sealed;
-        if let Err(e) = self.points.hit("engine.c3.destaged") {
-            self.open_segs.clear();
-            return Err(e);
-        }
+        let segments = outcome.segments;
+        self.points.hit("engine.c3.destaged")?;
         lunix_iface::crashpoint!("engine.c3.destaged");
-        // C4: seal the segments (footer, trailer, fdatasync, rename, dir fsync).
-        let mut new_segments = Vec::with_capacity(writers.len() + pre_sealed.len());
-        let mut seg_actual = 0u64;
-        for s in &pre_sealed {
-            seg_actual += s.size_bytes;
-            new_segments.push(s.seg);
-            self.open_segs.remove(s.seg);
-        }
-        while !writers.is_empty() {
-            let w = writers.remove(0);
-            let id = w.id();
-            let r = w.seal(writes);
-            self.open_segs.remove(id);
-            match r {
-                Ok(s) => {
-                    seg_actual += s.size_bytes;
-                    new_segments.push(s.seg);
-                }
-                Err(e) => {
-                    self.open_segs.clear();
-                    self.fatal("c4", &e);
-                    return Err(e);
-                }
-            }
-        }
+        // C4: the segments are sealed (footer, trailer, fdatasync, rename, dir
+        // fsync) by the destager before its map transaction committed, so no
+        // map entry ever names an unsealed segment; here the ledger is trued up.
+        let mut new_segments: Vec<SegId> = segments.iter().map(|s| s.seg).collect();
+        let seg_actual: u64 = segments.iter().map(|s| s.size_bytes).sum();
         if let Err(e) = self.space.transfer(
             SpaceKind::Segments,
             SpaceKind::Segments,

@@ -30,7 +30,7 @@ use crate::error::OpenError;
 use crate::flush::FlushGroups;
 use crate::points::Points;
 use crate::queue::{Queue, QueueShared};
-use crate::read::{ExtentReader, OpenSegs, ReadCtx, ReadPool, TrackedSegments};
+use crate::read::{ExtentReader, ReadCtx, ReadPool};
 use crate::recover::{recover, RecoveryReport};
 use crate::stats::Counters;
 
@@ -57,7 +57,6 @@ pub(crate) struct Inner {
     pub(crate) cfg: EngineConfig,
     pub(crate) dir: Arc<dyn VolumeDir>,
     pub(crate) segments: Arc<dyn SegmentStore>,
-    pub(crate) tracked: Arc<TrackedSegments>,
     pub(crate) packs: Arc<dyn PackStore>,
     pub(crate) commits: Arc<dyn CommitStore>,
     pub(crate) checkpoint: Arc<dyn CheckpointStore>,
@@ -80,7 +79,6 @@ pub(crate) struct Inner {
     pub(crate) flush: Arc<FlushGroups>,
     pub(crate) pool: ReadPool,
     pub(crate) cache: Arc<ChunkCache>,
-    pub(crate) open_segs: Arc<OpenSegs>,
     pub(crate) reader: Arc<ExtentReader>,
     /// Signalled when a queue retires an in-flight write (C1 waits on it).
     pub(crate) progress: (Mutex<()>, Condvar),
@@ -210,18 +208,12 @@ impl Engine {
         if let Some(s) = &rec.stats {
             stats.restore(s);
         }
-        let open_segs = Arc::new(OpenSegs::default());
-        let tracked = Arc::new(TrackedSegments {
-            inner: Arc::clone(&deps.segments),
-            open: Arc::clone(&open_segs),
-        });
         let reader = Arc::new(ExtentReader {
             segments: Arc::clone(&deps.segments),
             index: Arc::clone(&deps.index),
             codec: Arc::clone(&deps.extents),
             chunk_size: cfg.chunk_size,
             verify_reads: cfg.verify_reads,
-            open: Arc::clone(&open_segs),
             stats: Arc::clone(&stats),
         });
         let cache = Arc::new(ChunkCache::new(cfg.read_cache_max));
@@ -240,7 +232,6 @@ impl Engine {
             map: rec.map,
             dir: deps.dir,
             segments: deps.segments,
-            tracked,
             packs: deps.packs,
             commits: deps.commits,
             checkpoint: deps.checkpoint,
@@ -261,7 +252,6 @@ impl Engine {
             flush: Arc::new(FlushGroups::default()),
             pool,
             cache,
-            open_segs,
             reader,
             progress: (Mutex::new(()), Condvar::new()),
             poisoned_at: AtomicU64::new(u64::MAX),

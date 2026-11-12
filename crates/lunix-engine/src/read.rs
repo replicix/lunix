@@ -1,5 +1,4 @@
-//! Store reads: the R1 check, the stale-hint fallback, the open-segment wait
-//! and the read helper pool.
+//! Store reads: the R1 check, the stale-hint fallback and the read helper pool.
 //!
 //! **R1** (cross-cutting rule 13): every data read passes the map entry's
 //! `id_prefix` (or the full id) and the volume's chunk size to
@@ -9,19 +8,17 @@
 //! no "none" case: a lean volume (`id_len = 0`) reads as a scan
 //! (`verify_id`), as R1 says.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use lunix_format::node::DataEntry;
-use lunix_format::segment::FooterBody;
-use lunix_format::{ChunkId, ExtentKind, Hint, IdLen, IdPrefix, SegId};
+use lunix_format::{ChunkId, ExtentKind, Hint, IdLen, IdPrefix};
 use lunix_iface::block::Tag;
 use lunix_iface::crypto::{ExtentCodec, OpenExpect, OpenOutput};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::map::{entry_hint, BlockMap, ChunkNo};
-use lunix_iface::store::{ExtentLocation, SegmentInfo, SegmentStore, SegmentWriter};
+use lunix_iface::store::SegmentStore;
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::cache::ChunkCache;
@@ -63,87 +60,6 @@ pub trait ChunkReader: Send + Sync {
     fn confirm(&self, hint: &Hint, id: &ChunkId) -> Result<bool>;
 }
 
-/// Segments being written by the current cut. Their map entries exist from
-/// C3, but `*.open` files are not readable, so a reader of such an entry
-/// waits until C4 seals them (or the cut abandons them).
-#[derive(Default)]
-pub(crate) struct OpenSegs {
-    set: Mutex<HashSet<SegId>>,
-    cv: Condvar,
-}
-
-impl OpenSegs {
-    pub(crate) fn add(&self, seg: SegId) {
-        lock(&self.set).insert(seg);
-    }
-
-    pub(crate) fn remove(&self, seg: SegId) {
-        lock(&self.set).remove(&seg);
-        self.cv.notify_all();
-    }
-
-    /// Forgets every segment (a failed destage dropped its writers).
-    pub(crate) fn clear(&self) {
-        lock(&self.set).clear();
-        self.cv.notify_all();
-    }
-
-    /// Blocks (worker threads only) until `seg` is no longer being written.
-    pub(crate) fn wait_sealed(&self, seg: SegId) -> Result<()> {
-        let mut g = lock(&self.set);
-        let mut waited = Duration::ZERO;
-        while g.contains(&seg) {
-            if waited > Duration::from_secs(300) {
-                return Err(Error::Busy {
-                    what: "segment being sealed",
-                });
-            }
-            let (ng, _) = self
-                .cv
-                .wait_timeout(g, Duration::from_millis(50))
-                .unwrap_or_else(|p| p.into_inner());
-            g = ng;
-            waited += Duration::from_millis(50);
-        }
-        Ok(())
-    }
-}
-
-/// The segment store as the destage pipeline sees it: opening a segment
-/// registers it in [`OpenSegs`].
-pub(crate) struct TrackedSegments {
-    pub(crate) inner: Arc<dyn SegmentStore>,
-    pub(crate) open: Arc<OpenSegs>,
-}
-
-impl SegmentStore for TrackedSegments {
-    fn open_segment(&self) -> Result<Box<dyn SegmentWriter>> {
-        let w = self.inner.open_segment()?;
-        self.open.add(w.id());
-        Ok(w)
-    }
-
-    fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
-        self.inner.read_extent(hint, out)
-    }
-
-    fn locate(&self, hint: &Hint) -> Result<ExtentLocation> {
-        self.inner.locate(hint)
-    }
-
-    fn footer(&self, seg: SegId) -> Result<FooterBody> {
-        self.inner.footer(seg)
-    }
-
-    fn list(&self) -> Result<Vec<SegmentInfo>> {
-        self.inner.list()
-    }
-
-    fn delete(&self, seg: SegId) -> Result<u64> {
-        self.inner.delete(seg)
-    }
-}
-
 /// The R1 reader.
 pub(crate) struct ExtentReader {
     pub(crate) segments: Arc<dyn SegmentStore>,
@@ -151,7 +67,6 @@ pub(crate) struct ExtentReader {
     pub(crate) codec: Arc<dyn ExtentCodec>,
     pub(crate) chunk_size: u32,
     pub(crate) verify_reads: bool,
-    pub(crate) open: Arc<OpenSegs>,
     pub(crate) stats: Arc<Counters>,
 }
 
@@ -199,7 +114,6 @@ impl ExtentReader {
 impl ChunkReader for ExtentReader {
     fn read_entry(&self, entry: &DataEntry, out: &mut Vec<u8>) -> Result<()> {
         let hint = entry_hint(entry);
-        self.open.wait_sealed(hint.seg)?;
         let first = match self.open_at(&hint, Expectation::Prefix(&entry.prefix), out) {
             Ok(()) => return Ok(()),
             Err(e) => e,
@@ -230,7 +144,6 @@ impl ChunkReader for ExtentReader {
     }
 
     fn confirm(&self, hint: &Hint, id: &ChunkId) -> Result<bool> {
-        self.open.wait_sealed(hint.seg)?;
         let mut out = Vec::new();
         match self.open_at(hint, Expectation::Full(id), &mut out) {
             Ok(()) => Ok(true),

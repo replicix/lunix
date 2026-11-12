@@ -540,3 +540,86 @@ fn a_wrapped_ring_with_a_lost_checkpoint_recovers() {
     assert!(!r.engine.recovery_report().checkpoint_used);
     assert_eq!(r.read_all(), want);
 }
+
+fn small_cuts(cfg: &mut lunix_engine::EngineConfig) {
+    cfg.max_chunks_per_cut = 4;
+}
+
+#[test]
+fn a_cut_is_bounded_by_max_chunks_per_cut_and_big_discards_are_split() {
+    let cs = 16u64 << 10;
+    let mut v = Vol::create(cs as u32, 64, 2, JournalMode::Mixed(6));
+    v.tweak = small_cuts;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for c in 0..20u64 {
+        assert!(r
+            .write(c as usize, c * cs, &pattern(c, cs as usize), false)
+            .is_ok());
+    }
+    let mut commits = 0;
+    while let CommitOutcome::Committed { cut_seq, .. } = r.engine.commit_now(false).expect("commit")
+    {
+        commits += 1;
+        let tip = r.engine.tip().0;
+        let bytes = CommitStore::get(&r.store, tip).unwrap();
+        let lunix_format::commit::Commit::Full(f) = v.codec.open_commit(tip, &bytes).unwrap()
+        else {
+            panic!("full");
+        };
+        assert_eq!(f.cut_seq, cut_seq);
+        assert!(commits < 50);
+    }
+    assert!(
+        commits >= 5,
+        "20 chunks in cuts of at most 4: {commits} commits"
+    );
+    // A discard of the whole device is several records.
+    v.hooks.take_seqs();
+    assert!(r.hole(0, IoOp::Discard, 0, (64 * cs) as u32).is_ok());
+    assert!(
+        v.hooks.take_seqs().len() >= 64 / 2,
+        "split into records of 2 chunks"
+    );
+    while r.engine.commit_now(false).expect("commit") != CommitOutcome::Idle {}
+    let p = r.stop();
+    v.absorb(p, 1);
+    let mut r = v.open().map_err(|e| e.0).expect("reopen");
+    assert_eq!(r.read_all(), vec![0; (64 * cs) as usize]);
+}
+
+#[test]
+fn a_map_full_cut_is_retried_smaller_and_leaves_no_segment_behind() {
+    let cs = 16u64 << 10;
+    let mut v = Vol::create(cs as u32, 1100, 1, JournalMode::Mixed(8));
+    v.dirty_cap = Some(1);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    assert!(r.write(0, 0, &pattern(1, cs as usize), false).is_ok());
+    assert!(r
+        .write(0, 600 * cs, &pattern(2, cs as usize), false)
+        .is_ok());
+    // Two leaves dirty in one cut exceed the cap of 1: the cut is retried at
+    // the first write only, then the second commit takes the rest.
+    let first = r.engine.commit_now(false).expect("commit");
+    assert!(
+        matches!(first, CommitOutcome::Committed { cut_seq, .. } if cut_seq.0 == 1),
+        "{first:?}"
+    );
+    assert!(matches!(
+        r.engine.commit_now(false).expect("commit"),
+        CommitOutcome::Committed { .. }
+    ));
+    // Every segment on disk is named by a commit: the failed attempt's
+    // segment was deleted by the destager.
+    let mut named = std::collections::HashSet::new();
+    for c in CommitStore::list(&r.store).unwrap() {
+        let bytes = CommitStore::get(&r.store, c.seq).unwrap();
+        if let lunix_format::commit::Commit::Full(f) = v.codec.open_commit(c.seq, &bytes).unwrap() {
+            named.extend(f.new_segments);
+        }
+    }
+    for s in lunix_iface::store::SegmentStore::list(&r.store).unwrap() {
+        assert!(named.contains(&s.seg), "orphan segment {}", s.seg);
+    }
+    assert_eq!(r.read(0, 0, cs as u32).1, pattern(1, cs as usize));
+    assert_eq!(r.read(0, 600 * cs, cs as u32).1, pattern(2, cs as usize));
+}
