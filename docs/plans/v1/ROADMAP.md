@@ -9,6 +9,11 @@ phase 1 on, the format elements are final: the journal record, the
 segment and its CCH1 extent framing, the map node, the commit kinds, the
 bucket layout (including ADR-25's clone reservations: `volume.lineage`,
 the leaf `lineage_idx`, `holds/` and `readers/`) and the key hierarchy.
+The accepted crypto format elements (ADR-11, 2026-11-12) are frozen with
+them: the extent header fields (`dek_gen`, `salt`, `nonce`) and its AAD,
+the `families/<id>/keyring` object, the sealed-object table, the `volume`
+descriptor MAC and KMK fingerprint, and `parent_hash` and `epoch` in every
+commit kind.
 Later phases add code, not
 migrations. Encryption is therefore *designed* in phase 1 even where it is
 implemented later.
@@ -32,7 +37,7 @@ Phase 0 resolves the ADR gates before any format freezes.
 **Prototype** of the radix Merkle map: seal cost and memory at 1 and
 10 TiB.
 
-**Crypto review** of ADR-11.
+**Crypto review** of ADR-11 (done; amendments accepted 2026-11-12).
 
 **Keeper recovery spike (ADR-26):** the kill -9 recovery cycle with a
 memfd write buffer held by a keeper, including the lost-keeper case
@@ -59,7 +64,10 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - The map with local commits, and DISCARD / WRITE_ZEROES.
 - The space ladder with `on_full`, and online grow.
 - `fsck`, including index rebuild.
-- Encryption: format, key slots, AEAD.
+- Encryption: format, the keyring with its key slots, AEAD, the
+  attach-time downgrade check (descriptor MAC and KMK fingerprint), and
+  hash-chained commits with an HMAC on every commit of unencrypted
+  volumes.
 
 **Exit:**
 - fio verify passes.

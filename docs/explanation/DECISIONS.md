@@ -16,10 +16,10 @@ carries a dated **Gate outcome** block, and the numbers are in
   amendments from the measurements. ADR-2 is accepted by gate for AWS S3
   Standard, OVH and MinIO only (partial: R2, GCS, B2 and the rest were
   not run).
-- **Accepted by the maintainer:** ADR-19 (2026-11-12), now executed.
-- **Proposed, amendment awaiting the maintainer's decision:** ADR-11.
-  The review found six format-changing issues (F2, F5, F6, F7, F9,
-  F10), and the external reviewer has not answered.
+- **Accepted by the maintainer:** ADR-19 (2026-11-12), now executed, and
+  ADR-11 (2026-11-12) for the format, with the six amendments from the
+  crypto review (F2, F5, F6, F7, F9, F10). An external cryptographer
+  review is still recommended before release; it does not block phase 1.
 - **Proposed, gate not run:** ADR-5 and ADR-14 (no trace could be
   obtained without a licence acceptance).
 - **Proposed, phase 3 gate open:** ADR-28 (the phase 0 lane and
@@ -427,13 +427,17 @@ hint falls back to the chunk index (ADR-14).
     `commits/<seq:016x>`, written with `If-None-Match: *`. This is
     Constellation's `commits.rs` pattern.
   - Commit kinds:
-    - **FULL**: map root, size, parent, epoch, `cut_seq`, the segments
-      it introduced, optional heat-map reference.
+    - **FULL**: map root, size, `parent_seq`, `parent_hash`, `epoch`,
+      `cut_seq`, the segments it introduced, optional heat-map reference.
     - **DELTA**: journal records inline, compressed and encrypted, on top
       of the last FULL.
     - **EPOCH**: owner change.
     - **CONFIG** and **TRANSFER**: backend membership and authority
       moves (ADR-24).
+    - *Amended by ADR-11 (F5):* every kind carries `parent_hash` (the
+      BLAKE3 of the parent object's bytes) and `epoch`. Mount verifies the
+      links from the newest FULL and rejects a decreasing `epoch`, so valid
+      commits of two histories cannot be spliced into one chain.
   - Every object a commit names is durable before the commit is created.
 - **Ownership:**
   - `lease` is a CAS object (`If-Match`) holding the epoch, owner,
@@ -485,117 +489,222 @@ hint falls back to the chunk index (ADR-14).
 PUT fees are about $1,300 a month. The CLI warns about this and shows the
 measured rate.
 
-## ADR-11: Encryption: AES-256-GCM with per-chunk derived keys; Constellation's key hierarchy
+## ADR-11: Encryption: AES-256-GCM with per-extent derived keys; Constellation's key hierarchy
 
-**Gate outcome (phase 0, 2026-11-12):** partial — the crypto review
-(P0.8) is done and found the salted per-extent key, constant nonce and
-AES-256-GCM construction sound: the amended nonce rule held in every
-modelled case (10 000 mixed re-encodes, no repeat), 40 tests pass and 27
-independent cross-checks agree. The model reproduces the first draft's
-hole (recompress leaks the XOR of plaintexts). Six findings (F2, F5, F6,
-F7, F9, F10) change the frozen format and block the format freeze.
-ADR-11 stays **proposed**: the amendment below is **proposed, and needs
-the maintainer's decision**, and the external reviewer's answers to the
-15 questions in the review note are still outstanding. Cost on one Zen 5
-core: the per-extent key schedule adds about 0.35 µs (0.55-0.65 µs with
-a fresh salt and the proposed derivation); a full seal of 64 KiB takes
-3.77 µs as written (17.4 GB/s) and 3.98 µs proposed (16.5 GB/s), and of
-4 KiB 0.65 µs against 0.92 µs. Argon2id at 64 MiB, t = 3 costs 75-83 ms
-per wrap. Not run: the FIPS-validated build, a real KMS, parser fuzzing,
-AArch64. Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
+**Status:** accepted by the maintainer for the format (2026-11-12),
+amendments included. An external cryptographer review of the 15 questions
+in the [review note](research/2026-11-11-adr-11-crypto-review.md) is still
+recommended before release. It is a note, not a blocker for phase 1.
+
+**Gate outcome (phase 0, 2026-11-12):** the crypto review (P0.8) is done
+and found the salted per-extent key, constant nonce and AES-256-GCM
+construction sound: the amended nonce rule held in every modelled case
+(10 000 mixed re-encodes, no repeat), 40 tests pass and 27 independent
+cross-checks agree. The model reproduces the first draft's hole
+(recompress leaks the XOR of plaintexts). Six findings (F2, F5, F6, F7,
+F9, F10) changed the frozen format; the maintainer accepted the
+amendments on 2026-11-12. Cost on one Zen 5 core: the per-extent key
+schedule adds about 0.35 µs (0.55-0.65 µs with a fresh salt and the
+accepted derivation); a full seal of 64 KiB takes 3.77 µs as first written
+(17.4 GB/s) and 3.98 µs as accepted (16.5 GB/s), and of 4 KiB 0.65 µs
+against 0.92 µs. Argon2id at 64 MiB, t = 3 costs 75-83 ms per wrap. Not
+run: the FIPS-validated build, a real KMS, parser fuzzing, AArch64.
+Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
 [review note](research/2026-11-11-adr-11-crypto-review.md).
 
-- **Amendment proposed, needs the maintainer's decision (F2).** The
-  extent header gains an authenticated `dek_epoch: u32`, renamed
-  `dek_gen` so it is not confused with the lease and commit `epoch`. The
-  AAD becomes `ver ‖ codec ‖ level ‖ ulen ‖ kind ‖ dek_epoch ‖ family_id
-  ‖ id_len ‖ chunk_id`. "Encrypted" is read from the authenticated
-  volume descriptor, never from an extent.
-- **Amendment proposed, needs the maintainer's decision (F5).** Every
-  commit kind carries `parent_hash` (BLAKE3 of the parent object's
-  bytes) and `epoch`. Mount verifies the chain from the newest FULL and
-  rejects decreasing epochs. A FULL commit of an unencrypted volume
-  carries an HMAC under an integrity key held in the key slots, or is
-  documented as corruption detection only. The lease carries its epoch
-  in the plaintext, and a lease below the newest verified epoch is
-  rejected.
-- **Amendment proposed, needs the maintainer's decision (F6).** One
-  mutable `families/<id>/keyring`, written by CAS on the authority and
-  copied to mirrors, with `keyring_seq` inside a MAC'd body. The slot
-  wrap AAD is `"lunix slot v1\0" ‖ family ‖ slot_id ‖ kind ‖ KDF params
-  ‖ salt`, and KMS slots use the encryption context `{family, slot,
-  key_ref}`. Argon2id parameters are bounded when read (≤ 1 GiB, t ≤ 10,
-  p ≤ 16) and floored when written (≥ 19 MiB, t ≥ 2). Removing a slot or
-  changing a passphrase does not revoke a KMK the holder has seen;
-  revocation is migration to a new KMK, and DEK-epoch rotation protects
-  only new writes.
-- **Amendment proposed, needs the maintainer's decision (F7).** If the
-  caller supplies key material at attach, the volume must be encrypted
-  and its descriptor MAC (keyed by a KMK-derived key) must verify, else
-  the attach is refused as a downgrade. The orchestrator supplies the
-  KMK fingerprint; the local pin stays for the CLI.
-- **Amendment proposed, needs the maintainer's decision (F9).** Sealed
-  objects are listed: `volume` (plaintext fields plus MAC), `keyring`
-  (wrapped, MAC'd), `lease`, `commits/*` and DELTA bodies, `map/*`
-  nodes, segment footers, `heat/*`, `gc/*`, `readers/*`, `holds/*` and
-  `snapshots/*` bodies. They are sealed with XChaCha20-Poly1305 under a
-  per-kind metadata key; extents and map nodes use the extent scheme.
-  Object names stay plaintext.
-- **Amendment proposed, needs the maintainer's decision (F10).** The
-  extent header reserves `nonce[12]`: zero in the default profile, the
-  module-generated nonce in the FIPS profile, where aws-lc-rs offers no
-  fixed-nonce seal. The FIPS profile derives the key with HKDF-SHA-256
-  Expand over the same `info`. Suggested layout: `… + clen +
-  [dek_epoch(4) + salt(24) + nonce(12)] + payload + tag`.
-- Proposed with them, not blocking the freeze (F1b, F3, F8, F11, F12):
-  the extent key becomes `keyed_hash(DEK_epoch, info)` with `info =
-  "lunix extent v2\0" ‖ family_id ‖ kind ‖ dek_epoch ‖ codec ‖ level ‖
-  clen ‖ id_len ‖ chunk_id ‖ salt`, where the 192-bit salt is drawn
-  inside the seal function on every call and no retry, re-encode or
-  compaction path may carry one. Debug and fuzz builds run a (key,
-  nonce) tripwire. The local journal and overlay are plaintext at rest
-  (dm-crypt is recommended), and unencrypted volumes detect corruption
-  without authentication.
-- Test vectors in `bench/crypto-kat/raw/kat-vectors.json` would be
-  normative for phase 1 tests. DESIGN sections that would change if the
-  amendment is accepted: §5 step 6, §6, §6.1, §8.2, §8.5, §15, §22.1.
-  They are not edited yet.
+- Amendments F2, F5, F6, F7, F9, F10 (and F1b, F3, F8, F11, F12) accepted
+  by the maintainer, 2026-11-12:
+  - F2: authenticated `dek_gen` in the extent header and the AAD.
+  - F5: `parent_hash` and `epoch` in every commit kind; an HMAC on every
+    commit of an unencrypted volume; lease epoch floor.
+  - F6: one mutable, CAS-written `keyring`; bounded Argon2id; honest slot
+    semantics.
+  - F7: key material at attach means "must be encrypted", checked by the
+    descriptor MAC; the orchestrator supplies the KMK fingerprint.
+  - F9: every metadata object sealed, by the object-kind table.
+  - F10: a reserved `nonce[12]` in the extent header for the FIPS profile.
+  - F1b, F3, F8, F11, F12: the keyed extent derivation over `info`, a
+    salt that is never carried over, a (key, nonce) tripwire, plaintext
+    journal and overlay documented, the lease epoch floor.
+- The vectors in `bench/crypto-kat/raw/kat-vectors.json` are normative for
+  phase 1 tests. They use the `lunix extent v2\0` info string below. Their
+  field named `dek_epoch` is the same value as `dek_gen`.
+- DESIGN §5, §6, §6.1, §8, §15 and §22.1 follow this record.
 
 **Decision:** encryption is chosen at volume-family creation.
 
 - **Key hierarchy (taken from Constellation's `e2e.rs`):**
-  - A master key (KMK) is wrapped by one or more key slots: Argon2id
-    passphrase, KMS key or raw key file. Several slots let a volume
-    switch KMS when it changes cloud.
-  - The addressing key, the data-key epochs and the metadata key are
-    derived from the KMK by purpose, using keyed BLAKE3.
+  - A master key (KMK) is wrapped by one or more key slots in the family
+    keyring: Argon2id passphrase, KMS key or raw key file. Several slots
+    let a volume switch KMS when it changes cloud.
+  - Every other key is derived from the KMK by purpose, with keyed BLAKE3
+    (HKDF-SHA-256 in the FIPS profile): `keyed_hash(KMK, "lunix kdf v1\0" ‖
+    family_id ‖ purpose ‖ args)`. The purposes are the addressing key (one
+    for data, one for map nodes), one DEK per `dek_gen`, one metadata key
+    per object kind, the volume-descriptor MAC key, the keyring MAC key
+    and the KMK fingerprint.
+  - **`dek_gen`** is the DEK generation, a `u32` starting at 0. It is
+    named `dek_gen` so it is not confused with the lease and commit
+    `epoch`. Rotation raises it, new extents use the newest generation,
+    and old extents keep theirs until compaction rewrites them. A reader
+    derives any generation's DEK from the KMK.
+- **Extent format:**
+  - `header {magic, ver, codec, level, ulen} + chunk_id + clen +
+    [dek_gen(4) + salt(24) + nonce(12)] + payload + tag(16)`. The bracketed
+    fields exist when the volume is encrypted.
+  - "Encrypted" is read from the authenticated volume descriptor, never
+    from an extent. `family_id`, `id_len` and `kind` (data extent or map
+    node) also come from the descriptor and the container (`segments/` or
+    `map/`), not from the extent.
+  - `nonce` is zero in the default profile. In the FIPS profile it holds
+    the module-generated nonce.
 - **Data encryption:**
-  - Every extent carries a fresh random 192-bit `salt` in its header.
-  - The extent key is `blake3::derive_key("lunix extent v1",
-    DEK_epoch ‖ chunk_id ‖ salt)`.
-  - The cipher is AES-256-GCM with a fixed nonce, because every key
-    encrypts exactly one payload. It runs through `aws-lc-rs`; ring
-    measured 11 GB/s per core on this host.
-  - The AAD is the format version, codec, level, `ulen` and `chunk_id`.
+  - The extent key is `keyed_hash(DEK_gen, info)` with `info = "lunix
+    extent v2\0" ‖ family_id ‖ kind ‖ dek_gen ‖ codec ‖ level ‖ clen ‖
+    id_len ‖ chunk_id ‖ salt`. The FIPS profile uses HKDF-SHA-256 Expand
+    over the same `info`.
+  - The `salt` is a fresh random 192-bit value drawn **inside the seal
+    function on every call**. No retry, re-encode or compaction path may
+    carry one over: the extent builder has no salt setter, re-encoding
+    always re-seals, and the salt never comes from a buffered RNG pool.
+  - The cipher is AES-256-GCM with a fixed all-zero nonce, because every
+    key encrypts exactly one payload. It runs through `aws-lc-rs`; ring
+    measured 11 GB/s per core on the first host. The FIPS profile cannot
+    seal with a caller-chosen nonce in aws-lc-rs, so it stores the module's
+    random nonce in the `nonce` field.
+  - The AAD is `ver ‖ codec ‖ level ‖ ulen ‖ kind ‖ dek_gen ‖ family_id ‖
+    id_len ‖ chunk_id`. It holds no volume, segment or offset, so re-packing,
+    mirroring and dedup can copy extents verbatim.
+  - Debug and fuzz builds run a (key, nonce) tripwire that fails on any
+    repeat.
+- **Sealed objects (every metadata object's contents):**
+
+  | object | sealing |
+  |---|---|
+  | `volume` | plaintext fields plus a descriptor MAC (see Downgrade) |
+  | `families/<id>/keyring` | slots wrapped, body MAC'd |
+  | `lease` | XChaCha20-Poly1305, `lease` metadata key |
+  | `commits/*`, including DELTA bodies | XChaCha20-Poly1305, `commit` and `delta` metadata keys |
+  | `map/*` nodes | the extent scheme, `kind` = node |
+  | segment footers | XChaCha20-Poly1305, `footer` metadata key |
+  | `heat/*`, `gc/*`, `readers/*`, `holds/*`, `snapshots/*` bodies | XChaCha20-Poly1305, one metadata key per kind |
+  | `head`, `sync/*/progress` | not sealed: advisory, never trusted, only counters |
+
+  - Metadata uses a random 192-bit nonce. The AAD is `"lunix meta v1\0" ‖
+    volume ‖ kind ‖ object name` (the family for the keyring). It holds no
+    bucket or backend id, because mirrors hold byte-identical objects. A
+    commit moved to another `seq` or volume fails.
+  - Object names stay plaintext, so a bucket reader still sees counts,
+    sizes, times and access patterns.
+  - The FIPS profile needs an AES-GCM form of this sealing, with a key
+    derived from the metadata key and a random per-object salt. It is not
+    built.
+- **Keyring (F6):**
+  - There is one mutable object per family, `families/<family-id>/keyring`.
+    The `volume` object holds no slots.
+  - It is written by CAS (`If-Match`) on the authority only and copied
+    byte-identically to the mirrors. Its body holds `keyring_seq`, the
+    slots and the family id, and is MAC'd with the keyring MAC key.
+    `keyring_seq` rises on every change, and a keyring below the highest
+    `keyring_seq` seen is rejected, so a removed slot cannot come back
+    silently.
+  - A slot is the KMK wrapped with XChaCha20-Poly1305 under a key-encryption
+    key. The AAD is `"lunix slot v1\0" ‖ family ‖ slot_id ‖ kind ‖ KDF
+    params ‖ salt`. A KMS slot is bound by the KMS encryption context
+    `{family, slot, key_ref}`. Azure Key Vault wrap takes no AAD, so its
+    slot needs a MAC over the slot instead.
+  - Argon2id parameters are stored per slot and unwrap uses the stored
+    ones. They are bounded when read (at most 1 GiB, t ≤ 10, p ≤ 16) and
+    floored when written (at least 19 MiB, t ≥ 2).
+  - Removing a slot or changing a passphrase does **not** revoke a KMK the
+    holder has already seen. Revocation is migration to a new KMK. DEK
+    rotation protects only new writes, and a dedup hit keeps pointing at an
+    old extent until compaction rewrites it. A mounted volume holds its KMK
+    in memory, so slot changes take effect at the next attach.
+  - An unencrypted family has a keyring too. Its slots wrap an integrity
+    key instead of encryption keys (see Integrity).
+- **Downgrade (F7):**
+  - The `volume` descriptor carries a MAC keyed by a KMK-derived key. It
+    covers every plaintext field, with the label `"lunix volume v1\0"`.
+  - The attach request, not the bucket, decides whether the volume must be
+    encrypted. If the caller supplies key material (a slot credential, a
+    KMS reference or a key file), the volume must be encrypted and its
+    descriptor MAC must verify, else attach is refused as a downgrade
+    (`Downgrade`). A caller that supplies the integrity credential of an
+    unencrypted volume declares it integrity-only, and the descriptor MAC
+    must verify under the integrity key.
+  - The orchestrator (StorageClass, `LunixBackendSet` or the Secret)
+    supplies the KMK fingerprint. A different volume with its own KMK is
+    refused as `WrongKmk`. The local trust-on-first-use pin stays for the
+    interactive CLI.
+  - Without a credential, a fingerprint or a pin, a volume recreated as
+    plaintext cannot be told from a real one. That follows from the
+    ephemeral-client model.
+- **Commit chain (F5):**
+  - Every commit kind (FULL, DELTA, EPOCH, CONFIG, TRANSFER) carries
+    `parent_hash`, the BLAKE3 of the parent object's bytes as stored, and
+    `epoch`.
+  - Mount verifies the links from the newest FULL to the tip and rejects a
+    decreasing `epoch`. Two valid branches, such as the abandoned branch of
+    a DR steal (ADR-24), can no longer be spliced into one chain.
+  - The `lease` carries its `epoch` in the plaintext of its sealed body. A
+    lease whose epoch is below the newest verified epoch is rejected,
+    because an old sealed version of the same object would otherwise pass
+    the AEAD.
 - **Consequences:**
-  - There is no nonce-space limit. A (key, nonce) pair never repeats,
-    even when the same chunk is recompressed (ADR-12) or re-encoded by a
-    newer zstd.
+  - There is no nonce-space limit. A (key, nonce) pair never repeats, even
+    when the same chunk is recompressed (ADR-12) or re-encoded by a newer
+    zstd.
   - Re-packing and mirroring copy extent bytes verbatim, so they never
     re-encrypt.
-  - Commits and the lease use random-nonce XChaCha20-Poly1305 under the
-    metadata key.
+  - Commits, the lease and the other metadata use random-nonce
+    XChaCha20-Poly1305 (RustCrypto `chacha20poly1305`), a second AEAD
+    implementation to audit.
+  - A bucket reader sees chunk-id equality within a family, `clen`, object
+    names and timing. An opt-in `pad` option buckets `clen`; it is off by
+    default and its cost on real data is unmeasured.
+  - The local journal, the dirty overlay and the keeper-held memfd hold
+    plaintext. ADR-11 protects the bucket and the extents cached from it.
+    dm-crypt or LUKS on the local directory is recommended.
+  - Keys live in `Zeroizing` memory. The daemon already runs `mlockall`
+    for ublk. Core dumps are off (`PR_SET_DUMPABLE 0`, `RLIMIT_CORE 0`,
+    `MADV_DONTDUMP`).
+  - A Lunix KMK must never be shared with Constellation. The labels differ,
+    so an accidental share still yields unrelated keys.
 - **Amended 2026-11-11, before acceptance:** the first draft derived the
   key from `chunk_id` alone. That produced deterministic ciphertext and a
   GCM nonce-reuse hole whenever the same plaintext was compressed to
   different bytes. The random salt removes the hole.
+- **Amended 2026-11-12, at acceptance:** the extent key moved from
+  `blake3::derive_key("lunix extent v1", DEK_epoch ‖ chunk_id ‖ salt)` to
+  the keyed form above, which binds family, kind, codec, level and `clen`
+  and has a PRF slot for the secret. The header gained `dek_gen` and
+  `nonce`, the commits gained `parent_hash`, and the keyring became one
+  mutable object.
 
 **Integrity:**
-- Every fetched extent is checked: AEAD tag, then decompression with a
-  `ulen` cap, then the chunk id is recomputed.
-- FULL commits carry a MAC over the map root, epoch and parent. Rollback
-  detection needs an anchor outside the bucket; see the open questions in
-  DESIGN.md.
+- Every fetched extent is checked in this order: header sanity (version,
+  known codec, `chunk_id` matches the map), AEAD tag, `ulen` against the
+  volume's chunk size (never the header), bounded decompression, then the
+  chunk id is recomputed. The recompute is also the key commitment that
+  GCM lacks.
+- On a tag failure the daemon returns no data, counts it
+  (`extent_auth_failures_total{backend}`), tries another InSync backend
+  and never caches the bad extent. A tag-valid extent with the wrong id is
+  a writer bug or a key compromise and raises an alarm.
+- Encrypted volumes: the AEAD authenticates every commit body, and
+  `parent_hash` links them.
+- Unencrypted volumes: every commit (FULL, DELTA, EPOCH, CONFIG and
+  TRANSFER) carries an HMAC over its body, including `epoch` and
+  `parent_hash`, under an integrity key held in the family keyring. A
+  DELTA's HMAC covers its inline records, and a FULL's covers the map root.
+  Since the map is a Merkle tree over chunk ids, this authenticates the
+  volume state end to end. The lease carries the same HMAC. The integrity
+  key is chosen over "corruption detection only" (maintainer,
+  2026-11-12), and every commit is covered so that a bucket writer cannot
+  forge a DELTA or CONFIG between two FULLs.
+- Rollback to an older valid prefix of the chain needs an anchor outside
+  the bucket; see the open questions in DESIGN.md.
 
 **Rejected:**
 - *Per-chunk random-nonce XChaCha20-Poly1305.* That is Constellation's
@@ -604,9 +713,14 @@ AArch64. Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
 - *Unkeyed convergent encryption.* The provider could confirm known
   files.
 - *AES-GCM-SIV.* About 5× slower in the measured crates.
+- *Slots in the create-only `volume` object.* Slots must change after
+  creation.
+- *Corruption detection only for unencrypted volumes.* The maintainer
+  chose the HMAC.
 
-**Gate:** a crypto design review before the format is frozen. A FIPS
-profile uses HKDF-SHA-256 and HMAC-SHA-256.
+**Gate:** the crypto design review ran in phase 0 and is closed. The
+external review is recommended before release. A FIPS profile uses
+HKDF-SHA-256 and HMAC-SHA-256.
 
 ## ADR-12: Compression `auto`: an LZ4 probe, then zstd-1; recompress on seal
 
@@ -690,7 +804,8 @@ W-TinyLFU) in phase 0.
 **Decision:**
 - **Roles and contents:**
   - A volume has one authority backend and zero or more mirrors.
-  - Mirrors receive byte-identical segments, map packs and commits.
+  - Mirrors receive byte-identical segments, map packs and commits, and
+    the family keyring (ADR-11), which the authority writes by CAS.
   - A commit is copied last, so every backend always holds a valid
     prefix of the chain.
   - Each backend has a cursor, the highest commit it holds.
@@ -1003,6 +1118,10 @@ The format is part of v1. Its population is phase 7.
      configuration:
      `{config_version, authority: backend_id, backends: [{id, url,
      role, state, since_seq}], policy}`.
+   - *Amended by ADR-11 (F5):* like every commit kind, CONFIG and
+     TRANSFER carry `parent_hash` and `epoch`. The abandoned branch of a
+     DR steal (item 6) therefore cannot be spliced into the surviving
+     chain.
    - Every membership or state change is a CONFIG commit on the
      authority's chain, written create-only like every commit:
      - `backend add` → Joining;

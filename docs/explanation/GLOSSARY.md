@@ -8,8 +8,8 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   chunk/codec/crypto settings, exposed as `/dev/ublkbN` (symlink
   `/dev/lunix/<name>`).
 - **Family:** the key domain: a volume plus its snapshots and (post-v1)
-  clones. A volume dedups only against its own chunks and its frozen
-  lineage bases (ADR-13, ADR-25).
+  clones. It shares one keyring. A volume dedups only against its own
+  chunks and its frozen lineage bases (ADR-13, ADR-25).
 - **Lineage:** the parent volumes and base commits a post-v1 clone reads
   through (`volume.lineage`). It is always empty in v1.
 - **Hold:** `holds/<child>` in a parent volume, pinning a clone's base
@@ -24,13 +24,16 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   `owner`, `deadline` and `released`. It gives liveness. Safety comes
   from the commit chain.
 - **Epoch:** a monotonic owner generation. It is bumped on every
-  ownership change, and an EPOCH commit marks it in the chain.
+  ownership change, and an EPOCH commit marks it in the chain. Every
+  commit kind and the lease carry it, and mount rejects a decrease. It is
+  not the DEK generation (`dek_gen`).
 - **Zombie:** a former owner that has not noticed it lost the lease. It is
   fenced by its next commit attempt (412).
 - **seq:** the global write sequence number, assigned at admission.
 - **Cut:** the device state containing every write with `seq ≤ c`. It is
   always a legal post-power-loss image.
-- **Commit:** a create-only object `commits/<seq>`.
+- **Commit:** a create-only object `commits/<seq>`. Every kind carries
+  `epoch`, `parent_seq` and a **parent hash**.
   - **FULL** commits name a map root and new segments.
   - **DELTA** commits carry journal records inline (sync mode).
   - **EPOCH** commits mark an owner change.
@@ -39,6 +42,9 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   - **TRANSFER** commits hand the authority to another backend. A
     TRANSFER is written by CAS on the old authority, and that write is
     the transfer's linearization point.
+- **Parent hash:** `parent_hash`, the BLAKE3 of the parent commit object's
+  bytes as stored. It links the chain, so valid commits of two histories
+  cannot be spliced (ADR-11).
 - **Tip:** the highest contiguous commit on a backend.
 - **Journal:** the local, O_DIRECT, append-only record of acknowledged
   but not yet destaged writes.
@@ -51,6 +57,19 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   is a **hole** and is never stored.
 - **Extent:** one stored chunk inside a segment: header, compressed and
   optionally encrypted payload, tag.
+- **dek_gen:** the DEK generation, a `u32` in each encrypted extent's
+  header and AAD. Rotation raises it and protects only new writes. It is
+  unrelated to the lease and commit `epoch` (ADR-11).
+- **Keyring:** `families/<id>/keyring`, the one mutable key object of a
+  family. It holds the key slots that wrap the KMK (or, for an unencrypted
+  family, an integrity key). It is written by CAS on the authority, copied
+  to mirrors, and carries `keyring_seq` in a MAC'd body (ADR-11).
+- **KMK fingerprint:** a value derived from the KMK by purpose. The
+  orchestrator supplies it at attach, and a volume with a different KMK is
+  refused. The CLI pins it locally on first attach instead (ADR-11).
+- **Descriptor MAC:** the MAC on the `volume` object, keyed by a
+  KMK-derived key. Together with the rule that supplied key material means
+  "must be encrypted", it blocks the encryption downgrade (ADR-11).
 - **Segment:** an immutable packed object of extents, about 16 MiB, with
   a footer index. Its bytes are identical locally and on every backend.
 - **Map:** the fixed-radix Merkle tree from chunk index to `chunk_id` plus

@@ -60,7 +60,7 @@ until the coordinator reviews it.
 | P0.5 journal | done | ADR-4 accepted (gate); group commit; one run per cell |
 | P0.6 trace simulation | not run | no trace could be obtained without a licence acceptance; simulators built and tested |
 | P0.7 radix map | done | ADR-8 accepted (gate) with amendments |
-| P0.8 crypto review | partial | review done; six format-changing findings; ADR-11 stays proposed |
+| P0.8 crypto review | done | review done; six format-changing findings; amendments accepted and ADR-11 accepted for the format by the maintainer (2026-11-12); external review still recommended before release |
 | P0.9 `replicix-core` | done outside this plan | commit `caa47b4`; Constellation `6e25bad6`; ADR-19 accepted |
 | P0.10 S3 probe | partial | AWS S3 Standard, OVH and MinIO done; R2, GCS, B2 and others have no credentials |
 | P0.11 close-out | done | this status, `bench/BASELINE.md` and the ADR blocks |
@@ -75,9 +75,10 @@ until the coordinator reviews it.
   PUT latency per size with 8 parallel streams.
 - **P0.12.** The systemd FD-store variant (`sd_notify(FDSTORE=1)` and a
   `LISTEN_FDS` recovery path).
-- **Crypto amendment.** The maintainer decides F2, F5, F6, F7, F9 and F10
-  (ADR-11) before phase 1 freezes the extent, commit and bucket formats.
-  The external reviewer's answers are also outstanding.
+- **Crypto amendment.** Done (2026-11-12): the maintainer accepted F2,
+  F5, F6, F7, F9 and F10 (ADR-11), and the formats can freeze in phase 1.
+  The external reviewer's answers are still outstanding. They are
+  recommended before release and do not block phase 1.
 
 ## Privileges, hosts and scratch space
 

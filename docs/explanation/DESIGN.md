@@ -49,7 +49,8 @@ A **volume** is a thin block device of a given size. Its data path is:
   compression policy, encryption on/off, and family. Size is mutable
   (§14).
 - **Family:** the key domain (ADR-13): a volume plus its snapshots and,
-  post-v1, its clones. `family_id`, keyring (if encrypted).
+  post-v1, its clones. `family_id`, keyring (key slots for an encrypted
+  family, an integrity key for an unencrypted one; ADR-11).
   - **Dedup domain:** the volume plus its frozen lineage bases (ADR-25).
 - **Lineage:** `volume.lineage` lists the parent volumes and base commits
   a clone reads through. It is always empty in v1; the format is frozen
@@ -222,8 +223,14 @@ than the async interval, so overwrites are absorbed.
 5. **Compress:** `auto` = LZ4 probe on 4 KiB; raw if the saving is under
    6%; else zstd-1 with a per-worker context (ADR-12).
 6. **Encrypt (optional):** AES-256-GCM. The extent key is derived from
-   `chunk_id` plus a random per-extent salt, so each key is used once
-   (ADR-11).
+   the DEK of the current `dek_gen`, the family, the kind, the encoding
+   (codec, level, `clen`), `chunk_id` and a random 192-bit per-extent
+   salt, so each key is used once (ADR-11).
+   - The salt is drawn inside the seal function on every call. A retry,
+     a re-encode (recompress, zstd upgrade, pipeline degrade) and
+     compaction all re-seal with a new salt. No code path stores a salt or
+     accepts one from the caller.
+   - A debug or fuzz build checks every (key, nonce) pair for repeats.
 7. **Pack:** append the extent to the open segment, in LBA order within
    a batch. Seal the segment at the target size or at a commit cut:
    write the footer, `fdatasync`, rename into `segments/`.
@@ -249,11 +256,17 @@ Segment (`segments/<seg:016x>`, immutable, target 16 MiB):
 
 ```
 [extent]* [footer] [trailer]
-extent  = CCH1 header {magic, ver, codec, level, ulen} + chunk_id(32) + clen + [salt(24) if encrypted] + payload(+16 B GCM tag)
+extent  = CCH1 header {magic, ver, codec, level, ulen} + chunk_id(32) + clen + [dek_gen(4) + salt(24) + nonce(12)] + payload + tag(16)
 footer  = sorted [chunk_id, offset, clen, ulen, codec] (zstd-compressed) + seg-level BLAKE3 + seq range
 trailer = footer offset + length + magic
 ```
 
+- The bracketed fields exist only when the volume is encrypted. "Encrypted"
+  is read from the authenticated `volume` descriptor, never from an
+  extent. `dek_gen` is the DEK generation and is bound in the AAD. `nonce`
+  is zero in the default profile and holds the module-generated nonce in
+  the FIPS profile. The AAD is `ver ‖ codec ‖ level ‖ ulen ‖ kind ‖ dek_gen
+  ‖ family_id ‖ id_len ‖ chunk_id`, with no location in it (ADR-11).
 - Segment numbers are allocated by the owner, are monotonic, and are
   never reused: `seg = (epoch << 40) | counter`, so a zombie can never
   collide.
@@ -264,9 +277,10 @@ trailer = footer offset + length + magic
 ```
 <prefix>/lunix/v1/<volume-uuid>/
   volume          create-only: format version, uuid, family, lineage[] (empty in v1),
-                  block/chunk size, codec policy, id_len, crypto params,
-                  wrapped key slots (MAC'd)
-  lease           CAS object: epoch, owner{host,cluster}, deadline, released
+                  block/chunk size, codec policy, id_len, crypto params
+                  (encrypted or not, profile), KMK fingerprint, descriptor MAC.
+                  No key slots.
+  lease           CAS object, sealed: epoch, owner{host,cluster}, deadline, released
   head            advisory: last known commit seq (plain PUT; never trusted)
   commits/<seq:016x>       create-only FULL | DELTA | EPOCH | CONFIG | TRANSFER commits
   sync/<backend-id>/progress   advisory backfill/cursor progress (owner-only plain PUT)
@@ -278,7 +292,20 @@ trailer = footer offset + length + magic
   holds/<child-uuid>       clone base pins {base_seq}; none in v1, but GC honours them (ADR-25)
   gc/                      condemned lists, evidence journal
 <prefix>/lunix/v1/families/<family-id>/keyring   (shared by clones)
+                  mutable, sealed: keyring_seq, key slots, MAC'd body.
+                  CAS (If-Match) on the authority only; copied to mirrors
 ```
+
+- **Sealing (ADR-11):** every object above is sealed except `volume`
+  (plaintext fields plus a MAC), `head` and `sync/*/progress` (advisory
+  plain PUTs). Commits and DELTA bodies, `lease`, segment footers, `heat/`,
+  `gc/`, `readers/`, `holds/` and `snapshots/` bodies use
+  XChaCha20-Poly1305 under a per-kind metadata key. Extents and map nodes
+  use the extent scheme. Object names stay plaintext.
+- **Keyring:** `keyring_seq` rises on every change, and a keyring below
+  the highest one seen is rejected. The `keyring` is the one mutable
+  object that is not membership state (ADR-24). Mirrors copy it after the
+  authority's CAS.
 
 ## 7. Block map
 
@@ -377,9 +404,18 @@ trailer = footer offset + length + magic
 ### 8.2 FULL commit
 
 ```
-commit { kind: FULL, seq, epoch, parent_seq, cut_seq, size, map_root, map_packs[],
-         new_segments[], index_packs[], chain_floor, heat?, created_at, mac }
+commit { kind: FULL, seq, epoch, parent_seq, parent_hash, cut_seq, size, map_root,
+         map_packs[], new_segments[], index_packs[], chain_floor, heat?,
+         created_at, mac? }
 ```
+
+- **Chain fields (every kind, ADR-11):** all five commit kinds carry
+  `epoch`, `parent_seq` and `parent_hash`, the BLAKE3 of the parent
+  object's bytes as stored.
+- **Authentication:** on an encrypted volume the commit is sealed, and the
+  AEAD authenticates the whole body. On an unencrypted volume every
+  commit kind, and the lease, carries `mac`, an HMAC over the body under
+  the integrity key from the keyring.
 
 Upload order:
 
@@ -396,7 +432,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - On FLUSH or FUA, all flush waiters are gathered into one group.
 - `cut = max seq` of that group. The journal records `(last_commit_cut,
   cut]` are framed, compressed and encrypted into
-  `commits/<seq>` (kind DELTA, `If-None-Match: *`).
+  `commits/<seq>` (kind DELTA, `If-None-Match: *`). Like every commit it
+  carries `epoch`, `parent_seq` and `parent_hash`.
 - One PUT completes every waiter in the group. While it is in flight the
   next group accumulates, with one PUT outstanding per volume.
 - **Size cap:** if the group's data is over the DELTA cap (default
@@ -430,7 +467,13 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ### 8.4 Mount (attach) from a bucket
 
-1. Read `volume` and verify its MAC.
+1. Read `volume`.
+   - **Attach policy (ADR-11):** if the caller supplied key material, the
+     volume must be encrypted, else refuse as a downgrade.
+   - Read the family `keyring`, unwrap the KMK (or the integrity key) from
+     a slot, and verify the keyring MAC. Reject a `keyring_seq` below the
+     highest seen. A supplied KMK fingerprint must match.
+   - Verify the descriptor MAC of `volume`. A failure refuses the mount.
 2. Find the tip: start from the `head` hint, LIST `commits/` from it,
    and probe forward until a 404.
 3. **Find the authority** (ADR-24):
@@ -442,8 +485,14 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
      attach.
 4. Load the newest FULL ≤ tip and replay subsequent DELTAs, in order,
    up to the first gap.
+   - Verify the chain from that FULL to the tip: each commit's
+     `parent_hash` must equal the BLAKE3 of the parent object's bytes, and
+     `epoch` must never decrease. A broken link or a decreasing epoch
+     refuses the mount.
+   - On an unencrypted volume, verify the HMAC of every commit replayed.
 5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
-   not released, wait for the deadline (or `--steal`).
+   not released, wait for the deadline (or `--steal`). A lease whose
+   `epoch` is below the newest verified epoch is rejected.
 6. Write an EPOCH commit at tip + 1. If that write gets 412, another
    writer appended: re-read, replay, retry. If the 412 slot holds a
    TRANSFER, follow it (step 3).
@@ -453,7 +502,10 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 ### 8.5 Lease and fencing
 
 - **Lease:** `{epoch, owner, deadline, released}`, renewed every 30 s via
-  `If-Match` (TTL 90 s, configurable).
+  `If-Match` (TTL 90 s, configurable). The object is sealed, and `epoch`
+  is in the plaintext of its body. A reader rejects a lease below the
+  newest epoch of the verified chain, because an old version of the same
+  object would pass the AEAD.
 - **Losing the lease:** if renewal fails for longer than the TTL minus
   skew, the owner **self-fences**. Writes park and the device goes
   read-only after `fence_grace`.
@@ -663,6 +715,11 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   - Every row transition below is one CONFIG commit, written create-only
     on the authority.
   - Mirrors receive the commits as byte-identical copies and need no CAS.
+    The family `keyring` is copied the same way, after the authority's
+    CAS (ADR-11).
+  - Every CONFIG and TRANSFER commit carries `epoch` and `parent_hash`
+    like any commit (ADR-11), so a steal's abandoned branch cannot be
+    spliced back into a chain.
   - Backfill progress and cursors are advisory (`sync/<id>/progress`),
     rebuildable by a LIST/HEAD diff.
   - Credentials are never in S3. Backends are resolved by `id` on each
@@ -757,6 +814,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
     generation`) must match. Otherwise the device is deleted (EIO), not
     recovered. A mounted file system then goes read-only, and the
     deletion completes only when it is unmounted.
+  - The memfd holds plaintext journal records, like the local journal
+    (ADR-11, §15).
   - The phase 0 spike used a standalone keeper process. The systemd
     FD-store variant is untested.
   - The RAM sink's drain must not block the queue thread. The phase 0
@@ -831,13 +890,34 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 - **Keys:**
   - Keys, AEAD and integrity follow ADR-11.
-  - Key slots are wrapped in `volume`, and the `volume` object is MAC'd
-    to prevent encryption-downgrade attacks. The KMK fingerprint is
-    pinned locally on first attach.
+  - Key slots live in the family `keyring`, a single mutable object
+    written by CAS on the authority, with `keyring_seq` in a MAC'd body.
+    Slot wraps are bound to family, slot id, kind and KDF parameters.
+    Argon2id parameters are bounded when read and floored when written.
+  - **Downgrade defence:** the `volume` descriptor is MAC'd under a
+    KMK-derived key. The attach request, not the bucket, decides whether
+    the volume must be encrypted: supplying key material means it must
+    be, and the descriptor MAC must verify. The orchestrator supplies the
+    KMK fingerprint. The local trust-on-first-use pin stays for the CLI
+    only, because an ephemeral client has no pin.
+  - **History:** every commit is hash-chained and carries its epoch.
+    Mount rejects broken links, decreasing epochs and a stale lease.
+  - **Unencrypted volumes:** every commit and the lease carry an HMAC under
+    an integrity key from the keyring, so the bucket alone cannot forge
+    state. Extent contents are covered through the chunk ids in the
+    authenticated map.
+  - **Slot removal revokes nothing already seen:** removing a slot or
+    changing a passphrase leaves the KMK unchanged for anyone who held it.
+    Revocation is migration to a new KMK. DEK rotation (`dek_gen`)
+    protects only new writes.
+  - **Plaintext at rest locally:** the journal, the dirty overlay and the
+    keeper-held write buffer are plaintext. Run the local directory on
+    dm-crypt or LUKS if the host disk is in the threat model.
   - Keys live in mlocked, zeroized memory, and core dumps are forbidden.
 - **Hardening rules carried over from the Constellation audit:**
   - Bounded decode and bounded allocations from decoded counts.
-  - Decompression capped by `ulen`.
+  - Decompression capped by the volume's chunk size, never by the `ulen`
+    in an extent header.
   - Checked arithmetic on sizes and epochs.
   - Never trust sizes read from the bucket.
   - Redacted S3 errors.
@@ -940,7 +1020,7 @@ ADR-16 and ADR-22 set the shape.
 | local FS full | space ladder → wait or ENOSPC | §4.3 |
 | host FS EIO / corruption | volume read-only, alert | re-import from the bucket |
 | bucket object corrupt | the fetch fails verification | read from a mirror; scrub repairs |
-| backend rollback / substitution | MAC or epoch mismatch detected | refuse to mount; needs an anchor (open question) |
+| backend rollback / substitution | a spliced or re-ordered chain (`parent_hash`, epoch) or a stale lease is detected; an older valid prefix is not | refuse to mount; rollback needs an anchor (open question) |
 | mirror lags / fails | its state drops to CatchingUp | the authority is unaffected |
 | `lunixd` crash, S3 only | I/O stalls | recover; replay the keeper-held memfd buffer |
 | `lunixd` and keeper both lost, S3 only | the buffer is gone | the device is deleted (EIO), never resumed with stale data; a mounted file system goes read-only; remount from the bucket |
@@ -990,8 +1070,11 @@ queues, not 8.
 ## 22. Open questions
 
 1. **Rollback anchor.** A malicious bucket can serve an old but valid
-   chain. Options: a CSI-object or KMS monotonic counter, the maximum
-   across mirrors, or a signed epoch in the local state.
+   prefix of the chain. `parent_hash` and `epoch` (ADR-11) stop splices
+   and forks, but not this. Options: local state of `{seq, epoch,
+   tip_hash}` per volume (cheap, but a fresh host has none), a CSI-object
+   floor hint, the maximum across mirrors, or a write-only notary bucket.
+   A KMS has no monotonic counter.
 2. **Default chunk size.** 64 KiB against 16 KiB; ADR-5 gate, not run
    (no trace could be obtained).
 3. **Map write amplification** under scattered writes. Measured in
@@ -999,18 +1082,16 @@ queues, not 8.
    style map-delta records are the fallback if phase 1 finds that too
    high.
 4. **Cache policy** on block traces; ADR-14 gate, not run.
-5. **License.** The private repo currently carries MPL-2.0 like
-   Constellation. Keep it, or decide before any publication.
-6. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
-7. **Cross-volume dedup on the node cache** (golden images) without
+5. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
+6. **Cross-volume dedup on the node cache** (golden images) without
    leaking across families.
-8. **Staging raw journal batches ahead of FLUSH** (`refs.kind =
+7. **Staging raw journal batches ahead of FLUSH** (`refs.kind =
    journal`). Opened as ADR-29 only if the ADR-28 phase 3 gate shows
    fsync p99 under a 200 MB/s mix above 2× the two-PUT floor.
-9. **USER_COPY through io_uring.** The blocking `pread`/`pwrite` copy
+8. **USER_COPY through io_uring.** The blocking `pread`/`pwrite` copy
    lost about 10% at 4 KiB; issuing it with the backend SQEs may
    remove that loss (ADR-17). Untested.
-10. **Interior-node compression and fanout 256** for the map (ADR-8):
-    zstd-1 costs about 40 µs per interior node for little gain, and
-    fanout 256 writes 36-45% fewer bytes per seal at twice the resident
-    interior nodes. Left to phase 1.
+9. **Interior-node compression and fanout 256** for the map (ADR-8):
+   zstd-1 costs about 40 µs per interior node for little gain, and
+   fanout 256 writes 36-45% fewer bytes per seal at twice the resident
+   interior nodes. Left to phase 1.
