@@ -1,0 +1,7 @@
+# lunix-format golden file 07-meta-aad.bin (59 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  6c 75 6e 69 78 20 6d 65 74 61 20 76 31 00 b0 b1
+00000010  b2 b3 b4 b5 46 b7 88 b9 ba bb bc bd be bf 01 18
+00000020  00 00 00 63 6f 6d 6d 69 74 73 2f 30 30 30 30 30
+00000030  30 30 30 30 30 30 30 30 30 30 31

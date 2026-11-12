@@ -123,7 +123,7 @@ impl<'a> Envelope<'a> {
         r.magic(MAGIC)?;
         r.version_u8(ENV_VER)?;
         let kind = ObjectKind::from_u8(r.u8()?)?;
-        if !kinds.contains(&kind) {
+        if kind == ObjectKind::Keyring || !kinds.contains(&kind) {
             return Err(FormatError::invalid(WHAT, "kind does not match the object"));
         }
         let got_form = Form::from_u8(r.u8()?)?;
@@ -211,6 +211,10 @@ pub fn encode_form1(
 }
 
 fn header(kind: ObjectKind, form: Form, body_len: usize) -> Result<Vec<u8>> {
+    // The keyring is never an envelope: it appears only in the keyring MAC input.
+    if kind == ObjectKind::Keyring {
+        return Err(FormatError::invalid(WHAT, "the keyring has no envelope"));
+    }
     let max = kind.max_body_len();
     let n = u32::try_from(body_len)
         .ok()

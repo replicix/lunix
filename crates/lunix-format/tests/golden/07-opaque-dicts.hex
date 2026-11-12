@@ -1,0 +1,13 @@
+# lunix-format golden file 07-opaque-dicts.bin (152 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  4c 58 4d 31 01 0b 00 00 6c 00 00 00 01 00 00 00
+00000010  64 00 00 00 00 01 02 03 04 05 06 07 08 09 0a 0b
+00000020  0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b
+00000030  1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b
+00000040  2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b
+00000050  3c 3d 3e 3f 40 41 42 43 44 45 46 47 48 49 4a 4b
+00000060  4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b
+00000070  5c 5d 5e 5f 60 61 62 63 69 97 e3 fe 70 3d 9c 3d
+00000080  a5 a1 9e 97 b5 8b 4b f6 b1 5b 04 7d 98 24 32 96
+00000090  ed 81 cb 99 6d 6d bf f7

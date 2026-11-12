@@ -1,0 +1,7 @@
+# lunix-format golden file 07-opaque-space.bin (52 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  4c 58 4d 31 01 0c 00 00 08 00 00 00 03 00 00 00
+00000010  00 00 00 00 90 60 5a db d8 d3 2e 24 97 17 7f 36
+00000020  ae c2 e8 3b a0 bb 93 f3 be c1 59 dc 21 2a f8 8f
+00000030  a2 e9 6d 32

@@ -1,0 +1,9 @@
+# lunix-format golden file 07-opaque-heat.bin (85 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  4c 58 4d 31 01 05 00 00 29 00 00 00 02 00 00 00
+00000010  21 00 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c
+00000020  0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c
+00000030  1d 1e 1f 20 21 9a 8e 9c cb 69 d7 ba a3 9d 0f 0c
+00000040  33 d4 02 19 af da 32 cf 2b 59 cf 23 f2 9d 8d 0e
+00000050  0b 90 e3 f1 28
