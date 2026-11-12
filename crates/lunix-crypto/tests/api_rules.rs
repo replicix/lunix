@@ -121,3 +121,22 @@ fn unsafe_is_confined_to_the_arena() {
         }
     }
 }
+
+#[test]
+fn randomness_comes_from_getrandom_not_a_userspace_drbg() {
+    for (path, text) in sources() {
+        let code: String = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code.contains("aws_lc_rs::rand") && !code.contains("RAND_bytes"),
+            "{}: the AWS-LC DRBG must not seed salts or nonces",
+            path.display()
+        );
+        if path.ends_with("rng.rs") {
+            assert!(code.contains("getrandom"), "rng.rs must call getrandom(2)");
+        }
+    }
+}

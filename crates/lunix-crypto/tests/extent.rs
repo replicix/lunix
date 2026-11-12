@@ -896,12 +896,16 @@ fn dek_generations() {
             .expect("derivable generation");
         assert_eq!(out, data);
     }
-    // A keyring at generation 0 cannot derive generation 2.
-    assert!(g0
-        .crypto
-        .extents()
-        .open(ExtentKind::Data, &new, &e, &mut Vec::new())
-        .is_err());
+    // A keyring at generation 0 cannot derive generation 2; before the tag a
+    // forged header cannot be told from a writer bug, so it is `Auth`.
+    assert_eq!(
+        g0.crypto
+            .extents()
+            .open(ExtentKind::Data, &new, &e, &mut Vec::new())
+            .expect_err("dek_gen above the keyring's")
+            .kind(),
+        ErrorKind::Auth
+    );
 }
 
 /// The FIPS profile derives keys but cannot seal in phase 1.
@@ -987,4 +991,31 @@ proptest! {
             .open(ExtentKind::Data, &bad, &expect_plain(16_384, Some(&id), false), &mut Vec::new())
             .is_err());
     }
+}
+
+/// The ledger is bounded: past its cap it stops recording and says so.
+#[test]
+fn the_tripwire_ledger_is_capped() {
+    const { assert!(TRIPWIRE_ENABLED) };
+    let vol = volume(CryptoMode::Encrypted, 16_384, 83);
+    let codec = AesGcmExtents::new(Arc::clone(vol.crypto.volume_keys())).expect("codec");
+    let payload = seq_bytes(0, 64);
+    let id = ChunkId([6; 32]);
+    let desc = enc_desc(Codec::Raw, 64);
+    let mut out = Vec::with_capacity(256);
+    let cap = 4 * 1024 * 1024;
+    for _ in 0..cap {
+        out.clear();
+        codec
+            .seal(ExtentKind::Data, &id, &desc, &payload, &mut out)
+            .expect("seal");
+    }
+    assert_eq!(codec.tripwire_len(), cap);
+    assert!(!codec.tripwire_overflowed());
+    out.clear();
+    codec
+        .seal(ExtentKind::Data, &id, &desc, &payload, &mut out)
+        .expect("seal past the cap still works");
+    assert_eq!(codec.tripwire_len(), cap, "nothing recorded past the cap");
+    assert!(codec.tripwire_overflowed());
 }

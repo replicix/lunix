@@ -15,8 +15,9 @@
 //! # Rules this crate enforces
 //!
 //! * **Salt rule.** Nothing here accepts a salt or a nonce. `seal` draws a
-//!   fresh 192-bit salt from the operating system on every call
-//!   (`AesGcmExtents::seal`), and metadata nonces likewise. The `test-rng`
+//!   fresh 192-bit salt from the kernel with `getrandom(2)` on every call
+//!   (`AesGcmExtents::seal`), and metadata nonces, slot nonces, Argon2id salts
+//!   and new roots likewise; never from a userspace DRBG. The `test-rng`
 //!   feature (dev-dependency only) can swap the source for the vectors.
 //! * **Keys.** Every key lives in the page-locked, dump-excluded arena
 //!   ([`arena_stats`] reports how far `mlock` and `MADV_DONTDUMP` got) and is
@@ -29,9 +30,11 @@
 //! # Limits of zeroization
 //!
 //! Key bytes the arena holds are wiped on drop. Copies inside the AES and
-//! HMAC contexts of aws-lc-rs, inside a BLAKE3 hasher or inside Argon2's
-//! working memory are the libraries' to wipe; this crate keeps its own
-//! temporaries in [`zeroize::Zeroizing`] and does not claim more.
+//! HMAC contexts of aws-lc-rs and inside a BLAKE3 hasher are the libraries'
+//! to wipe; Argon2's block memory is wiped through the `argon2` crate's
+//! `zeroize` feature. This crate keeps its own temporaries in
+//! [`zeroize::Zeroizing`] and does not claim more. Decrypted or decompressed
+//! extent data is local plaintext and outside ADR-11's key protection (F11).
 
 #![deny(unsafe_code)]
 
@@ -59,7 +62,9 @@ pub use attach::{
     AttachError, AttachOk, AttachRequest, Credential,
 };
 pub use extent::{AesGcmExtents, PlainExtents};
-pub use keyring::{Argon2Cost, KeyFile, KeyringError, NewSlot, Unlock};
+pub use keyring::{
+    Argon2Cost, KeyFile, KeyringError, NewSlot, Unlock, UnlockOptions, UnlockPolicy,
+};
 pub use keys::VolumeKeys;
 pub use meta::{lease_is_stale, MetaSuite};
 pub use secret::{

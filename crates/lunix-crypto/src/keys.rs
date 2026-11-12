@@ -203,10 +203,9 @@ impl VolumeKeys {
             return Ok(DekRef::Current(dek));
         }
         if generation > self.dek_gen {
-            return Err(Error::Corrupt {
-                what: "extent",
-                detail: "dek_gen above the keyring's",
-            });
+            // Before authentication a forged header cannot be told from a
+            // writer bug, so this is the same error as a failed tag.
+            return Err(Error::Auth { what: "extent" });
         }
         let msg = Purpose::Dek(generation).message(&self.family)?;
         Ok(DekRef::Older(kdf::prf(self.profile, kmk.expose(), &msg)?))

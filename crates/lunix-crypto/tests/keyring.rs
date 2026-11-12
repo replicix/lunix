@@ -10,7 +10,7 @@ use common::*;
 use lunix_crypto::keyring::{
     self, add_slot, check_not_older, create, create_integrity_with_key_file, create_with_root,
     remove_slot, rewrap, rotate_dek, unlock, verify_mac, Argon2Cost, KeyFile, KeyringError,
-    NewSlot, Unlock,
+    NewSlot, Unlock, UnlockOptions, UnlockPolicy,
 };
 use lunix_crypto::Root;
 use lunix_format::keyring::{Argon2Params, Keyring, RootKind, Slot, SlotParams, SlotWrap};
@@ -41,7 +41,14 @@ fn new_keyfile_keyring(kind: RootKind) -> (keyring::Created, KeyFile) {
 }
 
 fn unlock_kf(bytes: &[u8], kf: &KeyFile, seen: u64) -> Result<keyring::Unlocked, KeyringError> {
-    unlock(bytes, PROFILE, &FAMILY, &Unlock::KeyFile(kf), seen, None)
+    unlock(
+        bytes,
+        PROFILE,
+        &FAMILY,
+        &Unlock::KeyFile(kf),
+        seen,
+        &UnlockOptions::default(),
+    )
 }
 
 /// Recomputes the MAC of a hand-edited keyring under `root`.
@@ -94,7 +101,7 @@ fn passphrase_slots_unlock_and_wrong_passphrases_do_not() {
         &FAMILY,
         &Unlock::Passphrase(PASS),
         0,
-        None,
+        &UnlockOptions::default(),
     )
     .expect("unlock");
     assert_eq!(ok.root.expose_for_tests(), created.root.expose_for_tests());
@@ -132,9 +139,16 @@ fn wrong_passphrase_and_corrupted_wrap_give_the_same_error() {
     )
     .expect("create");
     let try_pass = |bytes: &[u8], pass: &[u8]| {
-        unlock(bytes, PROFILE, &FAMILY, &Unlock::Passphrase(pass), 0, None)
-            .err()
-            .expect("must fail")
+        unlock(
+            bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Passphrase(pass),
+            0,
+            &UnlockOptions::default(),
+        )
+        .err()
+        .expect("must fail")
     };
     let wrong = try_pass(&created.bytes, b"not the passphrase");
 
@@ -170,7 +184,7 @@ fn wrong_passphrase_and_corrupted_wrap_give_the_same_error() {
             &other,
             &Unlock::Passphrase(PASS),
             0,
-            None
+            &UnlockOptions::default()
         ),
         Err(KeyringError::WrongCredential)
     ));
@@ -204,7 +218,14 @@ fn argon2id_bounds_are_enforced_on_read() {
         ("m < 8p", patch(60, 7)),
     ];
     for (name, bytes) in cases {
-        let r = unlock(&bytes, PROFILE, &FAMILY, &Unlock::Passphrase(PASS), 0, None);
+        let r = unlock(
+            &bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Passphrase(PASS),
+            0,
+            &UnlockOptions::default(),
+        );
         assert!(
             matches!(r, Err(KeyringError::Format(_))),
             "{name}: read bounds must reject before any allocation, got {:?}",
@@ -312,7 +333,14 @@ fn a_slot_copied_to_another_slot_id_or_family_fails() {
     remac(&mut foreign, &c.root);
     let bytes = keyring::encode(&foreign).expect("encode");
     assert!(matches!(
-        unlock(&bytes, PROFILE, &other, &Unlock::KeyFile(&kf), 0, None),
+        unlock(
+            &bytes,
+            PROFILE,
+            &other,
+            &Unlock::KeyFile(&kf),
+            0,
+            &UnlockOptions::default()
+        ),
         Err(KeyringError::WrongCredential)
     ));
 
@@ -341,7 +369,7 @@ fn a_slot_copied_to_another_slot_id_or_family_fails() {
             &FAMILY,
             &Unlock::Passphrase(PASS),
             0,
-            None
+            &UnlockOptions::default()
         ),
         Err(KeyringError::WrongCredential)
     ));
@@ -477,11 +505,25 @@ fn kms_slots_decode_and_answer_unsupported() {
     let bytes = keyring::encode(&kr).expect("encode");
     unlock_kf(&bytes, &kf, 0).expect("key-file slot beside a KMS slot");
     assert!(matches!(
-        unlock(&bytes, PROFILE, &FAMILY, &Unlock::Kms("arn:x"), 0, None),
+        unlock(
+            &bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Kms("arn:x"),
+            0,
+            &UnlockOptions::default()
+        ),
         Err(KeyringError::Unsupported(_))
     ));
     assert!(matches!(
-        unlock(&bytes, PROFILE, &FAMILY, &Unlock::Passphrase(PASS), 0, None),
+        unlock(
+            &bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Passphrase(PASS),
+            0,
+            &UnlockOptions::default()
+        ),
         Err(KeyringError::WrongCredential)
     ));
 }
@@ -520,7 +562,7 @@ fn the_default_integrity_volume_gets_a_0600_key_file_slot() {
         &FAMILY,
         &Unlock::KeyFilePath(&path),
         0,
-        None,
+        &UnlockOptions::default(),
     )
     .expect("unlock from the file");
     assert_eq!(u.root.expose_for_tests(), c.root.expose_for_tests());
@@ -545,7 +587,14 @@ fn the_default_integrity_volume_gets_a_0600_key_file_slot() {
     let empty = dir.join("empty.key");
     std::fs::write(&empty, []).expect("write");
     for p in [&missing, &wrong, &short, &long, &empty, &dir] {
-        let r = unlock(&c.bytes, PROFILE, &FAMILY, &Unlock::KeyFilePath(p), 0, None);
+        let r = unlock(
+            &c.bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::KeyFilePath(p),
+            0,
+            &UnlockOptions::default(),
+        );
         assert!(
             matches!(r, Err(KeyringError::WrongCredential)),
             "{p:?}: {:?}",
@@ -565,8 +614,15 @@ fn the_default_integrity_volume_gets_a_0600_key_file_slot() {
     .expect("add passphrase");
     assert_eq!(id, 2);
     let bytes = keyring::encode(&two).expect("e");
-    let moved = unlock(&bytes, PROFILE, &FAMILY, &Unlock::Passphrase(PASS), 0, None)
-        .expect("passphrase unwraps");
+    let moved = unlock(
+        &bytes,
+        PROFILE,
+        &FAMILY,
+        &Unlock::Passphrase(PASS),
+        0,
+        &UnlockOptions::default(),
+    )
+    .expect("passphrase unwraps");
     assert_eq!(moved.slot_id, 2);
     assert_eq!(moved.root.expose_for_tests(), c.root.expose_for_tests());
     // Only that slot, when asked.
@@ -576,7 +632,10 @@ fn the_default_integrity_volume_gets_a_0600_key_file_slot() {
         &FAMILY,
         &Unlock::Passphrase(PASS),
         0,
-        Some(1)
+        &UnlockOptions {
+            only_slot: Some(1),
+            ..UnlockOptions::default()
+        }
     )
     .is_err());
     let _ = std::fs::remove_dir_all(&dir);
@@ -599,4 +658,188 @@ fn create_with_a_known_root_is_deterministic_in_what_it_wraps() {
     assert_eq!(c.root.expose_for_tests(), root_bytes(77));
     let u = unlock_kf(&c.bytes, &kf, 0).expect("unlock");
     assert_eq!(u.root.expose_for_tests(), root_bytes(77));
+}
+
+// ---- review minors: key-file opening, unlock policy ---------------------------
+
+#[test]
+fn a_key_file_is_a_regular_file_never_a_symlink_or_a_fifo() {
+    let dir = scratch("kfopen");
+    let real = dir.join("real.key");
+    KeyFile::generate()
+        .expect("kf")
+        .write_new(&real)
+        .expect("write");
+    let (_, loose) = KeyFile::read_noting_mode(&real).expect("read");
+    assert!(!loose, "0600 is not loose");
+    // Group-readable: reported, not refused.
+    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+    let (_, loose) = KeyFile::read_noting_mode(&real).expect("still reads");
+    assert!(loose);
+    // A symlink is not followed.
+    let link = dir.join("link.key");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    assert!(KeyFile::read(&link).is_err());
+    // A FIFO neither blocks nor reads.
+    let fifo = dir.join("fifo.key");
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        0,
+    )
+    .expect("mkfifo");
+    assert!(KeyFile::read(&fifo).is_err());
+    // And through unlock they are wrong credentials.
+    let (c, _) = new_keyfile_keyring(RootKind::Ik);
+    for p in [&link, &fifo] {
+        assert!(matches!(
+            unlock(
+                &c.bytes,
+                PROFILE,
+                &FAMILY,
+                &Unlock::KeyFilePath(p),
+                0,
+                &UnlockOptions::default()
+            ),
+            Err(KeyringError::WrongCredential)
+        ));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn two_passphrase_slots() -> (keyring::Created, Keyring) {
+    let c = create(
+        PROFILE,
+        FAMILY,
+        RootKind::Kmk,
+        &NewSlot::Passphrase {
+            passphrase: b"first passphrase",
+            cost: COST,
+        },
+    )
+    .expect("create");
+    let (two, id) = add_slot(
+        &c.keyring,
+        PROFILE,
+        &c.root,
+        &NewSlot::Passphrase {
+            passphrase: b"second passphrase",
+            cost: COST,
+        },
+    )
+    .expect("add");
+    assert_eq!(id, 2);
+    (c, two)
+}
+
+#[test]
+fn hostile_keyrings_are_held_to_a_cost_policy() {
+    let c = create(
+        PROFILE,
+        FAMILY,
+        RootKind::Kmk,
+        &NewSlot::Passphrase {
+            passphrase: PASS,
+            cost: COST,
+        },
+    )
+    .expect("create");
+    // A slot at the format's 1 GiB read bound: skipped by the default policy
+    // before any memory is allocated, with its own error.
+    let mut bytes = c.bytes.clone();
+    bytes[60..64].copy_from_slice(&(1u32 << 20).to_le_bytes());
+    let started = std::time::Instant::now();
+    let r = unlock(
+        &bytes,
+        PROFILE,
+        &FAMILY,
+        &Unlock::Passphrase(PASS),
+        0,
+        &UnlockOptions::default(),
+    );
+    assert!(matches!(r, Err(KeyringError::OverPolicy)), "{:?}", r.err());
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    // A per-slot ceiling just under the floor skips an honest floor slot.
+    let strict = UnlockOptions {
+        policy: UnlockPolicy {
+            max_m_kib: 19_455,
+            ..UnlockPolicy::default()
+        },
+        ..UnlockOptions::default()
+    };
+    assert!(matches!(
+        unlock(
+            &c.bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Passphrase(PASS),
+            0,
+            &strict
+        ),
+        Err(KeyringError::OverPolicy)
+    ));
+    // The default policy admits the default cost (64 MiB, t = 3).
+    let d = create(
+        PROFILE,
+        FAMILY,
+        RootKind::Kmk,
+        &NewSlot::Passphrase {
+            passphrase: PASS,
+            cost: Argon2Cost::DEFAULT,
+        },
+    )
+    .expect("create");
+    unlock(
+        &d.bytes,
+        PROFILE,
+        &FAMILY,
+        &Unlock::Passphrase(PASS),
+        0,
+        &UnlockOptions::default(),
+    )
+    .expect("default cost is within the default policy");
+}
+
+#[test]
+fn the_pinned_slot_is_tried_first_and_the_budget_bounds_the_rest() {
+    let (c, two) = two_passphrase_slots();
+    let bytes = keyring::encode(&two).expect("encode");
+    let one_slot = u64::from(COST.m_kib) * u64::from(COST.t);
+    let budget = UnlockOptions {
+        policy: UnlockPolicy {
+            max_total_work: one_slot,
+            ..UnlockPolicy::default()
+        },
+        ..UnlockOptions::default()
+    };
+    // Without a hint the first slot spends the budget and the second is out.
+    assert!(matches!(
+        unlock(
+            &bytes,
+            PROFILE,
+            &FAMILY,
+            &Unlock::Passphrase(b"second passphrase"),
+            0,
+            &budget
+        ),
+        Err(KeyringError::OverPolicy)
+    ));
+    // With the slot of the last attach pinned first it unwraps in one derivation.
+    let pinned = UnlockOptions {
+        preferred_slot: Some(2),
+        ..budget
+    };
+    let u = unlock(
+        &bytes,
+        PROFILE,
+        &FAMILY,
+        &Unlock::Passphrase(b"second passphrase"),
+        0,
+        &pinned,
+    )
+    .expect("pinned slot first");
+    assert_eq!(u.slot_id, 2);
+    assert_eq!(u.root.expose_for_tests(), c.root.expose_for_tests());
 }

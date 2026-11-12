@@ -10,7 +10,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use lunix_crypto::keyring::{self, Argon2Cost, NewSlot, Unlock};
+use lunix_crypto::keyring::{self, Argon2Cost, NewSlot, Unlock, UnlockOptions};
 use lunix_crypto::{Root, VolumeCrypto};
 use lunix_format::keyring::RootKind;
 use lunix_format::volume::{CodecPolicy, VolumeDescriptor};
@@ -137,7 +137,7 @@ fn main() {
         &family,
         &Unlock::Passphrase(b"correct horse battery staple"),
         0,
-        None,
+        &UnlockOptions::default(),
     )
     .expect("unlock");
     println!(

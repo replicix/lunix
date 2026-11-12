@@ -14,7 +14,7 @@ use lunix_format::volume::VolumeDescriptor;
 use lunix_format::{CryptoMode, DekGen, FormatError};
 use lunix_iface::{Error, Result};
 
-use crate::keyring::{self, KeyringError, Unlock};
+use crate::keyring::{self, KeyringError, Unlock, UnlockOptions};
 use crate::secret::Root;
 use crate::volume::VolumeCrypto;
 use crate::{ct, kdf, mac};
@@ -100,6 +100,9 @@ fn from_keyring(e: KeyringError) -> AttachError {
         KeyringError::Rollback => AttachError::KeyringRollback,
         KeyringError::Format(f) => AttachError::Format(f),
         KeyringError::Unsupported(w) => AttachError::Unsupported(w),
+        KeyringError::OverPolicy => {
+            AttachError::Unsupported("argon2id cost above the unlock policy")
+        }
         KeyringError::Io(e) => AttachError::Internal(e.kind().to_string()),
         KeyringError::Invalid(w) => AttachError::Internal(w.to_owned()),
         KeyringError::WrongCredential | KeyringError::BelowFloor => AttachError::WrongCredential,
@@ -177,6 +180,9 @@ pub struct AttachRequest<'a> {
     pub pin: Option<Pin>,
     /// The highest `keyring_seq` seen (from `state/pins`); 0 when unknown.
     pub keyring_seq_seen: u64,
+    /// The slot that unwrapped at the last attach (tried first) and the cost
+    /// policy for hostile keyrings.
+    pub unlock: UnlockOptions,
 }
 
 /// A successful attach.
@@ -237,7 +243,7 @@ pub fn check_attach(
                 &desc.family_id,
                 u,
                 req.keyring_seq_seen,
-                None,
+                &req.unlock,
             )
             .map_err(from_keyring)?;
             if unlocked.root.mode() != mode {
@@ -252,7 +258,9 @@ pub fn check_attach(
     };
 
     // Rule 4: the descriptor MAC (the checksum, for plain) and the stored
-    // fingerprint it covers.
+    // fingerprint it covers. For a plain descriptor the derived fingerprint
+    // is zero, so a non-zero stored one is also `BadMac` (the matrix text
+    // names only keyed modes; the format decoder refuses it as well).
     let derived_fp = match &root {
         Some(r) => kmk_fingerprint(desc, r).map_err(internal)?,
         None => [0; 16],

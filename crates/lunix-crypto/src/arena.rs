@@ -82,6 +82,11 @@ fn arena() -> &'static Arena {
 
 impl Arena {
     fn take(&self) -> Option<SlotPtr> {
+        // Miri cannot run mmap/mlock: it uses the zeroized heap path, so the
+        // rest of the crate can be tested under it.
+        if cfg!(miri) {
+            return None;
+        }
         let mut free = self.free.lock().unwrap_or_else(PoisonError::into_inner);
         if free.is_empty() {
             self.grow(&mut free);

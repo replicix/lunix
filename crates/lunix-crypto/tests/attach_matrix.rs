@@ -9,7 +9,7 @@ mod common;
 use std::collections::BTreeSet;
 
 use common::*;
-use lunix_crypto::keyring::{self, Argon2Cost, KeyFile, NewSlot, Unlock};
+use lunix_crypto::keyring::{self, Argon2Cost, KeyFile, NewSlot, Unlock, UnlockOptions};
 use lunix_crypto::{check_attach, seal_descriptor, AttachError, AttachRequest, Credential};
 use lunix_format::keyring::RootKind;
 use lunix_format::local::Pin;
@@ -291,6 +291,7 @@ fn run(fx: &Fixture, case: Case) -> Result<lunix_crypto::AttachOk, AttachError> 
             fingerprint,
             pin,
             keyring_seq_seen: 0,
+            unlock: Default::default(),
         },
     )
 }
@@ -475,7 +476,7 @@ fn failures_outside_the_matrix() {
             &enc.desc.family_id,
             &Unlock::KeyFile(&enc.key_file),
             0,
-            None,
+            &UnlockOptions::default(),
         )
         .expect("unlock");
         let extra = KeyFile::generate().expect("kf");
@@ -518,7 +519,7 @@ fn failures_outside_the_matrix() {
         &enc.desc.family_id,
         &Unlock::KeyFile(&enc.key_file),
         0,
-        None,
+        &UnlockOptions::default(),
     )
     .expect("unlock");
     let rotated = keyring::rotate_dek(&u.keyring, Profile::Default, &u.root).expect("rotate");

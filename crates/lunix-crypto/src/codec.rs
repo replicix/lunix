@@ -125,6 +125,9 @@ pub(crate) fn finish(
 
 /// Restores `out` to `start` after a failed open and wipes what was written,
 /// which may be decrypted bytes of an object that did not authenticate.
+///
+/// Bytes left in the old allocation of a `Vec` that `finish` grew (the data
+/// is local plaintext, outside ADR-11's key protection, F11) are not wiped.
 pub(crate) fn rollback(out: &mut Vec<u8>, start: usize) {
     if out.len() > start {
         out[start..].fill(0);

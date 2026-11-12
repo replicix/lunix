@@ -71,6 +71,10 @@ pub enum KeyringError {
     /// A precondition of the call does not hold.
     #[error("invalid argument: {0}")]
     Invalid(&'static str),
+    /// Every matching slot is above the caller's cost policy (see
+    /// [`UnlockPolicy`]); nothing was derived for those slots.
+    #[error("every matching slot is above the unlock cost policy")]
+    OverPolicy,
     /// A key file could not be read or written.
     #[error("key file i/o: {0}")]
     Io(#[from] std::io::Error),
@@ -96,6 +100,9 @@ impl From<KeyringError> for Error {
             KeyringError::Format(f) => Error::Format(f),
             KeyringError::BelowFloor => Error::Invalid {
                 why: "argon2id parameters below the floor",
+            },
+            KeyringError::OverPolicy => Error::Refused {
+                why: "argon2id cost above the unlock policy",
             },
             KeyringError::Unsupported(what) => Error::Unsupported { what },
             KeyringError::Invalid(why) => Error::Invalid { why },
@@ -152,11 +159,35 @@ impl KeyFile {
         Ok(Self(Secret::new(b)))
     }
 
-    /// Reads a key file. Any other length is refused.
+    /// Reads a key file. Any other length is refused. The path is opened with
+    /// `O_NOFOLLOW | O_NOCTTY | O_NONBLOCK` and must be a regular file, so a
+    /// symlink is not followed and a FIFO or device cannot block the attach.
     pub fn read(path: &Path) -> Result<Self> {
+        Self::read_noting_mode(path).map(|(kf, _)| kf)
+    }
+
+    /// Like [`Self::read`], and also says whether group or other permission
+    /// bits are set. A caller logs that, but must not refuse: a Kubernetes
+    /// Secret mount is not 0600.
+    pub fn read_noting_mode(path: &Path) -> Result<(Self, bool)> {
+        use std::os::unix::fs::PermissionsExt;
+        let flags = rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::NOCTTY
+            | rustix::fs::OFlags::NONBLOCK;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                i32::try_from(flags.bits()).map_err(|_| KeyringError::Invalid("open flags"))?,
+            )
+            .open(path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(KeyringError::Invalid("a key file must be a regular file"));
+        }
+        let loose = meta.permissions().mode() & 0o077 != 0;
         let mut buf = Zeroizing::new(Vec::with_capacity(33));
-        std::fs::File::open(path)?.take(33).read_to_end(&mut buf)?;
-        Self::from_bytes(&buf)
+        file.take(33).read_to_end(&mut buf)?;
+        Ok((Self::from_bytes(&buf)?, loose))
     }
 
     /// Creates the file with mode 0600, failing if it exists, and makes it
@@ -210,6 +241,39 @@ pub enum Unlock<'a> {
     KeyFilePath(&'a Path),
     /// A KMS reference: `Unsupported` in phase 1.
     Kms(&'a str),
+}
+
+/// How much work `unlock` may spend on a keyring it does not trust: the read
+/// bounds of the format (1 GiB, `t` 10, `p` 16, 32 slots) are far above any
+/// real slot, and a bucket writer could otherwise cost an attach minutes of CPU.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct UnlockPolicy {
+    /// A passphrase slot with more memory than this (KiB) is skipped.
+    pub max_m_kib: u32,
+    /// Total of `m_kib * t` over the passphrase slots tried in one call.
+    pub max_total_work: u64,
+}
+
+impl Default for UnlockPolicy {
+    /// 256 MiB per slot, and at most four slots at 256 MiB and `t` = 3.
+    fn default() -> Self {
+        Self {
+            max_m_kib: 262_144,
+            max_total_work: 4 * 262_144 * 3,
+        }
+    }
+}
+
+/// Options of [`unlock`].
+#[derive(Clone, Copy, Default, Debug)]
+pub struct UnlockOptions {
+    /// Try only this slot.
+    pub only_slot: Option<u32>,
+    /// Try this slot first (the one that unwrapped at the last attach), so a
+    /// normal attach does one derivation however many slots the keyring holds.
+    pub preferred_slot: Option<u32>,
+    /// The cost ceiling.
+    pub policy: UnlockPolicy,
 }
 
 /// A keyring that was just created.
@@ -458,21 +522,23 @@ pub fn create_integrity_with_key_file(family: FamilyId, key_file: &Path) -> Resu
 
 /// Unwraps a slot with `cred` and verifies the keyring.
 ///
-/// Decodes (bounded), tries every slot of the credential's kind (only
-/// `only_slot` when given), checks the MAC under the unwrapped root, then
-/// checks `keyring_seq` against `seen_seq`.
+/// Decodes (bounded), tries the slots of the credential's kind (the
+/// preferred slot first, only `only_slot` when given, passphrase slots within
+/// the cost policy), checks the MAC under the unwrapped root, then checks
+/// `keyring_seq` against `seen_seq`.
 ///
 /// # Errors
 /// [`KeyringError::WrongCredential`] for every failure to unwrap or verify;
 /// `Format` for malformed bytes or Argon2id parameters over the read bounds;
-/// `Rollback`; `Unsupported` for a KMS credential.
+/// `OverPolicy` when only slots above the policy matched; `Rollback`;
+/// `Unsupported` for a KMS credential.
 pub fn unlock(
     bytes: &[u8],
     profile: Profile,
     family: &FamilyId,
     cred: &Unlock<'_>,
     seen_seq: u64,
-    only_slot: Option<u32>,
+    opts: &UnlockOptions,
 ) -> Result<Unlocked> {
     let kr = Keyring::decode(bytes)?;
     let key_file;
@@ -492,12 +558,29 @@ pub fn unlock(
     if kr.family_id != *family {
         return Err(KeyringError::WrongCredential);
     }
-    for slot in &kr.slots {
-        if slot.params.kind() != want_kind || only_slot.is_some_and(|id| id != slot.slot_id) {
+    let mut order: Vec<&Slot> = kr.slots.iter().collect();
+    if let Some(first) = opts.preferred_slot {
+        // Stable: the preferred slot moves to the front, the rest keep order.
+        order.sort_by_key(|s| s.slot_id != first);
+    }
+    let mut work = 0u64;
+    let mut skipped = false;
+    for slot in order {
+        if slot.params.kind() != want_kind || opts.only_slot.is_some_and(|id| id != slot.slot_id) {
             continue;
         }
         let kek: Zeroizing<[u8; 32]> = match (&slot.params, cred, key_file_ref) {
-            (SlotParams::Passphrase(p), Unlock::Passphrase(pw), _) => argon2id_kek(pw, p)?,
+            (SlotParams::Passphrase(p), Unlock::Passphrase(pw), _) => {
+                let cost = u64::from(p.m_kib) * u64::from(p.t);
+                if p.m_kib > opts.policy.max_m_kib
+                    || work.saturating_add(cost) > opts.policy.max_total_work
+                {
+                    skipped = true;
+                    continue;
+                }
+                work += cost;
+                argon2id_kek(pw, p)?
+            }
             (SlotParams::KeyFile, _, Some(kf)) => Zeroizing::new(*kf.0.expose()),
             _ => continue,
         };
@@ -514,6 +597,9 @@ pub fn unlock(
             keyring: kr.clone(),
             slot_id: slot.slot_id,
         });
+    }
+    if skipped {
+        return Err(KeyringError::OverPolicy);
     }
     Err(KeyringError::WrongCredential)
 }

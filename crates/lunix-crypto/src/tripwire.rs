@@ -1,21 +1,28 @@
 //! The `(key, nonce)` tripwire (ADR-11, F3).
 //!
-//! In debug and fuzz builds (`debug_assertions` or the `tripwire` feature)
-//! every AES-GCM seal records the pair it used and **panics on a repeat**. A
+//! In test and fuzz builds (`cfg(test)` or the `tripwire` feature; **not**
+//! plain debug builds of a daemon) every AES-GCM seal records the pair it used and **panics on a repeat**. A
 //! repeat cannot happen with a fresh random salt per extent key; the tripwire
 //! exists for the day a change reintroduces a carried-over salt, a stale RNG
 //! or a deterministic path. Only a digest of the pair is kept, never the key.
-//! The ledger grows with every seal, which is why it is not in release builds.
+//! The ledger is capped at [`CAP`] pairs (64 MiB); past it nothing more is
+//! recorded and [`Tripwire::overflowed`] says so, so a long test run cannot
+//! grow without bound.
 
-#[cfg(any(debug_assertions, feature = "tripwire"))]
+#[cfg(any(test, feature = "tripwire"))]
 mod on {
     use std::collections::HashSet;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, PoisonError};
+
+    /// Most pairs one ledger keeps.
+    pub(crate) const CAP: usize = 4 * 1024 * 1024;
 
     /// The ledger of one codec.
     #[derive(Default)]
     pub(crate) struct Tripwire {
         seen: Mutex<HashSet<[u8; 16]>>,
+        overflowed: AtomicBool,
     }
 
     impl Tripwire {
@@ -29,15 +36,23 @@ mod on {
             h.update(nonce);
             let mut digest = [0u8; 16];
             digest.copy_from_slice(&h.finalize().as_bytes()[..16]);
-            let fresh = self
-                .seen
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .insert(digest);
+            let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            if seen.len() >= CAP {
+                self.overflowed.store(true, Ordering::Relaxed);
+                return;
+            }
+            let fresh = seen.insert(digest);
+            drop(seen);
             assert!(
                 fresh,
                 "AES-GCM (key, nonce) pair repeated: the salt discipline is broken (ADR-11)"
             );
+        }
+
+        /// True once the ledger stopped recording at its cap.
+        #[allow(dead_code)]
+        pub(crate) fn overflowed(&self) -> bool {
+            self.overflowed.load(Ordering::Relaxed)
         }
 
         /// Pairs recorded so far.
@@ -50,11 +65,11 @@ mod on {
     }
 }
 
-#[cfg(not(any(debug_assertions, feature = "tripwire")))]
+#[cfg(not(any(test, feature = "tripwire")))]
 mod off {
     /// The disabled ledger: records nothing.
     #[derive(Default)]
-    pub(crate) struct Tripwire;
+    pub(crate) struct Tripwire(());
 
     impl Tripwire {
         #[inline]
@@ -63,13 +78,18 @@ mod off {
         pub(crate) fn len(&self) -> usize {
             0
         }
+
+        #[allow(dead_code)]
+        pub(crate) fn overflowed(&self) -> bool {
+            false
+        }
     }
 }
 
-#[cfg(not(any(debug_assertions, feature = "tripwire")))]
+#[cfg(not(any(test, feature = "tripwire")))]
 pub(crate) use off::Tripwire;
-#[cfg(any(debug_assertions, feature = "tripwire"))]
+#[cfg(any(test, feature = "tripwire"))]
 pub(crate) use on::Tripwire;
 
 /// True when this build runs the tripwire.
-pub const ENABLED: bool = cfg!(any(debug_assertions, feature = "tripwire"));
+pub const ENABLED: bool = cfg!(any(test, feature = "tripwire"));

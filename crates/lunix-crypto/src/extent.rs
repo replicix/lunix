@@ -2,13 +2,35 @@
 //!
 //! * [`AesGcmExtents`] is the `encrypted` volume: a keyed chunk id, a
 //!   per-extent key `keyed BLAKE3(DEK_gen, info)` over the canonical `info`
-//!   with a **fresh random salt drawn inside every `seal`**, AES-256-GCM with
+//!   with a **fresh random salt drawn inside every `seal`** (`getrandom(2)`,
+//!   never a userspace DRBG), AES-256-GCM with
 //!   the all-zero nonce through aws-lc-rs, and the canonical AAD. There is no
 //!   salt setter and no API that takes a salt or a nonce.
 //! * [`PlainExtents`] is the `integrity` and `plain` volume: no cipher, the
 //!   16-byte tag is BLAKE3-128 over every byte of the extent before it, keyed
 //!   with the extent tag key in `integrity` mode and unkeyed in `plain` mode
 //!   (D11).
+//!
+//! # What the unencrypted tag does not bind
+//!
+//! The tag of an `integrity` or `plain` extent covers the extent's bytes
+//! only (D11), not its kind, family-wide place or location. Safety on these
+//! volumes therefore rests on rules of the callers, not of this codec:
+//!
+//! * **R1.** Every data read passes the id it expects (`OpenExpect::chunk_id`,
+//!   or `id_prefix` from the map leaf) and the volume's `chunk_size`. An
+//!   `open` with neither accepts *any* valid extent of the family; such a read
+//!   is a scan and must set `verify_id`.
+//! * **R2.** `verify_id` is ignored for `ExtentKind::Node` (a node's hash
+//!   input is not its stored encoding); the map recomputes node hashes and
+//!   compares them with the parent's `child_hash` and the extent's `chunk_id`.
+//! * **`id_len` 16.** A map leaf stores a 16-byte prefix, so on an
+//!   `integrity` volume a guest that finds two chunks with equal prefixes (a
+//!   2^64 BLAKE3 birthday search over its own data), together with a writer of
+//!   the bucket, can have one served for the other on a local read, which does
+//!   not recompute the id. Use `id_len` 32 or `verify_reads` on integrity
+//!   volumes that hold untrusted guest content. Encrypted volumes use keyed
+//!   ids and are not affected.
 //!
 //! # Open order
 //!
@@ -140,6 +162,11 @@ impl AesGcmExtents {
     /// compiled out).
     pub fn tripwire_len(&self) -> usize {
         self.ledger.len()
+    }
+
+    /// True once the tripwire reached its cap and stopped recording.
+    pub fn tripwire_overflowed(&self) -> bool {
+        self.ledger.overflowed()
     }
 
     fn fips_allowed(&self) -> bool {
@@ -278,8 +305,8 @@ impl ExtentCodec for AesGcmExtents {
         check_desc(kind, desc)?;
         let k = &*self.keys;
         let dek_gen = k.dek_gen();
-        // A fresh salt on every call, from the operating system, here and
-        // nowhere else (ADR-11 F3).
+        // A fresh salt on every call, from `getrandom(2)`, here and nowhere
+        // else (ADR-11 F3).
         let mut salt = [0u8; 24];
         self.rng.fill(&mut salt)?;
 
