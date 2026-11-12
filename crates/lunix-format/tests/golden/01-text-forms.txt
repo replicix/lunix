@@ -1,0 +1,7 @@
+family_id  404142434445464748494a4b4c4d4e4f
+volume_uuid a0a1a2a3-a4a5-46a7-88a9-aaabacadaeaf
+objid      0000000000000001
+objid      000000ffffffffff
+objid      000001000000002a
+commit_seq 0000000000000007
+write_seq  0000000100000001

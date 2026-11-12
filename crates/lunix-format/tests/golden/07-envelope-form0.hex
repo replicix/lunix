@@ -1,0 +1,9 @@
+# lunix-format golden file 07-envelope-form0.bin (81 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  4c 58 4d 31 01 0c 00 00 25 00 00 00 00 01 02 03
+00000010  04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13
+00000020  14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23
+00000030  24 18 61 45 e8 67 ba fd 82 78 51 72 f7 e5 86 c6
+00000040  9b 55 29 a7 6b d3 b0 a2 d9 ee 0d 7f 71 f1 8e f8
+00000050  8f

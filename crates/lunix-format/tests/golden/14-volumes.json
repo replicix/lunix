@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "volumes": [
+    {
+      "name": "alpha",
+      "uuid": "a0a1a2a3-a4a5-46a7-88a9-aaabacadaeaf",
+      "directory": "/var/lib/lunix"
+    },
+    {
+      "name": "beta",
+      "uuid": "b0b1b2b3-b4b5-46b7-88b9-babbbcbdbebf",
+      "directory": "/data/lunix"
+    }
+  ]
+}

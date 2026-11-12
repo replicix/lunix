@@ -1,0 +1,7 @@
+# lunix-format golden file 07-pin-hold.bin (60 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f07_envelope
+00000000  4c 58 4d 31 01 09 00 00 10 00 00 00 01 00 00 00
+00000010  00 00 00 00 4d 00 00 00 00 00 00 00 55 49 19 cb
+00000020  97 54 f4 fa 11 b3 a1 34 55 2e 83 31 a5 f3 9e 44
+00000030  a6 42 e9 f3 41 19 57 d1 ba 92 42 1d

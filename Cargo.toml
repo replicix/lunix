@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98"
+license = "MPL-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+# Exact pins (=x.y.z) for everything the phase 1 plan expects, resolved on
+# 2026-11-12. Versions shared with replicix-core follow its pins so that one
+# copy of each crate is built.
+[workspace.dependencies]
+libublk = "=0.4.8"
+io-uring = "=0.7.16"
+blake3 = "=1.8.7"
+aws-lc-rs = "=1.19.0"
+chacha20poly1305 = "=0.11.0"
+argon2 = "=0.6.0"
+hmac = "=0.13.0"
+sha2 = "=0.11.0"
+zeroize = "=1.9.1"
+lz4_flex = { version = "=0.13.1", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
+zstd = "=0.13.3"
+crc32c = "=0.6.9"
+xxhash-rust = { version = "=0.8.19", features = ["xxh3", "xxh64"] }
+proptest = "=1.12.0"
+thiserror = "=2.0.21"
+anyhow = "=1.0.104"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+clap = { version = "=4.6.7", features = ["derive"] }
+tokio = { version = "=1.54.1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "fs"] }
+tracing = "=0.1.44"
+libc = "=0.2.191"
+rustix = { version = "=1.1.4", features = ["fs", "mm", "process", "thread", "event", "std"] }
+inventory = "=0.3.25"
+hdrhistogram = "=7.6.0"
+tempfile = "=3.27.0"
+hex = "=0.4.3"
+
+replicix-chunkfmt = { git = "https://github.com/replicix/replicix-core", rev = "6fb59d2", features = ["lz4"] }
+replicix-platform-lite = { git = "https://github.com/replicix/replicix-core", rev = "6fb59d2" }
+
+lunix-format = { path = "crates/lunix-format" }
+lunix-iface = { path = "crates/lunix-iface" }
+lunix-testkit = { path = "crates/lunix-testkit" }
+lunix-crypto = { path = "crates/lunix-crypto" }
+lunix-journal = { path = "crates/lunix-journal" }
+lunix-overlay = { path = "crates/lunix-overlay" }
+lunix-map = { path = "crates/lunix-map" }
+lunix-index = { path = "crates/lunix-index" }
+lunix-store = { path = "crates/lunix-store" }
+lunix-space = { path = "crates/lunix-space" }
+lunix-destage = { path = "crates/lunix-destage" }
+lunix-ublk = { path = "crates/lunix-ublk" }
+lunix-engine = { path = "crates/lunix-engine" }
+lunix-gc = { path = "crates/lunix-gc" }
+lunix-fsck = { path = "crates/lunix-fsck" }
+
+[profile.release]
+debug = 1
+
+[profile.test]
+opt-level = 1

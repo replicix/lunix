@@ -16,44 +16,44 @@ compared byte for byte. Files named `a0-*` reproduce a worked example of
 on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
 `crates/lunix-format/tests/vectors/`.
 
-- [ ] **1. Primitives** (§3): `ChunkId`, `IdLen`, `IdPrefix`, `ObjId`
+- [x] **1. Primitives** (§3): `ChunkId`, `IdLen`, `IdPrefix`, `ObjId`
   (`SegId`/`PackId`/`RunId`), `WriteSeq`, `CommitSeq`, `Epoch`, `DekGen`,
   `FamilyId`, `VolumeUuid`, `Codec`, `Level`, `ExtentKind`, `Hint`,
   `LineageIdx`, `TimeMs`, and their text forms (§22).
   Goldens: `01-objid.bin` (epoch/counter split at the limits),
   `01-hint.bin`, `01-text-forms.txt`.
-- [ ] **2. Journal file and record** (§5): file header, record header,
+- [x] **2. Journal file and record** (§5): file header, record header,
   batch packing and the reader rule, DELTA and memfd reuse of the framing.
   Goldens: `a0-journal-file-header.bin`, `a0-journal-batch-two-records.bin`
   (§23.1, blocks 0-5 of the file), `02-journal-record-write-1-block.bin`,
   `02-journal-record-hole.bin`, `02-journal-torn-batch.bin` (reader test
   input: a batch with its last block zeroed), `02-journal-resync.bin` (a
   damaged record followed by valid ones: the reader resyncs).
-- [ ] **3. Extent** (§6): plain and encrypted layouts, AAD builder, `info`
+- [x] **3. Extent** (§6): plain and encrypted layouts, AAD builder, `info`
   builder, plain tag input.
   Goldens: `a0-extent-plain-keyed.bin` (§23.2), `03-extent-plain-unkeyed.bin`,
   `a0-extent-encrypted-kat.bin` (§23.3), `03-extent-node.bin`,
   `03-aad-kat.bin` (= `aad_hardened`), `03-aad-fips-kat.bin`
   (= `aad_fips_kdf_zero_nonce`), `03-info-kat.bin` (= `info_v2`).
-- [ ] **4. Segment and map-pack container** (§7): trailer, footer body,
+- [x] **4. Segment and map-pack container** (§7): trailer, footer body,
   footer envelope (plain and sealed form), tiling rule.
   Goldens: `a0-segment-one-extent.bin` (§23.4), `04-segment-footer-body.bin`,
   `04-segment-trailer.bin`, `04-segment-footer-sealed.bin`,
   `04-segment-footer-dict-ids.bin` (codec-3 extents, `n_dict_ids` > 0),
   `04-mappack-two-nodes.bin`.
-- [ ] **5. Map node** (§8): node header, leaf `rb16` with the lineage
+- [x] **5. Map node** (§8): node header, leaf `rb16` with the lineage
   column, interior node, node hash, empty hashes for fanouts 256 and 512.
   Goldens: `a0-node-leaf-one-entry.bin` (§23.5), `05-node-leaf-empty-512.bin`,
   `05-node-leaf-empty-256.bin`, `05-node-leaf-full-512.bin`,
   `05-node-interior-root.bin` (§23.5), `05-node-interior-lineage-nonzero.bin`
   (rejected in v1), `05-empty-hashes.txt` (§23.7).
-- [ ] **6. Commits** (§10): common header and the FULL, DELTA, EPOCH,
+- [x] **6. Commits** (§10): common header and the FULL, DELTA, EPOCH,
   CONFIG and TRANSFER bodies, in envelope forms 0 and 1; genesis per D5.
   Goldens: `a0-commit-full-genesis.bin`, `a0-commit-full-1.bin` (§23.6),
   `06-commit-full-sealed.bin`, `06-commit-delta.bin`, `06-commit-epoch.bin`,
   `06-commit-epoch-authority.bin`, `06-commit-config.bin`,
   `06-commit-config-detached.bin`, `06-commit-transfer.bin`.
-- [ ] **7. Sealed-object table and metadata envelope** (§4.3, §4.4, §9,
+- [x] **7. Sealed-object table and metadata envelope** (§4.3, §4.4, §9,
   §14, §15): object kind ids, `meta_aad`, envelope forms 0 and 1, the pin
   bodies (`snapshots/`, `readers/`, `holds/`) and the opaque body of
   `heat/`, `dicts/`, `gc/space/`.
@@ -61,34 +61,34 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   `07-envelope-form1.bin`, `07-pin-snapshot.bin`, `07-pin-reader.bin`,
   `07-pin-hold.bin`, `07-opaque-heat.bin`, `07-opaque-dicts.bin`,
   `07-opaque-space.bin`.
-- [ ] **8. `volume` descriptor** (§11): all three crypto modes, the
+- [x] **8. `volume` descriptor** (§11): all three crypto modes, the
   descriptor MAC input, `lineage[]` (empty in v1, one entry round-tripped).
   Goldens: `a0-volume-encrypted.bin`, `a0-volume-integrity.bin` (§23.8),
   `08-volume-plain.bin`, `08-volume-lineage-one.bin`.
-- [ ] **9. Keyring** (§12): body, slots of the three kinds, slot AAD,
+- [x] **9. Keyring** (§12): body, slots of the three kinds, slot AAD,
   keyring MAC input, Argon2id bounds as constants.
   Goldens: `09-keyring-passphrase.bin`, `09-keyring-keyfile-and-kms.bin`,
   `09-slot-aad-kat.bin` (= `slot_aad_pass`).
-- [ ] **10. Lease** (§13): body with and without `transferred_to`.
+- [x] **10. Lease** (§13): body with and without `transferred_to`.
   Goldens: `10-lease.bin`, `10-lease-transferred.bin`.
-- [ ] **11. Key-purpose table** (§4.2): purpose ids and messages, default
+- [x] **11. Key-purpose table** (§4.2): purpose ids and messages, default
   and FIPS derivations.
   Goldens: `11-purposes.txt` (every purpose message and the KAT outputs
   `purpose_*`, `purpose_fips_*`, `purpose_msg_dek1`).
-- [ ] **12. Bucket and local paths** (§22): one function per path, the
+- [x] **12. Bucket and local paths** (§22): one function per path, the
   local-to-bucket-relative mapping (D9).
   Goldens: `12-paths.txt` (every path for fixed ids, local and
   bucket-relative).
-- [ ] **13. Index run** (§17): blocks, block index, covered segments,
+- [x] **13. Index run** (§17): blocks, block index, covered segments,
   trailer.
   Goldens: `13-index-run-one-block.bin`, `13-index-run-three-blocks.bin`.
-- [ ] **14. Local-only files** (§11, §18-§21): `volume` (same bytes as
+- [x] **14. Local-only files** (§11, §18-§21): `volume` (same bytes as
   item 8), `volume.json`, `volumes.json`, `state/checkpoint`,
   `state/device`, `state/pins`.
   Goldens: `14-checkpoint.bin` (both slots valid, and one torn),
   `14-device.bin`, `14-pins.bin`, `14-pins-none.bin`, `14-volume.json`,
   `14-volumes.json`.
-- [ ] **15. GC files** (§16): the `gc/<pass:016x>` object (envelope kind 7,
+- [x] **15. GC files** (§16): the `gc/<pass:016x>` object (envelope kind 7,
   opaque body `ver` 1) and the `state/gc/condemned` envelope.
   Goldens: `15-gc-pass.bin`, `15-gc-condemned-envelope.bin`.
 

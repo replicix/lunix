@@ -1,0 +1,12 @@
+# lunix-format golden file 06-commit-config-detached.bin (140 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f06_commit
+00000000  4c 58 4d 31 01 01 00 00 60 00 00 00 01 04 01 00
+00000010  00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00
+00000020  00 00 00 00 09 00 00 00 00 00 00 00 5a 5a 5a 5a
+00000030  5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a
+00000040  5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 10 03 0e cd
+00000050  a1 01 00 00 03 00 00 00 00 00 00 00 00 00 01 00
+00000060  00 00 00 00 00 00 00 00 00 00 00 00 17 01 51 80
+00000070  dd 29 90 78 26 2e 11 47 cc 5c e9 6b 26 8d f9 10
+00000080  d6 cb 99 c3 23 3c 93 ff 21 18 97 40

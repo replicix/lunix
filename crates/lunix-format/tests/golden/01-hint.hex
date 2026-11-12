@@ -1,0 +1,4 @@
+# lunix-format golden file 01-hint.bin (16 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f01_primitives
+00000000  01 00 00 00 00 00 00 00 67 45 23 01 4b 00 00 00

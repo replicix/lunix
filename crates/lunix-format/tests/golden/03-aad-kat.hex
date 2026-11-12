@@ -1,0 +1,7 @@
+# lunix-format golden file 03-aad-kat.bin (61 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f03_extent
+00000000  01 00 00 40 00 00 00 00 07 00 00 00 40 41 42 43
+00000010  44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 20 80 81 82
+00000020  83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f 90 91 92
+00000030  93 94 95 96 97 98 99 9a 9b 9c 9d 9e 9f
