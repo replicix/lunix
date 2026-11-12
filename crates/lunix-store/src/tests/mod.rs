@@ -91,17 +91,34 @@ pub(crate) fn create(dir: &Path, mode: CryptoMode, chunk: u32, opts: StoreOption
     .expect("create volume")
 }
 
-/// Tests that spawn a child take this for writing around `spawn`; tests that
-/// lock a volume take it for reading. A child between `fork` and `exec` holds a
-/// copy of every flock'd descriptor, so without this a volume could look `Busy`
-/// for a moment. (Real code never forks while holding a volume.)
+/// Tests that spawn a child take this for writing until the child has reached
+/// user code (see `spawn_child`); tests that lock a volume take it for reading.
+/// A child between `fork` and the close-on-exec of its descriptors holds a copy
+/// of every flock'd descriptor, and `spawn` can return before that close
+/// (the kernel releases a vfork parent in `exec_mmap`, ahead of closing the
+/// close-on-exec descriptors), so a volume could look `Busy`. Real code never
+/// forks while holding a volume.
 static FORK: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
-pub(crate) fn read_guard() -> std::sync::RwLockReadGuard<'static, ()> {
+/// `LocalVolume::create` under the read guard. Never call a guarded helper
+/// while holding a guard yourself: `std`'s `RwLock` blocks a new reader once a
+/// writer waits, so a reader that re-enters deadlocks against `spawn_child`.
+pub(crate) fn create_raw(
+    dir: &Path,
+    descriptor: &[u8],
+    json: &VolumeJson,
+    mode: CryptoMode,
+    opts: StoreOptions,
+) -> lunix_iface::Result<LocalVolume> {
+    let _g = read_guard();
+    LocalVolume::create(dir, descriptor, json, TestCodec::new(mode, UUID), opts)
+}
+
+fn read_guard() -> std::sync::RwLockReadGuard<'static, ()> {
     FORK.read().unwrap_or_else(|p| p.into_inner())
 }
 
-pub(crate) fn write_guard() -> std::sync::RwLockWriteGuard<'static, ()> {
+pub(super) fn write_guard() -> std::sync::RwLockWriteGuard<'static, ()> {
     FORK.write().unwrap_or_else(|p| p.into_inner())
 }
 

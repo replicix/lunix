@@ -476,7 +476,7 @@ impl LocalVolume {
             (
                 "index",
                 &["", ".tmp"][..],
-                &["manifest", "manifest.tmp"][..],
+                &["manifest", "manifest.tmp", "manifest.prev"][..],
             ),
         ] {
             for (name, _) in read_dir_names(&self.inner.path(sub)).map_err(io_err)? {
