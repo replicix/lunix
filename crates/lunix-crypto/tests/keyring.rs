@@ -46,7 +46,9 @@ fn unlock_kf(bytes: &[u8], kf: &KeyFile, seen: u64) -> Result<keyring::Unlocked,
 
 /// Recomputes the MAC of a hand-edited keyring under `root`.
 fn remac(kr: &mut Keyring, root: &Root) {
-    let key = lunix_crypto::testing::purpose_key(PROFILE, root, &kr.family_id, &Purpose::KeyringMac).expect("key");
+    let key =
+        lunix_crypto::testing::purpose_key(PROFILE, root, &kr.family_id, &Purpose::KeyringMac)
+            .expect("key");
     let input = kr.mac_input().expect("input");
     let hk = aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::HMAC_SHA256, &key[..]);
     kr.mac

@@ -95,9 +95,11 @@ fn every_field_of_the_vector_file_is_reproduced() {
         ("pin", Purpose::Fingerprint),
     ];
     for (name, p) in &purposes {
-        let k = lunix_crypto::testing::purpose_key(Profile::Default, &root, &fam, p).expect("purpose");
+        let k =
+            lunix_crypto::testing::purpose_key(Profile::Default, &root, &fam, p).expect("purpose");
         v.expect(&format!("purpose_{name}"), &k[..]);
-        let k = lunix_crypto::testing::purpose_key(Profile::Fips, &root, &fam, p).expect("fips purpose");
+        let k = lunix_crypto::testing::purpose_key(Profile::Fips, &root, &fam, p)
+            .expect("fips purpose");
         v.expect(&format!("purpose_fips_{name}"), &k[..]);
     }
     v.expect(

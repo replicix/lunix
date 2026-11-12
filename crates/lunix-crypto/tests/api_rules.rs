@@ -31,12 +31,8 @@ fn pub_fns(text: &str) -> Vec<(String, String, String)> {
         if !(t.starts_with("pub fn ") || t.starts_with("pub(crate) fn ")) {
             continue;
         }
-        let from = text
-            .lines()
-            .take(i)
-            .map(|l| l.len() + 1)
-            .sum::<usize>()
-            + (line.len() - t.len());
+        let from =
+            text.lines().take(i).map(|l| l.len() + 1).sum::<usize>() + (line.len() - t.len());
         let rest = &text[from..];
         let Some(open) = rest.find('(') else { continue };
         let mut depth = 0usize;
@@ -54,7 +50,12 @@ fn pub_fns(text: &str) -> Vec<(String, String, String)> {
                 _ => {}
             }
         }
-        let name = rest[..open].trim().rsplit(' ').next().unwrap_or("").to_owned();
+        let name = rest[..open]
+            .trim()
+            .rsplit(' ')
+            .next()
+            .unwrap_or("")
+            .to_owned();
         let params = rest[open + 1..end].to_owned();
         let above = lines[i.saturating_sub(3)..i].join("\n");
         found.push((name, params, above));
@@ -111,9 +112,8 @@ fn unsafe_is_confined_to_the_arena() {
             .filter(|l| !l.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
-        let uses_unsafe = code.contains("unsafe {")
-            || code.contains("unsafe fn")
-            || code.contains("unsafe impl");
+        let uses_unsafe =
+            code.contains("unsafe {") || code.contains("unsafe fn") || code.contains("unsafe impl");
         if name == "arena.rs" {
             assert!(uses_unsafe, "the arena is expected to hold the unsafe");
         } else {

@@ -134,7 +134,8 @@ fn descriptor_b_and_its_derived_keys_match_the_doc() {
         lunix_format::purpose::Purpose::NodeAddressing,
     ] {
         assert!(
-            lunix_crypto::testing::purpose_key(Profile::Default, &ik_b(), &desc.family_id, &p).is_err()
+            lunix_crypto::testing::purpose_key(Profile::Default, &ik_b(), &desc.family_id, &p)
+                .is_err()
         );
     }
     // And a KMK has no integrity HMAC or extent tag key.
@@ -144,7 +145,8 @@ fn descriptor_b_and_its_derived_keys_match_the_doc() {
         lunix_format::purpose::Purpose::ExtentTag,
     ] {
         assert!(
-            lunix_crypto::testing::purpose_key(Profile::Default, &kmk, &desc.family_id, &p).is_err()
+            lunix_crypto::testing::purpose_key(Profile::Default, &kmk, &desc.family_id, &p)
+                .is_err()
         );
     }
 }
