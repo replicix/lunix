@@ -2,7 +2,7 @@
 
 - Milestone M1.A, branch `p1/m1-a`, base `3bab655`, last code commit `f090ee2`
   (this report is the commit after it), 2026-11-12.
-- Host: Linux 7.0.0 (aws), 16 CPUs, rustc 1.98.1 (toolchain pinned 1.98), root not used.
+- Host: Linux 7.0.0, 16 CPUs, rustc 1.98.1 (toolchain pinned 1.98), root not used.
 - The gate ran with `LUNIX_HOST_SRC=lunix-p1/m1-a`, `LUNIX_HOST_TARGET=lunix-p1/target-m1a`,
   `LUNIX_JOBS=8`, `LUNIX_CPUS=0-7` through `tools/remote.sh run bash tools/ci.sh`.
 
