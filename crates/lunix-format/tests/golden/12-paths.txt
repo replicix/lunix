@@ -1,0 +1,36 @@
+# Bucket-relative names (D9) and local paths for fixed ids.
+# seg=000000000000002a pack=000000000000002b run=000001000000002c commit_seq=0000000000000007 volume=b0b1b2b3-b4b5-46b7-88b9-babbbcbdbebf child=a0a1a2a3-a4a5-46a7-88a9-aaabacadaeaf family=505152535455565758595a5b5c5d5e5f
+volume         bucket=volume                                   local=volume
+lease          bucket=lease
+head           bucket=head
+commit         bucket=commits/0000000000000007                 local=state/commits/0000000000000007
+segment        bucket=segments/000000000000002a                local=segments/000000000000002a.seg
+segment-open   bucket=segments/000000000000002a                local=segments/000000000000002a.open
+map-pack       bucket=map/000000000000002b                     local=map/000000000000002b
+map-pack-open  bucket=map/000000000000002b                     local=map/000000000000002b.open
+index-run      bucket=index/000001000000002c                   local=index/000001000000002c
+heat           bucket=heat/0000000000000007                    local=heat/0000000000000007
+dict           bucket=dicts/1234abcd                           local=dicts/1234abcd
+snapshot       bucket=snapshots/nightly-2026.11                local=snapshots/nightly-2026.11
+reader         bucket=readers/host-1.example-000000000000feed  local=readers/host-1.example-000000000000feed
+hold           bucket=holds/a0a1a2a3-a4a5-46a7-88a9-aaabacadaeaf local=holds/a0a1a2a3-a4a5-46a7-88a9-aaabacadaeaf
+gc-pass        bucket=gc/0000000000000003                      local=gc/0000000000000003
+gc-space       bucket=gc/space/0000000000000007                local=gc/space/0000000000000007
+sync-progress  bucket=sync/s3-main/progress
+keyring        bucket=families/505152535455565758595a5b5c5d5e5f/keyring
+volume-dir     dir=/var/lib/lunix/b0b1b2b3-b4b5-46b7-88b9-babbbcbdbebf
+bucket-prefix  prefix=pfx/lunix/v1/b0b1b2b3-b4b5-46b7-88b9-babbbcbdbebf/
+keyring-key    key=pfx/lunix/v1/families/505152535455565758595a5b5c5d5e5f/keyring
+keyring-local  path=/var/lib/lunix/families/505152535455565758595a5b5c5d5e5f/keyring
+# local-only paths (map to no bucket name)
+local-only     volume.json
+local-only     LOCK
+local-only     journal/q00-00000001.j
+local-only     journal/q1f-00000abc.j
+local-only     cache/
+local-only     state/checkpoint
+local-only     state/device
+local-only     state/pins
+local-only     state/gc/condemned
+local-only     integrity.key
+local-only     index/manifest

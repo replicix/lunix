@@ -43,7 +43,7 @@ pub mod volume;
 
 pub use error::{FormatError, Result};
 pub use ids::{
-    ChunkId, Codec, CommitSeq, DekGen, Epoch, ExtentKind, FamilyId, Hint, IdLen, IdPrefix,
-    LineageIdx, Level, ObjId, PackId, RunId, SegId, TimeMs, VolumeUuid, WriteSeq,
+    ChunkId, Codec, CommitSeq, DekGen, Epoch, ExtentKind, FamilyId, Hint, IdLen, IdPrefix, Level,
+    LineageIdx, ObjId, PackId, RunId, SegId, TimeMs, VolumeUuid, WriteSeq,
 };
 pub use mode::{CryptoMode, Form, ObjectKind, Profile};

@@ -269,7 +269,10 @@ pub mod local {
 }
 
 fn hex16(s: &str) -> Option<u64> {
-    if s.len() == 16 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         u64::from_str_radix(s, 16).ok()
     } else {
         None
@@ -327,7 +330,10 @@ pub fn local_to_bucket(rel: &str) -> Result<Option<String>> {
         ["gc", "space", n] => Ok(Some(format!("gc/space/{:016x}", id16(n, "gc space name")?))),
         ["gc", n] => Ok(Some(gc_pass(id16(n, "gc pass name")?)?)),
         ["dicts", n] => {
-            if n.len() == 8 && n.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            if n.len() == 8
+                && n.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
                 Ok(Some(format!("dicts/{n}")))
             } else {
                 Err(bad("dict name"))

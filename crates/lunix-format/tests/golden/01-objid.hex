@@ -1,0 +1,7 @@
+# lunix-format golden file 01-objid.bin (64 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f01_primitives
+00000000  01 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00
+00000010  ff ff ff ff ff 00 00 00 01 00 00 00 00 01 00 00
+00000020  ff ff ff ff ff 01 00 00 9a 78 56 34 12 ff ff 00
+00000030  01 00 00 00 00 ff ff ff ff ff ff ff ff ff ff ff

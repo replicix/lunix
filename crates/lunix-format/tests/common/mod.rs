@@ -134,7 +134,10 @@ fn render_hex(name: &str, bytes: &[u8]) -> String {
 
 fn first_diff(a: &[u8], b: &[u8]) -> String {
     match a.iter().zip(b).position(|(x, y)| x != y) {
-        Some(i) => format!("first difference at offset {i} (golden {:02x}, new {:02x})", a[i], b[i]),
+        Some(i) => format!(
+            "first difference at offset {i} (golden {:02x}, new {:02x})",
+            a[i], b[i]
+        ),
         None => format!("lengths differ (golden {}, new {})", a.len(), b.len()),
     }
 }
@@ -331,7 +334,9 @@ pub fn kat(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/kat-vectors.json");
     let v: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path).expect("kat file")).expect("kat json");
-    hex(v[name].as_str().unwrap_or_else(|| panic!("kat {name} is not a string")))
+    hex(v[name]
+        .as_str()
+        .unwrap_or_else(|| panic!("kat {name} is not a string")))
 }
 
 pub fn kat32(name: &str) -> [u8; 32] {
