@@ -99,6 +99,12 @@ pub fn gate_chunk(dir: &str) -> String {
         };
         verdict.insert(t, format!("{v} [S3<=1.25*min: {s3ok}, RMW<=2*RMW16: {rmwok}, mapWA p90<=25%: {waok}]"));
     }
+    let _ = writeln!(o, "\nInformational only (NOT the plan's rule): S3(C) at T=60 s with the map bytes scaled by 0.46 (DESIGN's run-encoded leaves, 352/768 MiB per TiB):");
+    for &c in &sizes {
+        let v: Vec<f64> = com.iter().filter(|r| num(r, "chunk") as u64 == c && num(r, "interval_s") as u64 == 60 && num(r, "fanout") as u64 == 512 && num(r, "logical_bytes") > 0.0)
+            .map(|r| (num(r, "data_r05") + 0.46 * num(r, "map_r05")) / num(r, "logical_bytes")).collect();
+        let _ = writeln!(o, "  C={} KiB: S3 p50 {:.4} p90 {:.4}", c >> 10, pct(&v, 0.5) * (1u64 << 30) as f64 / (1u64 << 30) as f64, pct(&v, 0.9));
+    }
     let _ = writeln!(o, "\nADR-5 verdict at T=60 s (primary): {}", verdict[&60]);
     let _ = writeln!(o, "sign check T=10 s: {}", verdict[&10]);
     let _ = writeln!(o, "sign check T=300 s: {}", verdict[&300]);
@@ -113,6 +119,7 @@ pub fn gate_cache(dir: &str) -> String {
         return "ADR-14 gate: NOT RUN (no cache CSVs in the directory)\n".into();
     }
     let chunk = 65536.0;
+    let chunk16 = 16384.0;
     let _ = writeln!(o, "| size (per mille of WS) | LRU med | S3-FIFO med | SIEVE med | W-TinyLFU med | S3-FIFO loses to LRU on |");
     let _ = writeln!(o, "|---|---|---|---|---|---|");
     let mut med: BTreeMap<(u32, &str), f64> = BTreeMap::new();
@@ -134,6 +141,14 @@ pub fn gate_cache(dir: &str) -> String {
         loses.insert(pm, l as f64 / n as f64);
         let _ = writeln!(o, "| {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.0}% of {} vols |", pm, vals[0], vals[1], vals[2], vals[3], 100.0 * l as f64 / n as f64, n);
     }
+    let _ = writeln!(o, "\nInformational: 16 KiB chunk cache check (median request miss ratio over volumes):");
+    for pm in [10u32, 50, 100] {
+        let line: Vec<String> = crate::policies::POLICIES.iter().map(|p| {
+            let v: Vec<f64> = rows.iter().filter(|r| r["policy"] == *p && num(r, "chunk") == chunk16 && num(r, "frac_pm") as u32 == pm).map(|r| num(r, "miss_req")).collect();
+            format!("{p} {:.4}", pct(&v, 0.5))
+        }).collect();
+        let _ = writeln!(o, "  {pm} per mille: {}", line.join(", "));
+    }
     let sizes = [10u32, 50, 100];
     let acc = sizes.iter().all(|&pm| {
         let best = crate::policies::POLICIES.iter().map(|p| med[&(pm, *p)]).fold(f64::MAX, f64::min);
@@ -145,7 +160,7 @@ pub fn gate_cache(dir: &str) -> String {
     let mut scan_fail = false;
     let _ = writeln!(o, "\nScan test (mean over scan volumes of S3-FIFO minus LRU miss ratio, absolute):");
     for pm in [5u32, 10, 20, 50, 100, 250] {
-        let get = |p: &str| -> BTreeMap<String, f64> { scan.iter().filter(|r| r["policy"] == p && num(r, "frac_pm") as u32 == pm).map(|r| (key(r), num(r, "miss_req"))).collect() };
+        let get = |p: &str| -> BTreeMap<String, f64> { scan.iter().filter(|r| r["policy"] == p && num(r, "chunk") == 65536.0 && num(r, "frac_pm") as u32 == pm).map(|r| (key(r), num(r, "miss_req"))).collect() };
         let (s, l) = (get("s3fifo"), get("lru"));
         let d: Vec<f64> = s.iter().filter_map(|(k, v)| l.get(k).map(|x| v - x)).collect();
         if !d.is_empty() {
@@ -156,8 +171,28 @@ pub fn gate_cache(dir: &str) -> String {
             let _ = writeln!(o, "  {pm} per mille: {:+.4} over {} volumes (worst {:+.4})", m, d.len(), d.iter().cloned().fold(f64::MIN, f64::max));
         }
     }
+    // Per-test reading of the scan rule: any single (volume, size) where S3-FIFO is > 2 % abs worse than LRU.
+    let mut cases = Vec::new();
+    for r in scan.iter().filter(|r| r["policy"] == "s3fifo" && num(r, "chunk") == chunk) {
+        if let Some(l) = scan.iter().find(|x| x["policy"] == "lru" && x["vol"] == r["vol"] && x["set"] == r["set"] && x["frac_pm"] == r["frac_pm"] && num(x, "chunk") == chunk) {
+            let d = num(r, "miss_req") - num(l, "miss_req");
+            if d > 0.02 {
+                cases.push(format!("{} @{}pm (+{:.4})", r["vol"], r["frac_pm"], d));
+            }
+        }
+    }
+    let _ = writeln!(o, "Per-test reading: {} scan tests with S3-FIFO > 2% abs worse than LRU: {}", cases.len(), cases.join("; "));
+    let _ = writeln!(o, "Informational: share of volumes where S3-FIFO is worse than LRU by more than a margin (miss ratio, abs):");
+    for pm in [10u32, 50, 100] {
+        let get = |p: &str| -> BTreeMap<String, f64> { rows.iter().filter(|r| r["policy"] == p && num(r, "chunk") == chunk && num(r, "frac_pm") as u32 == pm).map(|r| (key(r), num(r, "miss_req"))).collect() };
+        let (s, l) = (get("s3fifo"), get("lru"));
+        let n = l.len().max(1) as f64;
+        let f = |m: f64| s.iter().filter(|(k, v)| l.get(*k).map_or(false, |x| **v - *x > m)).count() as f64 / n;
+        let _ = writeln!(o, "  {pm} per mille: >0: {:.0}%  >0.001: {:.0}%  >0.005: {:.0}%  >0.01: {:.0}%", 100.0 * f(0.0), 100.0 * f(0.001), 100.0 * f(0.005), 100.0 * f(0.01));
+    }
+    scan_fail |= !cases.is_empty();
     let v = if scan_fail {
-        "S3-FIFO FAILS the scan test"
+        "S3-FIFO FAILS the scan rule (any single scan test > 2% abs worse than LRU)"
     } else if acc {
         "S3-FIFO accepted"
     } else if sieve {

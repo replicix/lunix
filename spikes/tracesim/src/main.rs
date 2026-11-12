@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  tracesim chunk --set NAME --fmt msr|alibaba|tencent --out DIR [--min-written-gib N] FILES...\n  tracesim cache --set NAME --fmt F --out DIR [--chunk 65536] [--scan-vols N] [--min-written-gib N] FILES...\n  tracesim gate DIR"
+        "usage:\n  tracesim chunk|all --set NAME --fmt msr|alibaba|tencent --out DIR [--min-written-gib N] FILES...\n  tracesim cache --set NAME --fmt F --out DIR [--chunk 65536,16384] [--scan-list a,b,..] [--tag T] [--min-written-gib N] FILES...\n  tracesim gate DIR"
     );
     std::process::exit(2)
 }
@@ -39,7 +39,7 @@ fn main() {
         print!("{}", gate::gate_cache(&args[1]));
         return;
     }
-    let (mut set, mut fmt, mut out, mut min_gib, mut chunk, mut scan_vols) = (String::new(), None, String::new(), 1.0f64, 65536u64, 10usize);
+    let (mut set, mut fmt, mut out, mut min_gib, mut chunks, mut scan_list, mut tag) = (String::new(), None, String::new(), 1.0f64, vec![65536u64], String::new(), String::new());
     let mut files = Vec::new();
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
@@ -49,8 +49,9 @@ fn main() {
             "--fmt" => fmt = trace::Fmt::parse(&val()),
             "--out" => out = val(),
             "--min-written-gib" => min_gib = val().parse().unwrap_or_else(|_| usage()),
-            "--chunk" => chunk = val().parse().unwrap_or_else(|_| usage()),
-            "--scan-vols" => scan_vols = val().parse().unwrap_or_else(|_| usage()),
+            "--chunk" => chunks = val().split(',').map(|x| x.parse().unwrap_or_else(|_| usage())).collect(),
+            "--scan-list" => scan_list = val(),
+            "--tag" => tag = val(),
             f => files.push(f.to_string()),
         }
     }
@@ -62,28 +63,29 @@ fn main() {
     let (vols, bad) = trace::load(&files, fmt).expect("read trace");
     let kept: Vec<_> = vols.iter().filter(|(_, r)| trace::written_bytes(r) as f64 >= min_gib * (1u64 << 30) as f64).collect();
     eprintln!("{} volumes loaded, {} kept (>= {} GiB written), {} unparsable lines skipped", vols.len(), kept.len(), min_gib, bad);
-    match cmd {
-        "chunk" => {
-            let mut o = chunksim::Out::default();
-            for (v, r) in &kept {
-                chunksim::sim_volume(&set, v, r, &mut o);
-            }
-            write_csv(&out, &format!("chunk_rmw.{set}.csv"), chunksim::H_RMW, &o.rmw);
-            write_csv(&out, &format!("chunk_map.{set}.csv"), chunksim::H_MAP, &o.map);
-            write_csv(&out, &format!("chunk_commit.{set}.csv"), chunksim::H_COMMIT, &o.commit);
+    let fname = |p: &str| if tag.is_empty() { format!("{p}.{set}.csv") } else { format!("{p}.{set}.{tag}.csv") };
+    if cmd == "chunk" || cmd == "all" {
+        let mut o = chunksim::Out::default();
+        for (v, r) in &kept {
+            chunksim::sim_volume(&set, v, r, &mut o);
         }
-        "cache" => {
-            // Scan test volumes: the N kept volumes with the most requests (deterministic).
-            let mut by_n: Vec<_> = kept.iter().map(|(v, r)| (r.len(), v.to_string())).collect();
-            by_n.sort_by(|a, b| b.cmp(a));
-            let scan: std::collections::BTreeSet<String> = by_n.into_iter().take(scan_vols).map(|x| x.1).collect();
-            let (mut rows, mut srows) = (Vec::new(), Vec::new());
-            for (v, r) in &kept {
-                cachesim::sim_volume(&set, v, r, chunk, scan.contains(*v), &mut rows, &mut srows);
+        write_csv(&out, &fname("chunk_rmw"), chunksim::H_RMW, &o.rmw);
+        write_csv(&out, &fname("chunk_map"), chunksim::H_MAP, &o.map);
+        write_csv(&out, &fname("chunk_commit"), chunksim::H_COMMIT, &o.commit);
+    }
+    if cmd == "cache" || cmd == "all" {
+        // Scan-test volumes are named explicitly (the caller states the selection rule).
+        let scan: std::collections::BTreeSet<&str> = scan_list.split(',').filter(|x| !x.is_empty()).collect();
+        let (mut rows, mut srows) = (Vec::new(), Vec::new());
+        for (v, r) in &kept {
+            for &c in &chunks {
+                cachesim::sim_volume(&set, v, r, c, scan.contains(v.as_str()), &mut rows, &mut srows);
             }
-            write_csv(&out, &format!("cache_results.{set}.csv"), cachesim::H_CACHE, &rows);
-            write_csv(&out, &format!("cache_scan.{set}.csv"), cachesim::H_SCAN, &srows);
         }
-        _ => usage(),
+        write_csv(&out, &fname("cache_results"), cachesim::H_CACHE, &rows);
+        write_csv(&out, &fname("cache_scan"), cachesim::H_SCAN, &srows);
+    }
+    if !matches!(cmd, "chunk" | "cache" | "all") {
+        usage();
     }
 }

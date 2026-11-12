@@ -1,0 +1,55 @@
+volumes: 27
+
+| T(s) | C(KiB) | S3 p50 | S3 p90 | S3 mean | RMW/1000w p50 | RMW p90 | MAP MiB/TiB touched p50 | mapWA p90-of-cuts: p50 vols | p90 vols |
+|---|---|---|---|---|---|---|---|---|---|
+| 10 | 16 | 1.0781 | 1.7340 | 1.1502 | 71.245 | 482.089 | 2627 | 2.0455 | 2.5000 |
+| 10 | 64 | 1.7896 | 2.9081 | 1.8419 | 57.937 | 372.736 | 671 | 0.7500 | 0.9375 |
+| 10 | 256 | 4.1095 | 8.3195 | 4.6510 | 22.104 | 156.043 | 183 | 0.1250 | 0.2500 |
+| 10 | 1024 | 12.8126 | 28.8049 | 14.8004 | 13.953 | 46.485 | 51 | 0.0312 | 0.0586 |
+| 60 | 16 | 0.7556 | 1.0507 | 0.7856 | 71.245 | 482.089 | 2627 | 1.0714 | 1.9286 |
+| 60 | 64 | 1.2999 | 1.9518 | 1.3071 | 57.937 | 372.736 | 671 | 0.2875 | 0.6875 |
+| 60 | 256 | 3.0280 | 5.5678 | 3.2256 | 22.104 | 156.043 | 183 | 0.0600 | 0.1875 |
+| 60 | 1024 | 7.4992 | 19.8087 | 9.6734 | 13.953 | 46.485 | 51 | 0.0165 | 0.0469 |
+| 300 | 16 | 0.5352 | 0.7997 | 0.5419 | 71.245 | 482.089 | 2627 | 0.7692 | 1.3184 |
+| 300 | 64 | 0.8452 | 1.4103 | 0.8756 | 57.937 | 372.736 | 671 | 0.2171 | 0.6250 |
+| 300 | 256 | 2.0808 | 3.0037 | 1.9647 | 22.104 | 156.043 | 183 | 0.0511 | 0.1688 |
+| 300 | 1024 | 5.6182 | 8.5691 | 5.3353 | 13.953 | 46.485 | 51 | 0.0120 | 0.0352 |
+
+Informational only (NOT the plan's rule): S3(C) at T=60 s with the map bytes scaled by 0.46 (DESIGN's run-encoded leaves, 352/768 MiB per TiB):
+  C=16 KiB: S3 p50 0.6597 p90 0.8330
+  C=64 KiB: S3 p50 1.2155 p90 1.7746
+  C=256 KiB: S3 p50 2.9917 p90 5.4409
+  C=1024 KiB: S3 p50 7.4655 p90 19.7324
+
+ADR-5 verdict at T=60 s (primary): amend to 16 KiB [S3<=1.25*min: false, RMW<=2*RMW16: true, mapWA p90<=25%: false]
+sign check T=10 s: amend to 16 KiB [S3<=1.25*min: false, RMW<=2*RMW16: true, mapWA p90<=25%: false]
+sign check T=300 s: amend to 16 KiB [S3<=1.25*min: false, RMW<=2*RMW16: true, mapWA p90<=25%: false]
+
+| size (per mille of WS) | LRU med | S3-FIFO med | SIEVE med | W-TinyLFU med | S3-FIFO loses to LRU on |
+|---|---|---|---|---|---|
+| 5 | 0.4038 | 0.4001 | 0.4036 | 0.4658 | 59% of 27 vols |
+| 10 | 0.3952 | 0.3823 | 0.3962 | 0.3970 | 33% of 27 vols |
+| 20 | 0.3598 | 0.3458 | 0.3346 | 0.3757 | 26% of 27 vols |
+| 50 | 0.3147 | 0.2969 | 0.2937 | 0.3092 | 22% of 27 vols |
+| 100 | 0.2714 | 0.2613 | 0.2546 | 0.2686 | 7% of 27 vols |
+| 250 | 0.2070 | 0.2060 | 0.2010 | 0.2023 | 4% of 27 vols |
+
+Informational: 16 KiB chunk cache check (median request miss ratio over volumes):
+  10 per mille: lru 0.6664, s3fifo 0.6407, sieve 0.6381, wtinylfu 0.6919
+  50 per mille: lru 0.5689, s3fifo 0.5202, sieve 0.5437, wtinylfu 0.5605
+  100 per mille: lru 0.5247, s3fifo 0.4888, sieve 0.4777, wtinylfu 0.5138
+
+Scan test (mean over scan volumes of S3-FIFO minus LRU miss ratio, absolute):
+  5 per mille: -0.0057 over 9 volumes (worst +0.0528)
+  10 per mille: -0.0181 over 9 volumes (worst +0.0506)
+  20 per mille: -0.0242 over 9 volumes (worst -0.0020)
+  50 per mille: -0.0145 over 9 volumes (worst -0.0000)
+  100 per mille: -0.0176 over 9 volumes (worst -0.0001)
+  250 per mille: -0.0246 over 9 volumes (worst -0.0001)
+Per-test reading: 2 scan tests with S3-FIFO > 2% abs worse than LRU: mds_1 @5pm (+0.0528); mds_1 @10pm (+0.0506)
+Informational: share of volumes where S3-FIFO is worse than LRU by more than a margin (miss ratio, abs):
+  10 per mille: >0: 33%  >0.001: 30%  >0.005: 22%  >0.01: 15%
+  50 per mille: >0: 22%  >0.001: 11%  >0.005: 11%  >0.01: 4%
+  100 per mille: >0: 7%  >0.001: 4%  >0.005: 4%  >0.01: 4%
+
+ADR-14 verdict: S3-FIFO FAILS the scan rule (any single scan test > 2% abs worse than LRU) [accept clauses: false, sieve<=0.95 at >=2 sizes: false, wtinylfu<=0.90 at all: false, scan_fail: true]
