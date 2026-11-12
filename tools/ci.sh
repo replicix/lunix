@@ -36,6 +36,10 @@ step "lunix-iface with crashpoints: clippy and tests (lead-approved ci.sh line, 
 cargo clippy -j "$jobs" -p lunix-iface --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-iface --features crashpoints
 
+step "lunix-store with crashpoints: clippy and kill-sweep tests (lead, M7 review major 2)"
+cargo clippy -j "$jobs" -p lunix-store --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-store --features crashpoints
+
 step "feature-edge check"
 bash tools/check-features.sh
 
