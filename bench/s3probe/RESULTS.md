@@ -284,6 +284,11 @@ Parallel 16 MiB (aggregate MB/s; few objects, so rough): AWS same region PUT 72 
 GET 78 / 788 / 180 at concurrency 1 / 8 / 32 (the concurrency-32 cell had only 4 objects in flight);
 OVH Hungary → Milan PUT 19 / 26 / 30 and GET 18 / 28 / 26 MB/s, bounded by the client's Wi-Fi link.
 
+- **Multipart section (deviations).** Goodput cells are 403 MB on AWS (not 1 GB) because the required
+  latency cells (2.35 GB) plus three 1 GB cells would pass the 4 GB cap; the 8 x 4 MiB and 8 x 2 MiB
+  splits are not allowed by the 5 MiB minimum (replaced by 3 and 6 parts); the sequential control
+  covers one split per size; the 64 MiB optional cell was not run.
+
 ## Cleanup and safety
 
 - After every run the probe listed and deleted only its own prefix and re-listed it: **leftover
@@ -361,6 +366,138 @@ sync-mode fsync estimate for DESIGN §20 needs the AWS/R2/OVH runs (the fact-che
 has secondary figures: Standard 500 KB PUT p50 about 70 ms, Express same-AZ 4 KB PUT about
 6.4 ms). The 4 KiB PUT p50 of 3.8-5.5 ms here is MinIO's own durable-write cost on this
 disk.
+
+## Multipart vs single PUT (16 MiB and 32 MiB objects)
+
+Question: is a multipart upload with parts sent in parallel worth it compared with one PUT? Measured
+with `s3probe mpu` (new subcommand, `spikes/s3probe/src/mpu.rs`; all requests through the hand-signed
+client in `raw.rs`, one connection pool, bodies sent unsigned over https, so the single PUT and the
+parts use the same stack). Raw: `raw/aws-host-mpu`, `raw/ovh-local-mpu`, `raw/ovh-local-mpu2` (plus the
+`-check` directories with the 5 MiB check); `tools/mpu_summary.py <p> <dirs>` regenerates the tables.
+
+**Allowed splits.** Both providers refuse a Complete whose non-final part is under 5 MiB
+(`400 EntityTooSmall`, tested with 1 MiB + 1 MiB on AWS and OVH). So 16 MiB in 8 x 2 MiB or 4 x 4
+MiB, and 32 MiB in 8 x 4 MiB, were **not run: not allowed**. Used instead: 16 MiB as 2 x 8 MiB and 3
+x 5.33 MiB (5,592,406 B); 32 MiB as 2 x 16, 4 x 8 and 6 x 5.33 MiB. "parN" = N parts in parallel,
+"seqN" = N parts one after the other (control; one split per size: seq2 for 16 MiB, seq4 for 32 MiB,
+to stay within the byte cap). Times in ms, one object at a time on a warmed pool, cells interleaved
+round by round with rotating order; "total" is end to end (Create + slowest part + Complete),
+"parts wall" is from the first part's launch to the last part's answer.
+
+### Per-object latency
+
+AWS S3 Standard, same region (us-west-2), n = 10 per cell, no failed sample:
+
+| size | form | total p50 | p90 | min | max | Create p50 | parts wall p50 | Complete p50 |
+|---|---|---|---|---|---|---|---|---|
+| 16 MiB | single PUT | **194** | 216 | 178 | 229 | - | - | - |
+| 16 MiB | par2 (8 MiB) | 249 | 278 | 233 | 316 | 24 | 127 | 91 |
+| 16 MiB | par3 (5.33 MiB) | 252 | 295 | 198 | 316 | 24 | 126 | 88 |
+| 16 MiB | seq2 (control) | 394 | 435 | 325 | 435 | 22 | 274 | 92 |
+| 32 MiB | single PUT | 336 | 359 | 328 | 399 | - | - | - |
+| 32 MiB | par2 (16 MiB) | 343 | 366 | 283 | 370 | 22 | 210 | 94 |
+| 32 MiB | par4 (8 MiB) | **265** | 279 | 247 | 285 | 23 | 139 | 96 |
+| 32 MiB | par6 (5.33 MiB) | 271 | 302 | 217 | 318 | 25 | 149 | 99 |
+| 32 MiB | seq4 (control) | 584 | 621 | 529 | 644 | 22 | 460 | 89 |
+
+Reading: multipart costs a fixed Create (about 23 ms) plus Complete (about 90 ms, the same as the
+earlier conditional-Complete figure), about 115 ms, before any part moves. Parallel parts saved 67 ms
+at 16 MiB (194 -> 127 for the data phase) and 197 ms at 32 MiB (336 -> 139), so the net is **+55 ms
+worse at 16 MiB and 71 ms (21%) better at 32 MiB**. Interpolating the two sizes, break-even is near
+25 MiB (not measured between). More parts than 4 buy nothing (par6 = par4). The slowest part is the
+whole parts phase; sequential parts are slower than one PUT, as expected.
+
+OVH Milan from the Wi-Fi client ("Hungary → Milan (Wi-Fi client)"), n = 12 per cell (two runs of 6, 3
+minutes apart, pooled), no failed sample. The single-stream rate on this link was 12 MB/s in these
+runs (19 MB/s in the earlier size sweep), and it wanders in time (hence min far below p50):
+
+| size | form | total p50 | p90 | min | max | Create p50 | parts wall p50 | Complete p50 |
+|---|---|---|---|---|---|---|---|---|
+| 16 MiB | single PUT | 1,424 | 1,509 | 750 | 1,553 | - | - | - |
+| 16 MiB | par2 | 1,597 | 1,693 | 816 | 1,731 | 41 | 1,491 | 66 |
+| 16 MiB | par3 | **1,164** | 1,282 | 876 | 2,130 | 39 | 1,044 | 70 |
+| 16 MiB | seq2 (control) | 2,224 | 2,457 | 1,010 | 2,766 | 39 | 2,119 | 67 |
+| 32 MiB | single PUT | 2,770 | 3,271 | 1,442 | 3,587 | - | - | - |
+| 32 MiB | par2 | 2,088 | 2,233 | 1,435 | 2,271 | 41 | 1,963 | 68 |
+| 32 MiB | par4 | 1,840 | 2,066 | 1,454 | 2,164 | 39 | 1,625 | 75 |
+| 32 MiB | par6 | **1,598** | 2,279 | 1,309 | 2,555 | 39 | 1,482 | 80 |
+| 32 MiB | seq4 (control) | 4,600 | 4,810 | 4,018 | 6,411 | 39 | 4,487 | 72 |
+
+Reading: here the path is the bottleneck and one TCP stream does not fill it, so several parallel
+connections win at 32 MiB (par4 34% and par6 42% below single) and par3 wins 18% at 16 MiB, while par2
+at 16 MiB loses (the 16 MiB single-PUT medians sit on a bimodal distribution, 750 vs 1,400 ms). This
+measures "more connections on a Wi-Fi path", not the provider; the same gain could come from sending
+two segments as two parallel PUTs. Create is 39 ms (one RTT pair) and Complete 66-80 ms.
+
+### Aggregate goodput, 8 objects in flight
+
+One run per cell (AWS 403 MB per cell, OVH about 320-335 MB per cell). Requests per GB use 1 GB =
+10^9 B and include the Create and Complete requests.
+
+| provider | size | form | objects | wall (ms) | MB/s | requests | requests per GB |
+|---|---|---|---|---|---|---|---|
+| same region (us-west-2) | 16 MiB | single PUT | 24 | 753 | 535 | 24 | 60 |
+| same region (us-west-2) | 32 MiB | single PUT | 12 | 723 | 557 | 12 | 30 |
+| same region (us-west-2) | 32 MiB | par4 (32 parts in flight) | 12 | 774 | 520 | 72 | 179 |
+| Hungary → Milan (Wi-Fi client) | 16 MiB | single PUT | 19 | 11,200 | 28.5 | 19 | 60 |
+| Hungary → Milan (Wi-Fi client) | 32 MiB | single PUT | 10 | 12,121 | 27.7 | 10 | 30 |
+| Hungary → Milan (Wi-Fi client) | 32 MiB | par4 (32 parts in flight) | 10 | 10,142 | 33.1 | 60 | 179 |
+
+On AWS, 8 objects in flight already saturate what the client can push (about 0.53 GB/s, CPU and NIC
+of the test host): multipart gives no gain (520 vs 557 MB/s, within the spread of a 0.75 s cell; one
+run each, so differences under about 10% are not resolved). Per-object time with 8 in flight (p50):
+16 MiB single 209 ms, 32 MiB single 365 ms, 32 MiB par4 370 ms. On the Wi-Fi path the link caps at
+about 31-33 MB/s: multipart 33.1 vs 27.7-28.5 MB/s for single PUTs (+16-19%, one run each), i.e. the
+single-PUT cells did not quite fill the link.
+
+### Request cost per GB uploaded
+
+S3 Standard list prices: PUT, COPY, POST and LIST requests $0.005 per 1,000; GET $0.0004 per 1,000;
+DELETE and abort free ([AWS S3 pricing](https://aws.amazon.com/s3/pricing/): the fetched page showed
+the LIST-as-PUT and free-DELETE statements but not the table, so the $0.005 figure is confirmed from
+secondary pages that quote it for us-east-1; check the live page for us-west-2). CreateMultipartUpload
+and CompleteMultipartUpload are POSTs and each UploadPart is a PUT, all in that tier. OVH states "no
+hidden fees for ingress/egress or API calls" on its Object Storage product page (storage capacity and
+restored data are billed; the price table itself was not read), so request count costs nothing there.
+
+| form | requests per object | requests per GB | request cost per GB | per TB |
+|---|---|---|---|---|
+| 16 MiB single | 1 | 60 | $0.00030 | $0.30 |
+| 16 MiB par2 | 4 | 238 | $0.00119 | $1.19 |
+| 16 MiB par3 | 5 | 298 | $0.00149 | $1.49 |
+| 32 MiB single | 1 | 30 | $0.00015 | $0.15 |
+| 32 MiB par2 | 4 | 119 | $0.00060 | $0.60 |
+| 32 MiB par4 | 6 | 179 | $0.00089 | $0.89 |
+| 32 MiB par6 | 8 | 238 | $0.00119 | $1.19 |
+
+Multipart is 4-5 times the request cost, but the absolute amounts are tiny (cents per 10 TB). The
+cost to watch is not the request fee but an abandoned upload: parts of an unfinished upload stay
+stored (and billed) until aborted; a lifecycle abort rule is a bucket setting this probe did not and
+may not touch, so a `flush_segment` that used multipart would have to abort on every failure path.
+
+### Verdict
+
+- **16 MiB segments: single PUT.** On AWS it is the fastest (194 vs 249-252 ms for 2-3 parts) and the
+  cheapest in requests; multipart's fixed 115 ms exceeds what parallel parts save at this size. The
+  5 MiB part minimum also caps useful parallelism at 3 parts. On the Wi-Fi/OVH path 3 parallel parts
+  were 18% faster at p50 but 2 parts were not, and the gain comes from using more connections, which
+  concurrent segment PUTs already provide.
+- **Larger objects: multipart starts to pay from about 25-32 MiB** (AWS: par4 21% faster at 32 MiB;
+  OVH from this client: 34-42% faster). Use parts of 8 MiB or more, 4 parts; more parts do not help.
+  Not measured: 64 MiB (the optional cell was **not run: it needs 0.64 GB and the required cells left 0.44 GB under the 4 GB cap**), part counts above 6, multipart under a shaped link.
+- **Aggregate throughput at concurrency 8: no reason for multipart** on AWS (both about 0.53 GB/s);
+  on a link-bound client it adds up to 19% by filling the pipe, which more concurrent PUTs would also do.
+- Multipart is still a valid fencing commit (conditional Complete, see above), but it is not cheaper on
+  the flush path (Create + Complete = 3 more round trips).
+- Caveats: AWS n = 10, OVH n = 12 per cell; one goodput run per cell (0.7-0.8 s on AWS, so noisy); the OVH
+  path varies in time (single 16 MiB PUT 750 to 1,550 ms) and its numbers describe this Wi-Fi client.
+
+Runs for this section: AWS same region 3,559 MB uploaded in 751 requests (probe counter; check run
+2 MB, 24 requests, plus 727 for the main run); OVH 3,810 MB in 838 requests over three runs (check,
+main, second latency run). Multipart uploads created / completed / aborted: AWS 83 / 82 / 1, OVH
+95 / 94 / 1 (the one abort in each is the deliberate 5 MiB check). Leftover objects 0 and open uploads
+0 in every run, and an independent `--verify` pass at the end listed 0 objects and 0 open uploads
+under `lunix-p0-probe/` in both buckets.
 
 ## Deviations from the plan and from the request
 
@@ -462,3 +599,17 @@ Numbers for DESIGN §20 / the fsync-scope note (concurrency 1, create-only or pl
 > so the multipart route is not cheaper on the flush path. Lane isolation: with 8 concurrent 16 MiB
 > uploads, a 4 or 64 KiB PUT stays within about 10% of idle at p50 on both AWS (0.5 GB/s) and a
 > saturated 31 MB/s Wi-Fi link, with or without a separate client; p99 unresolved.
+
+Multipart vs single PUT (P0.10 addendum, measured 2026-11-12; ADR-7 and ADR-28):
+
+> **Segment upload form:** keep one PUT per 16 MiB segment in `flush_segment`. Same region (us-west-2),
+> n = 10: 16 MiB single PUT p50 194 ms (p90 216) versus 249-252 ms for 2-3 parallel parts, because
+> CreateMultipartUpload (about 23 ms) and CompleteMultipartUpload (about 90 ms) cost more than the
+> parallel parts save; S3 and OVH both reject non-final parts under 5 MiB, so 16 MiB can use at most 3
+> parts. At 32 MiB, 4 parallel 8 MiB parts win by 21% (265 vs 336 ms; break-even about 25 MiB); at 8
+> objects in flight there is no aggregate gain (about 0.53 GB/s either way). Multipart costs 4-6
+> requests per object instead of 1 ($0.0009 vs $0.00015 per GB for 32 MiB objects at $0.005 per 1,000
+> PUT/POST), none on OVH. If segments grow beyond about 32 MiB, use 4 parts of at least 8 MiB, abort
+> on every failure path, and note that parallel segment PUTs reach the same goal without the extra
+> round trips. From the Wi-Fi client to OVH, parallel connections were 18-42% faster (the link, not the
+> provider, is the limit). Evidence: `bench/s3probe/RESULTS.md`, "Multipart vs single PUT".

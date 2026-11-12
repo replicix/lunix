@@ -1,0 +1,9 @@
+provider label: same region (us-west-2)
+started: 2026-11-12T09:39Z
+requests (counter, includes deletes and cleanup): 727
+bytes uploaded: 3556827136
+multipart uploads created/completed/aborted: 82/82/0
+open at the end (before sweep): 0
+leftover objects: 0
+open uploads after sweep: 0
+failed samples: 0

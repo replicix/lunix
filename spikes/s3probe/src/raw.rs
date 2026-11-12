@@ -3,6 +3,7 @@
 //! under the probe prefix (to prove that no upload is left open). Credentials stay in memory.
 
 use hmac::{Hmac, Mac};
+use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,8 @@ pub struct Raw {
     ak: String,
     sk: String,
     token: Option<String>,
+    /// send `UNSIGNED-PAYLOAD` instead of hashing bodies over 4 KiB (what object_store does over https)
+    pub unsigned: bool,
 }
 
 pub struct Resp {
@@ -124,6 +127,7 @@ impl Raw {
             ak: ak.into(),
             sk: sk.into(),
             token: token.map(String::from),
+            unsigned: false,
         })
     }
 
@@ -135,6 +139,17 @@ impl Raw {
         query: &[(&str, &str)],
         extra: &[(&str, &str)],
         body: Vec<u8>,
+    ) -> Result<Resp, String> {
+        self.send_bytes(method, key, query, extra, Bytes::from(body)).await
+    }
+
+    pub async fn send_bytes(
+        &self,
+        method: &str,
+        key: &str,
+        query: &[(&str, &str)],
+        extra: &[(&str, &str)],
+        body: Bytes,
     ) -> Result<Resp, String> {
         let path = format!("{}/{}", self.path_prefix, key);
         let path = if path == "/" { "/".to_string() } else { path };
@@ -156,7 +171,11 @@ impl Raw {
             .trim_start_matches("http://")
             .to_string();
         let (date, dt) = amz_stamp(crate::now_unix());
-        let phash = sha_hex(&body);
+        let phash = if self.unsigned && body.len() > 4096 {
+            "UNSIGNED-PAYLOAD".to_string()
+        } else {
+            sha_hex(&body)
+        };
         let mut hs: Vec<(String, String)> = vec![
             ("host".into(), host),
             ("x-amz-content-sha256".into(), phash.clone()),
@@ -222,9 +241,19 @@ impl Raw {
         n: u32,
         data: Vec<u8>,
     ) -> Result<(String, f64), String> {
+        self.part_b(key, id, n, Bytes::from(data)).await
+    }
+
+    pub async fn part_b(
+        &self,
+        key: &str,
+        id: &str,
+        n: u32,
+        data: Bytes,
+    ) -> Result<(String, f64), String> {
         let ns = n.to_string();
         let r = self
-            .send("PUT", key, &[("partNumber", &ns), ("uploadId", id)], &[], data)
+            .send_bytes("PUT", key, &[("partNumber", &ns), ("uploadId", id)], &[], data)
             .await?;
         match (r.status, r.etag.clone()) {
             (200, Some(e)) => Ok((e, r.ms)),
@@ -246,6 +275,10 @@ impl Raw {
         x.push_str("</CompleteMultipartUpload>");
         let extra: &[(&str, &str)] = if if_none_match { &[("If-None-Match", "*")] } else { &[] };
         self.send("POST", key, &[("uploadId", id)], extra, x.into_bytes()).await
+    }
+
+    pub async fn put_bytes(&self, key: &str, data: Bytes) -> Result<Resp, String> {
+        self.send_bytes("PUT", key, &[], &[], data).await
     }
 
     pub async fn abort(&self, key: &str, id: &str) -> Result<u16, String> {

@@ -1,0 +1,9 @@
+provider label: Hungary → Milan (Wi-Fi client)
+started: 2026-11-12T09:45Z
+requests (counter, includes deletes and cleanup): 307
+bytes uploaded: 1409294336
+multipart uploads created/completed/aborted: 42/42/0
+open at the end (before sweep): 0
+leftover objects: 0
+open uploads after sweep: 0
+failed samples: 0

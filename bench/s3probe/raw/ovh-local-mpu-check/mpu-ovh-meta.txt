@@ -1,0 +1,10 @@
+provider label: Hungary → Milan (Wi-Fi client)
+started: 2026-11-12T09:42Z
+min-part check: Complete of 1 MiB + 1 MiB refused: status 400 EntityTooSmall
+requests (counter, includes deletes and cleanup): 24
+bytes uploaded: 2105344
+multipart uploads created/completed/aborted: 1/0/1
+open at the end (before sweep): 0
+leftover objects: 0
+open uploads after sweep: 0
+failed samples: 0

@@ -23,6 +23,7 @@
 //! transferred per provider; phases that would exceed the cap are skipped and reported.
 
 mod lat2;
+mod mpu;
 mod raw;
 
 use bytes::Bytes;
@@ -1520,6 +1521,10 @@ fn render(name: &str, label: &str, r: &Report) -> (String, String) {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("mpu") {
+        mpu::run(&args[1..]).await;
+        return;
+    }
     let out_dir = args
         .iter()
         .position(|a| a == "--out")

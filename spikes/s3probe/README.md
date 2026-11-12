@@ -9,8 +9,7 @@ hardcoded or printed): `LUNIX_PROBE_<NAME>_BUCKET`, `_ENDPOINT` (omit for AWS), 
 `_PATH_STYLE=1`, `_ALLOW_HTTP=1`, `_LABEL`, `_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`/`_SESSION_TOKEN`
 (else `AWS_*`), then `s3probe --out DIR [--providers AWS,OVH] [--suites sem,seq,cond,sizes,pairs,lane,net]`.
 Profiles are not resolved: pipe `aws configure export-credentials --format env-no-export` into the
-process environment. For another machine build a static binary: `rustup target add
-x86_64-unknown-linux-musl`, `apt install musl-tools`, `cargo build --release --target ...-musl`.
+process environment. Static binary for another machine: `--target x86_64-unknown-linux-musl`.
 
 Suites (all by default). `sem`: create-if-absent and If-Match (412, 404), 8-way create and swap
 races, ranged GET, read-your-write, multipart create/abort, versioning state (read only), clock
@@ -21,8 +20,11 @@ and slope. `pairs`: two serial create-only PUTs. `lane`: small PUTs during a 16 
 upload, separate client versus the same client. `net`: TCP connect and TLS estimate.
 
 Everything lives under `lunix-p0-probe/<run-id>/`; only that prefix is deleted, open multipart
-uploads under it are listed and aborted at the end. Caps: 9,000 requests and 3 GB per run; tune
-with `LUNIX_PROBE_*_N`, `_LANE_OBJS`, `_LANE_ALONE_OBJS`, `_CCRACE_ROUNDS`. `<provider>-samples.csv`
+uploads under it are aborted at the end. Caps: 9,000 requests and 3 GB per run; tune with
+`LUNIX_PROBE_*_N`, `_LANE_OBJS`, `_LANE_ALONE_OBJS`, `_CCRACE_ROUNDS`. `<provider>-samples.csv`
 holds every sample; `tools/pool.py` recomputes percentiles and fits. `cargo test` runs the harness
-on an in-memory store. Deviations: Constellation's classification is re-implemented (about 60
-lines); the pool is unbounded, so "same client" shares the pool object, not a connection limit.
+on an in-memory store. Constellation's classification is re-implemented (about 60 lines).
+`s3probe mpu --out DIR --providers AWS [--phases check,lat,gp,opt64] [--verify|--sweep]`: multipart vs
+single PUT, 16/32 MiB (`src/mpu.rs`): `check` 5 MiB part minimum, `lat` per-object latency
+(`LUNIX_PROBE_MPU_N`), `gp` goodput at 8 in flight (`_GP16`, `_GP32`), `opt64`. `--verify` counts
+objects and open uploads under `lunix-p0-probe/`, `--sweep` aborts them; `tools/mpu_summary.py`.
