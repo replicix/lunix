@@ -674,7 +674,13 @@ impl VolumeJson {
         if s.len() > MAX_JSON_LEN {
             return Err(FormatError::range(VJ, "length", s.len() as u64));
         }
-        let v: Self = serde_json::from_str(s).map_err(json_err)?;
+        // The struct-level `default` would read a missing `version` as 1;
+        // like volumes.json, the file must carry it.
+        let raw: serde_json::Value = serde_json::from_str(s).map_err(json_err)?;
+        if raw.get("version").is_none() {
+            return Err(FormatError::invalid(VJ, "missing version"));
+        }
+        let v: Self = serde_json::from_value(raw).map_err(json_err)?;
         v.validate()?;
         Ok(v)
     }

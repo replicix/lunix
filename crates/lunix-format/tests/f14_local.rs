@@ -420,3 +420,12 @@ proptest! {
         prop_assert_eq!(VolumeJson::from_json(&t).unwrap(), v);
     }
 }
+
+#[test]
+fn version_is_required_in_both_json_files() {
+    let ok = VolumeJson::from_json(&common::golden_text_read("14-volume.json")).expect("golden");
+    let text = ok.to_json_pretty().expect("json");
+    assert!(VolumeJson::from_json(&text.replace("  \"version\": 1,\n", "")).is_err());
+    let reg = common::golden_text_read("14-volumes.json");
+    assert!(VolumesJson::from_json(&reg.replace("  \"version\": 1,\n", "")).is_err());
+}

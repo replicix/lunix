@@ -368,3 +368,8 @@ pub const VOLUME_A_FAMILY: [u8; 16] = [
 ];
 /// 2026-11-12T00:00:00Z in milliseconds.
 pub const CREATED_AT: u64 = 1_794_441_600_000;
+
+/// Reads a text golden.
+pub fn golden_text_read(name: &str) -> String {
+    std::fs::read_to_string(golden_dir().join(name)).expect("text golden")
+}
