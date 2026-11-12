@@ -32,6 +32,10 @@ cargo clippy -j "$jobs" --workspace --all-targets -- -D warnings
 step "cargo test --workspace"
 cargo test -j "$jobs" --workspace
 
+step "lunix-iface with crashpoints: clippy and tests (lead-approved ci.sh line, M1.B1 review 15)"
+cargo clippy -j "$jobs" -p lunix-iface --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-iface --features crashpoints
+
 step "feature-edge check"
 bash tools/check-features.sh
 

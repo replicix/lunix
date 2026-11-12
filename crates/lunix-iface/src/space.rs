@@ -1,0 +1,326 @@
+//! The space ledger and the space ladder (DESIGN section 2 "Space policy",
+//! section 4.3; ADR-14).
+//!
+//! # Threads and blocking
+//!
+//! [`SpaceGate::reserve`] is called from queue threads and is **non-blocking**:
+//! it either charges the ledger, parks the request behind a [`Waiter`], or
+//! refuses. Every other method is also non-blocking (atomic counters and short
+//! locks). A [`LadderStep`] runs on the gate's own background thread, never on
+//! a queue thread, and may block (the compact step is GC's urgent pass).
+//!
+//! # Accounting walk-through
+//!
+//! The ledger is `used = JournalReserved + Segments + Cache + Map + Index +
+//! Commits`; `Headroom` is a pseudo-kind holding the *bounds* charged ahead of
+//! time for commit-time objects. It is conservative between C2 and C9 (journal
+//! bytes and segment bytes are both counted) and exact outside that window.
+//! M8, M9, M11 and M17 cite these steps and test them:
+//!
+//! 1. *Admission* of a write: `reserve(JournalReserved, journal::record_bytes(kind,
+//!    blocks))`, the encoded record length, before `JournalLane::try_reserve`
+//!    (released again if that returns `Full` or `NoSpace`). May park or
+//!    refuse; this is the only place a guest write waits for space.
+//! 2. *C2* (cut taken): `reserve_headroom(Segments, ulen_of_nonzero_chunks)` as
+//!    an upper bound for the segments the cut will write, and
+//!    `reserve_headroom(Headroom, map_bound + commit_bound + index_bound)` for
+//!    the objects C5, C6 and C8 will create. Neither parks or consults the free
+//!    space limit; they draw on the reserved headroom region.
+//! 3. *C4* (segments sealed): `transfer(Segments, Segments, bound, actual)`.
+//! 4. *C5, C6, C8* (map pack, commit, index run durable):
+//!    `transfer(Headroom, Map, bound, actual)`, `transfer(Headroom, Commits,
+//!    bound, actual)`, `transfer(Headroom, Index, bound, actual)`.
+//! 5. *C9* (journal reclaimed): `release(JournalReserved, reclaimed)` with
+//!    `ReclaimReport::bytes` (the same unit, encoded record length), and `release(Headroom, remainder)` for any bound
+//!    left unused.
+//! 6. *GC delete*: `release(kind, bytes)` for each file removed, after the
+//!    delete is durable.
+//! 7. *Compaction output*: charged from headroom like a cut's segments
+//!    (`reserve_headroom(Segments, bound)`, then `transfer` at seal).
+//!
+//! `transfer` is atomic: no observer sees the bytes in both kinds or in
+//! neither. It never parks and never fails for lack of space (the headroom is
+//! what pays for the difference); the ledger may exceed the limit by at most
+//! the headroom while a cut is in flight.
+
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
+
+use lunix_format::local::SpaceSettings;
+
+use crate::error::Result;
+use crate::wake::WakeFd;
+
+/// What a ledger entry pays for.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum SpaceKind {
+    /// Journal bytes admitted and not yet reclaimed.
+    JournalReserved,
+    /// Sealed segments (and bounds for ones being written).
+    Segments,
+    /// Cached copies of remote data (none in phase 1).
+    Cache,
+    /// Map packs.
+    Map,
+    /// Index runs.
+    Index,
+    /// Commit objects.
+    Commits,
+    /// The headroom pseudo-kind: bounds held for commit-time objects.
+    Headroom,
+}
+
+impl SpaceKind {
+    /// Every kind, in ledger order.
+    pub const ALL: [SpaceKind; 7] = [
+        Self::JournalReserved,
+        Self::Segments,
+        Self::Cache,
+        Self::Map,
+        Self::Index,
+        Self::Commits,
+        Self::Headroom,
+    ];
+
+    /// The position in [`SpaceSnapshot::by_kind`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The state of a parked request.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WaiterState {
+    /// Still waiting.
+    Pending,
+    /// Space was found and **is already charged**; proceed.
+    Granted,
+    /// `full_timeout` expired; nothing is charged; fail with `NoSpace`.
+    TimedOut,
+    /// The requester withdrew; nothing is charged.
+    Cancelled,
+}
+
+const PENDING: u8 = 0;
+const GRANTED: u8 = 1;
+const TIMED_OUT: u8 = 2;
+const CANCELLED: u8 = 3;
+
+#[derive(Debug)]
+struct WaiterShared {
+    state: AtomicU8,
+    wake: Option<WakeFd>,
+}
+
+/// A handle to a parked reservation. The requester polls [`state`](Self::state)
+/// from `QueueHandler::poll`; the gate decides the outcome and signals the
+/// requester's wake fd. The first transition wins; later ones are no-ops.
+#[derive(Clone, Debug)]
+pub struct Waiter(Arc<WaiterShared>);
+
+impl Waiter {
+    /// A pending waiter that signals `wake` (if any) on a transition. For
+    /// gate implementations.
+    pub fn new(wake: Option<WakeFd>) -> Self {
+        Self(Arc::new(WaiterShared {
+            state: AtomicU8::new(PENDING),
+            wake,
+        }))
+    }
+
+    /// The current state.
+    pub fn state(&self) -> WaiterState {
+        match self.0.state.load(Ordering::Acquire) {
+            PENDING => WaiterState::Pending,
+            GRANTED => WaiterState::Granted,
+            TIMED_OUT => WaiterState::TimedOut,
+            _ => WaiterState::Cancelled,
+        }
+    }
+
+    fn transition(&self, to: u8) -> bool {
+        let won = self
+            .0
+            .state
+            .compare_exchange(PENDING, to, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        if won {
+            if let Some(w) = &self.0.wake {
+                w.signal();
+            }
+        }
+        won
+    }
+
+    /// Gate side: marks the reservation granted (after charging it). Returns
+    /// false if the waiter already left the pending state.
+    pub fn grant(&self) -> bool {
+        self.transition(GRANTED)
+    }
+
+    /// Gate side: marks the wait expired.
+    pub fn expire(&self) -> bool {
+        self.transition(TIMED_OUT)
+    }
+
+    /// Requester side: withdraws. If this returns false because the state was
+    /// already `Granted`, the bytes are charged and the requester must
+    /// `release` them.
+    pub fn cancel(&self) -> bool {
+        self.0
+            .state
+            .compare_exchange(PENDING, CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
+
+/// The answer to [`SpaceGate::reserve`].
+#[derive(Debug)]
+pub enum ReserveOutcome {
+    /// Charged; proceed.
+    Reserved,
+    /// Not enough space now (`on_full = wait`): the request is parked FIFO
+    /// behind this handle and charged when it is granted.
+    Parked(Waiter),
+    /// Refused (`on_full = error`, or the wait would exceed `full_timeout`
+    /// at once): nothing charged.
+    NoSpace,
+}
+
+/// A point-in-time view of the ledger.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SpaceSnapshot {
+    /// Bytes charged per kind, indexed by [`SpaceKind::index`].
+    pub by_kind: [u64; 7],
+    /// `min(cache_max, fs_free - free_floor)` as of the last refresh.
+    pub limit: u64,
+    /// Free bytes on the host file system as of the last refresh.
+    pub fs_free: u64,
+    /// The reserved headroom region (default 256 MiB).
+    pub headroom_total: u64,
+    /// Requests parked.
+    pub waiters: u64,
+    /// True after a fatal host I/O error.
+    pub read_only: bool,
+}
+
+impl SpaceSnapshot {
+    /// Bytes counted against the limit: every kind but `Headroom`.
+    pub fn used(&self) -> u64 {
+        SpaceKind::ALL
+            .iter()
+            .filter(|k| **k != SpaceKind::Headroom)
+            .map(|k| self.by_kind[k.index()])
+            .sum()
+    }
+}
+
+/// Which ladder step a callback is.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum LadderStepKind {
+    /// Evict clean cache.
+    EvictCache,
+    /// Evict cold segments that are synced to a backend.
+    EvictSynced,
+    /// Compact (GC's urgent pass in phase 1).
+    Compact,
+    /// Throttle destage.
+    ThrottleDestage,
+}
+
+/// How hard a step should try.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Urgency {
+    /// Background pressure.
+    Normal,
+    /// A write is parked.
+    Urgent,
+}
+
+/// Bytes a step freed; 0 means "nothing".
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Freed(pub u64);
+
+/// One rung of the ladder.
+pub trait LadderStep: Send {
+    /// Tries to free about `want_bytes` and reports what it freed. Runs on the
+    /// gate's thread and may block; must not call back into `reserve`.
+    fn run(&mut self, want_bytes: u64, urgency: Urgency) -> Result<Freed>;
+}
+
+/// Registration of the ladder's callbacks.
+pub trait Ladder {
+    /// Installs `step` for `kind`, replacing an earlier one. The gate runs the
+    /// registered steps in the order `EvictCache`, `EvictSynced`, `Compact`,
+    /// `ThrottleDestage` until enough is freed, then applies `on_full`.
+    fn register(&self, kind: LadderStepKind, step: Box<dyn LadderStep>);
+}
+
+/// Host I/O error reporting.
+pub trait SpaceEvents {
+    /// A host `EIO` (or equivalent) was seen: the volume becomes read-only
+    /// (writes fail, reads continue). `what` names the operation, for the log.
+    fn fatal_io(&self, what: &str);
+
+    /// True once `fatal_io` was called.
+    fn is_read_only(&self) -> bool;
+}
+
+/// The ledger. `Send + Sync`; see the module docs for the walk-through.
+pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
+    /// Charges `bytes` to `kind` if the ledger allows, else parks or refuses
+    /// per `on_full`. `wake` is signalled when a parked request resolves.
+    /// Reads never call this.
+    ///
+    /// # Errors
+    /// `ReadOnly` after `fatal_io`.
+    fn reserve(&self, kind: SpaceKind, bytes: u64, wake: Option<&WakeFd>)
+        -> Result<ReserveOutcome>;
+
+    /// Charges `bytes` to `kind` from the reserved headroom: no limit check,
+    /// never parks.
+    ///
+    /// # Errors
+    /// `NoSpace` only if the headroom itself is exhausted.
+    fn reserve_headroom(&self, kind: SpaceKind, bytes: u64) -> Result<()>;
+
+    /// Returns `bytes` of `kind` (saturating at zero is a bug and is reported
+    /// by debug assertions). Wakes parked requests that now fit, FIFO.
+    fn release(&self, kind: SpaceKind, bytes: u64);
+
+    /// Startup accounting of files that already exist: charges `bytes` to `kind`
+    /// without a limit check; never parks, never fails for lack of space.
+    ///
+    /// # Errors
+    /// Whatever `transfer` reports.
+    fn charge(&self, kind: SpaceKind, bytes: u64) -> Result<()> {
+        self.transfer(kind, kind, 0, bytes)
+    }
+
+    /// Atomically releases `from_bytes` of `from_kind` and charges `to_bytes` of
+    /// `to_kind`; the kinds may be equal (a true-up).
+    ///
+    /// # Errors
+    /// `Invalid` if `from_bytes` exceeds what `from_kind` holds.
+    fn transfer(
+        &self,
+        from_kind: SpaceKind,
+        to_kind: SpaceKind,
+        from_bytes: u64,
+        to_bytes: u64,
+    ) -> Result<()>;
+
+    /// Expires parked requests whose `full_timeout` has passed on the gate's
+    /// clock. A real gate also ticks itself; tests with a manual clock call
+    /// this after advancing it. Returns how many expired.
+    fn tick(&self) -> usize;
+
+    /// The ledger now.
+    fn snapshot(&self) -> SpaceSnapshot;
+
+    /// Live reconfiguration of the policy (`lunix space`).
+    ///
+    /// # Errors
+    /// `Invalid` for a setting that fails `VolumeJson` validation.
+    fn reconfigure(&self, settings: &SpaceSettings) -> Result<()>;
+}
