@@ -2,9 +2,8 @@
 
 This is the system spec. Rationale lives in [DECISIONS.md](DECISIONS.md)
 (ADR-n) and evidence in [research/](research/). Terms are defined in
-[GLOSSARY.md](GLOSSARY.md). ADR status is at the top of DECISIONS.md:
-the phase 0 gates accepted ADR-4, 8, 16, 17, 18, 20 and part of 2 and 26
-on 2026-11-12, and the rest are *proposed*. Where this spec and an
+[GLOSSARY.md](GLOSSARY.md). All ADRs are accepted (2026-11-12); their
+follow-ups are listed at the top of DECISIONS.md. Where this spec and an
 accepted ADR disagree, the ADR wins and this file is fixed in the same
 commit.
 

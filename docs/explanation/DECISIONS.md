@@ -5,27 +5,23 @@ context is in [DESIGN.md](DESIGN.md), and the evidence is in the dated
 notes under [research/](research/). New decisions, and changes of mind,
 are appended here.
 
-**Status:** every ADR below was **proposed** (2026-11-11). It becomes
-*accepted* when the maintainer says so, or when a phase 0 spike confirms
-it (marked *gate:*). Phase 0 closed on 2026-11-12; each gated ADR now
-carries a dated **Gate outcome** block, and the numbers are in
-[the baseline](../../bench/BASELINE.md).
+**Status: all ADRs (1-30) are accepted** by the maintainer
+(2026-11-12). Phase 0 closed the same day; each gated ADR carries a dated
+**Gate outcome** block, and the numbers are in
+[the baseline](../../bench/BASELINE.md). Acceptance keeps the follow-ups
+the gates named:
 
-- **Accepted by gate:** ADR-4, 8, 16, 17, 18, 20 and, for the
-  keeper-held write buffer, 26. ADR-8, 16, 17 and 20 carry
-  amendments from the measurements. ADR-2 is accepted by gate for AWS S3
-  Standard, OVH and MinIO only (partial: R2, GCS, B2 and the rest were
-  not run).
-- **Accepted by the maintainer:** ADR-19 (2026-11-12), now executed, and
-  ADR-11 (2026-11-12) for the format, with the six amendments from the
-  crypto review (F2, F5, F6, F7, F9, F10). An external cryptographer
-  review is still recommended before release; it does not block phase 1.
-- **Proposed, gate run without a pass:** ADR-5 (the rule points to
-  16 KiB; the maintainer decides the default after phase 1) and ADR-14
-  (S3-FIFO narrowly fails; the policies differ by at most about 4 %).
-- **Proposed, phase 3 gate open:** ADR-28 (the phase 0 lane and
-  two-PUT evidence is recorded).
-- **Proposed, no phase 0 gate:** all the others.
+- **ADR-2:** verified on AWS S3 Standard, OVH and MinIO. Other providers
+  must pass `lunix doctor` before they may be an authority.
+- **ADR-5:** the default chunk size (16 or 64 KiB) is decided by the
+  phase 1 exit benchmark; both sizes are supported.
+- **ADR-11:** an external cryptographer review is recommended before
+  release.
+- **ADR-14:** S3-FIFO is the working default; phase 2 revisits the policy.
+- **ADR-28:** its phase 3 gate decides whether journal-batch staging
+  (ADR-29) is opened.
+- **ADR-29** is a reserved number for that staging ADR, not yet a
+  decision.
 
 ## ADR-1: A new Rust daemon on ublk + io_uring, separate from Constellation
 
@@ -237,7 +233,7 @@ small random writes and no VM-image or database workloads.
 phase 1**, from phase 1 benchmarks with real file systems, databases and
 VM images; both 16 KiB and 64 KiB stay supported. Chunk size is a
 per-volume setting in the descriptor, so the default is not part of the
-format freeze. ADR-5 stays proposed. Evidence:
+format freeze. Evidence:
 [tracesim](../../bench/tracesim/RESULTS.md),
 [traces](../../bench/tracesim/TRACES.md).
 
@@ -783,9 +779,8 @@ LRU at 0.5-1 %; the mean over the 9 scan volumes is better than LRU).
 SIEVE is not 5 % better than S3-FIFO at two sizes; W-TinyLFU is worse.
 The policies differ by at most about 4 % in miss ratio, and the policy
 is implementation only (nothing on disk or in S3), so it can change in
-any release. S3-FIFO stays the working default and ADR-14 stays
-proposed; phase 2 revisits it with segment-granular eviction and
-Lunix's own traces. Evidence:
+any release. S3-FIFO stays the working default; phase 2 revisits it
+with segment-granular eviction and Lunix's own traces. Evidence:
 [tracesim](../../bench/tracesim/RESULTS.md).
 
 **Decision:**

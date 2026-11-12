@@ -12,7 +12,7 @@ Included here are:
   destage, segments, Merkle map, commits and fencing, cache, GC, mirrors,
   resize, security, CSI, the failure matrix and the performance targets.
 - [Decisions (ADRs)](DECISIONS.md): what was chosen, what was rejected,
-  and why. All are *proposed* as of 2026-11-11.
+  and why. All accepted on 2026-11-12.
 
 ## Research notes
 

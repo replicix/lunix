@@ -9,9 +9,9 @@ turns into a cache. Rust, io_uring, one daemon per host. It is the block
 sibling of [Constellation](https://github.com/replicix/constellation)
 (the moon of the Replicix universe; the name echoes the storage LUN).
 
-Status: **design phase** (2026-11-11). Nothing is implemented. The spec is
-[DESIGN.md](DESIGN.md); every choice in it is an ADR in
-[DECISIONS.md](DECISIONS.md), currently *proposed*.
+Status: **phase 1** (2026-11-12). Phase 0 is closed and every ADR in
+[DECISIONS.md](DECISIONS.md) is accepted; the spec is
+[DESIGN.md](DESIGN.md). Nothing is implemented yet.
 
 ## High level goals
 
