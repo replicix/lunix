@@ -97,9 +97,29 @@ impl Drop for Dev {
     fn drop(&mut self) {
         drop(self.fd.take());
         if std::thread::panicking() {
-            // Do not block a failing test: try once, report, leave it for the leftovers check.
-            if let Err(e) = self.dev.detach() {
-                eprintln!("cleanup: detach of {} failed: {e}", self.dev.bdev_path());
+            // A failed test must not leave a device without a daemon: detach
+            // (udev may hold the device for a moment), and if that does not
+            // work delete the device this test created (nothing is mounted).
+            let end = Instant::now() + Duration::from_secs(10);
+            loop {
+                match self.dev.detach() {
+                    Ok(()) => return,
+                    Err(UblkError::Busy { .. }) if Instant::now() < end => {
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "cleanup: detach of {} failed: {e}; deleting it",
+                            self.dev.bdev_path()
+                        );
+                        break;
+                    }
+                }
+            }
+            if let Err(e) =
+                UblkDevice::delete_by_id(self.dev.dev_id(), lunix_ublk::Timeouts::default())
+            {
+                eprintln!("cleanup: DEL_DEV of {} failed: {e}", self.dev.bdev_path());
             }
         }
     }

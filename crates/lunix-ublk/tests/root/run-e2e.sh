@@ -11,6 +11,17 @@ require_root; need_root_tests
 rm -rf "$OUT"; mkdir -p "$OUT"
 bash "$here/../../../../spikes/common/ublk-leftovers.sh" > "$OUT/leftovers-start.txt" || { cat "$OUT/leftovers-start.txt"; echo "not clean at start"; exit 2; }
 lsmod | grep -q '^ublk_drv ' || { modprobe ublk_drv && add_cleanup 'rmmod ublk_drv'; }
+# Whatever happens, devices this run created and recorded must not outlive it without a daemon:
+# the sweep deletes the recorded ones that still exist (nothing is mounted in these tests).
+sweep() {
+  trap - EXIT INT TERM
+  local d
+  for d in $(grep -o '/dev/ublkb[0-9]*' "$CREATED_DEVICES" 2>/dev/null | sort -u); do
+    [ -b "$d" ] && [ -n "${TESTD:-}" ] && { echo "sweep: deleting $d"; timeout -k 5 75 "$TESTD" del --id "${d#/dev/ublkb}"; }
+  done
+  true
+}
+add_cleanup sweep
 taskset -c "${E2E_CPUS:-4-7}" timeout -s TERM -k 120 "${E2E_TIMEOUT:-1500}" "$TEST_BIN" --ignored --test-threads 1 --nocapture 2>&1 | tee "$OUT/e2e.log"
 rc=${PIPESTATUS[0]}
 echo "e2e rc=$rc" | tee "$OUT/result.txt"
