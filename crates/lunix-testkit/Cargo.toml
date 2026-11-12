@@ -16,3 +16,6 @@ lunix-iface.workspace = true
 thiserror.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
+blake3.workspace = true
+lz4_flex.workspace = true
+zstd.workspace = true

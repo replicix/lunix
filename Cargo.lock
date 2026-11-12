@@ -1210,11 +1210,14 @@ dependencies = [
 name = "lunix-testkit"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "lunix-format",
  "lunix-iface",
+ "lz4_flex",
  "proptest",
  "tempfile",
  "thiserror 2.0.21",
+ "zstd",
 ]
 
 [[package]]
