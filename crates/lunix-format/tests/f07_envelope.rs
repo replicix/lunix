@@ -555,3 +555,27 @@ proptest! {
         let _ = OpaqueBody::decode(&b);
     }
 }
+
+#[test]
+fn body_len_is_capped_per_kind_even_with_a_looser_caller_bound() {
+    // A kind-1 commit envelope claiming 4 MiB + 1: the caller's bound is the
+    // delta maximum (68 MiB), the kind's own maximum (4 MiB) must still apply.
+    let over = (4u32 << 20) + 1;
+    let mut b = b"LXM1\x01\x01\x00\x00".to_vec();
+    b.extend_from_slice(&over.to_le_bytes());
+    let loose = ObjectKind::Delta.max_body_len();
+    let r = Envelope::decode(
+        &b,
+        &[ObjectKind::Commit, ObjectKind::Delta],
+        Form::Mac,
+        loose,
+    );
+    assert!(r.is_err());
+    assert!(lunix_format::commit::decode_envelope(&b, Form::Mac).is_err());
+    // A delta (kind 3) may exceed 4 MiB: the length check passes and the
+    // input is then truncated.
+    let mut d = b"LXM1\x01\x03\x00\x00".to_vec();
+    d.extend_from_slice(&over.to_le_bytes());
+    let e = lunix_format::commit::decode_envelope(&d, Form::Mac).unwrap_err();
+    assert!(matches!(e, FormatError::Truncated { .. }), "{e}");
+}

@@ -174,8 +174,9 @@ impl ObjectKind {
     }
 
     /// Maximum envelope `body_len` for this kind (section 9.1). The footer
-    /// bound depends on the object and is checked by the segment decoder;
-    /// here it is the loosest value, the opaque-body maximum.
+    /// bound depends on the object: `segment::decode_footer_envelope` always
+    /// tightens it to the footer length, so the value here (the opaque-body
+    /// maximum) only bounds a footer envelope decoded elsewhere.
     pub fn max_body_len(self) -> u32 {
         const MIB: u32 = 1 << 20;
         match self {

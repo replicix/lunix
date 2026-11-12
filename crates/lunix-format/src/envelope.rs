@@ -135,6 +135,9 @@ impl<'a> Envelope<'a> {
         }
         r.reserved(1)?;
         let body_len = r.u32()?;
+        // The caller's bound may be looser than this kind's (a list of
+        // kinds shares one bound): never exceed the kind's own maximum.
+        let max_body_len = max_body_len.min(kind.max_body_len());
         if body_len > max_body_len {
             return Err(FormatError::count(
                 WHAT,
