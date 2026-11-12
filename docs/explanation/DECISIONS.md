@@ -23,6 +23,18 @@ the gates named:
 - **ADR-29** is a reserved number for that staging ADR, not yet a
   decision.
 
+**Amended 2026-11-12 (phase 1 review).** The maintainer accepted the
+decisions of the review of the phase 1 plan. Each affected ADR below has
+an "Amended 2026-11-12 (phase 1 review)" block: ADR-4, 6, 7, 8, 9, 11, 14,
+16, 19, 24, 26 and 30. [DESIGN.md](DESIGN.md) follows them.
+
+**Terminology.** Two sequence numbers exist. `write_seq` numbers writes
+and cuts (the `seq` of ADR-3, 4, 10, 26, 27 and 28, and `cut_seq`).
+`commit_seq` is a commit's position in the chain (the `seq` of
+`commits/<seq>`, `heat/<seq>`, snapshot and reader pins, `parent_seq`,
+`since_seq`, `base_seq` and `chain_floor`). Older text that says `seq`
+means whichever fits its context.
+
 ## ADR-1: A new Rust daemon on ublk + io_uring, separate from Constellation
 
 **Decision:** Lunix is its own repository and binary. It is a ublk server
@@ -166,6 +178,32 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
 
 *Amended by ADR-26:* with no local tier, the journal is a RAM sink: a memfd held by a keeper, in the same record format.
 
+**Amended 2026-11-12 (phase 1 review):**
+- **Lanes.** The journal has one lane per ublk queue. `write_seq` is
+  global, and the lanes are merged by `write_seq` at recovery.
+- **Group flush.** A FLUSH is a group across lanes: a flush coordinator
+  waits until every lane's completed watermark reaches the group's highest
+  `write_seq`, then issues one `fdatasync` per lane with unflushed
+  appends. At most one group is in flight. A FLUSH covers the writes
+  completed before its group formed.
+- **Record framing.** A record is an inline 64-byte header followed by the
+  data, in one record padded to a 4 KiB multiple. The data is copied into
+  the lane's batch buffer. Records are packed back to back inside a lane
+  batch and only the batch is padded to 4 KiB, so n 4 KiB writes cost
+  `ceil(n · 4160 / 4096)` blocks (under 1.6 % overhead at n ≥ 32; an
+  isolated QD1 write costs 8 KiB). There is no separate header block
+  (DESIGN §4.1).
+- **Recovery floor.** Recovery takes the `cut_seq` of the newest FULL
+  commit as its floor, scans every file of every lane, keeps records above
+  the floor, merges them and stops at the first gap. The checkpoint only
+  says which files may be skipped. There is no mid-ring corruption error
+  and no flush marker; `fsck` warns about valid records beyond the gap.
+- Local commits and journal records carry `epoch` = 0 until a backend
+  exists.
+- "The journal deduplicates by `seq`" (DESIGN §3) is reworded: a reissued
+  request is re-admitted with a new `write_seq`, and the reissue is
+  idempotent at the block level.
+
 **Gate outcome (phase 0, 2026-11-12):** accepted (gate) — one
 group-committed `fdatasync` per sync point is confirmed. Linked
 `WRITE→FSYNC` did not meet the rule on ext4, xfs or the real-disk
@@ -265,6 +303,14 @@ the default.
 
 ## ADR-6: Chunk identity = BLAKE3-256 of the plaintext; zeros are never stored
 
+**Amended 2026-11-12 (phase 1 review):** every extent carries a 16-byte
+tag (ADR-11), so reads from the local store verify the tag instead of
+recomputing the chunk id. On an unencrypted volume the tag is BLAKE3-128
+over the extent header and payload, keyed with the integrity key from the
+keyring if one exists, else unkeyed. The chunk id stays the identity; a
+`verify_reads` option recomputes it on local reads, and an extent fetched
+from a backend is still verified by recomputing it.
+
 **Decision:**
 - `chunk_id = blake3(plaintext)`. When the volume family is encrypted it
   is `blake3::keyed_hash(addressing_key, plaintext)`; this is
@@ -282,6 +328,10 @@ the default.
 - *SHA-256 by default.* It is 2.3× slower than BLAKE3 on this host.
 
 ## ADR-7: Packed segments in one format, locally and on S3
+
+**Amended 2026-11-12 (phase 1 review):** the framed header's tag is in
+every extent. It is the AEAD tag on an encrypted volume and a BLAKE3-128
+tag on an unencrypted one (ADR-11). There is one extent layout for both.
 
 **Decision:**
 - Destaged chunks are packed in write order into immutable **segments**.
@@ -303,6 +353,17 @@ the default.
   and double code.
 
 ## ADR-8: The block map is a fixed-radix Merkle tree with location hints
+
+**Amended 2026-11-12 (phase 1 review):** the two questions the gate left to
+phase 1 are decided.
+- **Fanout** is a volume-descriptor field, `map_fanout`: 256 or 512, with
+  512 the default. A leaf holds `map_fanout` entries. The choice is fixed
+  at creation and needs no migration.
+- **Interior nodes** are stored raw, through the extent codec (codec 0). No
+  zstd or LZ4 is used on nodes, since hashes do not compress. The node
+  header has no codec byte; it carries `level` and `fanout`. Leaves and
+  interior nodes both go through the extent codec, so the codec field of
+  the node's `CCH1` header is the only codec indication.
 
 **Gate outcome (phase 0, 2026-11-12):** amended (gate) — rules 1-4 pass
 (rule 5 is a report) at 10 TiB, fanout 512, 64 KiB chunks, one core. Seal of 1 000
@@ -340,7 +401,8 @@ without reading the changed blocks. Evidence:
 **Decision:** the LBA → chunk map is a fixed-fanout radix tree.
 
 - **Leaf entries:**
-  - Each leaf holds 512 entries, covering 32 MiB of LBA at 64 KiB chunks.
+  - Each leaf holds `map_fanout` entries (512 by default, covering 32 MiB
+    of LBA at 64 KiB chunks).
   - An entry is a stored **id prefix** plus a **location hint** (segment,
     offset, `clen`), or *hole*.
   - The id prefix is the first 16 B of `chunk_id`. The id length is a
@@ -427,6 +489,24 @@ hint falls back to the chunk index (ADR-14).
 
 ## ADR-9: A create-only commit chain with an epoch lease; no mutable root
 
+**Amended 2026-11-12 (phase 1 review):**
+- **Numbering.** A commit's `commit_seq` is its position in the chain,
+  `parent_seq + 1`, and is distinct from the write `seq`. The genesis
+  commit is `commit_seq` 0 with no parent. Its `parent_hash` is the BLAKE3
+  of the `volume` object's bytes as stored. In phase 1 `chain_floor` is the
+  genesis `commit_seq` until GC or retention moves it, and no commit object
+  is deleted.
+- **Index runs.** "Every object a commit names is durable before the commit
+  is created" holds for `index_packs[]` because a FULL names only the runs
+  that were durable before it. The run for a FULL's own segments is named
+  by the next FULL, so index runs may lag one commit.
+- **Orphans.** At open, before the index catches up, every sealed segment
+  and map pack with an id above the highest the chain names, and that no
+  commit names, is deleted. Otherwise a dedup hit could point the map at a
+  segment that no commit lists.
+- **EPOCH** has the optional field `authority` (the backend that becomes
+  the authority; ADR-24).
+
 **Decision:**
 - **The commit chain:**
   - The volume's history is a chain of create-only objects
@@ -501,6 +581,28 @@ measured rate.
 amendments included. An external cryptographer review of the 15 questions
 in the [review note](research/2026-11-11-adr-11-crypto-review.md) is still
 recommended before release. It is a note, not a blocker for phase 1.
+
+**Amended 2026-11-12 (phase 1 review):**
+- **Tag in every extent.** The 16-byte tag is present in every extent. On
+  an encrypted volume it is the AEAD tag. On an unencrypted volume it is
+  BLAKE3-128 over the extent header and payload, keyed with the integrity
+  key from the keyring if one exists, else unkeyed. Local reads verify the
+  tag instead of recomputing the chunk id (`verify_reads` recomputes it);
+  fetched extents are still verified in the order of "Integrity" below.
+  This closes the gap where a flipped payload byte in an unencrypted raw
+  extent was returned as data.
+- **Widths.** The stored extent header keeps `CCH1`'s widths (2-byte codec,
+  8-byte `ulen`). The AAD and the key-derivation `info` are a canonical
+  re-encoding, not the header bytes: they use the widths of the normative
+  KAT vectors, a 1-byte codec, a 1-byte level and 4-byte `ulen` and `clen`.
+  Both are safe, because a chunk is at most 1 MiB and a codec id is at most
+  255.
+- **AAD object name.** In the metadata AAD, "object name" is the
+  bucket-relative object path (for example `commits/<commit_seq:016x>`),
+  for every kind. A local-only commit is sealed under that name, so its
+  bytes upload verbatim.
+- `heat/`, `gc/` and `dicts/` bodies freeze only the envelope
+  `{kind id, ver, bytes}` in phase 1.
 
 **Gate outcome (phase 0, 2026-11-12):** the crypto review (P0.8) is done
 and found the salted per-extent key, constant nonce and AES-256-GCM
@@ -767,6 +869,11 @@ owned by an independent writer.
 
 *Amended by ADR-26:* the local store is optional. Its role is `store`, `cache` or `none`.
 
+**Amended 2026-11-12 (phase 1 review):** the "compact" rung is real in
+phase 1 for local-only volumes. GC and compaction ship in phase 1 (DESIGN
+§11), because a local-only volume evicts nothing and its store would
+otherwise grow without bound under churn.
+
 **Gate outcome (phase 0, 2026-11-12):** run on MSR Cambridge (27
 volumes, 64 KiB chunks). The fixed rule does **not** accept S3-FIFO, and
 no other policy meets the amendment margin. Median request miss ratios
@@ -847,6 +954,11 @@ W-TinyLFU) in phase 0.
 ## ADR-16: Process model: one `lunixd` per host; stateless CSI plugin; user recovery
 
 *Amended by ADR-26:* S3-only volumes add a keeper (the systemd FD store or `lunix-keeper`) that holds the RAM write buffer across daemon restarts.
+
+**Amended 2026-11-12 (phase 1 review):** the control protocol is
+length-prefixed JSON frames over the Unix socket, with a protocol version
+(DESIGN §16). gRPC is rejected: it adds a build dependency with no phase 1
+benefit. The protocol is not an on-disk format and can change later.
 
 **Gate outcome (phase 0, 2026-11-12):** amended (gate) — user recovery
 with `REISSUE` keeps a mounted file system consistent. kill -9 with a
@@ -1011,6 +1123,13 @@ evaluated.
 
 ## ADR-19: Shared crates with Constellation
 
+**Amended 2026-11-12 (phase 1 review):** the crate list gains a sixth crate,
+`replicix-zdict`, new code and not an extraction. It holds the
+zstd-with-dictionary codec (codec id 3, encode and decode, registered
+behind `chunkfmt`'s `CODEC_ZSTD_DICT`), the dictionary blob format and a
+generic trainer and evaluator, so that Constellation can use them too.
+Lunix's study harness depends on it (ADR-30).
+
 **Status: accepted (2026-11-12, maintainer).** All five crates move now,
 including `csi-common`, into the public repository
 [replicix/replicix-core](https://github.com/replicix/replicix-core).
@@ -1117,6 +1236,11 @@ The format is part of v1. Its population is phase 7.
 **Rejected:** ML prefetch (cost, opacity).
 
 ## ADR-24: Backend membership lives in the commit chain; authority transfer is live
+
+**Amended 2026-11-12 (phase 1 review):** two fields that the steps used
+without defining are now part of the frozen bodies. An EPOCH commit has the
+optional field `authority` (step 5 writes `EPOCH{authority: B}`). The
+`lease` has the optional field `transferred_to` (step 6).
 
 **Context:**
 - Once a volume has a backend, the client is ephemeral. Every host must
@@ -1326,6 +1450,20 @@ elements:
   entry and an empty list.
 
 ## ADR-26: Three storage topologies (local only, local + S3, S3 only), switchable live
+
+**Amended 2026-11-12 (phase 1 review):**
+- **Index packs** have the bucket path `index/<pack:016x>`. A FULL's
+  `index_packs[]` names only runs that were durable before the commit, so
+  the runs may lag one commit (ADR-9).
+- **Local file set.** The local directory holds `volume` (the exact
+  descriptor bytes), `volume.json` (local-only settings), `state/` with the
+  local `commits/`, `checkpoint`, `device` and `pins`, and
+  `<dir>/families/<id>/keyring`; the host registry is
+  `<state_dir>/volumes.json` (DESIGN §4). Local commits record `epoch` = 0
+  until a backend exists and are sealed under their bucket-relative names.
+- **Device identity.** Before recovering a device the daemon checks the
+  recorded `boot_id`, queue count, depth, flags and size against the device
+  (DESIGN §3).
 
 **Gate outcome (phase 0, 2026-11-12):** accepted (gate) for the
 keeper-held RAM write buffer; the systemd FD-store variant is *not run*.
@@ -1738,6 +1876,21 @@ Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
 
 ## ADR-30: Compression advisor and zstd dictionaries, trained on demand from the volume's own data
 
+**Amended 2026-11-12 (phase 1 review):**
+- **The benchmark moves to phase 1** (plan milestone M18). It still sets the
+  adoption thresholds and the built-in set, and phase 4 starts from its
+  results. It has two arms:
+  - the Lunix arm, as specified under Phasing;
+  - a Constellation-style arm: whole files under 4 MiB as single objects,
+    4 MiB chunks of larger files, and the dictionary chosen by file
+    extension.
+- **Core split.** The dictionary codec (codec id 3, encode and decode), the
+  dictionary blob format and a generic trainer and evaluator live in
+  replicix-core as the crate `replicix-zdict` (ADR-19), so Constellation
+  can use them. Phase 1 pins its codec-3 decoder test vectors as goldens.
+- **Frozen `dicts/` body.** Phase 1 freezes only the envelope
+  `{kind id, ver, bytes}`; `bytes` is the blob defined by `replicix-zdict`.
+
 **Context:**
 - Each chunk is compressed on its own (ADR-12), so a 4-16 KiB chunk has
   little history to match against. zstd dictionaries fix that for
@@ -1832,12 +1985,16 @@ ships):**
 - **Dedup and encryption** are unaffected: chunk ids hash the plaintext,
   and every extent gets a fresh salt, so a rewrite is safe.
 - **Phasing:** a v1 requirement (maintainer, 2026-11-12).
-  - Phase 1 freezes the reservations.
-  - Phase 4 delivers the whole feature next to `gc --dry-run` and the
-    space accounting: first a benchmark of dictionaries against plain
-    zstd levels at 4, 16 and 64 KiB (it sets the adoption thresholds and
-    the built-in set), then `estimate`, `train`, `apply`, `ls|rm` and the
-    dictionary read path.
+  - Phase 1 freezes the reservations. It also runs a benchmark of
+    dictionaries against plain zstd levels at 4, 16 and 64 KiB on real
+    block-device data (it sets the adoption thresholds and the built-in
+    set), adds a Constellation-style arm, and delivers `replicix-zdict`
+    (codec id 3, the dictionary blob format and the trainer and evaluator)
+    in replicix-core.
+  - Phase 4 delivers the `lunix compress` commands (`estimate`, `train`,
+    `apply`, `ls|rm`) and the dictionary read path next to `gc --dry-run`
+    and the space accounting, starting from the phase 1 benchmark's
+    results.
 - **Amends:** ADR-12 (dictionaries are no longer simply deferred; the
   read path and the command are planned) and ADR-11 (`dicts/` joins the
   sealed-object table).

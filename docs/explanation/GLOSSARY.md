@@ -16,12 +16,14 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   commit so that GC keeps it.
 - **Reader pin:** `readers/<host>-<id>`, which keeps a time-travel
   mount's commit alive while it is mounted.
-- **Chain floor:** the lowest retained commit seq, recorded in each FULL.
-  Unpinned commits below it may be deleted.
+- **Chain floor:** the lowest retained `commit_seq`, recorded in each FULL.
+  Unpinned commits below it may be deleted. In phase 1 it is the genesis
+  commit.
 - **Owner:** the single host currently allowed to write a volume. It
   holds the lease.
 - **Lease:** a CAS object on the authority backend holding `epoch`,
-  `owner`, `deadline` and `released`. It gives liveness. Safety comes
+  `owner`, `deadline` and `released`, and optionally `transferred_to`
+  after an authority transfer. It gives liveness. Safety comes
   from the commit chain.
 - **Epoch:** a monotonic owner generation. It is bumped on every
   ownership change, and an EPOCH commit marks it in the chain. Every
@@ -29,14 +31,23 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   not the DEK generation (`dek_gen`).
 - **Zombie:** a former owner that has not noticed it lost the lease. It is
   fenced by its next commit attempt (412).
-- **seq:** the global write sequence number, assigned at admission.
-- **Cut:** the device state containing every write with `seq ≤ c`. It is
-  always a legal post-power-loss image.
-- **Commit:** a create-only object `commits/<seq>`. Every kind carries
-  `epoch`, `parent_seq` and a **parent hash**.
+- **write_seq:** the global write sequence number, assigned at admission
+  across all queues and journal lanes. A FULL commit's `cut_seq` is a
+  `write_seq`.
+- **commit_seq:** a commit's position in the chain: `parent_seq + 1`, with
+  the genesis commit at 0. It names the object `commits/<commit_seq>`. It
+  is unrelated to `write_seq`.
+- **Genesis commit:** the first commit, a FULL with an empty map, with
+  `commit_seq` 0. Its `parent_hash` is the BLAKE3 of the `volume` object's
+  bytes.
+- **Cut:** the device state containing every write with `write_seq ≤ c`.
+  It is always a legal post-power-loss image.
+- **Commit:** a create-only object `commits/<commit_seq>`. Every kind
+  carries `epoch`, `parent_seq` and a **parent hash**.
   - **FULL** commits name a map root and new segments.
   - **DELTA** commits carry journal records inline (sync mode).
-  - **EPOCH** commits mark an owner change.
+  - **EPOCH** commits mark an owner change. An optional `authority` field
+    names the backend that becomes the authority.
   - **CONFIG** commits record the backend set, roles, states and the
     authority. They are the only S3 record of membership (ADR-24).
   - **TRANSFER** commits hand the authority to another backend. A
@@ -48,6 +59,9 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Tip:** the highest contiguous commit on a backend.
 - **Journal:** the local, O_DIRECT, append-only record of acknowledged
   but not yet destaged writes.
+- **Journal lane:** one ring of journal files per ublk queue. Lanes share
+  the global `write_seq` and are merged at recovery. A FLUSH is a group
+  across lanes.
 - **Overlay:** the in-memory LBA map of journal-resident data. Reads
   check it first.
 - **Destage:** the off-path pipeline that turns overlay data into stored
@@ -57,6 +71,10 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   is a **hole** and is never stored.
 - **Extent:** one stored chunk inside a segment: header, compressed and
   optionally encrypted payload, tag.
+- **Tag:** the 16 bytes that end every extent. It is the AEAD tag on an
+  encrypted volume and BLAKE3-128 over the extent header and payload on an
+  unencrypted one (keyed with the integrity key if the keyring has one).
+  A local read verifies it instead of recomputing the chunk id.
 - **dek_gen:** the DEK generation, a `u32` in each encrypted extent's
   header and AAD. Rotation raises it and protects only new writes. It is
   unrelated to the lease and commit `epoch` (ADR-11).
@@ -73,12 +91,15 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Segment:** an immutable packed object of extents, about 16 MiB, with
   a footer index. Its bytes are identical locally and on every backend.
 - **Map:** the fixed-radix Merkle tree from chunk index to `chunk_id` plus
-  location **hint**. Its root hash identifies the volume's content.
+  location **hint**. Its root hash identifies the volume's content. Its
+  fanout, `map_fanout`, is 256 or 512 (default 512), fixed per volume.
 - **Hint:** a `(segment, offset, clen)` stored next to a `chunk_id` in a
   leaf, so a cold read costs one GET. It is verified on use, and falls
   back to the chunk index.
-- **Chunk index:** `chunk_id → location`, kept as LSM runs. It is used
-  for dedup and for stale hints, and can be rebuilt from segment footers.
+- **Chunk index:** `chunk_id → location`, kept as LSM runs (`index/<pack>`).
+  It is used for dedup and for stale hints, and can be rebuilt from segment
+  footers. A FULL names only the runs that were durable before it, so runs
+  may lag one commit.
 - **Backend:** an S3 location holding a copy of the volume.
   - The **authority** holds the lease and must support conditional
     writes.
@@ -92,7 +113,7 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   (ADR-27). Each is `local` or `s3`, and says where data must be before
   a write or a FLUSH completes.
 - **Space ladder:** what happens as local space runs out: evict clean →
-  compact → throttle → `on_full` (`wait` with an optional timeout, or
+  compact (real in phase 1 for local-only volumes) → throttle → `on_full` (`wait` with an optional timeout, or
   `error` = ENOSPC).
 - **Heat map:** a `heat/<seq>` object of hot ranges and first-touch
   order, used to warm a new owner's cache.
@@ -117,5 +138,8 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   bulk uploads (ADR-28). Everything else uses the **bulk lane**.
 - **sync_dirty_max:** the cap on acknowledged-but-unuploaded bytes when
   `flush = s3`. It bounds fsync latency under a bulk writer (ADR-28).
+- **Orphan:** a sealed segment or map pack that no commit names and whose
+  id is above the highest the chain names, left by a crash before the
+  commit. It is deleted at open, before the index catches up.
 - **Steal:** taking ownership without a graceful release. It waits for
   the lease TTL, or `--force`.

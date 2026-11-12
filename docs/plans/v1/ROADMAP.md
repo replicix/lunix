@@ -7,14 +7,18 @@ is [DESIGN.md](../../explanation/DESIGN.md).
 Each phase builds on the previous one and ends with its gates green. From
 phase 1 on, the format elements are final: the journal record, the
 segment and its CCH1 extent framing, the map node, the commit kinds, the
-bucket layout (including ADR-25's clone reservations: `volume.lineage`,
+16-byte tag on every extent, the commit numbering (`commit_seq`, with the
+genesis commit at 0), the bucket layout (including `index/<pack>` and
+ADR-25's clone reservations: `volume.lineage`,
 the leaf `lineage_idx`, `holds/` and `readers/`) and the key hierarchy.
 The accepted crypto format elements (ADR-11, 2026-11-12) are frozen with
 them: the extent header fields (`dek_gen`, `salt`, `nonce`) and its AAD,
 the `families/<id>/keyring` object, the sealed-object table, the `volume`
 descriptor MAC and KMK fingerprint, and `parent_hash` and `epoch` in every
 commit kind. ADR-30's dictionary reservations are frozen too: codec id 3,
-`dicts/<id>` and its GC rule.
+the `dicts/<id>` envelope (`{kind id, ver, bytes}`) and its GC rule. The
+`heat/` and `gc/` bodies freeze only their envelope; later phases version
+their contents.
 Later phases add code, not
 migrations. Encryption is therefore *designed* in phase 1 even where it is
 implemented later.
@@ -64,7 +68,17 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
   segments.
 - The map with local commits, and DISCARD / WRITE_ZEROES.
 - The space ladder with `on_full`, and online grow.
+- Garbage collection and compaction for local-only volumes, with
+  retention `last:N` FULL commits (default 2) moving `chain_floor`: mark from the
+  roots, LFS cost-benefit compaction, and condemn → grace → recheck →
+  delete (DESIGN §11). The ladder's compact step is real.
 - `fsck`, including index rebuild.
+- The compression-dictionary study (ADR-30, plan milestone M18): the
+  benchmark of dictionaries against zstd levels at 4, 16 and 64 KiB on
+  real block-device data, with a Constellation-style arm (whole files
+  under 4 MiB, 4 MiB chunks, dictionary chosen by file extension), and the
+  crate `replicix-zdict` in replicix-core: the dictionary codec (codec id
+  3), the dictionary blob format and a generic trainer and evaluator.
 - Encryption: format, the keyring with its key slots, AEAD, the
   attach-time downgrade check (descriptor MAC and KMK fingerprint), and
   hash-chained commits with an HMAC on every commit of unencrypted
@@ -74,12 +88,22 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - fio verify passes.
 - xfstests passes on ext4 and xfs over the device.
 - A kill -9 crash loop at every step passes, with fsck clean.
+- Garbage collection and compaction pass under churn:
+  - a GC oracle (an independent reachability recount from the roots)
+    agrees after every cycle, and no live data is ever reclaimed;
+  - space returns to a steady state: repeated overwrite churn does not
+    grow the store beyond the live data plus bounded headroom;
+  - the crash loop covers every condemn, compact and delete step, with
+    fsck clean.
 - Dedup and compression ratios are reported.
 - Perf meets the §20 targets for local hits and writes, or the
   shortfall is explained.
 - The default chunk size is decided (ADR-5): fio, a database (pgbench)
   and a VM-image workload at 16 KiB and 64 KiB, comparing dedup and
   compression ratio, map size, CPU per GiB and partial-chunk RMW.
+- The dictionary benchmark report is published, with both arms, and
+  `replicix-zdict` ships with its codec-3 decoder test vectors pinned as
+  goldens.
 
 ## Phase 2: One S3 backend (authority), async mode
 
@@ -90,7 +114,9 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - Eviction (S3-FIFO), miss handling with ranged, coalesced, hedged GETs,
   and readahead.
 - `volume import` (mount elsewhere).
-- GC and compaction.
+- The backend side of GC and compaction: deleting remote segments, fenced
+  on the lease epoch, and compaction that fetches live extents by ranged
+  GET. The local side ships in phase 1; mirror GC stays in phase 5.
 - The fault-injecting object store.
 
 **Exit:**
@@ -134,12 +160,13 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - `rollback`.
 - Tiered retention and the `chain_floor`.
 - Per-snapshot USED, WRITTEN and REFER, and `gc --dry-run`.
-- Compression advisor (ADR-30, a v1 requirement):
-  - first, a benchmark of dictionaries against plain zstd levels at 4,
-    16 and 64 KiB on real block-device data, which sets the adoption
-    thresholds and the built-in dictionaries;
-  - `lunix compress estimate`, then `train`, `apply` and `ls|rm`;
-  - the dictionary read path (codec id 3, `dicts/`, the GC rule).
+- Compression advisor (ADR-30, a v1 requirement). The benchmark, the
+  dictionary codec and the trainer come from phase 1 (`replicix-zdict`):
+  - `lunix compress estimate`, then `train`, `apply` and `ls|rm`, with the
+    adoption thresholds and built-in dictionaries that the phase 1
+    benchmark set;
+  - the dictionary read path integration (codec id 3, `dicts/`, the GC
+    rule).
 - `diff`, raw `export`, a full-copy `restore`, shrink and `verify`.
 - GC honours `holds/` (always empty in v1).
 

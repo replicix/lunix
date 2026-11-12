@@ -5,7 +5,14 @@ This is the system spec. Rationale lives in [DECISIONS.md](DECISIONS.md)
 [GLOSSARY.md](GLOSSARY.md). All ADRs are accepted (2026-11-12); their
 follow-ups are listed at the top of DECISIONS.md. Where this spec and an
 accepted ADR disagree, the ADR wins and this file is fixed in the same
-commit.
+commit. The phase 1 plan review of 2026-11-12 amended this file and
+ADR-4, 6, 7, 8, 9, 11, 14, 16, 19, 24, 26 and 30; the ADRs carry
+"Amended 2026-11-12 (phase 1 review)" blocks.
+
+Two sequence numbers are used and never mixed. **`write_seq`** numbers
+writes (§8.1). **`commit_seq`** numbers commits, by their position in the
+chain (§8.2). A bare `seq` in older text means `write_seq` in a write or
+cut context and `commit_seq` in a commit context.
 
 ## 1. Overview
 
@@ -44,8 +51,8 @@ A **volume** is a thin block device of a given size. Its data path is:
 ## 2. Volume model
 
 - **Volume:** `uuid` and a human name registered on the host. Fixed at
-  creation: block size 4096, chunk size (default 64 KiB, ADR-5),
-  compression policy, encryption on/off, and family. Size is mutable
+  creation: block size 4096, chunk size (default 64 KiB, ADR-5), map
+  fanout (`map_fanout`, 256 or 512, default 512; ADR-8), compression policy, encryption on/off, and family. Size is mutable
   (§14).
 - **Family:** the key domain (ADR-13): a volume plus its snapshots and,
   post-v1, its clones. `family_id`, keyring (key slots for an encrypted
@@ -76,7 +83,9 @@ A **volume** is a thin block device of a given size. Its data path is:
 - **Device creation:** `ADD_DEV` with the flags of ADR-17, then
   `SET_PARAMS`, then `START_DEV`. `nr_hw_queues` is 4-16 (default:
   `min(8, cpus/4)`) and QD is 128. There is one pinned thread per queue.
-  Buffers are preallocated and mlocked. The daemon runs with
+  Buffers are preallocated and mlocked; each is `max_io_buf_bytes` (a
+  per-volume attach option, default 1 MiB, minimum 256 KiB), so a volume
+  pins `queues × 128 × max_io_buf_bytes` in copy mode. The daemon runs with
   `PR_SET_IO_FLUSHER` and in its own mount namespace (libublk issue #50).
 - **Data path mode:** the copy path is the default. `USER_COPY` and
   `BATCH_IO` are opt-in per volume. `USER_COPY` wins at 64 KiB and above
@@ -101,9 +110,23 @@ A **volume** is a thin block device of a given size. Its data path is:
 - **Recovery:** after a crash or an upgrade, the daemon finds devices in
   the QUIESCED or recovering state and runs `START_USER_RECOVERY`, then
   reattaches the queues. `USER_RECOVERY_REISSUE` replays in-flight
-  requests. This is safe because writes are idempotent at the block level
-  and the journal deduplicates by `seq`. The driver retains the
-  parameters, so recovery sends no `SET_PARAMS`.
+  requests. This is safe because writes are idempotent at the block level:
+  a reissued request is re-admitted with a new `write_seq`, and the guest
+  cannot have ordered another write after one it has not seen
+  acknowledged. The driver retains the parameters, so recovery sends no
+  `SET_PARAMS`.
+- **Device identity:** ublk has no owner tag on a device, and device ids
+  are reused after a reboot. The daemon therefore records the device in
+  `state/device` (device id, `boot_id`, queue count and depth, size,
+  flags) and recovers a device only if all of these hold:
+  1. `GET_DEV_INFO` on the recorded id succeeds and the state is QUIESCED
+     or recovering;
+  2. the queue count, depth, flags and `dev_sectors` equal the recorded
+     values;
+  3. `boot_id` equals the current boot.
+
+  A failed check is an error that leaves the device alone. The daemon
+  then adds a new device (attach) and never touches the stale one.
 - **Fail-I/O:** a per-volume `on_hang` watchdog can switch a wedged
   device to fail-I/O. A device in fail-I/O cannot be recovered; the
   policy is to delete it and remount. `FAIL_IO` and `REISSUE` cannot be
@@ -121,9 +144,9 @@ A **volume** is a thin block device of a given size. Its data path is:
 | op | handling (queue thread) | completes when |
 |---|---|---|
 | READ | overlay → map → local store → backend miss (§10) | data copied to the request buffer |
-| WRITE | reserve journal space; `seq = next()`; append record (O_DIRECT, io_uring); update overlay | journal write completed (volatile) |
+| WRITE | reserve journal space; `write_seq = next()`; copy the data into the lane's record buffer and append the record (O_DIRECT, io_uring); update overlay | journal write completed (volatile) |
 | WRITE+FUA | as WRITE, then join the next flush group | the flush group is durable at the mode's level |
-| FLUSH | join the flush group: one `fdatasync` of the journal; sync mode: also a DELTA commit (§8.3) | the group is durable |
+| FLUSH | join the flush group: one `fdatasync` per journal lane with unflushed appends (§4.1); sync mode: also a DELTA commit (§8.3) | the group is durable |
 | DISCARD / WRITE_ZEROES | journal a hole record; overlay marks a hole | journal write completed |
 
 The queue thread never blocks. Anything that waits (space, S3, a cold
@@ -139,35 +162,94 @@ journal):
 
 ```
 <dir>/<volume-uuid>/
-  volume.json        local copy of volume config + backend set + cursors
+  volume             the exact descriptor bytes (so `backend add` uploads them with the MAC intact)
+  volume.json        local-only settings: name, directory, space policy, commit cadence
   LOCK               process lock (stale-lock takeover, Constellation ADR-29 pattern)
-  journal/           ring of preallocated, zero-filled 64 MiB files
-  segments/          <seg:016x>.seg — own segments (same bytes as on S3)
+  journal/           one lane per ublk queue: q<lane>-<ordinal:08x>.j, preallocated zero-filled 64 MiB files
+  segments/          <seg:016x>.seg — own segments (same bytes as on S3); <seg:016x>.open while being written
   cache/             slab file(s) of fetched extents (S3-FIFO)
   map/               map-node packs (own + fetched)
-  index/             chunk index LSM runs (chunk_id → segment, offset, clen)
+  index/             <pack:016x> chunk index LSM runs (chunk_id → segment, offset, clen)
   heat/              access sampling for warm-start manifests
-  state/             checkpoint: overlay snapshot, destage cursor, last commit
+  state/
+    commits/         <commit_seq:016x> local-only commits (§13.3)
+    checkpoint       a hint only: last commit_seq, per-lane journal tails, counters
+    device           ublk device id, boot_id, queue count and depth, size, flags (§3)
+    pins             highest keyring_seq and epoch seen, KMK fingerprint pin
+<dir>/families/<family-id>/keyring     the family keyring (§6.1)
+<state_dir>/volumes.json               host registry: name → uuid, directory
 ```
+
+- The backend set is not in `volume.json`: from the first backend on it
+  lives in the commit chain (ADR-24).
+- `volumes.json` is replaced atomically and can be rebuilt by scanning
+  the volume directories.
+- Every local file that must be atomic is written as a temporary file,
+  `fdatasync`, rename, then a directory `fsync`.
+- The `checkpoint` is a hint with a checksum and a double-slot atomic
+  layout. Losing it or finding it stale is harmless (§4.1).
 
 ### 4.1 Journal
 
-- The journal is a ring of 64 MiB files opened O_DIRECT. Records are
-  4 KiB-aligned: `{magic, seq, epoch, lba, len, kind(write|hole), crc32c}`
-  followed by the data.
-- Writes are batched per queue into io_uring submissions. FLUSH issues
-  one group-committed `fdatasync` (ADR-4). Linked WRITE→FSYNC chains
-  and `O_DSYNC` per write were measured and rejected. The files are
-  preallocated and zero-filled; on btrfs the journal directory is
-  `nodatacow`.
+- **Lanes.** There is one journal lane per ublk queue. A lane owns a ring
+  of 64 MiB files (`journal/q<lane>-<ordinal:08x>.j`) opened O_DIRECT, each
+  starting with a header `{magic, version, volume uuid, lane id, file
+  ordinal, generation}`. `write_seq` is global across lanes, so the lanes
+  are merged by `write_seq` at recovery. The ring is bounded by
+  `journal_max`, split evenly across lanes; a lane with no free file parks
+  its writes until reclaim.
+- **Record framing.** A record is `{magic, write_seq, epoch, lba, len,
+  kind(write|hole), crc32c}` as an inline 64-byte header, followed by the
+  data. The CRC covers header and data. A hole record has `len` and no
+  data. The data is copied into the lane's aligned batch buffer (a bounded
+  pool; the pool running dry is `Full`, like a lane with no free file), so
+  the ublk request buffer is free as soon as the append is queued.
+- **Batch packing (decided 2026-11-12).** Records are packed back to back,
+  8-byte aligned, inside one lane **batch**; only the batch is padded to a
+  4 KiB multiple and written with one O_DIRECT write. Padding is zeros,
+  and a zero `magic` means "end of batch: continue at the next 4 KiB
+  boundary". Recovery reads records in order and stops at the first CRC
+  failure or gap, so a torn batch loses only its unacknowledged tail.
+  - Cost: a batch of *n* 4 KiB writes takes `ceil(n · 4160 / 4096)`
+    blocks, under 1.6 % plus one block of overhead at n ≥ 32. An isolated
+    4 KiB write at queue depth 1 costs two blocks (8 KiB); at that depth
+    the flush, not the bytes, sets the latency (P0.5).
+  - There is no separate header block.
+- **`epoch`** in a record is 0 until a backend exists (local commits
+  record `epoch` = 0 as well; §13.3).
+- Writes are batched per lane into io_uring submissions. A lane is
+  single-threaded and never blocks.
+- **Group flush (ADR-4).** A FLUSH is a group across lanes, assembled by a
+  flush coordinator that owns its own ring:
+  1. It takes `upto` = the highest `write_seq` among the waiting flushes.
+  2. It waits until every lane's completed watermark is `≥ upto`.
+  3. It issues one `fdatasync` for each lane with unflushed appends, in
+     parallel. The group completes when all have.
+  - At most one group is in flight; later flushes accumulate into the next
+    one. A FLUSH covers the writes completed before its group formed.
+  - Linked WRITE→FSYNC chains and `O_DSYNC` per write were measured and
+    rejected.
+  - The files are preallocated and zero-filled; on btrfs the journal
+    directory is `nodatacow`.
 - **Recovery:**
-  1. Scan from the checkpoint's `journal_tail`.
-  2. Accept records with valid CRCs in contiguous `seq` order.
-  3. Stop at the first gap or torn record. A torn tail is legal, because
-     those writes were never flushed.
+  1. Take the `floor`: the `cut_seq` of the newest FULL commit (0 for the
+     genesis commit). It is trusted, because the commit is authenticated.
+     The checkpoint is not the floor.
+  2. Scan every file of every lane. Keep records with a valid file header
+     and a valid CRC and `write_seq > floor`. A record from a previous
+     pass of the ring is stale and ends its lane's scan.
+  3. Merge the lanes by `write_seq` and accept records in contiguous
+     order.
+  4. Stop at the first gap or torn record and ignore everything after it.
+     A torn tail is legal, because those writes were never flushed. No
+     marker of the last flushed `write_seq` exists on disk, and none is
+     added; `fsck` reports valid records beyond the first gap as a warning
+     with their `write_seq` range.
+  - The checkpoint's per-lane tails only say which files may be skipped. A
+    lost or stale checkpoint changes the cost of recovery, not its result.
 - **Reclaim:** journal space is freed once every record in a file has
   been destaged into a segment whose `fdatasync` is done, *and* the
-  owning map change is checkpointed.
+  commit that names the owning map change is durable (§8.2).
 - **Retention after destage:** in async and sync modes, records also wait
   until the containing cut is committed to the authority. A DELTA commit
   can then be rebuilt from the journal.
@@ -190,13 +272,36 @@ journal):
   runs:
   1. Evict clean cache.
   2. Evict cold synced segments.
-  3. Compact (local-only).
+  3. Compact (local-only; a real step in phase 1, §11).
   4. Throttle destage and upload.
   5. Apply `on_full`: `wait` parks the request, until `full_timeout` if
      one is set, then ENOSPC; `error` returns ENOSPC immediately (ublk
      maps it to `BLK_STS_NOSPC`).
 - A reserve of 2 × the segment size, plus the commit and map headroom, is
   never handed to writes.
+
+### 4.4 Open and recovery order
+
+`Engine::open` of a local volume runs these steps, then accepts I/O.
+Recovery is idempotent: a crash during it is another recovery.
+
+1. Take `LOCK`; read and verify `volume`; unlock the keys; run the attach
+   check (ADR-11).
+2. Read the tip commit and verify the last chain link (`fsck` verifies the
+   whole chain from genesis).
+3. Open the map at the tip's `map_root`; read the checkpoint hint.
+4. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1);
+   rebuild the overlay from the records; set the next `write_seq`.
+5. **Delete orphans.** Delete unsealed (`*.open`) and temporary files.
+   Delete every sealed segment and map pack whose id is above the highest
+   id the chain names, and that no commit names. This is safe, because
+   ids are never reused and the journal still holds the data (reclaim
+   happens only after the commit is durable). It must run before step 6,
+   or a dedup hit could point the map at a segment that no commit lists,
+   and a later GC would delete live data. `fsck` reports such files as
+   `orphan` only if the volume was closed cleanly.
+6. **Catch up the chunk index** (`index.catch_up`) from the footers of the
+   segments the chain names that no named index run covers (§8.2).
 
 ## 5. Destage pipeline
 
@@ -230,6 +335,8 @@ than the async interval, so overwrites are absorbed.
      compaction all re-seal with a new salt. No code path stores a salt or
      accepts one from the caller.
    - A debug or fuzz build checks every (key, nonce) pair for repeats.
+   - On an unencrypted volume this step computes the extent's BLAKE3-128
+     tag instead (§6).
 7. **Pack:** append the extent to the open segment, in LBA order within
    a batch. Seal the segment at the target size or at a commit cut:
    write the footer, `fdatasync`, rename into `segments/`.
@@ -256,7 +363,7 @@ Segment (`segments/<seg:016x>`, immutable, target 16 MiB):
 ```
 [extent]* [footer] [trailer]
 extent  = CCH1 header {magic, ver, codec, level, ulen} + chunk_id(32) + clen + [dek_gen(4) + salt(24) + nonce(12)] + payload + tag(16)
-footer  = sorted [chunk_id, offset, clen, ulen, codec] (zstd-compressed) + seg-level BLAKE3 + seq range
+footer  = sorted [chunk_id, offset, clen, ulen, codec] (zstd-compressed) + seg-level BLAKE3 + write_seq range
 trailer = footer offset + length + magic
 ```
 
@@ -266,6 +373,25 @@ trailer = footer offset + length + magic
   is zero in the default profile and holds the module-generated nonce in
   the FIPS profile. The AAD is `ver ‖ codec ‖ level ‖ ulen ‖ kind ‖ dek_gen
   ‖ family_id ‖ id_len ‖ chunk_id`, with no location in it (ADR-11).
+- **The tag.** The 16-byte `tag` is present in **every** extent, so there
+  is one extent layout for both volume kinds.
+  - Encrypted volume: the AEAD tag.
+  - Unencrypted volume: BLAKE3-128 (the first 16 bytes of the BLAKE3
+    output) over the extent header and payload, that is, every byte of the
+    extent before the tag. It is keyed with the integrity key from the
+    family keyring if one exists, else unkeyed.
+  - A read from the local store verifies the tag, the header and the id
+    prefix against the map. It does not recompute the chunk id; the
+    `verify_reads` option recomputes it. `fsck` verifies every tag. An
+    extent fetched from a backend is also verified by recomputing the
+    chunk id (ADR-11).
+- **Field widths.** The stored header keeps `CCH1`'s widths (a 2-byte
+  codec and an 8-byte `ulen`). The AAD and the key-derivation `info` are a
+  canonical re-encoding that uses the widths of the normative KAT vectors
+  (`bench/crypto-kat/raw/kat-vectors.json`): a 1-byte codec, a 1-byte
+  level and 4-byte `ulen` and `clen`. They are not the header bytes. This
+  is safe, because a chunk is at most 1 MiB and a codec id is at most
+  255.
 - Segment numbers are allocated by the owner, are monotonic, and are
   never reused: `seg = (epoch << 40) | counter`, so a zombie can never
   collide.
@@ -279,18 +405,20 @@ trailer = footer offset + length + magic
                   block/chunk size, codec policy, id_len, crypto params
                   (encrypted or not, profile), KMK fingerprint, descriptor MAC.
                   No key slots.
-  lease           CAS object, sealed: epoch, owner{host,cluster}, deadline, released
-  head            advisory: last known commit seq (plain PUT; never trusted)
-  commits/<seq:016x>       create-only FULL | DELTA | EPOCH | CONFIG | TRANSFER commits
+  lease           CAS object, sealed: epoch, owner{host,cluster}, deadline, released,
+                  transferred_to? (set best effort after an authority transfer, ADR-24)
+  head            advisory: last known commit_seq (plain PUT; never trusted)
+  commits/<commit_seq:016x>   create-only FULL | DELTA | EPOCH | CONFIG | TRANSFER commits
   sync/<backend-id>/progress   advisory backfill/cursor progress (owner-only plain PUT)
   segments/<seg:016x>      data segments
   map/<pack:016x>          map-node packs
-  heat/<seq:016x>          warm-start manifests (ADR-23)
-  snapshots/<name>         create-only pins {seq, created, consistency, label}
-  readers/<host>-<id>      time-travel mount pins {seq, deadline}, renewed while mounted
+  index/<pack:016x>        chunk index runs (sorted [chunk_id, seg, off, clen] blocks, a block index and a checksum)
+  heat/<commit_seq:016x>   warm-start manifests (ADR-23)
+  snapshots/<name>         create-only pins {commit_seq, created, consistency, label}
+  readers/<host>-<id>      time-travel mount pins {commit_seq, deadline}, renewed while mounted
   holds/<child-uuid>       clone base pins {base_seq}; none in v1, but GC honours them (ADR-25)
-  gc/                      condemned lists, evidence journal
-  dicts/<id:08x>           create-only trained zstd dictionaries (ADR-30; reserved in phase 1, used from phase 4)
+  gc/                      condemned lists, evidence journal; gc/space/<commit_seq:016x> (§11)
+  dicts/<id:08x>           create-only trained zstd dictionaries (ADR-30; envelope reserved in phase 1, used from phase 4)
 <prefix>/lunix/v1/families/<family-id>/keyring   (shared by clones)
                   mutable, sealed: keyring_seq, key slots, MAC'd body.
                   CAS (If-Match) on the authority only; copied to mirrors
@@ -302,6 +430,22 @@ trailer = footer offset + length + magic
   `gc/`, `readers/`, `holds/` and `snapshots/` bodies use
   XChaCha20-Poly1305 under a per-kind metadata key. Extents and map nodes
   use the extent scheme. Object names stay plaintext.
+  - **The AAD object name** is the bucket-relative object path, such as
+    `commits/<commit_seq:016x>`, for every kind (the family for the
+    keyring). A local-only commit in `state/commits/<commit_seq:016x>` is
+    sealed under the name `commits/<commit_seq:016x>`, so its bytes upload
+    verbatim when a backend is attached (§13.3).
+- **Frozen bodies.**
+  - `snapshots/`, `readers/` and `holds/` bodies are exactly the fields
+    listed above.
+  - `heat/`, `gc/` (including `gc/space/`) and `dicts/` freeze only their
+    envelope in phase 1: `{kind id, ver, bytes}`. Their contents are
+    versioned by the phase that defines them (4 and 7 for `heat/` and
+    `gc/`; `dicts/` holds the dictionary blob of `replicix-zdict`, ADR-30).
+- **Index runs.** A chunk index run is an immutable file of sorted
+  `[chunk_id, seg, off, clen]` blocks with a block index and a checksum. It
+  is stored locally in `index/` and, from phase 2, in the bucket under the
+  same name.
 - **Keyring:** `keyring_seq` rises on every change, and a keyring below
   the highest one seen is rejected. The `keyring` is the one mutable
   object that is not membership state (ADR-24). Mirrors copy it after the
@@ -310,8 +454,12 @@ trailer = footer offset + length + magic
 ## 7. Block map
 
 - **Shape:** a radix tree over chunk index `ci = lba / chunk_size`.
-  Fanout is 512. Depth is `ceil(log512(chunks))`. At 64 KiB chunks that is
-  3 levels (leaf + 2 interior) up to 8 TiB, and 4 levels up to 4 PiB.
+  The fanout is the volume's `map_fanout`, a descriptor field fixed at
+  creation: 256 or 512, default 512. Depth is `ceil(log_fanout(chunks))`.
+  At 64 KiB chunks and fanout 512 that is 3 levels (leaf + 2 interior) up
+  to 8 TiB, and 4 levels up to 4 PiB. A leaf holds `map_fanout` entries.
+  Fanout 256 writes 36-45% fewer bytes per seal at twice the resident
+  interior nodes (ADR-8).
 - **Entries:**
   - Leaf entry: `hole` | `{id_prefix, hint{seg, off, clen}}`.
     - `id_prefix` is the first `id_len` bytes of `chunk_id`, where
@@ -338,8 +486,10 @@ trailer = footer offset + length + magic
 - **Node identity:** node hash = BLAKE3 of the canonical encoding (keyed
   if encrypted). For an interior node the hash covers the child hashes
   only, never the child locations, so identical content gives identical
-  roots on any backend. Leaves are stored in their bit-packed encoding without
-  compression. Interior nodes are zstd-compressed. If the family is
+  roots on any backend. Leaves are stored in their bit-packed encoding.
+  Interior nodes are stored raw. Both go through the extent codec with
+  codec 0 (raw): there is no zstd on nodes and no codec byte in the node
+  header, which carries only `level` and `fanout`. If the family is
   encrypted, both are encrypted with ADR-11's scheme keyed by the node
   hash.
 - **Hot path:**
@@ -381,33 +531,60 @@ trailer = footer offset + length + magic
     keyed by `(seg, off)`. That needs its own ADR before it is enabled.
 - **Chunk index:**
   - `chunk_id → (seg, off, clen)` is kept as LSM sorted runs locally,
-    persisted to the bucket inside FULL commits as index packs.
+    named by FULL commits as index packs (`index/<pack:016x>`, §6.1) and,
+    from phase 2, uploaded with them.
   - It can always be rebuilt from segment footers, which is `fsck
     --rebuild-index`.
+  - **Index runs may lag one commit.** A run is persisted after the FULL
+    commit that covers its segments (§8.2, step C8), so a FULL cannot
+    name the run for its own segments. `index_packs[]` of FULL *n* lists
+    the runs that were durable before FULL *n* was created; they cover the
+    segments named by commits up to *n*−1. The run for *n*'s segments is
+    named by the next FULL. Open catches up the rest from segment footers
+    (§4.4). A commit never names a run that is not yet durable.
 
 ## 8. Commits, cuts and modes
 
 ### 8.1 Cuts
 
-- A global atomic `seq` is assigned at write admission, across all queues.
-- To cut at `c`:
-  1. Pick `c` = the current `seq` value.
-  2. Wait until every write with `seq ≤ c` has reached the journal; that
-     is only the in-flight ones.
+- A global atomic `write_seq` is assigned at write admission, across all
+  queues and journal lanes. It is unrelated to the `commit_seq` of §8.2.
+- To cut at `c` (a `write_seq` value):
+  1. Pick `c` = the current `write_seq` value.
+  2. Wait until every write with `write_seq ≤ c` has reached the journal;
+     that is only the in-flight ones.
   3. Destage up to `c` into sealed segments and the map, using MVCC on
-     the overlay: writes with `seq > c` stay out of this map version.
+     the overlay: writes with `write_seq > c` stay out of this map version.
   4. Seal the map.
 - A cut never stalls new writes; it only waits for in-flight ones. Every
-  completed FLUSH names a `seq`, so "the state at the last FLUSH before
+  completed FLUSH names a `write_seq`, so "the state at the last FLUSH before
   time t" is well defined (CDP at commit granularity).
 
 ### 8.2 FULL commit
 
 ```
-commit { kind: FULL, seq, epoch, parent_seq, parent_hash, cut_seq, size, map_root,
+commit { kind: FULL, commit_seq, epoch, parent_seq, parent_hash, cut_seq, size, map_root,
          map_packs[], new_segments[], index_packs[], chain_floor, heat?,
          created_at, mac? }
+EPOCH  { kind: EPOCH, commit_seq, epoch, parent_seq, parent_hash, authority?,
+         created_at, mac? }
 ```
+
+- **Numbering.** `commit_seq` is the commit's position in the chain:
+  `parent_seq + 1`. The genesis commit, a FULL with an empty map that
+  volume creation writes, is `commit_seq` 0 with no `parent_seq`, and its
+  `parent_hash` is the BLAKE3 of the `volume` object's bytes as stored.
+  `cut_seq` is a `write_seq` (§8.1); a FULL carries both numbers and they
+  are independent. `parent_seq` and `since_seq` are commit numbers.
+- **`chain_floor`** is a `commit_seq`: the lowest retained commit. It
+  starts at genesis and moves up as retention releases commits. In
+  phase 1 the retention policy is `last:N` FULL commits (default 2, the
+  tip and its predecessor), so `chain_floor` is the older of the two
+  (§8.7, §11).
+- **`authority`** on an EPOCH commit is optional. It names the backend that
+  becomes the authority and is set by an authority transfer (§12); a plain
+  ownership change (§8.4) leaves it out. In a local-only volume `epoch` is
+  0 in every commit until a backend exists (§13.3).
 
 - **Chain fields (every kind, ADR-11):** all five commit kinds carry
   `epoch`, `parent_seq` and `parent_hash`, the BLAKE3 of the parent
@@ -421,18 +598,42 @@ Upload order:
 
 1. All new segments and packs are uploaded, using parallel PUTs with
    AIMD concurrency from `upload-concurrency`.
-2. Then `commits/<seq>` is written with `If-None-Match: *`.
+2. Then `commits/<commit_seq>` is written with `If-None-Match: *`.
 3. Then, best effort, `head` is updated.
 
 In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 `B_max` throttle admission.
 
+**Index runs a FULL names.** A FULL names only index runs that were
+durable before the commit object (`index_packs[]`, §7). The run covering
+a FULL's own segments is persisted afterwards and named by the next FULL.
+
+**Local commit order.** A local FULL commit is made in this durable order;
+each step has a crash point:
+1. Pick `c`, wait for in-flight writes, cut the overlay (§8.1).
+2. Destage the cut. Extents go to the open segment, the map is updated in
+   memory, and index inserts are held back.
+3. Seal the open segments: footer, trailer, `fdatasync`, rename, directory
+   `fsync`.
+4. Seal the map into a pack: `fdatasync`, rename, directory `fsync`.
+5. Build and seal the FULL commit and write it: temporary file,
+   `fdatasync`, rename, directory `fsync`. **This is the durability point
+   of the cut.**
+6. Write the checkpoint hint.
+7. Persist the index run for the sealed segments.
+8. Reclaim the journal up to the cut, release the overlay and update the
+   space ledger.
+
+A crash before step 5 completes leaves the previous commit as the tip; the
+new segments and pack are orphans, deleted at open (§4.4). The journal is
+never reclaimed before step 5 is durable.
+
 ### 8.3 DELTA commit (sync mode)
 
 - On FLUSH or FUA, all flush waiters are gathered into one group.
-- `cut = max seq` of that group. The journal records `(last_commit_cut,
-  cut]` are framed, compressed and encrypted into
-  `commits/<seq>` (kind DELTA, `If-None-Match: *`). Like every commit it
+- `cut = max write_seq` of that group. The journal records
+  `(last_commit_cut, cut]` are framed, compressed and encrypted into
+  `commits/<commit_seq>` (kind DELTA, `If-None-Match: *`). Like every commit it
   carries `epoch`, `parent_seq` and `parent_hash`.
 - One PUT completes every waiter in the group. While it is in flight the
   next group accumulates, with one PUT outstanding per volume.
@@ -443,7 +644,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - **Write-through** (`write_ack = s3`, ADR-27): plain writes join the
   same flush groups, and each completes when its group's DELTA is on the
   authority.
-- **FUA** is a cut at its own `seq` (ADR-28). An ext4/xfs fsync arrives
+- **FUA** is a cut at its own `write_seq` (ADR-28). An ext4/xfs fsync arrives
   as an empty FLUSH and then a FUA write of 4 KiB or less, serialised by
   the block layer, so it costs two flush groups.
 - **Flush lane** (ADR-28): commit objects and DELTA bodies up to the
@@ -475,7 +676,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
      highest seen. A supplied KMK fingerprint must match.
    - Verify the descriptor MAC of `volume`. A failure refuses the mount.
 2. Find the tip: start from the `head` hint, LIST `commits/` from it,
-   and probe forward until a 404.
+   and probe forward until a 404. Commit numbers are contiguous
+   (§8.2), so the next slot is always `tip + 1`.
 3. **Find the authority** (ADR-24):
    - Read the latest CONFIG at or below the tip.
    - Go to the backend it names as the authority. If that backend's tip
@@ -488,12 +690,13 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
    - Verify the chain from that FULL to the tip: each commit's
      `parent_hash` must equal the BLAKE3 of the parent object's bytes, and
      `epoch` must never decrease. A broken link or a decreasing epoch
-     refuses the mount.
+     refuses the mount. (The chain starts at the genesis commit, whose
+     `parent_hash` is the BLAKE3 of `volume`; `fsck` verifies from there.)
    - On an unencrypted volume, verify the HMAC of every commit replayed.
 5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
    not released, wait for the deadline (or `--steal`). A lease whose
    `epoch` is below the newest verified epoch is rejected.
-6. Write an EPOCH commit at tip + 1. If that write gets 412, another
+6. Write an EPOCH commit at `tip + 1`. If that write gets 412, another
    writer appended: re-read, replay, retry. If the 412 slot holds a
    TRANSFER, follow it (step 3).
 7. Start the device. Map nodes are faulted lazily, and prefetch follows
@@ -501,8 +704,11 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ### 8.5 Lease and fencing
 
-- **Lease:** `{epoch, owner, deadline, released}`, renewed every 30 s via
-  `If-Match` (TTL 90 s, configurable). The object is sealed, and `epoch`
+- **Lease:** `{epoch, owner, deadline, released, transferred_to?}`,
+  renewed every 30 s via `If-Match` (TTL 90 s, configurable).
+  `transferred_to` is optional. A completed authority transfer sets it on
+  the old authority's lease with a best-effort CAS (§12); the chain, not
+  the lease, is authoritative. The object is sealed, and `epoch`
   is in the plaintext of its body. A reader rejects a lease below the
   newest epoch of the verified chain, because an old version of the same
   object would pass the AEAD.
@@ -521,7 +727,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - **Snapshot** (`lunix snapshot NAME SNAP [--freeze MOUNTPOINT]`):
   1. With `--freeze` (or CSI `snapshot.freeze=true`), run `fsfreeze -f`.
   2. Force a cut, then a FULL commit `c`.
-  3. Create `snapshots/SNAP` (`If-None-Match`) as `{seq: c, created,
+  3. Create `snapshots/SNAP` (`If-None-Match`) as `{commit_seq: c, created,
      consistency: crash|fs-frozen, label}`.
   4. Unfreeze.
   - The cost is one cut: no data is copied, and nothing is copied later.
@@ -537,10 +743,10 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
     | async | one per commit, every `T`/`B` (idle volumes create none) |
     | sync | one per flush group |
 - **Time-travel mount** (`lunix mount-at NAME --snapshot S | --commit
-  seq | --time t`):
+  commit_seq | --time t`):
   1. Resolve the target commit. `--time` means the newest commit with
      `created ≤ t`.
-  2. Create `readers/<host>-<id>` `{seq, deadline}`, renewed every
+  2. Create `readers/<host>-<id>` `{commit_seq, deadline}`, renewed every
      `TTL/3`.
   3. Open the map root read-only.
   4. Expose `/dev/lunix/NAME@S` with `UBLK_ATTR_READ_ONLY`.
@@ -549,11 +755,11 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
     backend.
   - Unmount deletes the reader pin. A crashed reader's pin simply
     expires.
-- **Rollback** (`lunix rollback NAME --to S|seq`):
+- **Rollback** (`lunix rollback NAME --to S|commit_seq`):
   - Requires the owner, with the device detached (or `--offline`) and
     the journal empty.
   - It writes a FULL commit with `map_root` = the target's root, a new
-    `seq` and `parent` = the current tip. The rollback is therefore
+    `commit_seq` and `parent` = the current tip. The rollback is therefore
     itself a restore point and can be undone.
   - The cache needs no invalidation: entries are keyed by content.
 - **Diff and export:**
@@ -567,14 +773,15 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 - **Policy:** `lunix retain NAME last:10,within:24h,every:1h:48,every:1d:30`.
   - The tiers are clock-free in the sense of Constellation plan 32:
-    thinning is decided from commit `created` order and seq, never by
+    thinning is decided from commit `created` order and `commit_seq`, never by
     deleting on a timer that could race a writer.
 - **GC roots:**
   - retained commits;
   - snapshot pins, reader pins and holds;
   - the tip's FULL plus its DELTAs.
 - **Chain floor:**
-  - Each FULL records `chain_floor`, the lowest retained seq.
+  - Each FULL records `chain_floor`, the lowest retained `commit_seq`
+    (in phase 1, the older of the last `N` FULLs; default `N` = 2).
   - Commit objects below `chain_floor` that are not pinned may be
     deleted. Mount and tip discovery never look below it.
   - EPOCH, CONFIG and TRANSFER commits are kept while a TRANSFER pointer
@@ -630,7 +837,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 2. Map entry → hole (zero-fill) or `chunk_id`.
 3. Local location: own segment, or a cache-slab entry keyed by the
    16 B `id_prefix`. The slab entry holds the full `chunk_id`, which is
-   checked.
+   checked. A local read verifies the extent's tag (§6) and does not
+   recompute the chunk id unless `verify_reads` is set.
 4. Otherwise a backend miss: a ranged GET of the extent via the hint (or
    the index), verify, decompress, insert into the slab, serve.
 
@@ -672,6 +880,23 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ## 11. Garbage collection and compaction
 
+GC and compaction ship in phase 1 for local-only volumes, with the space
+ladder's compact step (§4.3) real. Phase 2 adds the backend side:
+deleting remote segments, fenced on the lease epoch. Mirror GC comes with
+mirrors (phase 5).
+
+- **Phase 1 roots.** A local-only volume has no snapshots, readers or
+  holds yet. Its roots are the last `N` FULL commits (retention `last:N`,
+  default 2: the tip and its predecessor, so a damaged tip has a
+  fallback). GC drops segments, map packs and index runs no root reaches,
+  and deletes commit objects below `chain_floor` after the grace. Chain
+  verification (mount, `fsck`) walks from the tip down to `chain_floor`;
+  the floor commit's parent may be absent. Phase 4 adds tiered retention
+  and the other roots.
+- **Local grace.** A local-only volume has no lease and no reader pins, so
+  its grace covers only in-flight cuts, destage and reads. It is never
+  shorter than that. The same condemn, grace, recheck, delete order
+  applies, and `epoch` is 0.
 - **Mark:** walk the maps of all GC roots (§8.7: retained commits, the
   tip's FULL plus DELTAs, snapshot, reader and clone-hold pins) and
   mark the trained dictionaries (ADR-30) that live extents reference, and
@@ -697,7 +922,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
       Merkle diff summing leaf `clen`;
     - `USED`: bytes referenced only by this root, which deleting it
       would free.
-  - Results are cached in `gc/space/<seq>` and recomputed incrementally
+  - Results are cached in `gc/space/<commit_seq:016x>` and recomputed incrementally
     when retention changes.
   - `lunix gc NAME --dry-run [--retain …]` reports what a policy change
     would reclaim.
@@ -736,7 +961,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 - **Invariant:** on each backend, every object a commit names exists
   before that commit object exists there.
-- **Copy order:** segments and packs, then commits in `seq` order, then
+- **Copy order:** segments and packs, then commits in `commit_seq` order, then
   `head`.
 - **Copy path:** cross-provider copies stream through `lunixd` or a
   `lunix sync` job. Same-provider copies may use server-side CopyObject.
@@ -751,9 +976,11 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   4. Write `TRANSFER{to: B, epoch: e+1}` at `t+1` on A (CAS). This is the
      linearization point.
   5. Copy `t+1` to B, create B's `lease` (epoch `e+1`), then write
-     `EPOCH{authority: B}` at `t+2` on B.
+     `EPOCH{authority: B}` at `t+2` on B (the optional `authority` field,
+     §8.2).
   6. Resume publication on B. A becomes a mirror, or is drained through
-     CONFIG commits on B.
+     CONFIG commits on B. A's `lease` gets `transferred_to: B` (CAS, best
+     effort; the chain is authoritative).
   - **Cost:** async mode sees nothing; sync mode delays one flush group
     by about 3 PUT round trips.
   - **Crash recovery:** a TRANSFER at A's tip means roll forward; no
@@ -835,8 +1062,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 ### 13.2 Live transitions
 
-- **Sink switch at a seq barrier `b`:**
-  - Overlay entries carry their sink. Writes with `seq > b` go to the
+- **Sink switch at a `write_seq` barrier `b`:**
+  - Overlay entries carry their sink. Writes with `write_seq > b` go to the
     new sink.
   - A FLUSH spanning `b` waits for both sinks.
   - The old sink is retired after a commit covering `b` is on the
@@ -862,11 +1089,13 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 ### 13.3 Local-only volumes and attaching S3 later
 
 - **Local-only:** a local-only volume is the same store with no backend.
-  Commits are written to `state/commits/` locally: the same objects,
-  without CAS.
+  Commits are written to `state/commits/<commit_seq:016x>` locally: the
+  same objects, without CAS. They record `epoch` = 0 until a backend
+  exists, and they are sealed under their bucket-relative names (§6.1), so
+  they upload verbatim.
 - **Attaching:** `backend add` makes the first backend the authority:
   1. Probe it.
-  2. Write `volume`.
+  2. Write `volume`: the exact bytes of the local `volume` file.
   3. Acquire the lease.
   4. Copy segments, packs and commits.
   5. Write the first CONFIG commit, naming this backend as the authority
@@ -906,7 +1135,9 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   - **Unencrypted volumes:** every commit and the lease carry an HMAC under
     an integrity key from the keyring, so the bucket alone cannot forge
     state. Extent contents are covered through the chunk ids in the
-    authenticated map.
+    authenticated map, and each extent carries its own BLAKE3-128 tag
+    (keyed with the integrity key), so a flipped byte is caught on a local
+    read too (§6).
   - **Slot removal revokes nothing already seen:** removing a slot or
     changing a passphrase leaves the KMK unchanged for anyone who held it.
     Revocation is migration to a new KMK. DEK rotation (`dek_gen`)
@@ -933,9 +1164,11 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   - `lunix` is the CLI.
   - `lunix-csi` runs in `--controller` and `--node` modes.
   - `lunix sync` is a job mode for bulk backfill and verify off-node.
-- **Control API:** a typed request/response protocol over a Unix socket,
-  either reusing Constellation's control framing (decision in phase 0)
-  or gRPC.
+- **Control API:** a typed request/response protocol of length-prefixed
+  JSON frames over the Unix socket, with a protocol version. Frames have
+  a size bound. It is not an on-disk format, so it can change between
+  releases; the version tells the CLI and the daemon apart. gRPC was
+  rejected: it adds a build dependency with no phase 1 benefit (ADR-16).
 - **CLI sketch:**
 
 ```
@@ -949,8 +1182,8 @@ lunix local NAME none|cache [--size 100G]|store   (live; ADR-26)
 lunix volume create NAME --size 200G --local none s3://…   (S3 only; implies sync)
 lunix space NAME --floor 10% --on-full wait --full-timeout 60s --cache-max 100G
 lunix resize NAME 300G       lunix snapshot NAME SNAP [--freeze MNT]   lunix snapshot rm|ls NAME
-lunix mount-at NAME --snapshot S|--commit <seq>|--time <t>   (read-only time travel)
-lunix rollback NAME --to S|<seq>   lunix retain NAME <policy>   lunix diff NAME A B
+lunix mount-at NAME --snapshot S|--commit <commit_seq>|--time <t>   (read-only time travel)
+lunix rollback NAME --to S|<commit_seq>   lunix retain NAME <policy>   lunix diff NAME A B
 lunix export NAME --snapshot S -o image.raw   lunix gc NAME --dry-run
 lunix compress estimate NAME [--level N] [--dict …] [--sample 1%] [--exact]   (ADR-30)
 lunix compress train|apply|ls|rm NAME …                                       (ADR-30)
@@ -1074,7 +1307,7 @@ queues, not 8.
 
 1. **Rollback anchor.** A malicious bucket can serve an old but valid
    prefix of the chain. `parent_hash` and `epoch` (ADR-11) stop splices
-   and forks, but not this. Options: local state of `{seq, epoch,
+   and forks, but not this. Options: local state of `{commit_seq, epoch,
    tip_hash}` per volume (cheap, but a fresh host has none), a CSI-object
    floor hint, the maximum across mirrors, or a write-only notary bucket.
    A KMS has no monotonic counter.
@@ -1097,7 +1330,3 @@ queues, not 8.
 8. **USER_COPY through io_uring.** The blocking `pread`/`pwrite` copy
    lost about 10% at 4 KiB; issuing it with the backend SQEs may
    remove that loss (ADR-17). Untested.
-9. **Interior-node compression and fanout 256** for the map (ADR-8):
-   zstd-1 costs about 40 µs per interior node for little gain, and
-   fanout 256 writes 36-45% fewer bytes per seal at twice the resident
-   interior nodes. Left to phase 1.
