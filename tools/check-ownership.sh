@@ -3,6 +3,10 @@
 #
 #   tools/check-ownership.sh [<milestone>] [--changed-list FILE] [--base REV]
 #
+# Cargo.toml/Cargo.lock commit titles (`deps: add ...`) are enforced only in
+# git mode, i.e. on the GitHub runner; the host gate (a copy without .git)
+# cannot see commits, so make the GitHub job required for merges.
+#
 # <milestone> defaults to $LUNIX_M, then to a guess from the branch name
 # (p1/m1-a -> m1a; $LUNIX_BRANCH overrides the git branch). The changed files are `git diff --name-only` against
 # `git merge-base HEAD main` (plus untracked files), or the lines of
@@ -30,23 +34,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Guess the milestone from a branch name: p1/m1-a -> m1a, p1/m5-map -> m5.
-from_branch() {
-  local br="${1#p1/}" first rest
-  first="${br%%-*}"
-  rest="${br#*-}"
-  rest="${rest%%-*}"
-  if [[ "$br" == *-* && "$rest" =~ ^[a-z][0-9]?$ ]]; then echo "$first$rest"; else echo "$first"; fi
-}
-if [ -z "$m" ] && [ -n "${LUNIX_BRANCH:-}" ]; then m="$(from_branch "$LUNIX_BRANCH")"; fi
-if [ -z "$m" ] && has_git; then
-  m="$(from_branch "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)")"
-fi
-if [ -z "$m" ]; then
-  echo "check-ownership: milestone not given (argument or LUNIX_M)" >&2
-  exit 2
-fi
-
 # Flatten the table: "<id>\t<paths|exclude>\t<glob>".
 flat="$(awk '
   /^\[[a-z0-9]+\]/ { id = $0; gsub(/[\[\]]/, "", id); key = ""; next }
@@ -63,6 +50,25 @@ flat="$(awk '
   }
 ' "$table")"
 
+# Guess the milestone from a branch name: try <first><second> (p1/m1-b2a ->
+# m1b2a), then <first> alone (p1/m5-map -> m5); the first with an entry wins.
+has_entry() { printf '%s\n' "$flat" | awk -F'\t' -v m="$1" '$1 == m { f = 1 } END { exit !f }'; }
+from_branch() {
+  local br="${1#p1/}" first rest
+  first="${br%%-*}"
+  rest="${br#*-}"
+  rest="${rest%%-*}"
+  if [[ "$br" == *-* ]] && has_entry "$first$rest"; then echo "$first$rest"; else echo "$first"; fi
+}
+if [ -z "$m" ] && [ -n "${LUNIX_BRANCH:-}" ]; then m="$(from_branch "$LUNIX_BRANCH")"; fi
+if [ -z "$m" ] && has_git; then
+  m="$(from_branch "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)")"
+fi
+if [ -z "$m" ]; then
+  echo "check-ownership: milestone not given (argument or LUNIX_M)" >&2
+  exit 2
+fi
+
 if ! printf '%s\n' "$flat" | awk -F'\t' -v m="$m" '$1 == m { f = 1 } END { exit !f }'; then
   echo "check-ownership: no entry for milestone '$m' in $table" >&2
   exit 2
@@ -70,7 +76,7 @@ fi
 
 # glob -> anchored extended regex
 glob_to_re() {
-  local g="$1" out="" i c n
+  local g="$1" out="" i c
   for ((i = 0; i < ${#g}; i++)); do
     c="${g:i:1}"
     case "$c" in

@@ -59,4 +59,18 @@ expect 2 "ownership: unknown milestone is an error" own m99 --changed-list "$tmp
 printf 'docs/plans/v1/reports/p1-m6.md\n' > "$tmp/rep.txt"
 expect 1 "ownership: m5 may not write m6's report" own m5 --changed-list "$tmp/rep.txt"
 
+# --- milestone guess from branch names (all names the plan's branches use)
+guess() { # <branch> <wanted milestone>
+  set +e
+  out="$(env -u LUNIX_M LUNIX_BRANCH="$1" bash "$tools/check-ownership.sh" --changed-list "$tmp/none.txt" 2>&1)"
+  set -e
+  if [[ "$out" == "check-ownership: $2 ok"* ]]; then echo "ok: branch $1 -> $2"; else echo "FAIL: branch $1 -> $2 (got: $out)" >&2; fail=1; fi
+}
+: > "$tmp/none.txt"
+for pair in p1/m1-a:m1a p1/m1-a0:m1a0 p1/m1-b1:m1b1 p1/m1-b2a:m1b2a p1/m1-b2b:m1b2b \
+            p1/m2-crypto:m2 p1/m5-map:m5 p1/m12-a:m12a p1/m12-b:m12b p1/m13-a:m13a \
+            p1/m13-b:m13b p1/m17-a:m17a p1/m17-b:m17b p1/m18-b:m18b; do
+  guess "${pair%%:*}" "${pair##*:}"
+done
+
 exit $fail

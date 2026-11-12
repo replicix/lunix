@@ -13,7 +13,7 @@
 #                         check before and after (root milestones only)
 #   leftovers             run spikes/common/ublk-leftovers.sh on the host
 #   df                    show free space of the host's file system
-#   df-guard <path> <GiB> exit non-zero unless the file system holding <path>
+#   df-guard <path> <GiB> (absolute path) exit non-zero unless the file system holding <path>
 #                         keeps at least $LUNIX_MIN_FREE_GIB (default 120) GiB
 #                         free after <GiB> more are used
 #
@@ -35,6 +35,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
+# shellcheck source=/dev/null
 [ -f "$root/.env.host" ] && . "$root/.env.host"
 
 m="${LUNIX_M:-}"
@@ -164,6 +165,7 @@ case "$sub" in
     [ $# -eq 2 ] || die "df-guard: usage: df-guard <path> <GiB>"
     p="$1"; need="$2"
     [[ "$need" =~ ^[0-9]+$ ]] || die "df-guard: <GiB> must be a whole number"
+    # A relative path is relative to the host's home (`~` is not expanded).
     avail="$(ssh_ "df -B1G --output=avail $(printf '%q' "$p") | tail -n 1" | tr -d ' ')"
     [[ "$avail" =~ ^[0-9]+$ ]] || die "df-guard: cannot read free space"
     if [ $((avail - need)) -lt "$min_free" ]; then
