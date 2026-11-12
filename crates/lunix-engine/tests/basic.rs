@@ -293,6 +293,11 @@ fn a_checkpoint_from_beyond_the_tip_is_ignored_and_the_records_replay() {
     let mut r = v.open().map_err(|e| e.0).expect("reopen");
     assert!(!r.engine.recovery_report().checkpoint_used);
     assert_eq!(r.engine.tip().0, CommitSeq(tip.0 - 1));
+    assert_eq!(
+        (*lock(&v.floor.floor)).expect("floor").max_commit_seq,
+        prev,
+        "the stale checkpoint does not move the floor"
+    );
     // The second write is above the new floor and still in the journal.
     assert_eq!(r.read(0, 4096, 4096).1, pattern(2, 4096));
 }
