@@ -376,6 +376,27 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - **Write-through** (`write_ack = s3`, ADR-27): plain writes join the
   same flush groups, and each completes when its group's DELTA is on the
   authority.
+- **FUA** is a cut at its own `seq` (ADR-28). An ext4/xfs fsync arrives
+  as an empty FLUSH and then a FUA write of 4 KiB or less, serialised by
+  the block layer, so it costs two flush groups.
+- **Flush lane** (ADR-28): commit objects and DELTA bodies up to the
+  DELTA cap travel on a dedicated connection pool per backend (default
+  3), with the hedged-retry budget of reads. Everything else is on the
+  bulk lane (§9).
+- **Unflushed-byte cap:** with `flush = s3`, acknowledged bytes not yet
+  in a PUT and not covered by a commit are capped at `sync_dirty_max`
+  (default 64 MiB; at most `mem_buffer / 4` with local tier `none`).
+  Above it, admission throttles. The fsync bound is
+  `sync_dirty_max / goodput + 2 PUT RTT`.
+- **Over-cap groups** are split into segments of at most `flush_segment`
+  (default 4 MiB), uploaded in parallel on the bulk lane with AIMD. The
+  DELTA commit naming them follows on the flush lane.
+- **References:** a DELTA's `refs: [{kind: segment | journal, id, hash}]`.
+  `journal` (a sealed raw journal batch staged ahead of a FLUSH) is
+  reserved and unused in v1.
+- **Telemetry:** `flush_group_bytes`, `flush_latency` and
+  `flush_lane_queue`. The CLI warns when a `flush = s3` volume's p50
+  flush group exceeds 1 MiB.
 
 ### 8.4 Mount (attach) from a bucket
 
@@ -489,6 +510,10 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 - Built on `object_store` with Constellation's CAS classification and
   provider quirks (`cas.rs`, `classify.rs`): 409/412/404/304, a
   retried-PUT-landed check and redacted errors.
+- **Two lanes per backend (ADR-28):** the flush lane (commits and small
+  DELTA bodies only) and the bulk lane, which has an in-flight byte cap
+  `upload_inflight_max` (default 32 MiB) and a token bucket at
+  `upload_share` (default 0.8) of the measured goodput.
 - Retries cap at 30 s per call. Transient failures retry forever in sync
   mode (a "hard mount"), unless `flush_timeout` is set; then FLUSH fails
   with EIO.
@@ -496,7 +521,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
   - `If-None-Match`, `If-Match`, ranged GET, LIST-after-PUT and multipart;
   - 8-way concurrent CAS (Constellation `probe.rs`);
   - clock skew;
-  - latency and throughput at 4 KiB, 64 KiB and 16 MiB.
+  - latency and throughput at 4 KiB, 64 KiB, 1 MiB, 4 MiB and 16 MiB.
 
   - bucket versioning state.
 
@@ -683,7 +708,8 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
     bytes (default 256 MiB). It also holds the open segment being
     packed for upload.
   - When the buffer fills, admission backs off: cut and commit sooner,
-    destage, throttle. There is no ENOSPC unless `bucket_quota` is set.
+    destage, throttle. The first rung is `sync_dirty_max`, at most
+    `mem_buffer / 4` here (ADR-28). There is no ENOSPC unless `bucket_quota` is set.
 - **Keeper:**
   - The memfd is held by the systemd FD store (`FDSTORE=1`) or by
     `lunix-keeper`, a tiny process in the DaemonSet pod, via
@@ -885,7 +911,7 @@ hits. They are targets, not measurements.
 | sequential write ingest | ≥ 3 GB/s with `auto` compression on 8 workers |
 | sequential read, hits | ≥ 5 GB/s |
 | cold sequential read, same region | ≥ 1 GB/s with readahead and parallel ranged GETs |
-| sync-mode fsync latency | ≈ 1 PUT RTT. S3 Standard: one measured run, PUT p50 70 ms / p99 137 ms at 500 KB. Express One Zone: PUT p99 ~7 ms at 4 KB, same AZ ([fact-check §C](research/2026-11-11-fact-check.md)) |
+| sync-mode fsync latency | ≈ 2 PUT RTT for an ext4/xfs fsync (FLUSH, then FUA; ADR-28), 1 RTT for a data-only fdatasync, plus `sync_dirty_max / goodput` under a bulk writer. S3 Standard: one measured run, PUT p50 70 ms / p99 137 ms at 500 KB. Express One Zone: PUT p99 ~7 ms at 4 KB, same AZ ([fact-check §C](research/2026-11-11-fact-check.md)) |
 
 The baseline comes from the phase 0 spikes: libublk null and loop
 targets against `null_blk`.
@@ -926,3 +952,6 @@ targets against `null_blk`.
 8. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
 9. **Cross-volume dedup on the node cache** (golden images) without
    leaking across families.
+10. **Staging raw journal batches ahead of FLUSH** (`refs.kind =
+    journal`). Opened as ADR-29 only if the ADR-28 phase 3 gate shows
+    fsync p99 under a 200 MB/s mix above 2× the two-PUT floor.

@@ -77,6 +77,8 @@ Constellation (ADR-19) but is not a Constellation frontend.
 
 *Amended by ADR-26:* with no local tier, a FLUSH is durable only as an S3 commit.
 
+*Amended by ADR-28:* prefix cuts are kept because every commit is a published image, not because file systems need write order.
+
 **Decision:**
 - The device advertises a volatile write cache and FUA, through
   `UBLK_ATTR_VOLATILE_CACHE | UBLK_ATTR_FUA`.
@@ -96,8 +98,17 @@ Constellation (ADR-19) but is not a Constellation frontend.
 - *Advertising write-through (no volatile cache).* Then every write would
   need durability before its acknowledgement, and the file system would
   never send FLUSH, so sync mode would be impossible to make fast.
-- *Arbitrary subsets at sync points.* Ordering matters to journaling file
-  systems.
+- *Arbitrary subsets at sync points* (for example, persisting a FUA write
+  alone and committing older writes later). Such an image is a legal
+  post-power-loss state: ext4, xfs, btrfs and the databases in scope order
+  with FLUSH/FUA points and checksums, not with write order
+  ([FUA and FLUSH semantics §3](research/2026-11-12-fua-and-flush-semantics.md)). It is rejected
+  because every commit is a published image: a restore point, a
+  time-travel or rollback target and a mirror's failover state. A cut is
+  a state the guest passed through; a non-cut image is one it never saw.
+  Cuts also keep the chain single-numbered (`cut_seq`, `chain_floor`,
+  `(last_cut, cut]` framing) and avoid exposing guests reliably to
+  non-prefix states that real disks produce only rarely. See ADR-28.
 
 **Evidence:** [cache & consistency §1](research/2026-11-11-cache-consistency-s3-protocol.md),
 [novel ideas §1.3](research/2026-11-11-novel-ideas.md).
@@ -318,6 +329,8 @@ hint falls back to the chunk index (ADR-14).
 - *Fencing that depends on clocks.*
 
 ## ADR-10: Durability modes: local, async (default with a backend), sync
+
+*Amended by ADR-28:* a FUA write is a cut at its own `seq`, so an ext4/xfs fsync is two commits (FLUSH, then FUA). Flush uploads have their own lane, and unflushed bytes in sync mode are capped by `sync_dirty_max`.
 
 *Amended by ADR-27:* the modes are presets of two settings, `write_ack` and `flush` (each `local` or `s3`). A new preset, `write-through`, makes every acknowledged write durable on S3.
 
@@ -1054,3 +1067,125 @@ ADR-10 modes become presets of them.
 **Amends:**
 - ADR-10: its modes are presets of these two settings, and
   `write-through` is added.
+
+## ADR-28: FLUSH and FUA stay prefix cuts; flush-lane discipline instead of staging or a FUA fast path
+
+**Context:**
+- Recommended by the design review in
+  [fsync scope](research/2026-11-12-fsync-scope-recommendation.md).
+- The maintainer asked (2026-11-12) whether an fsync of one file could
+  persist only that file's data under `flush = s3`. It cannot: the device
+  sees no files, and journal transactions span files. The remaining
+  question was whether to shrink the cost of a FLUSH that drags in every
+  write completed before it.
+- Measured on kernel 7.0 ([fsync-trace](../../bench/fsync-trace/RESULTS.md)): an ext4 or xfs
+  fsync is one empty FLUSH request followed within microseconds by one
+  FUA write of 4 KiB or less; the flush group carries everything written
+  since the previous flush point (4.1 MiB at a 200 MB/s stream, 19 MiB
+  p50 and 38 MiB max at 1 GB/s) at an unchanged flush rate; a bare FUA
+  with no FLUSH ahead of it arises only from `O_DIRECT|O_DSYNC` overwrite,
+  which no database in scope uses by default.
+- Modelled ([background staging §3](research/2026-11-12-fsync-background-staging.md)): staging
+  unflushed writes to S3 ahead of the FLUSH helps only with 1-2 MiB
+  objects (about 135-160 ms against a 260 ms baseline and a 65-70 ms
+  floor) and costs 3x to 11x the AWS request bill, loses overwrite
+  absorption, and needs sealed staged objects, orphan GC and mirror
+  fan-out. [FUA and FLUSH semantics](research/2026-11-12-fua-and-flush-semantics.md) shows that
+  persisting a FUA write alone is a legal crash image but produces
+  commits that are not cuts.
+
+**Decision:**
+1. **Prefix cuts stay.** A FLUSH completes when a DELTA holding every
+   write with `seq <= cut` is on the authority (ADR-10). A FUA write is
+   treated as a FLUSH followed by itself: its commit is a cut at its own
+   `seq`. Every commit on S3 remains a cut. No background staging and no
+   FUA-only commit in v1.
+2. **Two upload lanes per backend** (DESIGN §9):
+   - the **flush lane**: a small dedicated connection pool (default 3)
+     that carries commit objects and DELTA bodies up to the DELTA cap,
+     and nothing else; its PUTs get the hedged-retry budget of reads;
+   - the **bulk lane**: segments, map and index packs, FULL folds, mirror
+     copies, GC and compaction traffic, with an in-flight byte cap
+     `upload_inflight_max` (default 32 MiB) and a token bucket at
+     `upload_share` (default 0.8) of the goodput measured by `doctor` or
+     by the lane itself.
+3. **A sync-mode unflushed-byte cap.** With `flush = s3`, bytes that are
+   acknowledged, not yet in a PUT and not covered by a commit are capped
+   at `sync_dirty_max` (default 64 MiB; with local tier `none`, at most
+   `mem_buffer / 4`). Above it, admission throttles, as `B_max` does in
+   async mode. The fsync bound is `sync_dirty_max / goodput + 2 PUT RTT`.
+4. **Over-cap flush groups** are split into segments of at most
+   `flush_segment` (default 4 MiB, inside ADR-7's range) uploaded in
+   parallel on the bulk lane with AIMD; the DELTA commit that names them
+   follows on the flush lane (ADR-9 upload order unchanged).
+5. **Format reservation.** A DELTA commit's reference list is
+   `refs: [{kind: segment | journal, id, hash}]`. `journal` (a sealed raw
+   journal batch uploaded ahead of a FLUSH) is reserved and unused in v1,
+   so staging can be added later without a format change.
+6. **Guidance and telemetry.** Metrics `flush_group_bytes`,
+   `flush_latency` and `flush_lane_queue`. The CLI warns when a
+   `flush = s3` volume's p50 flush group exceeds 1 MiB and recommends a
+   separate volume for the bulk writer, or S3 Express One Zone as the
+   authority for low-volume latency-sensitive volumes. Documentation
+   states that an ext4/xfs fsync costs two PUT round trips in
+   `flush = s3`.
+
+**Rejected:**
+- *Background staging of unflushed writes* (sealed small segments, raw
+  journal batches, pipelined commits, multipart Complete as commit,
+  Express append). Modelled gain about one half of a PUT time over the
+  rules above; loses overwrite absorption (LSVD measured write
+  amplification 1.97 to 1.35 on some traces); early destage forces
+  partial-chunk RMW, a GET on S3-only volumes; 3x to 11x the AWS request
+  bill for the 200 MB/s case; new key-derivation context; orphan GC;
+  mirror fan-out. Deferred, not closed: see the gate.
+- *Pipelined commits naming objects not yet durable.* Breaks ADR-9's
+  invariant and adds a second validity notion beside the F5 chain
+  verification.
+- *A FUA-only fast path.* Legal but it introduces non-cut commits, which
+  need seq-set framing, highest-seq replay across commits for writes,
+  discards and holes, a cut/non-cut marker in restore points, time-travel
+  and rollback, and new GC and mirror rules, for a workload (QEMU
+  `cache=directsync`, fio `--sync=1`) nobody runs in production.
+- *Dropping `UBLK_ATTR_FUA`.* Removes bare FUA at the source but turns
+  every `O_DSYNC` write into write plus full FLUSH and switches off
+  iomap's write-through path.
+- *Per-file sync.* The device sees no files; journal transactions span
+  files.
+
+**Consequences:**
+- DESIGN §20's "sync-mode fsync latency about 1 PUT RTT" becomes
+  "about 2 PUT RTT for an ext4/xfs fsync (FLUSH then FUA, serialised by
+  the block layer); 1 RTT for data-only fdatasync". Standard: about
+  140 ms; Express One Zone: about 14 ms.
+- Request cost is unchanged for small groups; large groups cost one PUT
+  per `flush_segment`, which is the same curve any sub-16 MiB upload is
+  on.
+- No new object kinds, no change to the copy invariant (ADR-26), to
+  mirrors (ADR-24) or to retention (ADR-25). Write-through (ADR-27) is
+  unaffected: its groups already use the flush lane.
+
+**Gate (phase 0, extends P0.10; phase 3 for the end-to-end run):**
+- P0.10 adds PUT p50/p99 at 4 KiB, 1, 2, 4, 8 and 16 MiB per provider,
+  single-stream and 8 parallel, with and without a concurrent 200 MB/s
+  upload on separate connections. The lane rule is confirmed if the
+  4 KiB PUT p99 under load stays within 1.5x its idle value.
+- Phase 3: the fsync-trace s2a/s2b mixes on ext4 and xfs over a real
+  `flush = s3` volume, with and without rules 2-4, on AWS Standard and
+  one zero-request-fee provider. If p99 fsync latency under the 200 MB/s
+  mix remains above 2x the two-PUT floor, staging of raw journal
+  batches (`refs.kind = journal`) is designed as ADR-29.
+
+**Amends:**
+- ADR-3: the rejection "Arbitrary subsets at sync points. Ordering
+  matters to journaling file systems." is replaced by the text below.
+- ADR-10: the sync bullet gains "FUA is a cut at its own seq; an ext4/xfs
+  fsync is therefore two commits"; the cost note cites this ADR for the
+  group-size curve.
+- DESIGN §8.3: add lanes, `sync_dirty_max`, `flush_segment`, `refs[]`.
+- DESIGN §9: two connection pools per backend; `doctor` reports PUT
+  latency at 4 KiB, 1 MiB, 4 MiB and 16 MiB.
+- DESIGN §13.1: `sync_dirty_max` is the first rung of the memory ladder.
+- DESIGN §20: fsync target corrected as above.
+- DESIGN §22: add "Staging of raw journal batches ahead of FLUSH
+  (ADR-28 gate)".

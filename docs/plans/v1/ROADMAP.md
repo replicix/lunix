@@ -92,6 +92,9 @@ baseline table in `bench/`.
   `flush_timeout` policy, and runtime mode switches.
 - The `write_ack`/`flush` settings and the `write-through` preset
   (ADR-27).
+- Flush-lane discipline (ADR-28): the flush and bulk lanes,
+  `sync_dirty_max`, over-cap groups split into `flush_segment` pieces,
+  and the reserved `refs.kind = journal`.
 - S3-only volumes (ADR-26): the memfd write buffer and its keeper, RAM
   caches, and the bucket-resident index lookup.
 - Live local-tier changes: the sink switch, `none ↔ cache`.
@@ -99,6 +102,9 @@ baseline table in `bench/`.
 **Exit:**
 - After any kill, every FLUSH-acknowledged write is present on the
   bucket. In write-through, every acknowledged write is.
+- ADR-28 gate: fsync p50/p99 under the fsync-trace 200 MB/s and
+  1 GB/s mixes on ext4 and xfs, on AWS Standard and OVH. If p99 stays
+  above 2× the two-PUT floor, open ADR-29 (journal-batch staging).
 - An S3-only volume passes fio verify and the kill -9 loop. A lost
   keeper fails the device and never resumes it.
 - `none → cache → none` under fio load: no I/O errors, and fsck is

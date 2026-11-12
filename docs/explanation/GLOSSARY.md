@@ -93,5 +93,10 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   write buffer) to the other at a seq barrier, without pausing I/O.
 - **Hydrate:** copy every live segment into the local tier, turning
   `cache` into `store`.
+- **Flush lane:** the dedicated connection pool per backend that carries
+  only commits and small DELTA bodies, so an fsync never queues behind
+  bulk uploads (ADR-28). Everything else uses the **bulk lane**.
+- **sync_dirty_max:** the cap on acknowledged-but-unuploaded bytes when
+  `flush = s3`. It bounds fsync latency under a bulk writer (ADR-28).
 - **Steal:** taking ownership without a graceful release. It waits for
   the lease TTL, or `--force`.
