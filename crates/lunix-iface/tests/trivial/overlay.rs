@@ -90,6 +90,10 @@ impl Overlay for TOverlay {
     }
 
     fn dirty_bytes(&self) -> u64 {
-        lock(&self.blocks).values().map(|v| v.len() as u64).sum::<u64>() * 4096
+        lock(&self.blocks)
+            .values()
+            .map(|v| v.len() as u64)
+            .sum::<u64>()
+            * 4096
     }
 }

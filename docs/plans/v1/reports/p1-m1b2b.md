@@ -160,3 +160,49 @@ See `git log origin/main..p1/m1-b2b`: the code commits above and this report.
 ## Remote disk use
 
 `~/lunix-p1/m1b2b` is 7.0 GiB in total (target dir included), under the 10 GiB budget.
+
+## Review round (`wip/01-p1-m1b2b-review.md`) and the overlay amendment
+
+Merged `origin/main` twice (no rebase). Fixes:
+
+| finding | fix |
+|---|---|
+| 1 major | `MemStoreConfig.mode: CryptoMode` (default `Integrity`); `mode.extent_ovh()` in `parse_extent`, `read_extent`, `locate`; test `the_encrypted_layout_is_parsed_with_its_own_overhead` appends an `ExtentLayout::Encrypted` extent built with `Extent { crypto: Some(..) }` and refuses the unencrypted one |
+| 2 major | `JournalMode { Immediate, Manual, Mixed(seed) }` (`MemJournalConfig.mode`, `set_completion_mode`). `Mixed` holds a seeded subset of appends and completes them from `poll` in a seeded order (the wake fd is re-signalled while any is held); `Manual` adds `complete_append_seq` for any order; `completed_watermark` is the minimum held number minus one; the pool `Full` is reachable in both. `set_manual_completions` is gone. Tests: `mixed_mode_completes_out_of_order_...`, `manual_mode_completes_a_chosen_append_...` |
+| 3 | the durable pass skips `seq >=` the poison point; test `a_flush_below_the_poison_point_promises_nothing_above_it` |
+| 4 | `open_lane` is `Invalid` until `recover` ran on this instance |
+| 5 | `tail_after` remembers the highest cut; `reclaim` is `Invalid` for a tail that would drop a non-torn record above it; `reclaim_calls()` counts successful reclaims |
+| 6 | `load` filters by volume before taking the newest slot |
+| 7 | fault points `pins.store.*`, `device.{store,clear}.*`, `checkpoint.zero.*`, `leftovers.remove.*`, `pack.append`, and `Fault::Io` read points `segment.read`, `segment.footer`, `pack.read` |
+| 8 | documented: a writer dropped after a crash fault always leaves its `*.open`, one open at `crash(seed)` leaves it at random |
+| 9 | `MemQueue` frees its queue on `Drop` |
+| 10 | `Mixed` block completions: a seeded subset waits exactly one more `poll`, the rest completes in a seeded order |
+| 11 | documented on `IoSpec::is_valid` (the strategies stay below `MAX_IO_BYTES`) |
+| 12 | `PlainCodec::seal` refuses `dict_id` unless codec 3 (and codec 3 without one) |
+| 13 | recorded below for M3 |
+| 14 | `MemIndex::insert_hinted` |
+| 15 | `FakeCtlServer` drops a connection from its list when it ends; the `Debug` dependency of `method_name` is documented |
+
+**PlainCodec and the key-commitment amendment**: in integrity mode a data chunk id is keyed BLAKE3 under a key derived from the test key
+(`blake3::derive_key("lunix testkit addressing", key)`); node hashes are unkeyed BLAKE3 in every mode; plain-mode ids are unkeyed.
+`verify_id` is ignored for `ExtentKind::Node` (R2). A node presented as data fails with `Auth`. Not byte-compatible with `lunix-crypto`'s
+purpose 0x0a key, by design.
+
+**FlatOverlay is versioned** (ADR-3): every block keeps all versions by `write_seq`; `lookup` takes the newest, `cut(c)` the newest `<= c`
+even when a newer write shadows it, `release(cut)` drops every version `<= cut_seq`, `dirty_bytes` counts versions. The model proptest
+(`model_overlay`, 1 000 x 100) is rewritten with per-block version maps. New contract test
+`cut_keeps_versions_shadowed_by_newer_writes` in `lunix-iface/src/contract/overlay.rs` and its entry in the macro (**ownership
+exception approved by the lead**), plus the versioned trivial overlay in `lunix-iface/tests/trivial/overlay.rs`. A real overlay
+(`lunix-overlay`, M4) now fails that test until it is versioned too.
+
+### Text for the lead to place
+
+- **M3 brief / `Journal` docs, stale records.** A real journal reuses preallocated ring files. After a crash a *dropped* record's slot
+  holds the *older* bytes of the previous pass, which can be a perfectly valid-looking record with a lower `write_seq` than its
+  neighbours; the file `gen` (or truncation) must make recovery reject it, and M3 needs its own test for it. The fake cannot show it:
+  it models absence, not stale content. Also: records at or above `next_seq` that remain after a gap must be invalidated by the
+  journal before the first append that reuses their numbers.
+- **`recover`/`open_lane` sentence.** "`recover` must run before the first `open_lane` (a lane opened earlier is a caller bug, `Invalid`),
+  and `recover` after a lane was opened is `Invalid`; records at or above the returned `next_seq` are invalidated by the journal before
+  the first append." (`MemJournal` implements exactly this.)
+- `OracleLog::first_match` needs the log in `write_seq` order: with several queues M11's harness logs at `try_reserve` time.
