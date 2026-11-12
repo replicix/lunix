@@ -73,14 +73,16 @@ fn a_zeroed_file_ends_recovery_at_the_first_gap_and_reports_the_rest() {
     assert!(ords.len() >= 3, "workload spans {ords:?}");
     zero_bytes(&path_of(&rig.cfg, 0, ords[1]), 4096, SMALL_FILE - 4096);
     let first_of = |o: u32| w.iter().find(|x| x.ordinal == o).expect("file used").seq;
-    let last_of_first = w.iter().filter(|x| x.ordinal == ords[0]).last().expect("rec").seq;
+    let last_of_first = w.iter().rfind(|x| x.ordinal == ords[0]).expect("rec").seq;
     {
         let j = rig.open();
         let r = recover_all(&j);
         assert_eq!(seqs(&r), (1..=last_of_first).collect::<Vec<_>>());
         assert_eq!(r.gap_at, Some(WriteSeq(first_of(ords[1]))));
         assert_eq!(r.next_seq, WriteSeq(last_of_first + 1));
-        let ig = r.ignored_after_gap.expect("later valid records are reported");
+        let ig = r
+            .ignored_after_gap
+            .expect("later valid records are reported");
         assert_eq!(ig.first, WriteSeq(first_of(ords[2])));
         assert_eq!(ig.last, WriteSeq(100));
         check_data(&j, &r);
@@ -121,7 +123,10 @@ fn a_corrupted_record_above_the_floor_ends_recovery_there() {
         .find(|d| d.start == bad.start)
         .expect("damaged range reported");
     assert_eq!((d.prev_seq, d.next_seq), (WriteSeq(39), Some(WriteSeq(41))));
-    assert_eq!(d.end, w[40].start, "the range runs to the next valid record");
+    assert_eq!(
+        d.end, w[40].start,
+        "the range runs to the next valid record"
+    );
     check_data(&j, &r);
 }
 
@@ -183,7 +188,12 @@ fn wrap_ring(rig: &Rig, lanes: u16, rounds: usize, per_round: usize) -> (Vec<Wri
     let mut all: Vec<Written> = Vec::new();
     let mut floor = 0u64;
     for round in 0..rounds {
-        all.extend(fill(&j, &mut ls, per_round, (round * 1000) as u64 + all.len() as u64));
+        all.extend(fill(
+            &j,
+            &mut ls,
+            per_round,
+            (round * 1000) as u64 + all.len() as u64,
+        ));
         // Everything but the last 5 records counts as destaged and committed.
         floor = all.last().expect("rec").seq - 5;
         let tail = j.tail_after(WriteSeq(floor)).expect("tail");
@@ -286,7 +296,11 @@ fn valid_records_beyond_a_gap_do_not_come_back_in_the_next_incarnation() {
     };
     // The write of seq 5 never reached the disk; 6, 7, 8 did.
     let lost = &w[4];
-    zero_bytes(&path_of(&rig.cfg, lost.lane, lost.ordinal), lost.start, lost.len);
+    zero_bytes(
+        &path_of(&rig.cfg, lost.lane, lost.ordinal),
+        lost.start,
+        lost.len,
+    );
     {
         let j = rig.open();
         let r = recover_all(&j);

@@ -101,7 +101,10 @@ pub fn group_flush(j: &dyn Journal) {
         }),
     )
     .expect("submit flush");
-    assert!(rx.recv_timeout(T).expect("flush completion"), "flush failed");
+    assert!(
+        rx.recv_timeout(T).expect("flush completion"),
+        "flush failed"
+    );
 }
 
 pub fn recover_all(j: &dyn Journal) -> lunix_iface::journal::Recovered {
@@ -226,4 +229,27 @@ pub fn read_at_path(path: &std::path::Path, off: u64, len: usize) -> Vec<u8> {
 
 pub fn seqs(r: &lunix_iface::journal::Recovered) -> Vec<u64> {
     r.records.iter().map(|x| x.record.write_seq.0).collect()
+}
+
+/// Like [`write`], but when the lane's buffer pool is dry it polls (and retries)
+/// until a completion frees a buffer.
+pub fn write_wait(lane: &mut dyn JournalLane, lba: u64, blocks: u32) -> Appended {
+    let start = std::time::Instant::now();
+    loop {
+        match lane
+            .try_reserve(RecordKind::Write, blocks)
+            .expect("reserve")
+        {
+            SlotOutcome::Reserved(slot) => {
+                let data = pattern(slot.write_seq.0, blocks);
+                return lane.append(slot, lba, &data).expect("append");
+            }
+            SlotOutcome::Full | SlotOutcome::NoSpace => {
+                assert!(start.elapsed() < T, "still full after {T:?}");
+                let mut out = Vec::new();
+                lane.poll(&mut out);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
 }

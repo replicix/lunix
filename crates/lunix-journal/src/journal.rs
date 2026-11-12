@@ -2,15 +2,14 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use lunix_format::journal::BLOCK;
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
 use lunix_iface::journal::{
-    FlushDone, Journal, JournalFill, JournalLane, JournalLoc, JournalTail, LaneId, Recovered,
-    ReclaimReport,
+    FlushDone, Journal, JournalFill, JournalLane, JournalLoc, JournalTail, LaneId, ReclaimReport,
+    Recovered,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
@@ -421,8 +420,3 @@ impl Journal for FileJournal {
         }
     }
 }
-
-#[allow(dead_code)]
-const _: usize = BLOCK;
-#[allow(dead_code)]
-type _Unused = Condvar;

@@ -136,7 +136,9 @@ fn group(sh: &Shared, ring: Option<&mut IoUring>, flushes: Vec<(u64, FlushDone)>
     if !ok {
         // Nothing since the last successful sync is promised any more.
         for it in &items {
-            lock(&sh.flights[usize::from(it.lane)]).dirty.insert(it.slot);
+            lock(&sh.flights[usize::from(it.lane)])
+                .dirty
+                .insert(it.slot);
         }
         sh.poison(min_unsynced.min(upto));
     }

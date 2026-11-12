@@ -18,9 +18,7 @@ mod scan;
 mod shared;
 mod sys;
 
-pub use config::{
-    JournalConfig, TraceEvent, TraceFn, DEFAULT_JOURNAL_MAX, MIN_JOURNAL_MAX,
-};
+pub use config::{JournalConfig, TraceEvent, TraceFn, DEFAULT_JOURNAL_MAX, MIN_JOURNAL_MAX};
 pub use journal::FileJournal;
 
 use lunix_format::local::CheckpointSlot;
@@ -32,6 +30,9 @@ use lunix_format::CommitSeq;
 /// written for a commit above the tip (the tip was truncated by
 /// `fsck --repair --truncate-tip`) names files whose records the new tip does
 /// not cover; it must be ignored and every file scanned.
-pub fn usable_hint(hint: Option<&CheckpointSlot>, tip_commit_seq: CommitSeq) -> Option<&CheckpointSlot> {
+pub fn usable_hint(
+    hint: Option<&CheckpointSlot>,
+    tip_commit_seq: CommitSeq,
+) -> Option<&CheckpointSlot> {
     hint.filter(|h| h.last_commit_seq <= tip_commit_seq.0)
 }

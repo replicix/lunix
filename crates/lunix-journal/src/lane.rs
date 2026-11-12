@@ -14,11 +14,11 @@
 //!
 //! # When a batch is written
 //!
-//! A batch is submitted when it is full, when the next record needs a new
-//! batch, or after an `append` or a `poll` that finds fewer than
-//! `max_inflight` batches in flight. Under low load every record therefore
-//! goes out at once; under load the records that arrive while batches are in
-//! flight pack together and go out on the next completion.
+//! A batch is submitted when the next record does not fit (so it is full), by
+//! an `append` that finds no batch in flight, and by a `poll` that finds fewer
+//! than `max_inflight`. An idle lane therefore writes every record at once; a
+//! burst writes its first record alone and packs the rest into the batch the
+//! queue thread's next `poll` (or the first completion) sends out.
 
 use std::collections::BTreeSet;
 use std::os::fd::AsRawFd;
@@ -292,15 +292,27 @@ impl FileLane {
             .remove(&o.seq);
     }
 
+    /// Gives up the reservation `o` after a failure. The journal is poisoned
+    /// **before** the sequence number leaves the pending set: a group flush that
+    /// sees the lanes clear must already see the poison, or it could complete
+    /// over a sequence number that was never written.
     fn abort(&mut self, o: &Outstanding, err: Error) -> Error {
-        self.unreserve(o);
         self.sh.poison(o.seq);
+        self.unreserve(o);
         err
     }
 
-    fn maybe_submit(&mut self) -> Result<()> {
+    /// Writes the open batch if the policy allows: from `append` only when no
+    /// batch is in flight (an idle lane writes at once), from `poll` while
+    /// fewer than `max_inflight` are.
+    fn maybe_submit(&mut self, from_append: bool) -> Result<()> {
+        let limit = if from_append {
+            1
+        } else {
+            self.sh.cfg.max_inflight
+        };
         let ready = self.outstanding.is_none()
-            && self.inflight_writes < self.sh.cfg.max_inflight
+            && self.inflight_writes < limit
             && self.open.as_ref().is_some_and(|o| !o.seqs.is_empty());
         if ready {
             self.submit_open()?;
@@ -371,7 +383,10 @@ impl FileLane {
             len,
             addr: ptr as usize,
         });
-        if let Err(e) = self.push_sqe(&sqe).and_then(|()| self.ring.submit().map(|_| ())) {
+        if let Err(e) = self
+            .push_sqe(&sqe)
+            .and_then(|()| self.ring.submit().map(|_| ()))
+        {
             // The entry may still sit in the submission queue: leak the
             // buffer (do not reuse it) and fail the batch.
             self.fail_batch(batch, e.raw_os_error().unwrap_or(libc::EIO), false);
@@ -466,7 +481,8 @@ impl FileLane {
         if self.read_cache.len() < MAX_CACHED_READ_BUFS {
             self.read_cache.push(abuf);
         }
-        self.out.push(JournalCompletion::Read { token, status, buf });
+        self.out
+            .push(JournalCompletion::Read { token, status, buf });
     }
 
     fn reap(&mut self) {
@@ -520,10 +536,9 @@ impl JournalLane for FileLane {
             let a = self.active();
             a.file.max_seq.fetch_max(seq, Ordering::AcqRel);
             a.file.rec_bytes.fetch_add(rec_len as u64, Ordering::AcqRel);
-            a.file.hi_off.fetch_max(
-                round4k(file_off + rec_len as u64),
-                Ordering::AcqRel,
-            );
+            a.file
+                .hi_off
+                .fetch_max(round4k(file_off + rec_len as u64), Ordering::AcqRel);
             (a.ordinal, a.gen)
         };
         let token = (u64::from(self.id) << 48) | self.next_token;
@@ -605,7 +620,7 @@ impl JournalLane for FileLane {
         }
         self.unfinished.insert(o.seq);
         self.last_accepted = o.seq;
-        self.maybe_submit()?;
+        self.maybe_submit(true)?;
         Ok(Appended {
             write_seq: WriteSeq(o.seq),
             loc: JournalLoc {
@@ -674,7 +689,10 @@ impl JournalLane for FileLane {
             delta: (loc.offset - a0) as usize,
         });
         self.inflight_reads += 1;
-        if let Err(e) = self.push_sqe(&sqe).and_then(|()| self.ring.submit().map(|_| ())) {
+        if let Err(e) = self
+            .push_sqe(&sqe)
+            .and_then(|()| self.ring.submit().map(|_| ()))
+        {
             // Nothing was queued (or it will complete harmlessly into a buffer
             // we keep): hand the buffer back with an error.
             if let Some(req) = self.reads[id].take() {
@@ -697,7 +715,7 @@ impl JournalLane for FileLane {
         self.reap();
         // A failure here is recorded by `fail_batch` (poison and error
         // completions); there is nobody to return it to.
-        let _ = self.maybe_submit();
+        let _ = self.maybe_submit(false);
         out.append(&mut self.out);
     }
 

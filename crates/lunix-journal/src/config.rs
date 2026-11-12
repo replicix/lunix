@@ -4,7 +4,7 @@ use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lunix_format::journal::{BLOCK, FILE_LEN, MAX_LANES, MAX_WRITE_BLOCKS, RECORD_HEADER_LEN};
+use lunix_format::journal::{BLOCK, FILE_LEN, MAX_LANES, MAX_WRITE_BLOCKS};
 use lunix_format::VolumeUuid;
 use lunix_iface::{Error, Result};
 
@@ -158,6 +158,3 @@ impl std::fmt::Debug for JournalConfig {
             .finish_non_exhaustive()
     }
 }
-
-/// The length of the record header, re-exported for sizing.
-pub(crate) const REC_HEADER: u64 = RECORD_HEADER_LEN as u64;

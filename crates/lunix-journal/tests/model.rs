@@ -140,7 +140,11 @@ fn check_recovered(
 
 fn run(s: &Scenario) -> Result<(), TestCaseError> {
     let t0 = std::time::Instant::now();
-    let tm = |what: &str| if std::env::var_os("MODEL_TIMING").is_some() { eprintln!("{what}: {:?}", t0.elapsed()); };
+    let tm = |what: &str| {
+        if std::env::var_os("MODEL_TIMING").is_some() {
+            eprintln!("{what}: {:?}", t0.elapsed());
+        }
+    };
     let dir = scratch();
     let jdir = dir.path().join("journal");
     copy_dir(&template(s.lanes), &jdir);
@@ -153,8 +157,7 @@ fn run(s: &Scenario) -> Result<(), TestCaseError> {
     {
         let j = open_journal(&cfg);
         recover_all(&j);
-        let mut lanes: Vec<Box<dyn JournalLane>> =
-            (0..s.lanes).map(|l| open_lane(&j, l)).collect();
+        let mut lanes: Vec<Box<dyn JournalLane>> = (0..s.lanes).map(|l| open_lane(&j, l)).collect();
         let mut waiting = vec![0usize; usize::from(s.lanes)];
         for op in &s.ops {
             match *op {
@@ -243,12 +246,13 @@ fn run(s: &Scenario) -> Result<(), TestCaseError> {
             let mut head = [0u8; 64];
             f.read_exact_at(&mut head, r.start).expect("read");
             let idx = recs.iter().position(|x| x.seq == r.seq).expect("rec");
-            intact[idx] && lunix_format::journal::Record::parse(&{
-                let mut all = vec![0u8; r.len as usize];
-                f.read_exact_at(&mut all, r.start).expect("read");
-                all
-            })
-            .is_ok()
+            intact[idx]
+                && lunix_format::journal::Record::parse(&{
+                    let mut all = vec![0u8; r.len as usize];
+                    f.read_exact_at(&mut all, r.start).expect("read");
+                    all
+                })
+                .is_ok()
         };
         if whole && r.seq == k + 1 {
             k += 1;
@@ -269,8 +273,7 @@ fn run(s: &Scenario) -> Result<(), TestCaseError> {
         if let Some(range) = r.ignored_after_gap {
             prop_assert!(range.first.0 > k && range.last >= range.first);
         }
-        let mut lanes: Vec<Box<dyn JournalLane>> =
-            (0..s.lanes).map(|l| open_lane(&j, l)).collect();
+        let mut lanes: Vec<Box<dyn JournalLane>> = (0..s.lanes).map(|l| open_lane(&j, l)).collect();
         let mut waiting = vec![0usize; usize::from(s.lanes)];
         for &(lane, blocks) in &s.second {
             let l = lane % usize::from(s.lanes);

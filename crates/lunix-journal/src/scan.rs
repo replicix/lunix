@@ -15,15 +15,15 @@
 
 use std::ops::Range;
 
-use lunix_format::journal::{scan_file, RecordKind, BLOCK};
+use lunix_format::journal::{scan_file, RecordKind};
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
 use lunix_iface::journal::{
-    DamagedRange, RecordInfo, Recovered, RecoveredRecord, WriteSeqRange, LaneId, JournalLoc,
+    DamagedRange, JournalLoc, LaneId, RecordInfo, Recovered, RecoveredRecord, WriteSeqRange,
 };
 use lunix_iface::{Error, Result};
 
-use crate::ring::{io_err, lock, Role, Rings};
+use crate::ring::{io_err, lock, Rings, Role};
 use crate::sys::{self, B};
 
 /// One accepted record of a scanned file.
@@ -150,8 +150,12 @@ fn scan_lane(
             out.push(sf);
             continue;
         }
-        let buf = sys::read_aligned(file, 0, usize::try_from(len).map_err(|_| Error::invalid("file length"))?)
-            .map_err(io_err)?;
+        let buf = sys::read_aligned(
+            file,
+            0,
+            usize::try_from(len).map_err(|_| Error::invalid("file length"))?,
+        )
+        .map_err(io_err)?;
         match scan_file(buf.as_slice(), WriteSeq(prev)) {
             Err(_) => sf.bad = true,
             Ok(res) => {
@@ -425,6 +429,3 @@ fn kept_bytes(f: &ScannedFile, floor: u64, next_seq: u64) -> u64 {
         .map(|r| r.enc)
         .sum()
 }
-
-/// Blocks per file header, re-exported for callers sizing wipes.
-pub(crate) const HEADER_BYTES: u64 = BLOCK as u64;

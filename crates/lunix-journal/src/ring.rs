@@ -134,7 +134,6 @@ pub(crate) struct Rings {
     pub dir: PathBuf,
     pub lanes: Vec<LaneRing>,
     pub file_len: u64,
-    pub direct: bool,
 }
 
 impl Rings {
@@ -193,7 +192,13 @@ fn create_file(
 /// Opens the journal directory: validates existing files, creates the missing
 /// ones. Existing files are never modified.
 pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings> {
+    let existed = cfg.dir.is_dir();
     std::fs::create_dir_all(&cfg.dir).map_err(io_err)?;
+    if !existed {
+        if let Some(parent) = cfg.dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+            sys::fsync_dir(parent).map_err(io_err)?;
+        }
+    }
     let want = cfg.files_per_lane();
     let mut found: Vec<Vec<u32>> = vec![Vec::new(); usize::from(cfg.lanes)];
     for entry in std::fs::read_dir(&cfg.dir).map_err(io_err)? {
@@ -232,9 +237,15 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
                 .ok()
                 .and_then(|b| FileHeader::decode(b.as_slice()).ok());
             let (gen, bad) = match head {
-                Some(h)
-                    if h.lane == lane && h.ordinal == ordinal && h.volume_uuid == cfg.volume_uuid =>
-                {
+                Some(h) if h.lane == lane && h.ordinal == ordinal => {
+                    if h.volume_uuid != cfg.volume_uuid {
+                        // Re-initialising it would destroy another volume's
+                        // records: refuse instead.
+                        return Err(Error::Corrupt {
+                            what: "journal file",
+                            detail: "belongs to another volume",
+                        });
+                    }
                     (h.generation, false)
                 }
                 _ => (0, true),
@@ -249,7 +260,8 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
         }
         let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
         while files.len() < want {
-            let (file, gen) = create_file(cfg, &cfg.dir, lane, next_ordinal, zero).map_err(io_err)?;
+            let (file, gen) =
+                create_file(cfg, &cfg.dir, lane, next_ordinal, zero).map_err(io_err)?;
             created_any = true;
             files.push(Arc::new(RingFile::new(file)));
             slots.push(SlotInfo {
@@ -279,7 +291,6 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
         dir: cfg.dir.clone(),
         lanes,
         file_len: cfg.file_len,
-        direct: cfg.direct,
     })
 }
 
@@ -328,5 +339,29 @@ impl Rings {
         file.file.sync_data()?;
         std::fs::rename(self.path(lane, old_ordinal), self.path(lane, new_ordinal))?;
         Ok(gen)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_round_trip() {
+        assert_eq!(file_name(0, 1), "q00-00000001.j");
+        assert_eq!(file_name(255, 0xabcd), "qff-0000abcd.j");
+        assert_eq!(parse_name("q00-00000001.j"), Some((0, 1)));
+        assert_eq!(parse_name("qff-0000abcd.j"), Some((255, 0xabcd)));
+        for bad in [
+            "q00-00000000.j",
+            "q0-00000001.j",
+            "q00-1.j",
+            "q00-00000001.j.tmp",
+            "x00-00000001.j",
+            "q00_00000001.j",
+            "q00-0000000g.j",
+        ] {
+            assert_eq!(parse_name(bad), None, "{bad}");
+        }
     }
 }
