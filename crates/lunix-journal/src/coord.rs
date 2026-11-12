@@ -130,7 +130,7 @@ fn group(sh: &Shared, ring: Option<&mut IoUring>, flushes: Vec<(u64, FlushDone)>
     let mut ok = true;
     if !items.is_empty() {
         lunix_iface::crashpoint!("journal.before_fdatasync");
-        ok = sync_all(ring, &items);
+        ok = !sh.fail_sync.swap(false, Ordering::SeqCst) && sync_all(ring, &items);
         lunix_iface::crashpoint!("journal.after_fdatasync");
     }
     if !ok {

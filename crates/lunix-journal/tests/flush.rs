@@ -261,3 +261,32 @@ fn dropping_the_journal_answers_queued_flushes() {
     l.append(slot, 0, &pattern(1, 1))
         .expect("append still works");
 }
+
+#[test]
+fn a_failed_fdatasync_poisons_from_the_first_unsynced_write() {
+    let (_dir, cfg, _ev) = traced(2);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l0 = open_lane(&j, 0);
+    let mut l1 = open_lane(&j, 1);
+    write(&mut *l0, 0, 1); // seq 1
+    complete_appends(&mut *l0, 1);
+    assert!(flush(&j, 1).recv_timeout(T).expect("flush 1"), "synced");
+    write(&mut *l1, 8, 1); // seq 2
+    write(&mut *l0, 16, 1); // seq 3
+    complete_appends(&mut *l1, 1);
+    complete_appends(&mut *l0, 1);
+    j.fail_next_sync();
+    assert!(!flush(&j, 3).recv_timeout(T).expect("flush 3"), "must fail");
+    // Everything since the last successful sync is unpromised: from seq 2 up.
+    assert!(!flush(&j, 2).recv_timeout(T).expect("flush 2"));
+    assert!(!flush(&j, 9).recv_timeout(T).expect("flush 9"));
+    // Seq 1 was made durable by the earlier successful sync.
+    assert!(flush(&j, 1).recv_timeout(T).expect("flush 1 again"));
+    for lane in [&mut l0, &mut l1] {
+        let e = lane
+            .try_reserve(RecordKind::Write, 1)
+            .expect_err("poisoned");
+        assert_eq!(e.kind(), lunix_iface::ErrorKind::Io);
+    }
+}

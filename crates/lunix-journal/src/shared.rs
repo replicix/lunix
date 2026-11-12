@@ -99,6 +99,8 @@ pub(crate) struct Shared {
     /// Lanes whose next append fails (test hook).
     pub fail_next: Mutex<BTreeSet<u16>>,
     pub fail_any: AtomicBool,
+    /// The next group's `fdatasync` fails (test hook).
+    pub fail_sync: AtomicBool,
 }
 
 impl Shared {

@@ -61,6 +61,7 @@ impl FileJournal {
             zero,
             fail_next: Mutex::new(BTreeSet::new()),
             fail_any: AtomicBool::new(false),
+            fail_sync: AtomicBool::new(false),
         });
         let worker = Arc::clone(&sh);
         let handle = std::thread::Builder::new()
@@ -79,6 +80,13 @@ impl FileJournal {
     pub fn fail_next_append(&self, lane: LaneId) {
         lock(&self.sh.fail_next).insert(lane.0);
         self.sh.fail_any.store(true, Ordering::Relaxed);
+    }
+
+    /// Test hook: the next group flush that has files to sync reports a failed
+    /// `fdatasync`.
+    #[doc(hidden)]
+    pub fn fail_next_sync(&self) {
+        self.sh.fail_sync.store(true, Ordering::SeqCst);
     }
 
     fn apply_plan(&self, plan: &Plan) {
