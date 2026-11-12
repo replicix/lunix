@@ -598,6 +598,7 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
   | `map/*` nodes | the extent scheme, `kind` = node |
   | segment footers | XChaCha20-Poly1305, `footer` metadata key |
   | `heat/*`, `gc/*`, `readers/*`, `holds/*`, `snapshots/*` bodies | XChaCha20-Poly1305, one metadata key per kind |
+  | `dicts/*` (ADR-30) | XChaCha20-Poly1305, `dict` metadata key |
   | `head`, `sync/*/progress` | not sealed: advisory, never trusted, only counters |
 
   - Metadata uses a random 192-bit nonce. The AAD is `"lunix meta v1\0" ‖
@@ -733,6 +734,8 @@ external review is recommended before release. A FIPS profile uses
 HKDF-SHA-256 and HMAC-SHA-256.
 
 ## ADR-12: Compression `auto`: an LZ4 probe, then zstd-1; recompress on seal
+
+*Amended by ADR-30:* zstd dictionaries come through an explicit `lunix compress train|apply` command that measures the volume's own data. Codec id 3, `dicts/<id>` and the GC rule are reserved in the phase 1 format.
 
 **Decision:**
 - Each chunk gets a 4 KiB LZ4 probe. If the probe saves less than 6%, the
@@ -1737,3 +1740,106 @@ Consequences. Evidence: [s3probe](../../bench/s3probe/RESULTS.md),
 - DESIGN §20: fsync target corrected as above.
 - DESIGN §22: add "Staging of raw journal batches ahead of FLUSH
   (ADR-28 gate)".
+
+## ADR-30: Compression advisor and zstd dictionaries, trained on demand from the volume's own data
+
+**Context:**
+- Each chunk is compressed on its own (ADR-12), so a 4-16 KiB chunk has
+  little history to match against. zstd dictionaries fix that for
+  similar-but-not-identical content (database pages, file-system
+  metadata, text, OS files), which dedup cannot touch because dedup needs
+  identical chunks. On mixed user data they gain little.
+- Automatic training would guess on the user's behalf. The maintainer
+  proposed (2026-11-12) an explicit command that trains on the volume's
+  own data and reports the achievable gain before anything changes.
+
+**Decision:**
+1. **`lunix compress estimate|train|apply|ls|rm`:**
+   - `estimate NAME [--level N] [--dict auto|builtin:<name>|<id>]
+     [--sample 1%|64M] [--exact]` answers "what would this setting save
+     on this volume?" for higher zstd levels, built-in dictionaries or a
+     trained candidate. It changes nothing.
+   - `train NAME [--classes auto|1-4] [--sample …]` produces candidate
+     dictionaries and the same report.
+   - `apply NAME --dict <id> [--new-only | --rewrite cold | --rewrite
+     all]` turns a dictionary on. The default is new writes only;
+     `--rewrite` recompresses existing extents in the background through
+     ADR-12's cold-segment recompression.
+2. **Sampling:**
+   - Chunks are drawn uniformly over the current map's live extents. Holes
+     and extents stored raw are skipped, and their share is reported
+     because it caps any gain.
+   - Reads come from the local tier, else by ranged GET. When the sample
+     needs backend reads, the command first prints the GET count, the
+     bytes and the cost, and asks for confirmation.
+3. **Training:**
+   - zstd's trainer (`ZDICT`, fastCover) runs on 80 % of the sample in a
+     low-priority background task inside `lunixd`.
+   - With `--classes`, a cheap per-chunk classifier (magic numbers,
+     text against binary, byte entropy) splits chunks into up to 4
+     classes, one dictionary each. Unclassified chunks use no dictionary.
+4. **Report:** measured on the held-out 20 %:
+   - per candidate: dictionary size, class, share of stored bytes it
+     applies to, and the ratio with and without it;
+   - volume-wide: stored bytes now and projected, with a 95 % confidence
+     interval (from a bootstrap over the sample);
+   - destage CPU change, monthly S3 storage change at the configured
+     prices, and the GET/PUT count and cost of `--rewrite`.
+   - `--exact` compresses every eligible chunk instead of a sample. It is
+     priced first like any backend read.
+5. **Adoption rule:** `train` marks a candidate "recommended" only if it
+   gains at least 5 % on its class and 1 % volume-wide. Otherwise the
+   volume stays without a dictionary.
+6. **Built-in dictionaries:** Lunix may ship dictionaries trained once on
+   public data (ext4 and xfs metadata, common Linux distributions,
+   PostgreSQL and InnoDB pages). They are identified by a global id,
+   versioned forever, carried in the binary and never stored in a
+   bucket. Nothing is trained on user data for them.
+7. **Security:** training happens inside `lunixd`, which already holds
+   the keys. Trained dictionaries derive from plaintext, so they are
+   sealed like other metadata. The report shows only sizes, ratios and
+   costs.
+
+**Format reservations (frozen in phase 1, unused until the feature
+ships):**
+- **Codec id 3:** zstd with a dictionary. The dictionary is named by the
+  `dictID` field of the zstd frame header. Ids with the top bit set are
+  built-in dictionaries; the others are the volume's trained ones.
+- **`dicts/<id:08x>`:** a create-only object under the volume prefix
+  holding a trained dictionary, sealed with its own metadata key (added
+  to ADR-11's sealed-object table).
+- **GC rule:** a trained dictionary is live while any extent reachable
+  from a GC root references it. It is deleted only after the usual
+  condemn, grace and recheck (ADR-25, DESIGN §11). Mirrors copy
+  `dicts/` before any segment that uses it.
+- **Clones (post-v1):** a clone reads its bases' dictionaries from the
+  parent's prefix, which the parent's holds keep alive.
+
+**Rejected:**
+- *Automatic background training.* It spends CPU and backend reads on
+  volumes where dictionaries gain nothing, and changes stored bytes
+  without the operator's say. A later policy may run `train` on a
+  schedule, with the same adoption rule.
+- *One global dictionary trained across tenants.* It would leak data
+  across families, as ADR-13 rejects for dedup.
+- *A dictionary id field in the extent header.* The zstd frame already
+  carries one, and the codec id says when to read it.
+
+**Consequences:**
+- **Reads:** a cold read of a dictionary-compressed extent needs the
+  dictionary first: one small GET per volume, then cached. Decompression
+  speed is unchanged.
+- **Memory:** a loaded dictionary costs its size plus zstd's prepared
+  state, a few hundred KiB to a few MiB per dictionary and level.
+- **Dedup and encryption** are unaffected: chunk ids hash the plaintext,
+  and every extent gets a fresh salt, so a rewrite is safe.
+- **Phasing:**
+  - Phase 1 freezes the reservations.
+  - `estimate` lands in phase 4, next to `gc --dry-run` and the space
+    accounting. It changes nothing on disk.
+  - `train` and `apply` need the dictionary read path, so they come
+    later, gated on a benchmark of dictionaries against plain zstd
+    levels at 4, 16 and 64 KiB.
+- **Amends:** ADR-12 (dictionaries are no longer simply deferred; the
+  read path and the command are planned) and ADR-11 (`dicts/` joins the
+  sealed-object table).

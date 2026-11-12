@@ -291,6 +291,7 @@ trailer = footer offset + length + magic
   readers/<host>-<id>      time-travel mount pins {seq, deadline}, renewed while mounted
   holds/<child-uuid>       clone base pins {base_seq}; none in v1, but GC honours them (ADR-25)
   gc/                      condemned lists, evidence journal
+  dicts/<id:08x>           create-only trained zstd dictionaries (ADR-30; reserved, unused in v1 until the feature ships)
 <prefix>/lunix/v1/families/<family-id>/keyring   (shared by clones)
                   mutable, sealed: keyring_seq, key slots, MAC'd body.
                   CAS (If-Match) on the authority only; copied to mirrors
@@ -674,6 +675,7 @@ In async mode a FULL commit is cut every `T`/`B`. Unsynced bytes above
 
 - **Mark:** walk the maps of all GC roots (§8.7: retained commits, the
   tip's FULL plus DELTAs, snapshot, reader and clone-hold pins) and
+  mark the trained dictionaries (ADR-30) that live extents reference, and
   accumulate live bytes per segment. Maintain approximate per-segment liveness
   incrementally between full marks.
 - **Compact:**
@@ -951,6 +953,8 @@ lunix resize NAME 300G       lunix snapshot NAME SNAP [--freeze MNT]   lunix sna
 lunix mount-at NAME --snapshot S|--commit <seq>|--time <t>   (read-only time travel)
 lunix rollback NAME --to S|<seq>   lunix retain NAME <policy>   lunix diff NAME A B
 lunix export NAME --snapshot S -o image.raw   lunix gc NAME --dry-run
+lunix compress estimate NAME [--level N] [--dict …] [--sample 1%] [--exact]   (ADR-30)
+lunix compress train|apply|ls|rm NAME …                                       (ADR-30, later)
 lunix clone SNAP NEW         (post-v1, ADR-25; v1 `restore SNAP NEW` = full copy)
 lunix status [NAME]   lunix doctor s3://…   lunix verify NAME   lunix fsck NAME
 lunix warm NAME   lunix migrate plan NAME --add s3://… --remove <id>   lunix steal NAME

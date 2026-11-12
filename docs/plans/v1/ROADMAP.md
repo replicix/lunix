@@ -13,7 +13,8 @@ The accepted crypto format elements (ADR-11, 2026-11-12) are frozen with
 them: the extent header fields (`dek_gen`, `salt`, `nonce`) and its AAD,
 the `families/<id>/keyring` object, the sealed-object table, the `volume`
 descriptor MAC and KMK fingerprint, and `parent_hash` and `epoch` in every
-commit kind.
+commit kind. ADR-30's dictionary reservations are frozen too: codec id 3,
+`dicts/<id>` and its GC rule.
 Later phases add code, not
 migrations. Encryption is therefore *designed* in phase 1 even where it is
 implemented later.
@@ -133,6 +134,8 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - `rollback`.
 - Tiered retention and the `chain_floor`.
 - Per-snapshot USED, WRITTEN and REFER, and `gc --dry-run`.
+- `lunix compress estimate` (ADR-30): what a higher zstd level or a
+  built-in dictionary would save on this volume.
 - `diff`, raw `export`, a full-copy `restore`, shrink and `verify`.
 - GC honours `holds/` (always empty in v1).
 
@@ -209,7 +212,8 @@ downtime, and warm against cold time-to-steady-state measured.
 - `sync-fast-wal` on S3 Express One Zone.
 - `sync-quorum` / `sync-all` mirror policies.
 - Peer-to-peer cache warm-up during migration.
-- Per-volume zstd dictionaries.
+- `lunix compress train|apply` and the dictionary read path (ADR-30),
+  gated on a dictionary benchmark at 4, 16 and 64 KiB.
 - Cold-segment recompression.
 - The SHARDS cost advisor.
 - File-system-aware cache hints.
