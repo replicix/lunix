@@ -8,7 +8,8 @@
 //! obligations: whole-chunk assembly with an R1 base read for partial chunks,
 //! zero chunks as holes, dedup against the cut and the index (a `Hinted` hit
 //! is confirmed first, D17), one map transaction applied atomically, index
-//! inserts held back for the caller.
+//! inserts held back for the caller. Like M9 it seals full segments during
+//! the cut and leaves the last one open for C4.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -20,7 +21,8 @@ use lunix_iface::index::{ChunkIndex, Confirm};
 use lunix_iface::journal::{Journal, WriteSeqRange};
 use lunix_iface::map::{BlockMap, ChunkNo};
 use lunix_iface::overlay::{OverlayCut, PieceSource};
-use lunix_iface::store::{SegmentStore, SegmentWriter};
+use lunix_iface::space::SpaceGate;
+use lunix_iface::store::{SealedSegment, SegmentStore, SegmentWriter};
 use lunix_iface::{Error, Result};
 
 use crate::read::ChunkReader;
@@ -41,6 +43,9 @@ pub struct DestageCtx<'a> {
     pub codec: &'a dyn ExtentCodec,
     /// Verified reads (R1) for partial-chunk bases and dedup confirmation.
     pub reader: &'a dyn ChunkReader,
+    /// The space gate, for `ReadOnly` and `fatal_io` on a host EIO only: the
+    /// ledger reservations of a cut are the coordinator's (C2, C4).
+    pub space: &'a dyn SpaceGate,
     /// The volume chunk size.
     pub chunk_size: u32,
     /// The map id-prefix length.
@@ -52,8 +57,11 @@ pub struct DestageCtx<'a> {
 /// What a destage produced, for C4 and the counters.
 #[derive(Default)]
 pub struct DestageOutcome {
-    /// Segments written, **not sealed** (C4 seals them, in this order).
+    /// Segments written and **not sealed** (C4 seals them, in this order).
     pub writers: Vec<Box<dyn SegmentWriter>>,
+    /// Segments the pipeline already sealed during the cut (M9 seals full
+    /// ones as it goes). Durable but unnamed until C6, like the rest.
+    pub sealed: Vec<SealedSegment>,
     /// Index entries for the new extents, inserted by the caller once the
     /// commit naming their segments is durable.
     pub index_inserts: Vec<(ChunkId, Hint)>,
@@ -187,8 +195,12 @@ impl Destager for SimpleDestager {
                         .seal(ExtentKind::Data, &id, &desc, &buf, &mut extent)?;
                     out.stage_ns[3] += nanos(t);
                     let t = Instant::now();
+                    // A full segment is sealed now, as M9 does; the last one
+                    // stays open for C4.
                     if writer.as_ref().is_some_and(|w| w.is_full()) {
-                        out.writers.extend(writer.take());
+                        if let Some(w) = writer.take() {
+                            out.sealed.push(w.seal(ctx.writes)?);
+                        }
                     }
                     if writer.is_none() {
                         writer = Some(ctx.segments.open_segment()?);

@@ -237,6 +237,7 @@ impl Inner {
             segments: &*self.tracked,
             codec: &*self.extents,
             reader: &*self.reader,
+            space: &*self.space,
             chunk_size: self.cfg.chunk_size,
             id_len: self.cfg.id_len,
             writes,
@@ -254,9 +255,7 @@ impl Inner {
             Ok(s) => s,
             Err(e) => {
                 self.fatal("c3 rehint", &e);
-                for w in &outcome.writers {
-                    self.open_segs.remove(w.id());
-                }
+                self.open_segs.clear();
                 return Err(e);
             }
         };
@@ -272,16 +271,20 @@ impl Inner {
         }
         let index_inserts = outcome.index_inserts;
         let mut writers = outcome.writers;
+        let pre_sealed = outcome.sealed;
         if let Err(e) = self.points.hit("engine.c3.destaged") {
-            for w in &writers {
-                self.open_segs.remove(w.id());
-            }
+            self.open_segs.clear();
             return Err(e);
         }
         lunix_iface::crashpoint!("engine.c3.destaged");
         // C4: seal the segments (footer, trailer, fdatasync, rename, dir fsync).
-        let mut new_segments = Vec::with_capacity(writers.len());
+        let mut new_segments = Vec::with_capacity(writers.len() + pre_sealed.len());
         let mut seg_actual = 0u64;
+        for s in &pre_sealed {
+            seg_actual += s.size_bytes;
+            new_segments.push(s.seg);
+            self.open_segs.remove(s.seg);
+        }
         while !writers.is_empty() {
             let w = writers.remove(0);
             let id = w.id();
@@ -293,9 +296,7 @@ impl Inner {
                     new_segments.push(s.seg);
                 }
                 Err(e) => {
-                    for w in &writers {
-                        self.open_segs.remove(w.id());
-                    }
+                    self.open_segs.clear();
                     self.fatal("c4", &e);
                     return Err(e);
                 }
