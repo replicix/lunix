@@ -198,6 +198,19 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   the floor, merges them and stops at the first gap. The checkpoint only
   says which files may be skipped. There is no mid-ring corruption error
   and no flush marker; `fsck` warns about valid records beyond the gap.
+- **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
+  header or CRC failure at `p` the reader does not end the lane: it scans
+  forward from `p + 8` in 8-byte steps for the next header that passes
+  magic, `ver`, `gen`, `off`, CRC and a `write_seq` above the last
+  accepted. The lane ends only when none exists. Global `write_seq`
+  contiguity still decides what is kept, so damage above the recovery floor
+  is a missing `write_seq` and stops recovery exactly as before, and damage
+  at or below the floor costs nothing. This is a reader-side rule; the
+  record format does not change. Forging an accepted header needs the
+  64-bit file `gen`.
+- **Checkpoint tails.** The checkpoint's lane tails are used only if its
+  `last_commit_seq` is at most the tip's `commit_seq`. `fsck --repair
+  --truncate-tip` zeroes the checkpoint.
 - Local commits and journal records carry `epoch` = 0 until a backend
   exists.
 - "The journal deduplicates by `seq`" (DESIGN §3) is reworded: a reissued
@@ -306,10 +319,20 @@ the default.
 **Amended 2026-11-12 (phase 1 review):** every extent carries a 16-byte
 tag (ADR-11), so reads from the local store verify the tag instead of
 recomputing the chunk id. On an unencrypted volume the tag is BLAKE3-128
-over the extent header and payload, keyed with the integrity key from the
-keyring if one exists, else unkeyed. The chunk id stays the identity; a
+over every byte of the extent before the tag: keyed with a key derived
+from the integrity key in `integrity` mode, unkeyed in `plain` mode (a
+checksum that detects corruption only). The chunk id stays the identity; a
 `verify_reads` option recomputes it on local reads, and an extent fetched
 from a backend is still verified by recomputing it.
+
+**Amended 2026-11-12 (M1.A0 review, dedup confirmation):** a dedup hit
+taken from a persisted index run is confirmed before the map points at it:
+the extent header at the hinted location must carry the same full 32-byte
+`chunk_id`, and the extent's tag (AEAD, keyed or, in plain mode, unkeyed)
+must verify. Index runs are checksummed, not authenticated, so without this
+a forged or wrong entry naming another valid extent would make a new chunk
+never be stored. An unconfirmed hit is a miss. A hit from the in-process
+table built from verified footers needs no confirmation.
 
 **Decision:**
 - `chunk_id = blake3(plaintext)`. When the volume family is encrypted it
@@ -506,6 +529,19 @@ hint falls back to the chunk index (ADR-14).
   segment that no commit lists.
 - **EPOCH** has the optional field `authority` (the backend that becomes
   the authority; ADR-24).
+- **Dedup confirmation (M1.A0 review).** Index runs are not authenticated,
+  so a dedup hit from a run is confirmed against the extent header's full
+  `chunk_id` and its tag or AEAD before the map points at it (ADR-6). An
+  unconfirmed hit is a miss.
+- **`created_at` is a writer clamp,** `created_at = max(now,
+  parent.created_at)`, not a chain validity rule. Mount and `fsck` never
+  reject on it (`fsck` warns). `epoch`, `commit_seq` and `chain_floor`
+  remain reader rules.
+- **Object ids** (segments, map packs, index runs) are never reused. After
+  the open-time orphan sweep the next id is 1 + the maximum of the
+  checkpoint's `id_high`, the highest id the chain names and the highest id
+  present before the sweep, so `fsck --repair --truncate-tip` cannot make
+  the allocator reissue a swept id.
 
 **Decision:**
 - **The commit chain:**
@@ -604,6 +640,36 @@ recommended before release. It is a note, not a blocker for phase 1.
 - `heat/`, `gc/` and `dicts/` bodies freeze only the envelope
   `{kind id, ver, bytes}` in phase 1.
 
+**Amended 2026-11-12 (maintainer decision, after the M1.A0 review): three
+volume modes.** The descriptor's crypto mode is one of:
+- **`encrypted`:** AEAD on extents and metadata.
+- **`integrity`:** an HMAC on every commit and on the lease, keyed extent
+  tags, and an integrity key in the keyring. This is F5/F7 as accepted
+  below, and it **remains the default for unencrypted volumes**.
+- **`plain`:** mode 0. Unkeyed BLAKE3 checksums and tags, no key material.
+  It detects corruption only and gives no protection against anyone who
+  can write the bucket: commits, footers and tags can be recomputed, and a
+  local read does not recompute the chunk id, so a swapped extent with the
+  right header id returns wrong data. The mode is fixed in the create-only
+  descriptor, so a plain volume can never be made safe later. It is an
+  explicit opt-out, supported everywhere including volumes with S3
+  backends. The CLI and docs warn about these limits when plain is chosen
+  and when a backend is added to a plain volume.
+- **Default and CLI.** `lunix volume create` without `--encrypt` or
+  `--plain` makes an `integrity` volume (flags `--encrypt`, `--integrity`,
+  `--plain`). For a local volume it auto-creates a key-file slot (kind 2)
+  whose random key lives next to the volume (`<dir>/<uuid>/integrity.key`,
+  0600), so attach needs no extra step; `--passphrase` adds a passphrase
+  slot for volumes that move. Kubernetes supplies the integrity credential
+  from a Secret, like an encryption key. The per-I/O cost is nil: keyed
+  BLAKE3 runs at the unkeyed speed and the HMAC touches metadata only.
+- **Attach rules (F7 extended).** A `plain` volume needs no credential. A
+  credential supplied for a plain volume is refused as `Downgrade`, like a
+  pin that records a stronger mode than the descriptor has. The descriptor
+  of a plain volume carries an unkeyed BLAKE3 checksum in place of the MAC.
+- Index runs stay checksummed and unauthenticated in every mode, made safe
+  by the dedup confirmation of ADR-6.
+
 **Gate outcome (phase 0, 2026-11-12):** the crypto review (P0.8) is done
 and found the salted per-extent key, constant nonce and AES-256-GCM
 construction sound: the amended nonce rule held in every modelled case
@@ -624,11 +690,14 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
   by the maintainer, 2026-11-12:
   - F2: authenticated `dek_gen` in the extent header and the AAD.
   - F5: `parent_hash` and `epoch` in every commit kind; an HMAC on every
-    commit of an unencrypted volume; lease epoch floor.
+    commit of an `integrity` volume (the default for unencrypted volumes;
+    `plain` is an explicit opt-out, see the three-modes amendment); lease
+    epoch floor.
   - F6: one mutable, CAS-written `keyring`; bounded Argon2id; honest slot
     semantics.
   - F7: key material at attach means "must be encrypted", checked by the
-    descriptor MAC; the orchestrator supplies the KMK fingerprint.
+    descriptor MAC; the orchestrator supplies the KMK fingerprint. A plain
+    volume needs no credential.
   - F9: every metadata object sealed, by the object-kind table.
   - F10: a reserved `nonce[12]` in the extent header for the FIPS profile.
   - F1b, F3, F8, F11, F12: the keyed extent derivation over `info`, a
@@ -730,8 +799,9 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
     rotation protects only new writes, and a dedup hit keeps pointing at an
     old extent until compaction rewrites it. A mounted volume holds its KMK
     in memory, so slot changes take effect at the next attach.
-  - An unencrypted family has a keyring too. Its slots wrap an integrity
-    key instead of encryption keys (see Integrity).
+  - An `integrity` family has a keyring too. Its slots wrap an integrity
+    key instead of encryption keys (see Integrity). A `plain` family has no
+    key material, so it has no slots.
 - **Downgrade (F7):**
   - The `volume` descriptor carries a MAC keyed by a KMK-derived key. It
     covers every plaintext field, with the label `"lunix volume v1\0"`.
@@ -741,7 +811,9 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
     descriptor MAC must verify, else attach is refused as a downgrade
     (`Downgrade`). A caller that supplies the integrity credential of an
     unencrypted volume declares it integrity-only, and the descriptor MAC
-    must verify under the integrity key.
+    must verify under the integrity key. A `plain` volume needs no
+    credential; a credential supplied for one is `Downgrade` (the caller
+    expects protection the volume lacks).
   - The orchestrator (StorageClass, `LunixBackendSet` or the Secret)
     supplies the KMK fingerprint. A different volume with its own KMK is
     refused as `WrongKmk`. The local trust-on-first-use pin stays for the
@@ -803,7 +875,8 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
   a writer bug or a key compromise and raises an alarm.
 - Encrypted volumes: the AEAD authenticates every commit body, and
   `parent_hash` links them.
-- Unencrypted volumes: every commit (FULL, DELTA, EPOCH, CONFIG and
+- `integrity` volumes (plain volumes carry an unkeyed checksum instead and
+  get none of this): every commit (FULL, DELTA, EPOCH, CONFIG and
   TRANSFER) carries an HMAC over its body, including `epoch` and
   `parent_hash`, under an integrity key held in the family keyring. A
   DELTA's HMAC covers its inline records, and a FULL's covers the map root.
@@ -824,8 +897,10 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
 - *AES-GCM-SIV.* About 5× slower in the measured crates.
 - *Slots in the create-only `volume` object.* Slots must change after
   creation.
-- *Corruption detection only for unencrypted volumes.* The maintainer
-  chose the HMAC.
+- *Corruption detection only as the default for unencrypted volumes.* The
+  maintainer chose the HMAC as the default (2026-11-12). Corruption
+  detection survives as the explicit `plain` mode (2026-11-12, after the
+  M1.A0 review recommended against offering it in v1).
 
 **Gate:** the crypto design review ran in phase 0 and is closed. The
 external review is recommended before release. A FIPS profile uses
@@ -1424,6 +1499,13 @@ elements:
   - Every entry in a leaf's segment dictionary carries `lineage_idx: u8`,
     always 0 in v1. So a hint can point into a parent's segments under
     the parent's prefix without changing the leaf encoding (ADR-8).
+  - **Interior child entries reserve `lineage_idx` too (M1.A0 review).**
+    The 48-byte interior entry `{child_hash, pack, off, len}` gets
+    `lineage_idx: u8` in the unused top byte of `len` (`len` is at most
+    65 644, so a u24 holds it): 0 in v1, rejected if non-zero. Without it
+    a clone would have to copy every leaf and interior node of its base
+    (about 300-350 MiB per TiB) at creation. The entry size and the node
+    hash (child hashes only) do not change.
 - **Holds:** `holds/<child-uuid>` objects in a parent's prefix, each
   naming a base commit. GC treats holds as roots **from v1**. There is
   therefore never a GC version that could delete a future clone's base.

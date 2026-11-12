@@ -10,7 +10,10 @@ segment and its CCH1 extent framing, the map node, the commit kinds, the
 16-byte tag on every extent, the commit numbering (`commit_seq`, with the
 genesis commit at 0), the bucket layout (including `index/<pack>` and
 ADR-25's clone reservations: `volume.lineage`,
-the leaf `lineage_idx`, `holds/` and `readers/`) and the key hierarchy.
+the leaf `lineage_idx`, the interior-entry `lineage_idx` (the top byte of
+the child `len`, zero in v1), `holds/` and `readers/`) and the key
+hierarchy. The descriptor's crypto mode (`encrypted`, `integrity`, `plain`;
+ADR-11) is frozen with it.
 The accepted crypto format elements (ADR-11, 2026-11-12) are frozen with
 them: the extent header fields (`dek_gen`, `salt`, `nonce`) and its AAD,
 the `families/<id>/keyring` object, the sealed-object table, the `volume`

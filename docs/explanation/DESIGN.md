@@ -52,11 +52,22 @@ A **volume** is a thin block device of a given size. Its data path is:
 
 - **Volume:** `uuid` and a human name registered on the host. Fixed at
   creation: block size 4096, chunk size (default 64 KiB, ADR-5), map
-  fanout (`map_fanout`, 256 or 512, default 512; ADR-8), compression policy, encryption on/off, and family. Size is mutable
-  (§14).
+  fanout (`map_fanout`, 256 or 512, default 512; ADR-8), compression policy,
+  crypto mode (`encrypted`, `integrity` or `plain`, below) and family. Size
+  is mutable (§14).
+- **Crypto mode (ADR-11):** fixed at creation, in the descriptor.
+  - `encrypted`: AEAD on extents and metadata, keys from a KMK.
+  - `integrity` (the default): HMAC on every commit, keyed extent tags, an
+    integrity key in the keyring. Contents are not hidden, and nobody who
+    lacks the key can write state the volume accepts.
+  - `plain`: unkeyed BLAKE3 checksums and tags. It detects corruption only
+    and gives no protection against anyone who can write the bucket. It is
+    supported everywhere, including volumes with S3 backends, and the CLI
+    warns about its limits (§16).
 - **Family:** the key domain (ADR-13): a volume plus its snapshots and,
   post-v1, its clones. `family_id`, keyring (key slots for an encrypted
-  family, an integrity key for an unencrypted one; ADR-11).
+  family, an integrity key for an `integrity` one, nothing for a `plain`
+  one; ADR-11).
   - **Dedup domain:** the volume plus its frozen lineage bases (ADR-25).
 - **Lineage:** `volume.lineage` lists the parent volumes and base commits
   a clone reads through. It is always empty in v1; the format is frozen
@@ -165,6 +176,7 @@ journal):
   volume             the exact descriptor bytes (so `backend add` uploads them with the MAC intact)
   volume.json        local-only settings: name, directory, space policy, commit cadence
   LOCK               process lock (stale-lock takeover, Constellation ADR-29 pattern)
+  integrity.key      key-file slot credential of an `integrity` volume made without --passphrase (0600; §15)
   journal/           one lane per ublk queue: q<lane>-<ordinal:08x>.j, preallocated zero-filled 64 MiB files
   segments/          <seg:016x>.seg — own segments (same bytes as on S3); <seg:016x>.open while being written
   cache/             slab file(s) of fetched extents (S3-FIFO)
@@ -173,7 +185,7 @@ journal):
   heat/              access sampling for warm-start manifests
   state/
     commits/         <commit_seq:016x> local-only commits (§13.3)
-    checkpoint       a hint only: last commit_seq, per-lane journal tails, counters
+    checkpoint       a hint only: last commit_seq, per-lane journal tails, id_high (object id high water), counters
     device           ublk device id, boot_id, queue count and depth, size, flags (§3)
     pins             highest keyring_seq and epoch seen, KMK fingerprint pin
 <dir>/families/<family-id>/keyring     the family keyring (§6.1)
@@ -208,8 +220,9 @@ journal):
   8-byte aligned, inside one lane **batch**; only the batch is padded to a
   4 KiB multiple and written with one O_DIRECT write. Padding is zeros,
   and a zero `magic` means "end of batch: continue at the next 4 KiB
-  boundary". Recovery reads records in order and stops at the first CRC
-  failure or gap, so a torn batch loses only its unacknowledged tail.
+  boundary". Recovery reads records in order, resyncs past a damaged record
+  (below), and stops at the first gap in the merged `write_seq` order, so
+  a torn batch loses only its unacknowledged tail.
   - Cost: a batch of *n* 4 KiB writes takes `ceil(n · 4160 / 4096)`
     blocks, under 1.6 % plus one block of overhead at n ≥ 32. An isolated
     4 KiB write at queue depth 1 costs two blocks (8 KiB); at that depth
@@ -237,9 +250,22 @@ journal):
      The checkpoint is not the floor.
   2. Scan every file of every lane. Keep records with a valid file header
      and a valid CRC and `write_seq > floor`. A record from a previous
-     pass of the ring is stale and ends its lane's scan.
+     pass of the ring is stale and is not kept.
+     - **Resync after damage.** On a header or CRC failure at offset `p`
+       the reader does not end the lane. It scans forward from `p + 8` in
+       8-byte steps to the end of the file for the next header that passes
+       magic, `ver`, `gen` (the file's generation), `off` (its own file
+       position), the CRC and `write_seq` greater than the last accepted
+       one. It accepts that record and continues. The lane ends only when
+       no such header exists. Forging an accepted header needs the 64-bit
+       `gen`, which no guest write can see; random damage passing `gen`,
+       `off` and the CRC is about 2^-160. The cost is reading the rest of
+       a 64 MiB file after a hit. `fsck` reports the damaged range.
   3. Merge the lanes by `write_seq` and accept records in contiguous
-     order.
+     order. This global contiguity, not file position, decides what is
+     kept, so resync is safe: a damaged record at or below the floor costs
+     nothing, and a damaged record above it is a missing `write_seq` and
+     stops recovery exactly where step 4 says.
   4. Stop at the first gap or torn record and ignore everything after it.
      A torn tail is legal, because those writes were never flushed. No
      marker of the last flushed `write_seq` exists on disk, and none is
@@ -247,6 +273,10 @@ journal):
      with their `write_seq` range.
   - The checkpoint's per-lane tails only say which files may be skipped. A
     lost or stale checkpoint changes the cost of recovery, not its result.
+    The tails are used only if the checkpoint's `last_commit_seq` is at
+    most the tip's `commit_seq`. A checkpoint from beyond the tip (after
+    `fsck --repair --truncate-tip`, §4.4) says that records up to the old
+    tip's cut may be skipped, and they must not be.
 - **Reclaim:** journal space is freed once every record in a file has
   been destaged into a segment whose `fdatasync` is done, *and* the
   commit that names the owning map change is durable (§8.2).
@@ -291,8 +321,11 @@ Recovery is idempotent: a crash during it is another recovery.
    chain from the tip down to `chain_floor`). There is no automatic
    fallback: a tip that does not authenticate is a typed mount error, and
    the repair is offline, `lunix fsck --repair --truncate-tip`, which moves
-   the damaged object aside and makes the previous commit the tip.
-3. Open the map at the tip's `map_root`; read the checkpoint hint.
+   the damaged object aside, makes the previous commit the tip and zeroes
+   both checkpoint slots (the checkpoint describes the old tip).
+3. Open the map at the tip's `map_root`; read the checkpoint hint. Use its
+   lane tails only if its `last_commit_seq` is at most the tip's
+   `commit_seq` (§4.1).
 4. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1);
    rebuild the overlay from the records; set the next `write_seq`.
 5. **Delete orphans.** Delete unsealed (`*.open`) and temporary files.
@@ -303,6 +336,12 @@ Recovery is idempotent: a crash during it is another recovery.
    or a dedup hit could point the map at a segment that no commit lists,
    and a later GC would delete live data. `fsck` reports such files as
    `orphan` only if the volume was closed cleanly.
+   - **Object id allocator.** Ids of segments, map packs and index runs
+     are never reused (§6). After the sweep the next id is 1 + the maximum
+     of the checkpoint's `id_high`, the highest id named by the chain and
+     the highest id present on disk **before** the sweep. A truncated tip
+     or a sweep that deleted the top ids therefore cannot make the
+     allocator hand out an id that a stale index entry still holds.
 6. **Catch up the chunk index** (`index.catch_up`) from the footers of the
    segments the chain names that no named index run covers (§8.2).
 
@@ -320,11 +359,20 @@ than the async interval, so overwrites are absorbed.
 2. **Zero scan:** OR-accumulate over 64 B lanes. An all-zero chunk
    becomes a hole and the pipeline stops.
 3. **Hash:** BLAKE3 (keyed if the family is encrypted) → `chunk_id`.
+   `integrity` and `plain` volumes use unkeyed BLAKE3.
 4. **Dedup:**
    - Look up `chunk_id` in the chunk index (in-memory cuckoo or xxh3
      table, then LSM).
    - On a hit, the map entry points to the existing location and the
-     pipeline stops.
+     pipeline stops. A hit from the in-process table built from verified
+     footers is taken as is. A hit taken from a persisted index run is
+     first **confirmed**: read the extent header at the hinted location,
+     compare all 32 bytes of its `chunk_id` with the new chunk's, and
+     check its tag (the AEAD tag or the keyed tag; the unkeyed checksum in
+     plain mode). Only then does the map point at it. An unconfirmed hit
+     is a miss and the chunk is stored again. Index runs are checksummed,
+     not authenticated (§7), so a forged or damaged entry costs
+     availability at most, never a lost write.
    - The index is authoritative only for chunks reachable from retained
      commits. GC removes entries (§11).
 5. **Compress:** `auto` = LZ4 probe on 4 KiB; raw if the saving is under
@@ -338,8 +386,9 @@ than the async interval, so overwrites are absorbed.
      compaction all re-seal with a new salt. No code path stores a salt or
      accepts one from the caller.
    - A debug or fuzz build checks every (key, nonce) pair for repeats.
-   - On an unencrypted volume this step computes the extent's BLAKE3-128
-     tag instead (§6).
+   - On an `integrity` or `plain` volume this step computes the extent's
+     BLAKE3-128 tag instead (§6): keyed in `integrity` mode, unkeyed in
+     `plain` mode.
 7. **Pack:** append the extent to the open segment, in LBA order within
    a batch. Seal the segment at the target size or at a commit cut:
    write the footer, `fdatasync`, rename into `segments/`.
@@ -382,8 +431,9 @@ trailer = footer offset + length + magic
   - Unencrypted volume: BLAKE3-128 (the first 16 bytes of the BLAKE3
     output) over the extent header, `chunk_id`, `clen` and payload, that is,
     every byte of the extent before the tag, taken as one contiguous
-    slice. It is keyed with the integrity key from the
-    family keyring if one exists, else unkeyed.
+    slice. In `integrity` mode it is keyed with a key derived from the
+    integrity key in the family keyring. In `plain` mode it is unkeyed: a
+    checksum that anyone who can write the bucket can recompute.
   - A read from the local store verifies the tag, the header and the id
     prefix against the map. It does not recompute the chunk id; the
     `verify_reads` option recomputes it. `fsck` verifies every tag. An
@@ -407,7 +457,8 @@ trailer = footer offset + length + magic
 <prefix>/lunix/v1/<volume-uuid>/
   volume          create-only: format version, uuid, family, lineage[] (empty in v1),
                   block/chunk size, codec policy, id_len, crypto params
-                  (encrypted or not, profile), KMK fingerprint, descriptor MAC.
+                  (mode: encrypted | integrity | plain; profile), KMK fingerprint, descriptor MAC
+                  (a keyed MAC; unkeyed BLAKE3 in plain mode).
                   No key slots.
   lease           CAS object, sealed: epoch, owner{host,cluster}, deadline, released,
                   transferred_to? (set best effort after an authority transfer, ADR-24)
@@ -489,7 +540,13 @@ trailer = footer offset + length + magic
     - A leaf is about 9-11 KiB at 16 B ids: 294-352 MiB per TiB, against
       768 MiB for plain 48 B rows.
     - A point lookup takes 121-181 ns on the encoded leaf.
-  - Interior entry: `{child_hash, child_location{pack, off, len}}`.
+  - Interior entry: `{child_hash, child_location{pack, off, len,
+    lineage_idx}}`. `lineage_idx` (`u8`) is reserved for ADR-25 so that a
+    thin clone's interior nodes can point at its parent's map packs and
+    share them. It is 0 in v1, and a reader rejects any other value. It
+    sits in the unused top byte of `len` (a `len` is at most 65 644, so it
+    fits in 24 bits), which adds no bytes to the entry. The node hash
+    still covers child hashes only, never locations or `lineage_idx`.
   - Absent subtree: the empty-node hash.
 - **Node identity:** node hash = BLAKE3 of the canonical encoding (keyed
   if encrypted). For an interior node the hash covers the child hashes
@@ -543,6 +600,11 @@ trailer = footer offset + length + magic
     from phase 2, uploaded with them.
   - It can always be rebuilt from segment footers, which is `fsck
     --rebuild-index`.
+  - **Runs are checksummed, not authenticated.** A hit from a run is a
+    hint. A read verifies the extent it finds (§6). A dedup hit is
+    confirmed against the extent header's full `chunk_id` and its tag
+    before the map points at it (§5, step 4), so a bad run can cost a
+    miss, never a write.
   - **Index runs may lag one commit.** A run is persisted after the FULL
     commit that covers its segments (§8.2, step C8), so a FULL cannot
     name the run for its own segments. `index_packs[]` of FULL *n* lists
@@ -595,13 +657,24 @@ EPOCH  { kind: EPOCH, commit_seq, epoch, parent_seq, parent_hash, authority?,
   ownership change (§8.4) leaves it out. In a local-only volume `epoch` is
   0 in every commit until a backend exists (§13.3).
 
+- **`created_at`** is informational wall-clock time. It is a **writer
+  clamp**, `created_at = max(now, parent.created_at)`, so it never goes
+  backwards along a chain written by well-behaved hosts. It is not a chain
+  validity rule: a reader cannot check it without the parent, and a host
+  with a slow clock may legitimately take over a chain. Mount and `fsck`
+  never reject on it; `fsck` warns when it decreases. `epoch`,
+  `commit_seq` and `chain_floor` stay reader rules, because they are
+  authenticated monotone state, not clocks.
 - **Chain fields (every kind, ADR-11):** all five commit kinds carry
   `epoch`, `parent_seq` and `parent_hash`, the BLAKE3 of the parent
   object's bytes as stored.
 - **Authentication:** on an encrypted volume the commit is sealed, and the
-  AEAD authenticates the whole body. On an unencrypted volume every
+  AEAD authenticates the whole body. On an `integrity` volume every
   commit kind, and the lease, carries `mac`, an HMAC over the body under
-  the integrity key from the keyring.
+  the integrity key from the keyring. On a `plain` volume `mac` is an
+  unkeyed BLAKE3 checksum of the body: it detects corruption and nothing
+  else, and the hash chain does not stop a bucket writer who recomputes
+  it.
 
 Upload order:
 
@@ -679,7 +752,10 @@ never reclaimed before step 5 is durable.
 
 1. Read `volume`.
    - **Attach policy (ADR-11):** if the caller supplied key material, the
-     volume must be encrypted, else refuse as a downgrade.
+     volume must be encrypted, else refuse as a downgrade. An integrity
+     credential declares an `integrity` volume. A `plain` volume needs no
+     credential, and a credential supplied for one is refused as a
+     downgrade (the caller expects protection the volume lacks).
    - Read the family `keyring`, unwrap the KMK (or the integrity key) from
      a slot, and verify the keyring MAC. Reject a `keyring_seq` below the
      highest seen. A supplied KMK fingerprint must match.
@@ -702,7 +778,8 @@ never reclaimed before step 5 is durable.
      refuses the mount. (Verification stops at `chain_floor`, whose parent
      may be absent; the genesis commit's `parent_hash` is the BLAKE3 of
      `volume`.)
-   - On an unencrypted volume, verify the HMAC of every commit replayed.
+   - On an `integrity` volume, verify the HMAC of every commit replayed.
+     On a `plain` volume verify its checksum.
 5. Acquire the lease: CAS `lease`, `epoch+1`. If the lease is held and
    not released, wait for the deadline (or `--steal`). A lease whose
    `epoch` is below the newest verified epoch is rejected.
@@ -1111,7 +1188,10 @@ mirrors (phase 5).
   exists, and they are sealed under their bucket-relative names (§6.1), so
   they upload verbatim.
 - **Attaching:** `backend add` makes the first backend the authority:
-  1. Probe it.
+  1. Probe it. On a `plain` volume, warn first (and ask for confirmation
+     on a terminal): once the bucket holds the volume, anyone who can write
+     it can rewrite history and data undetected (§15). The mode is fixed in
+     the descriptor, so it cannot be upgraded afterwards.
   2. Write `volume`: the exact bytes of the local `volume` file.
   3. Acquire the lease.
   4. Copy segments, packs and commits.
@@ -1149,12 +1229,29 @@ mirrors (phase 5).
     only, because an ephemeral client has no pin.
   - **History:** every commit is hash-chained and carries its epoch.
     Mount rejects broken links, decreasing epochs and a stale lease.
-  - **Unencrypted volumes:** every commit and the lease carry an HMAC under
-    an integrity key from the keyring, so the bucket alone cannot forge
-    state. Extent contents are covered through the chunk ids in the
-    authenticated map, and each extent carries its own BLAKE3-128 tag
-    (keyed with the integrity key), so a flipped byte is caught on a local
-    read too (§6).
+  - **Integrity volumes (the default for unencrypted volumes):** every
+    commit and the lease carry an HMAC under an integrity key from the
+    keyring, so the bucket alone cannot forge state. Extent contents are
+    covered through the chunk ids in the authenticated map, and each extent
+    carries its own BLAKE3-128 tag (keyed with a key derived from the
+    integrity key), so a flipped byte is caught on a local read too (§6).
+    `lunix volume create` makes this mode unless told otherwise. For a
+    local volume it also creates a key-file slot (`integrity.key`, 0600,
+    next to the volume), so attach needs no extra step; `--passphrase`
+    adds a passphrase slot for a volume that will move hosts.
+  - **Plain volumes (explicit opt-out, `--plain`):** commits, the lease,
+    footers and tags carry unkeyed BLAKE3 checksums. They detect
+    corruption (a flipped byte, a torn write) and nothing else. Anyone who
+    can write the bucket can rewrite commits, footers and data and
+    recompute every checksum; a local read does not recompute the chunk id,
+    so a swapped extent with the right header id returns wrong data. The
+    mode is fixed in the descriptor, so a plain volume can never be made
+    safe later. It is supported everywhere, including with S3 backends,
+    and attach needs no credential. The CLI and docs warn when plain is
+    chosen and when a backend is added to a plain volume (§16).
+  - **Index runs** are checksummed and never MAC'd or sealed. They are
+    hints: reads verify what they find, and a dedup hit from a run is
+    confirmed against the extent's `chunk_id` and tag first (§5, §7).
   - **Slot removal revokes nothing already seen:** removing a slot or
     changing a passphrase leaves the KMK unchanged for anyone who held it.
     Revocation is migration to a new KMK. DEK rotation (`dek_gen`)
@@ -1186,10 +1283,22 @@ mirrors (phase 5).
   a size bound. It is not an on-disk format, so it can change between
   releases; the version tells the CLI and the daemon apart. gRPC was
   rejected: it adds a build dependency with no phase 1 benefit (ADR-16).
+- **Crypto mode flags.** `--encrypt`, `--integrity` and `--plain` are
+  mutually exclusive; with none of them `volume create` makes an
+  **integrity** volume (ADR-11).
+  - `integrity` creates a key-file slot (kind 2) with a random key in
+    `<dir>/<uuid>/integrity.key` (0600) for a local volume, and attach picks
+    it up. `--passphrase` adds a passphrase slot instead, for volumes that
+    move. `--encrypt` takes the same slot options.
+  - `plain` creates no key material and prints a warning: plain detects
+    corruption only and protects against nobody who can write the bucket.
+  - `backend add` and `volume create ... s3://...` on a plain volume print
+    the same warning and need confirmation (`--yes` to skip it).
+  - Attaching a plain volume needs no credential.
 - **CLI sketch:**
 
 ```
-lunix volume create NAME --size 200G --dir /data/lunix [--chunk 64K] [--encrypt] [--compress auto]
+lunix volume create NAME --size 200G --dir /data/lunix [--chunk 64K] [--encrypt | --integrity | --plain] [--passphrase] [--compress auto]
 lunix volume import NAME s3://bucket/prefix/<uuid> --dir /data/lunix
 lunix attach NAME            # → /dev/lunix/NAME     lunix detach NAME [--release]
 lunix backend add NAME s3://… [--role authority|mirror]   lunix backend rm NAME <id> [--drain]
