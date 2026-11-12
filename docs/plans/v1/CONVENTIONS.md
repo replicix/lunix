@@ -182,6 +182,11 @@ Gates in a plan end in a decision. Record it in
 
 ## Code style
 
+- **Rust guidelines:** every agent that writes, reviews or refactors Rust
+  loads the `rust-skills` skill first (installed for all Claude accounts,
+  from github.com/leonardomso/rust-skills at commit `fd2a861`) and follows
+  its rules. Where a rule conflicts with this file, the plan or the spec,
+  those win. Reviews cite rule ids (for example `err-no-unwrap-prod`).
 - Rust 2021, stable toolchain. Errors: `thiserror` in libraries, `anyhow`
   with context in binaries. Comments explain intent and trade-offs, never
   narrate code.
