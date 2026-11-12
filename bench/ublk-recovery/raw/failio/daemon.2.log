@@ -1,0 +1,6 @@
+RECOVER_FOUND state=3
+RECOVER_STARTED ms=0
+Error: build ctrl
+
+Caused by:
+    Invalid input

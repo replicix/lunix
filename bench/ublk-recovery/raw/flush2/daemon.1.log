@@ -1,0 +1,29 @@
+READY id=0 bdev=/dev/ublkb0 recovered=false ms=73
+PARAMS after-add types=0x5 attrs=0xc lbs_shift=12 pbs_shift=12 io_min_shift=12 io_opt_shift=12 max_sectors=2048 dev_sectors=16777216
+DEVINFO after-add id=0 state=0 queues=4 depth=128 max_io_buf=1048576 flags=0x2745a
+AFFINITY after-add q0 [0, 1, 2, 3]
+AFFINITY after-add q1 [4, 5, 6, 7]
+AFFINITY after-add q2 [8, 9, 10, 11]
+AFFINITY after-add q3 [12, 13, 14, 15]
+COUNTERS reads=42 writes=0 fua_writes=0 flushes=0 other=0
+COUNTERS reads=76 writes=180 fua_writes=0 flushes=2 other=0
+COUNTERS reads=198 writes=182 fua_writes=0 flushes=5 other=0
+COUNTERS reads=205 writes=183 fua_writes=1 flushes=6 other=0
+COUNTERS reads=205 writes=20191 fua_writes=10004 flushes=10009 other=0
+COUNTERS reads=205 writes=20193 fua_writes=10005 flushes=10010 other=0
+COUNTERS reads=205 writes=33225 fua_writes=13041 flushes=17661 other=0
+COUNTERS reads=205 writes=33234 fua_writes=13042 flushes=17662 other=0
+COUNTERS reads=235 writes=53237 fua_writes=23042 flushes=27663 other=0
+COUNTERS reads=235 writes=53239 fua_writes=23043 flushes=27664 other=0
+COUNTERS reads=235 writes=66223 fua_writes=26032 flushes=35418 other=0
+COUNTERS reads=235 writes=66232 fua_writes=26033 flushes=35419 other=0
+COUNTERS reads=235 writes=86236 fua_writes=36033 flushes=45419 other=0
+COUNTERS reads=235 writes=86237 fua_writes=36034 flushes=45420 other=0
+COUNTERS reads=235 writes=99254 fua_writes=39051 flushes=52730 other=0
+COUNTERS reads=235 writes=99255 fua_writes=39052 flushes=52731 other=0
+COUNTERS reads=235 writes=119260 fua_writes=49053 flushes=62732 other=0
+COUNTERS reads=236 writes=119261 fua_writes=49054 flushes=62733 other=0
+COUNTERS reads=236 writes=132289 fua_writes=52082 flushes=70104 other=0
+COUNTERS reads=236 writes=132298 fua_writes=52085 flushes=70108 other=0
+STOPPING
+COUNTERS reads=236 writes=132298 fua_writes=52085 flushes=70108 other=0

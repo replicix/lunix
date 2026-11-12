@@ -1,38 +1,43 @@
-# P0.3 results: recovery under kill -9, feature table (partial); P0.4 and P0.12 not run
+# P0.3, P0.4 (and P0.12) results: recovery, feature table, resize, FLUSH counts
 
 Spike: `spikes/ublk-recovery` (`ublk-recovery`, libublk `=0.4.8`, io-uring `=0.7.16`). Host, kernel, tool versions: see
 `../ublk-baseline/RESULTS.md` (AMD EPYC Zen 5, 16 vCPUs, SMT off, kernel 7.0.0 Ubuntu, Ubuntu 26.04, fio 3.41; governor not
-exposed). Date 2026-11-11/12, spike revision uncommitted. Daemon on CPUs 0-3, fio on 4-7, 4 queues x depth 128, copy mode.
+exposed). Dates 2026-11-11/12 (the host was rebooted between the first and second session, see the deadlock section), spike revision uncommitted. Daemon on CPUs 0-3, fio on 4-7, 4 queues x depth 128, copy mode.
 
 ## Status at a glance
 
 | item | status |
 |---|---|
 | feature table and live probes (step 2) | done |
-| kill -9 loop, ext4: 36 cycles in 4 phases | done, all clean |
-| kill -9 loop, xfs: 10 cycles in 2 phases | done, all clean |
-| QUIESCE planned handover x20 (step 4) | **FAILED: the first handover deadlocked the daemon in the kernel (below); the host has a stuck device. Everything after it was stopped per CONVENTIONS rule 6** |
-| BATCH_IO recheck (step 5), negative controls (step 6), FAIL_IO check | **not run** (stopped after the hang) |
-| P0.4 resize / FLUSH counting | **not run**; scripts written (`run-resize.sh`, `run-flush-count.sh`), never executed |
-| P0.12 RAM write buffer | **not run**; code written and compiled, never executed |
+| kill -9 loop, ext4: 36 cycles in 4 phases | done, all clean (session 1) |
+| kill -9 loop, xfs: 10 cycles in 2 phases | done, all clean (session 1) |
+| QUIESCE planned handover x20 | session 1: deadlocked the daemon in the kernel (below). Session 2 with the fix: **20 of 20 clean on ext4** |
+| BATCH_IO recheck, kill -9 x20 | **clean** (20 cycles, fsck 0) |
+| BATCH_IO recheck, QUIESCE handover | **FAILED** (below) |
+| negative control (a) USER_RECOVERY without REISSUE | fails as expected |
+| negative control (b) acked-but-dropped writes | fails as expected |
+| FAIL_IO behaviour | done (below) |
+| P0.4 resize, write-cache sysfs, FLUSH counting | done (separate sections) |
+| P0.12 | **not completed**: the first measurement run wedged a device again (see the P0.12 section); the lost-keeper and 20-cycle runs were never executed |
 
-## Gate (ADR-17, fixed in advance): partial
+## Gate (ADR-17, fixed in advance)
 
 Rule: 30 consecutive kill -9 cycles on ext4 and 10 on xfs with zero fio errors and zero verify failures, fsck clean after every
-phase, no stall > 30 s at a 1 s restart delay, **both negative controls fail as expected**, mandatory flags present.
+phase, no stall > 30 s at a 1 s restart delay, both negative controls fail as expected, mandatory flags present.
 
 | clause | measured | result |
 |---|---|---|
-| 30 kill -9 cycles ext4 (plan) | 36 cycles in 4 phases (20 immediate restart, 10 with 1 s delay, 3 with 10 s delay, 3 double kills); fio exit 0, no job error | met |
+| 30 kill -9 cycles ext4 | 36 cycles in 4 phases (20 immediate restart, 10 with 1 s delay, 3 with 10 s delay, 3 double kills); fio exit 0, no job error | met |
 | 10 kill -9 cycles xfs | 6 immediate + 4 with 1 s delay, same | met |
 | zero verify failures | fio `verify_fatal` never fired; sha256 of the data files equal before/after remount; fsyncer: 0 bad blocks of acknowledged fsyncs after every phase | met |
 | fsck.ext4 -fn / xfs_repair -n after every phase | rc 0 after all 6 phases | met |
 | no stall > 30 s at 1 s restart delay | heartbeat stall p50/p99/max 1128/1141/1141 ms (ext4), 1132/1162/1162 (xfs); fio max clat 1187 / 1238 ms | met |
-| both negative controls fail as expected | **not run** | **not evaluated: the gate cannot be called green** |
+| negative control (a): USER_RECOVERY without REISSUE | after the first recovery fio fails (error 30, read-only file system after EIO), fsyncer I/O error, `fsck` rc 4 | fails as expected |
+| negative control (b): daemon acks but drops writes (SIGHUP) before the kill | fio `verify: bad magic header` (fatal), fsyncer 8887 and 9597 bad blocks of acked fsyncs, fsck rc 4 | fails as expected |
 | mandatory flags `CMD_IOCTL_ENCODE`, `USER_RECOVERY`, `QUIESCE`, `UPDATE_SIZE` present | all set in GET_FEATURES (0x7ffff) | met |
 
-**Outcome: ADR-17 not closed.** The kill -9 half of the recovery design is confirmed with margin. The QUIESCE half found a defect
-(below) that must be understood first, and the negative controls remain to be run.
+**Outcome for the kill -9 recovery design (ADR-17/ADR-16): accepted (gate).** Both negative controls trip the harness, so the clean
+runs are meaningful. Two amendments come out of the spike (QUIESCE handover and BATCH_IO, below).
 
 ## What the harness does
 
@@ -162,29 +167,141 @@ kernel git tree); ADR-17's 6.16 floor stays provisional. libublk 0.4.8 cannot se
 `PER_IO_DAEMON` (its `ctrl_flags` validation rejects them); `src/rawctl.rs` adds the device through the control ring directly and
 libublk attaches afterwards (this works).
 
-## Finding: QUIESCE handover deadlocks when the daemon uses libublk's `run_target()`
+## QUIESCE handover (planned upgrade)
 
-Evidence: `raw/quiesce-deadlock-evidence.md`. `quiesce_dev()` returned `Ok(0)`; the daemon then returned from `run_target()`, which
-issues `STOP_DEV`; the kernel thread executing it sits in `ublk_stop_dev_unlocked` -> `ublk_wait_tagset_rqs_idle` (msleep loop)
-waiting for started requests that can only be requeued after the daemon closes `/dev/ublkcN`, which it cannot do while that command
-blocks its io-wq worker. The mounted ext4, fio, the fsyncers and jbd2 are in D state; `kill -9` of the daemon does not help.
+**Session 1 finding (deadlock).** The daemon called `quiesce_dev()` (`Ok(0)`) and then returned from libublk's `run_target()`, which
+issues `STOP_DEV` after the queue threads exit. The kernel thread executing it sat in `ublk_stop_dev_unlocked` ->
+`ublk_wait_tagset_rqs_idle` (msleep loop) waiting for started requests that are only requeued after the daemon closes
+`/dev/ublkcN`, which it cannot do while that command blocks its io-wq worker. Mounted ext4, fio, fsyncers and jbd2 went to D state,
+`kill -9` of the daemon had no effect and only a reboot cleared it (`raw/quiesce-deadlock-evidence.md`).
+Design impact (ADR-16/17/18): **a daemon must never issue `STOP_DEV` after `QUIESCE_DEV`**; libublk's `run_target()` cannot be used
+for the planned-upgrade path as is.
 
-Design impact (ADR-16/17/18): **a daemon must never issue `STOP_DEV` after `QUIESCE_DEV`**; after a successful quiesce it must exit (or
-close the cdev) directly. libublk's `run_target()` cannot be used for the planned-upgrade path as is: phase 1 needs its own queue
-lifecycle (libublk's `ramdisk` example ends with `disown()` instead of a stop) or an upstream fix. The spike was changed
-(`std::process::exit` right after a successful quiesce), but **that fix is untested**: the run was stopped per rule 6.
+**Session 2 (after the reboot) with the fix** (`exit()` right after a successful quiesce, so the cdev is closed and the device goes
+QUIESCED; nothing else sends STOP_DEV). Tested first on an unmounted device under raw fio load (daemon exited 2.9 s after SIGUSR2, fio
+stalled and continued after `--recover`, rc 0), then mounted, with a watchdog that stops everything if the daemon does not exit:
 
-## Host state left behind (needs the lead)
+| run | cycles | result | exec->recovered ms p50/max | kill->ready ms p50/max | heartbeat stall ms p50/p99/max |
+|---|---|---|---|---|---|
+| ext4, QUIESCE handover, copy mode | 20 | fio 0, fsck 0, sha equal, 0 bad acked blocks | 72 / 182 | 172 / 328 | 180 / 2000 / 2000 |
+| ext4, kill -9, **BATCH_IO** | 20 | fio 0, fsck 0, sha equal, 0 bad acked blocks | 170 / 180 | 281 / 882 | 252 / 1230 / 1230 |
+| ext4, QUIESCE handover, **BATCH_IO** | 1 clean, **2nd failed** | file system went read-only (error 30), fsck rc 4, fsyncer I/O error | - | - | - |
 
-Device `ublk0` is stuck, with the mounted ext4 at the scratch mount `mnt/rec`, the daemon process, 4 fio workers, 2 fsyncers, the
-heartbeat writer and jbd2/flush kworkers in uninterruptible sleep, and the 16 GiB backing file still allocated (held open).
-`ublk_drv` has a reference count of 3 and cannot be unloaded. Nothing was forced (no reboot, no `rmmod -f`, no truncation of the
-backing file). A bare `sync(1)` on this host hangs on the stuck ext4 (a `sync` process is already in D state); use `sync -f <file>`.
-Only a reboot or a driver-side release clears it.
+- One handover in the copy-mode run shows a 2.0 s stall (the quiesce waits for in-flight I/O to drain, up to the 5 s timeout I pass);
+  the median is 0.18 s.
+- **BATCH_IO + QUIESCE does not work with libublk 0.4.8's batch transport as I used it.** After the first (apparently clean) handover
+  the second recovered daemon saw the fs go read-only. A plausible cause (not verified): requests already fetched by the batch queue
+  but not yet committed when the process exits are not requeued the way a kill -9 requeues them (REISSUE), so ext4 sees an error.
+  With kill -9 the same BATCH_IO setup passed all 20 cycles.
+- Consequence for the P0.2 rule: the BATCH_IO clause "recovery cycle passes with BATCH_IO" is **not met** for the QUIESCE path; since the
+  performance clause already failed, BATCH_IO stays opt-in.
+
+## FAIL_IO and REISSUE while the server is away (`raw/failio2/result.md`)
+
+- Device created with `USER_RECOVERY_FAIL_IO`: after `kill -9` fio gets EIO within ~150 ms (it exits with an error).
+  **Recovering such a device failed** (the device was in state 3, FAIL_IO; `START_USER_RECOVERY` path returned an io_uring error in my
+  flow), so FAIL_IO is a "give up and remount" policy, not a pause. This matches ADR-17's wording ("use FAIL_IO plus a remount procedure").
+- Device with REISSUE: 8 s after the kill fio is still running without error (I/O queued); after `--recover` (72 ms) it finishes with exit 0.
+- The hung-queue watchdog (flip a stuck device to FAIL_IO from the control plane) was not tried; only the creation-time flag was.
+
+## P0.4: UPDATE_SIZE online grow, write-cache attributes, FLUSH counting
+
+### Online grow (`raw/resize/results.md`)
+
+| fs | grow 16 -> 64 GiB under fio randwrite+verify | fs grown online | fio errors | fsck/repair/check |
+|---|---|---|---|---|
+| ext4 | `UPDATE_SIZE` rc 0, sysfs and `blockdev --getsize64` changed without remount | `resize2fs`, df 16.7 -> 67.5 GB | 0 | rc 0 |
+| xfs | same | `xfs_growfs`, df 17.1 -> 68.6 GB | 0 | rc 0 |
+| btrfs | same | `btrfs filesystem resize max`, df 17.2 -> 68.7 GB | 0 | rc 0 |
+
+Special cases (ext4): grow right after kill -9 + recovery works (fio 0 errors); resize to the current size is accepted (no-op); 64 GiB + 12 KiB
+is accepted and visible; 64 GiB + 12 KiB + 512 B (not a multiple of the 4096-byte logical block) is **also accepted by the driver** (size
+134217753 sectors, not a multiple of the block size; libublk's wrapper refuses it, the raw command does not), so the daemon must validate;
+shrink 64 -> 8 GiB on an idle unmounted device is accepted (the 64 GiB fs then refuses to mount: wrong fs type/bad superblock) and growing back restores a clean fs (fsck rc 0).
+
+### Write-cache visibility
+
+Default attrs `VOLATILE_CACHE | FUA`: `write_cache = write back`, `fua = 1`, `logical/physical_block_size = 4096`, `max_sectors_kb = 1024`,
+`rotational = 0`, `discard_granularity = 0`. Control without `VOLATILE_CACHE`: `write through`, `fua = 0`.
+
+### FLUSH / FUA / writes per fsync (`raw/flush/`, `raw/flush2/`; 10 000 pwrite+sync iterations onto preallocated files, default mkfs and mount options)
+
+| fs | variant | jobs | writes per sync | FUA per sync | FLUSH per sync |
+|---|---|---|---|---|---|
+| ext4 | fsync | 1 | 3.013 | 1.0 | 1.0 |
+| ext4 | fsync | 8 | 1.501 | 0.251 | 0.251 |
+| ext4 | fdatasync | 1 | 3.0 | 1.0 | 1.0 |
+| ext4 | fdatasync | 8 | 1.502 | 0.252 | 0.251 |
+| ext4 | o_sync | 1 | 3.001 | 1.0 | 1.0 |
+| ext4 | o_sync | 8 | 1.503 | 0.252 | 0.251 |
+| ext4 | o_dsync | 1 | 3.001 | 1.0 | 1.0 |
+| ext4 | o_dsync | 8 | 1.505 | 0.253 | 0.253 |
+| xfs | fsync | 1 | 2.001 | 1.0 | 1.0 |
+| xfs | fsync | 8 | 1.303 | 0.304 | 0.765 |
+| xfs | fdatasync | 1 | 2.0 | 1.0 | 1.0 |
+| xfs | fdatasync | 8 | 1.298 | 0.299 | 0.775 |
+| xfs | o_sync | 1 | 2.0 | 1.0 | 1.0 |
+| xfs | o_sync | 8 | 1.302 | 0.302 | 0.731 |
+| xfs | o_dsync | 1 | 2.001 | 1.0 | 1.0 |
+| xfs | o_dsync | 8 | 1.303 | 0.303 | 0.737 |
+| btrfs | fsync | 1 | 11.62 | 1.0 | 1.0 |
+| btrfs | fsync | 8 | 6.209 | 0.25 | 0.25 |
+| btrfs | fdatasync | 1 | 11.625 | 1.0 | 1.0 |
+| btrfs | fdatasync | 8 | 5.91 | 0.25 | 0.25 |
+| btrfs | o_sync | 1 | 11.637 | 1.0 | 1.0 |
+| btrfs | o_sync | 8 | 5.949 | 0.25 | 0.25 |
+| btrfs | o_dsync | 1 | 11.627 | 1.0 | 1.0 |
+| btrfs | o_dsync | 8 | 5.293 | 0.25 | 0.25 |
+
+Setup traffic (writes / FUA / FLUSH commands): mkfs ext4 110/0/4, xfs 180/0/2, btrfs 52/0/18; mount ext4 1/1/0, xfs 2/0/3, btrfs 0/0/0; umount ext4 5/4/7, xfs 9/3/4, btrfs 24/1/1.
+
+Reading: every single-job sync costs exactly one FUA write plus one FLUSH on all three file systems (ext4 3 writes, xfs 2, btrfs 11.6 because of its log tree).
+With 8 concurrent syncers the kernel coalesces: ext4 and btrfs drop to 0.25 FLUSH per sync, xfs to 0.73-0.78. **No file system issues more than 3 FLUSH
+commands per sync** (maximum 1.0). The FUA/FLUSH pair is the unit the journal's group commit (DESIGN section 8/4) has to absorb: one DELTA/journal sync point per
+FLUSH, and FUA writes must be durable on completion. ext4's FLUSH counts are from the first run; xfs and btrfs from a second launch (the first launch hit its
+20 minute watchdog during xfs; no data from the interrupted part was used).
+
+
+## P0.12: keeper-held RAM write buffer (ADR-26) - NOT COMPLETED
+
+Implemented (`spikes/ublk-recovery`): `run --sink mem --keeper SOCK --mem-mib N` (memfd ring with a header {magic, device id, generation} and 32-byte record
+headers; writes acknowledged from RAM; FLUSH/FUA drain the ring into the O_DIRECT backing file and `fdatasync`; single queue), `keeper/keeper.py`
+(holds the memfd across `kill -9`, `PUT`/`GET` over a Unix socket with SCM_RIGHTS; the daemon bumps the generation on every recovery), recovery that
+refuses (prints `REFUSED`, deletes the device, exits 3) when the keeper has no buffer or the magic, device id or generation does not match, and the drivers
+`SINK=mem ./run-crash-loop.sh` (cycles with ext4 mounted and fio verify), `run-lost-keeper.sh`, `run-ramsink.sh`. It compiles; **none of the gate runs was executed**.
+The systemd FD store variant was **not run** (not attempted).
+
+What ran: `run-ramsink.sh`, unmounted raw device, 4 KiB random writes without FLUSH:
+
+| sink | QD | IOPS | latency p50 / p99 / p99.9 |
+|---|---|---|---|
+| file (O_DIRECT write to the backing file, no sync) | 1 | 248 | 3260 / 13566 / 41157 us |
+| file | 32 | 4634 | 5669 / 10158 / 12648 us |
+| mem (RAM sink) | 1, 32 | **no result** | the fio runs never finished |
+
+Why the mem run produced nothing: the fio job was time-based and wrote far more than the 256 MiB ring holds, so the ring filled and `append()` called `drain()`,
+a synchronous record-by-record O_DIRECT `pwrite` into a disk that takes ~3.3 ms per write here (the file-sink row), i.e. minutes for 63 000 records. Meanwhile the
+harness's `timeout`/cleanup sent SIGTERM and later SIGKILL to the busy daemon, whose control ring was in the middle of `STOP_DEV`
+(started requests nobody completes), and **the device wedged exactly as in session 1** (`ublk_stop_dev_unlocked` msleep loop in an io-wq worker, daemon stuck in
+`do_exit`, a `del` command waiting). No file system was mounted this time (raw device), nothing else was affected, and I stopped at once and killed my driver chain
+without issuing any further control command. Hard-learned rule for phase 1: **never let STOP_DEV (or process exit) race with started requests that the daemon is
+not completing; a daemon that must block (drain, S3) has to keep the queue threads completing requests, and shutdown must stop admitting I/O before STOP_DEV.**
+Fixes made after the fact, **untested**: bounded `--io_size` in `run-ramsink.sh`, no SIGKILL fallback and 30 s wait in `stop_daemon_clean`, a watchdog `timeout` around every `del`.
+
+Replay time of a 256 MiB buffer and acknowledgement latency vs the P0.5 journal: **not measured**. For reference the P0.5 journal (group commit, ext4 loop) has
+durable latency ~4.6 ms at 4 KiB closed loop; the file sink above acknowledges a non-durable write in 3.3 ms on this disk, and a RAM sink is expected to be
+tens of microseconds (not measured).
+
+## Host state left behind
+
+Device `ublk0` (raw, no file system) is wedged again: daemon `ublk-recovery run` in D state, two `fio` jobs and one `ublk-recovery del` waiting on it,
+`ublk_drv` loaded and not removable, `/var/tmp/lunix-spike/rec.img` (4 GiB) held open. No mounts. Not forced, not retried.
 
 ## Proposed decision record (for the lead to merge)
 
-ADR-17 gate outcome (2026-11-12): **open**. kill -9 recovery: met on ext4 (36 cycles) and xfs (10), see above. QUIESCE planned handover:
-failed with the libublk `run_target()` flow (kernel deadlock, needs a reboot); mandatory flags present; `SET_PARAMS` is retained by
-the driver; negative controls not yet run. Amend ADR-16/18: after `QUIESCE_DEV` the daemon exits without `STOP_DEV`; `run_target()` is
-not usable for that path.
+ADR-17 gate outcome (2026-11-12): **accepted (gate)** for kill -9 recovery (46 cycles, ext4 and xfs, clean) and for QUIESCE with the corrected daemon (20/20 clean);
+**amended**: (1) after `QUIESCE_DEV` the daemon exits without `STOP_DEV` (libublk `run_target()` unusable for that path); (2) `SET_PARAMS` is retained by the driver; (3) BATCH_IO stays
+opt-in (no performance gain, and a QUIESCE handover broke the fs in the one trial); (4) `USER_RECOVERY_FAIL_IO` devices are not recoverable (delete and remount); (5) the daemon
+must never let `STOP_DEV`/exit race with started requests it is not completing (device wedge, observed twice). Both negative controls trip the harness as designed.
+ADR-20: online grow via `UPDATE_SIZE` works on ext4, xfs and btrfs under load, also right after a recovery; the driver accepts sizes that are not a multiple of the logical block size, so the daemon must validate.
+ADR-26 (RAM write buffer + keeper): **not run**; code and drivers ready.

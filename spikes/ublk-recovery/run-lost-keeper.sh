@@ -12,7 +12,7 @@ bash "$here/../common/ublk-leftovers.sh" > "$OUT/leftovers-start.txt" || { cat "
 lsmod | grep -q '^ublk_drv ' || { modprobe ublk_drv && add_cleanup 'rmmod ublk_drv'; }
 rm -f "$IMG"; fallocate -l "${IMG_GIB}G" "$IMG"
 add_cleanup "rm -f $IMG $KSOCK"; add_cleanup 'del_dev'; add_cleanup 'stop_daemon_clean'; add_cleanup "umount -l $MNT"
-add_cleanup 'pkill -x fio; pkill -f heartbeat.py; pkill -f fsyncer.py; pkill -f keeper.py'
+add_cleanup 'kill $KPID'
 python3 "$here/keeper/keeper.py" "$KSOCK" > "$OUT/keeper.log" 2>&1 & KPID=$!
 for i in $(seq 1 50); do grep -q ready "$OUT/keeper.log" && break; sleep 0.1; done
 R="$OUT/result.md"; : > "$R"; say() { echo "$*" | tee -a "$R"; }

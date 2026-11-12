@@ -465,8 +465,9 @@ fn run(dev_id: i32, backing: String, recover: bool, queues: u16, depth: u16, buf
         raw_added = true;
     }
     let mut b = UblkCtrlBuilder::default().name("lunix_rec").id(id).depth(depth).nr_queues(queues).io_buf_bytes(buf_bytes);
-    if raw_added {
-        b = b.dev_flags(UblkFlags::empty());
+    if raw_added || (recover && fail_io) {
+        // libublk rejects FAIL_IO in ctrl_flags; for an existing device the kernel already knows its flags
+        b = b.dev_flags(if recover { UblkFlags::UBLK_DEV_F_RECOVER_DEV } else { UblkFlags::empty() });
     } else {
         b = b.ctrl_flags(cflags).dev_flags(if recover { UblkFlags::UBLK_DEV_F_RECOVER_DEV } else { UblkFlags::UBLK_DEV_F_ADD_DEV });
     }

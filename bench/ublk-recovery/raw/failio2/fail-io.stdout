@@ -1,0 +1,8 @@
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=187543552, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=796901376, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=204734464, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=217550848, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=1754574848, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=917041152, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=1243889664, buflen=4096
+fio: io_u error on file /dev/ublkb0: Input/output error: write offset=520630272, buflen=4096

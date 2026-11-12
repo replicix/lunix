@@ -18,7 +18,7 @@ rm -f "$IMG"; fallocate -l "${IMG_GIB}G" "$IMG"; add_cleanup "rm -f $IMG"
 add_cleanup 'del_dev'
 add_cleanup 'stop_daemon_clean'
 add_cleanup 'umount -l '"$MNT"
-add_cleanup 'pkill -x fio; pkill -f heartbeat.py'
+:
 DARGS=()
 [ "$BATCH" = 1 ] && DARGS+=(--batch)
 [ "$CONTROL" = noreissue ] && DARGS+=(--no-reissue)
@@ -86,7 +86,7 @@ run_phase() { # name count delay
     local tk; tk=$(now_ns)
     if [ "$KILL_MODE" = quiesce ]; then
       kill -USR2 "$DPID"; for i in $(seq 1 300); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.05; done
-      kill -0 "$DPID" 2>/dev/null && { echo "daemon did not exit after quiesce"; aborted="quiesce hang"; break; }
+      kill -0 "$DPID" 2>/dev/null && { echo "WEDGED: daemon did not exit after quiesce; stopping at once, nothing else touched"; touch "$OUT/WEDGED"; trap - EXIT INT TERM; exit 9; }
     else
       kill -9 "$DPID"; wait "$DPID" 2>/dev/null
     fi

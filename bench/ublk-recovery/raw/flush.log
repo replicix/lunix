@@ -1,0 +1,13 @@
+ext4 fsync nj=1 done
+ext4 fsync nj=8 done
+ext4 fdatasync nj=1 done
+ext4 fdatasync nj=8 done
+ext4 o_sync nj=1 done
+ext4 o_sync nj=8 done
+ext4 o_dsync nj=1 done
+ext4 o_dsync nj=8 done
+xfs fsync nj=1 done
+xfs fsync nj=8 done
+~/lunix-p0/ublk-recovery/rec-lib.sh: line 36: kill: `': not a pid or valid job spec
+xfs fdatasync nj=1 done
+~/lunix-p0/ublk-recovery/rec-lib.sh: line 36: kill: `': not a pid or valid job spec

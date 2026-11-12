@@ -9,7 +9,7 @@ mkdir -p "$OUT"
 IMG="$LUNIX_SPIKE_DIR/rec.img"; MNT="$LUNIX_SPIKE_DIR/mnt/fl"; need_safe "$IMG"; need_safe "$MNT"
 bash "$here/../common/ublk-leftovers.sh" > "$OUT/leftovers-start.txt" || { cat "$OUT/leftovers-start.txt"; exit 2; }
 lsmod | grep -q '^ublk_drv ' || { modprobe ublk_drv && add_cleanup 'rmmod ublk_drv'; }
-add_cleanup "rm -f $IMG"; add_cleanup 'del_dev'; add_cleanup 'stop_daemon_clean'; add_cleanup "umount -l $MNT"; add_cleanup 'pkill -x fio'
+add_cleanup "rm -f $IMG"; add_cleanup 'del_dev'; add_cleanup 'stop_daemon_clean'; add_cleanup "umount -l $MNT"
 CSV="$OUT/flush-counts.csv"; echo "fs,step,jobs,reads,writes,fua_writes,flushes,per_fsync_writes,per_fsync_fua,per_fsync_flush" > "$CSV"
 delta() { # prev(4 numbers) cur(4 numbers) -> 4 numbers
   python3 -c "import sys; a=list(map(int,sys.argv[1].split())); b=list(map(int,sys.argv[2].split())); print(*[y-x for x,y in zip(a,b)])" "$1" "$2"

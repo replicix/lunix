@@ -1,0 +1,22 @@
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+verify: bad magic header ef09, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.0.0 offset 27754496, length 4096 (requested block: offset=27754496, length=4096)
+verify: bad magic header ab41, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.3.0 offset 23158784, length 4096 (requested block: offset=23158784, length=16384)
+verify: bad magic header 0, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 57053184, length 4096 (requested block: offset=57053184, length=16384)
+verify: bad magic header f308, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.0.0 offset 37683200, length 4096 (requested block: offset=37683200, length=4096)
+verify: bad magic header c34c, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.0.0 offset 52031488, length 4096 (requested block: offset=52031488, length=65536)
+verify: bad magic header 3448, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.0.0 offset 88637440, length 4096 (requested block: offset=88637440, length=4096)
+verify: bad magic header 6fe4, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.2.0 offset 34234368, length 4096 (requested block: offset=34234368, length=4096)
+verify: bad magic header 0, wanted accaverify: bad magic header f6, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 76410880, length 4096 (requested block: offset=76410880, length=16384)
+verify: bad magic header 6a68, wanted accaverify: bad magic header 0, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.3.0 offset 96710656, length 4096 (requested block: offset=96710656, length=4096)
+ at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 28508160, length 4096 (requested block: offset=28508160, length=4096)
+ at file /var/tmp/lunix-spike/mnt/rec/mixed.2.0 offset 46592000, length 4096 (requested block: offset=46592000, length=4096)
+verify: bad magic header 0, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 72196096, length 4096 (requested block: offset=72196096, length=16384)
+verify: bad magic header e3ed, wanted accaverify: bad magic header 0, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.2.0 offset 21291008, length 4096 (requested block: offset=21291008, length=4096)
+ at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 63512576, length 4096 (requested block: offset=63512576, length=16384)
+verify: bad magic header 0, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 84729856, length 4096 (requested block: offset=84729856, length=65536)
+verify: bad magic header 0, wanted accaverify: bad magic header 3a80, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.1.0 offset 21454848, length 4096 (requested block: offset=21454848, length=65536)
+ at file /var/tmp/lunix-spike/mnt/rec/mixed.2.0 offset 22196224, length 4096 (requested block: offset=22196224, length=4096)
+verify: bad magic header d4dc, wanted acca at file /var/tmp/lunix-spike/mnt/rec/mixed.2.0 offset 46518272, length 4096 (requested block: offset=46518272, length=16384)

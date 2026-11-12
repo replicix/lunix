@@ -1,0 +1,7 @@
+# P0.12 RAM-sink latency and replay
+
+## Acknowledgement latency (4k random write on the raw device, no FLUSH issued)
+- sink=file QD1: 248 IOPS, lat p50 3260.416 us, p99 13565.952 us, p99.9 41156.608 us, mean 4021 us
+- sink=file QD32: 4634 IOPS, lat p50 5668.864 us, p99 10158.08 us, p99.9 12648.448 us, mean 6900 us
+- sink=mem QD1: 
+- sink=mem QD32: 

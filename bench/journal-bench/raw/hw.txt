@@ -1,0 +1,2 @@
+write_cache: write through
+root fs: ext4

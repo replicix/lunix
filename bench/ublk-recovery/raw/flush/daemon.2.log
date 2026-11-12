@@ -1,0 +1,17 @@
+READY id=0 bdev=/dev/ublkb0 recovered=false ms=84
+PARAMS after-add types=0x5 attrs=0xc lbs_shift=12 pbs_shift=12 io_min_shift=12 io_opt_shift=12 max_sectors=2048 dev_sectors=16777216
+DEVINFO after-add id=0 state=0 queues=4 depth=128 max_io_buf=1048576 flags=0x2745a
+AFFINITY after-add q0 [0, 1, 2, 3]
+AFFINITY after-add q1 [4, 5, 6, 7]
+AFFINITY after-add q2 [8, 9, 10, 11]
+AFFINITY after-add q3 [12, 13, 14, 15]
+COUNTERS reads=42 writes=0 fua_writes=0 flushes=0 other=0
+COUNTERS reads=75 writes=180 fua_writes=0 flushes=2 other=0
+COUNTERS reads=223 writes=182 fua_writes=0 flushes=5 other=0
+COUNTERS reads=230 writes=183 fua_writes=1 flushes=6 other=0
+COUNTERS reads=230 writes=20188 fua_writes=10003 flushes=10008 other=0
+COUNTERS reads=230 writes=20190 fua_writes=10004 flushes=10009 other=0
+COUNTERS reads=230 writes=33207 fua_writes=13026 flushes=17830 other=0
+COUNTERS reads=230 writes=33216 fua_writes=13027 flushes=17831 other=0
+STOPPING
+COUNTERS reads=230 writes=52599 fua_writes=22717 flushes=27521 other=0

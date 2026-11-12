@@ -1,3 +1,9 @@
-== phase handover count=20 delay=0 01:15:59
-daemon did not exit after quiesce
-ABORTED: quiesce hang
+== phase handover count=20 delay=0 07:58:22
+grep: ~/lunix-p0/out/ublk-recovery/ext4-quiesce/daemon.19.log: No such file or directory
+phase handover done: cycles=20 fio_rc=0 fsck_rc=0 sha_equal=1
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+handover,20,0,0,0,0,
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| handover | 20 | 72 | 182 | 182 | 172 | 328 | 180 | 2000 | 2000 |
+overall rc=0

@@ -1,0 +1,11 @@
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+fio: norandommap given for variable block sizes, verify limited
+fio: pid=0, err=30/file:filesetup.c:254, func=fsync, error=Read-only file system
+fio: open state file: Read-only file system
+fio: state file: local-mixed-1-verify.state (for_write=1)
+fio: open state file: Read-only file system
+fio: state file: local-mixed-0-verify.state (for_write=1)
+fio: open state file: Read-only file system
+fio: state file: local-mixed-2-verify.state (for_write=1)

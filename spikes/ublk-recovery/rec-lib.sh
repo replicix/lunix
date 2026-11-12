@@ -26,11 +26,12 @@ start_daemon() {
 daemon_ms() { sed -n 's/^READY .* ms=\([0-9]*\)$/\1/p' "$DLOG" | head -1; }
 stop_daemon_clean() { # SIGTERM -> kill_dev; then delete
   [ -n "$DPID" ] && kill -TERM "$DPID" 2>/dev/null
-  local i; for i in $(seq 1 100); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.1; done
-  kill -0 "$DPID" 2>/dev/null && kill -KILL "$DPID" 2>/dev/null
+  # No SIGKILL fallback: killing a daemon whose STOP_DEV is in flight wedges the device (seen twice); report instead.
+  local i; for i in $(seq 1 300); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$DPID" 2>/dev/null && echo "WARNING: daemon $DPID did not stop within 30 s (device may be wedged); not killing it" >&2
   DPID=""
 }
-del_dev() { [ -n "$DEVID" ] && "$REC_BIN" del --id "$DEVID" >/dev/null 2>&1; }
+del_dev() { [ -n "$DEVID" ] && timeout -k 3 20 "$REC_BIN" del --id "$DEVID" >/dev/null 2>&1; }
 counters() { # snapshot counters of the running daemon: prints "reads writes fua flushes"
   local before; before=$(grep -c '^COUNTERS' "$DLOG")
   kill -USR1 "$DPID"

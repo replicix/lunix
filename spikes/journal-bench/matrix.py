@@ -9,6 +9,7 @@ SECS = os.environ.get("SECS", "3")
 CPU = os.environ.get("CPU", "0")
 QUICK = os.environ.get("QUICK") == "1"
 PRIMARY_ONLY = os.environ.get("FULL", "1") == "0"
+RATES = [int(x) for x in os.environ.get("RATES", "50000,0").split(",")]  # offered rec/s, 0 = closed loop
 F = os.path.join(d, "journal.dat")
 G = os.path.join(d, "growing.dat")
 
@@ -35,7 +36,7 @@ def cell(name, b, w, rec, rate, pre=8, bg=False, file=None):
 
 cells = []
 for rec in (4096, 65536):
-    for rate in (50000, 0):
+    for rate in RATES:
         for (n, b, w) in STRATS:
             cells.append(dict(name=n, b=b, w=w, rec=rec, rate=rate))
 if not PRIMARY_ONLY:

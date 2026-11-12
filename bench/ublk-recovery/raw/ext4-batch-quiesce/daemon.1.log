@@ -1,0 +1,8 @@
+READY id=0 bdev=/dev/ublkb0 recovered=false ms=67
+PARAMS after-add types=0x5 attrs=0xc lbs_shift=12 pbs_shift=12 io_min_shift=12 io_opt_shift=12 max_sectors=2048 dev_sectors=33554432
+DEVINFO after-add id=0 state=0 queues=4 depth=128 max_io_buf=1048576 flags=0x2d45a
+AFFINITY after-add q0 [0, 1, 2, 3]
+AFFINITY after-add q1 [4, 5, 6, 7]
+AFFINITY after-add q2 [8, 9, 10, 11]
+AFFINITY after-add q3 [12, 13, 14, 15]
+QUIESCE result=Ok(0) ms=9858

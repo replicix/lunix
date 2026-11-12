@@ -1,0 +1,9 @@
+== phase handover count=20 delay=0 08:09:48
+ABORTED: fio ended early at cycle 2
+phase handover done: cycles=2 fio_rc=4 fsck_rc=4 sha_equal=-100
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+handover,2,4,4,8600,101,fio ended early at cycle 2
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| handover | 1 | 66 | 66 | 66 | 219 | 219 | 0 | 0 | 0 |
+overall rc=1
