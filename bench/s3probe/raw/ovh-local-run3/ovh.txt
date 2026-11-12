@@ -1,0 +1,17 @@
+provider OVH (Hungary → Milan), started 2026-11-12T08:47Z
+classification: MIRROR-ONLY (gate not met: create_if_absent_second_412=missing, if_match_swap_ok=missing, if_match_stale_412=missing, concurrent_create_x8=missing, concurrent_swap_x8=missing, read_your_write_get=missing, read_your_write_list=missing)
+requests: 994 (approximate; a few helper calls are not counted), bytes transferred: 475 MB, leftover objects under probe prefix: 0
+multipart uploads: created=0 aborted=0 completed=0 still open at end (u64::MAX = list failed)=0
+network: tcp connect p50 20.51 ms (n=10); cold-HEAD 196.4 ms, warm-HEAD 31.8 ms, TLS+setup approx 144.1 ms
+  put_size               size=     4096 conc= 1 n= 40 p50=   39.38 p90=   40.71 p99=   46.06 max=   46.06 ttfb50=    NaN ttfb99=    NaN MB/s=     0.1 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=    65536 conc= 1 n= 40 p50=   79.27 p90=  136.58 p99=  205.79 max=  205.79 ttfb50=    NaN ttfb99=    NaN MB/s=     0.8 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=   262144 conc= 1 n= 40 p50=   78.25 p90=  107.81 p99=  169.69 max=  169.69 ttfb50=    NaN ttfb99=    NaN MB/s=     3.4 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  1048576 conc= 1 n= 40 p50=  137.46 p90=  192.74 p99=  357.43 max=  357.43 ttfb50=    NaN ttfb99=    NaN MB/s=     7.6 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  2097152 conc= 1 n= 12 p50=  167.63 p90=  223.25 p99=  253.49 max=  253.49 ttfb50=    NaN ttfb99=    NaN MB/s=    12.5 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  4194304 conc= 1 n= 12 p50=  304.22 p90=  328.13 p99=  330.69 max=  330.69 ttfb50=    NaN ttfb99=    NaN MB/s=    13.8 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  8388608 conc= 1 n= 12 p50=  514.72 p90=  564.13 p99=  603.28 max=  603.28 ttfb50=    NaN ttfb99=    NaN MB/s=    16.3 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size= 16777216 conc= 1 n= 12 p50=  886.11 p90=  947.86 p99= 1060.62 max= 1060.62 ttfb50=    NaN ttfb99=    NaN MB/s=    18.9 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size_fit_p50       size=        0 conc= 1 n=  8 p50=   72.15 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=     0.0 all sizes: fixed=72.2 ms, slope=52.04 ms/MiB (19 MiB/s); 1-16 MiB only: fixed=88.6 ms, slope=50.55 ms/MiB (20 MiB/s); fixed cost in the p50 column
+  put_size_fit_p99       size=        0 conc= 1 n=  8 p50=  159.98 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=     0.0 all sizes: fixed=160.0 ms, slope=55.79 ms/MiB (18 MiB/s); 1-16 MiB only: fixed=194.9 ms, slope=52.62 ms/MiB (19 MiB/s); fixed cost in the p50 column
+  serial_pair_4096_4096  size=     8192 conc= 1 n=100 p50=   96.45 p90=  174.86 p99=  211.66 max=  219.00 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 create-only PUT of 4096 B then, once complete, create-only PUT of 4096 B; first p50=48.2 p99=163.3, second p50=47.8 p99=81.4
+  serial_pair_1048576_4096 size=  1052672 conc= 1 n= 40 p50=  191.99 p90=  270.01 p99=  377.50 max=  377.50 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 create-only PUT of 1048576 B then, once complete, create-only PUT of 4096 B; first p50=142.7 p99=329.9, second p50=48.2 p99=80.3

@@ -1,53 +1,303 @@
-# P0.10: S3 probe sweep (MinIO only)
+# P0.10: S3 probe sweep (AWS S3 Standard, OVH Object Storage, MinIO)
 
-Status: **partial, by design.** No cloud-provider credentials were available. The probe
-(`spikes/s3probe`) is built and tested and ran against a throwaway local MinIO only. Every real
-provider is **not run: no credentials**. ADR-2's claim "authority requires conditional writes"
-for the three launch providers (AWS S3, Cloudflare R2, OVH) is therefore **neither confirmed
-nor refuted** by this run, and the "about 1 PUT RTT" figure for DESIGN §20 sync mode is **not
-produced** (loopback MinIO says nothing about a cloud round trip).
+Status: **done for the two real providers.** `spikes/s3probe` ran against AWS S3 Standard (from a
+client in the same region and from Hungary), OVH Object Storage Milan (from Hungary) and, earlier,
+a throwaway local MinIO. Cloudflare R2, GCS, B2 and the rest are still **not run: no credentials**.
 
-Outcome per provider: MinIO (single-drive, unversioned): *authority-capable (gate met)*;
-MinIO (same server, versioning-enabled bucket): *authority-capable (gate met)*; all others:
-*not run*.
+Outcome per provider, ADR-2's authority gate (create-if-absent 412, If-Match swap and stale 412,
+8-way create 20/20, 8-way swap 100/100 with no torn read, read-your-write by GET and LIST):
+
+| provider | gate | notes |
+|---|---|---|
+| AWS S3 Standard (unversioned bucket) | **authority-capable (met), 3 of 3 runs** | also `If-None-Match: *` on `CompleteMultipartUpload` works (create-only, 412 on an existing key) |
+| OVH Object Storage, Milan (PUT returns a version id) | **authority-capable (met), 1 full sweep** | same conditional-Complete result; passes whatever the bucket's versioning state is |
+| MinIO RELEASE.2026-11-10 (unversioned and versioned bucket) | authority-capable (met) | earlier sweep, loopback |
+| R2, GCS, B2, Scaleway, Wasabi, Hetzner, Tigris, Spaces | not run: no credentials | |
+
+Headline numbers (create-only or plain PUT, concurrency 1, medians; details below):
+
+| | 4 KiB PUT p50 / p99 | 1 MiB PUT p50 | 16 MiB PUT p50 | fixed cost + slope (fit of p50) | two serial 4 KiB create-only PUTs p50 / p99 |
+|---|---|---|---|---|---|
+| AWS, same region (us-west-2) | 29.7 / 45 ms (2 runs pooled, n=80) | 73 ms | 210 ms | 42 ms + 10.6 ms/MiB (about 95 MiB/s) | 54 / 94 ms (n=200) |
+| OVH, Hungary → Milan | 39.6 / 46-54 ms (runs 1 and 3) | 130-138 ms | 886-911 ms | 71 ms + 52.9 ms/MiB (about 19 MiB/s, uplink-bound) | 97 / 133-212 ms |
+| AWS, Hungary → us-west-2 | 218 / 302 ms | 630 ms | 5.5 s | 291 ms + 328 ms/MiB (3 MiB/s) | 444 / 1,059 ms |
 
 ## Header
 
 | | |
 |---|---|
-| dates | 2026-11-11 (two runs of the whole sweep, about 90 s apart, UTC 23:00-23:04) |
-| host | AMD EPYC (Zen 5), 16 vCPUs, SMT off, 1 NUMA node, ~30 GiB RAM, local NVMe SSD, ext4 root; kernel 7.0.0 (Ubuntu), Ubuntu 26.04.1 LTS; Docker 29.1.3 |
-| privileges | unprivileged user in the docker group; no root; no credentials |
-| network location label | "local docker, loopback" (client and server on the same host; no TLS) |
-| pinning | container `--cpuset-cpus 8-15 --memory 2g`; probe `taskset -c 8-15`; build `-j 4`; CPUs 8-15 shared with other agents |
-| MinIO | `RELEASE.2026-11-10T21-18-11Z` (commit 91b5d1aa), go1.27.4, from the Chainguard image `cgr.dev/chainguard/minio:latest`, digest `sha256:db3f583fa49121942168bd6383a773b2cde3384c9a99bf7193560b9a0f3a28fd`, run as the unprivileged ssh uid, single-drive (bind-mounted directory), container `lunix-p0-minio`, published on `127.0.0.1:19000` only |
-| why that image | the upstream Docker Hub repository `minio/minio` no longer exists and `quay.io/minio/minio` answers 401 (checked 2026-11-11); this is the first pullable MinIO build that worked |
-| probe | `spikes/s3probe` (uncommitted), `object_store` 0.14.1 (the version Constellation's `Cargo.lock` resolves), tokio 1.54.1, futures 0.3.34, bytes 1.12.1, rustc 1.96.0 |
-| credentials | generated at run time (`/dev/urandom`), passed through a mode-0600 env file deleted right after container start and through process environment variables; never written to the repo, never printed |
-| cost | zero (local); the run used 3,771-3,807 requests and 1,979-1,981 MB transferred per provider entry, inside the plan's cap of about 5,000 requests and 2 GB |
+| dates | 2026-11-12 (MinIO: 2026-11-11). All times below are offsets from the start of the first AWS sweep, T+0 |
+| AWS client ("same region (us-west-2)") | test host: AMD EPYC (Zen 5), 16 vCPUs, SMT off, 1 NUMA node, ~30 GiB RAM, local NVMe SSD, ext4 root; kernel 7.0.0 (Ubuntu), Ubuntu 26.04.1 LTS; probe pinned `taskset -c 8-15`, build `-j 4`; glibc build |
+| OVH and cross-continent clients ("Hungary → Milan", "Hungary → us-west-2") | the local workstation, running a static musl binary built on the test host (the workstation never compiled anything). the single-stream rate (19 MiB/s to Milan) and the aggregate upload rate (31 MB/s) were bound by that machine's uplink, so large-object numbers from Hungary describe that path, not the provider |
+| probe | `spikes/s3probe` (uncommitted), `object_store` 0.14.1, reqwest 0.13.5, sha2 0.10.9, hmac 0.12.1, tokio 1.54.1, futures 0.3.34, bytes 1.12.1, rustc 1.96.0; `musl-tools` installed on the host with `apt-get` for the static build |
+| credentials | short-lived SSO credentials for AWS and the OVH profile's keys, each read with `aws configure export-credentials`, held only in the environment of the probe process (AWS: piped over ssh stdin); never in a file, log or command line |
+| scope | only the key prefix `lunix-p0-probe/<run-id>/` of each bucket. No bucket setting was changed (versioning was only read), no lifecycle/policy/CORS/ACL/tags; every multipart upload the probe started was completed or aborted |
 
-Reproduce on the host: `cd ~/lunix-p0/s3probe && cargo build --release && OUT=out ./run-minio.sh`.
-Raw: `raw/run1/{minio,miniover}.{csv,txt}`, `raw/run2/…`, `raw/run{1,2}.log`, `raw/run1/not-run.txt`.
+Runs (offsets are minutes after T+0; "sweep" = semantics + latency suites):
+
+| run | client → target | start | suites | requests (probe counter) | transferred |
+|---|---|---|---|---|---|
+| AWS host smoke | same region | T-1 | cond, net | 808 | 136 MB |
+| AWS host 1 | same region | T+0 | all (sem, cond, seq, sizes, pairs, lane, net) | 6,722 | 2,958 MB |
+| OVH local 1 | Hungary → Milan | T+0.5 | all | 7,069 | 2,946 MB |
+| OVH smoke | Hungary → Milan | T-1 | cond, net | 808 | 136 MB |
+| AWS local 1 | Hungary → us-west-2 | T+7 | sem, cond, sizes, pairs, lane (small lane), net | 4,584 | 1,245 MB, of which about 40 MB were GETs (swap-race reads) |
+| AWS host 2 | same region | T+31 | sem, cond, sizes, pairs, lane, net | 5,376 | 2,397 MB |
+| AWS host 3 | same region | T+35 | cond (40 race rounds), lane (64 x 16 MiB per phase), net | 2,638 | 2,557 MB |
+| OVH local 2 | Hungary → Milan | T+37 | cond (40 race rounds), sizes, pairs, net | 3,016 | 612 MB |
+| OVH local 3 | Hungary → Milan | T+42 | sizes, pairs, net | 994 | 475 MB |
+
+Totals: AWS from the host 15,544 requests / 8,048 MB over four runs (largest run 6,722 requests,
+2,958 MB); AWS from Hungary 4,584 requests; OVH 11,887 requests / 4,169 MB over four runs (largest run 7,069,
+2,946 MB). Each run stayed under the 10,000 requests and about 3 GB caps. The request counter is the
+probe's own and omits a few helper calls (it is a lower bound by a few percent).
+
+Reproduce on the host: `cd ~/lunix-p0/s3probe && cargo build --release`, export the
+`LUNIX_PROBE_<NAME>_*` variables (README), `./target/release/s3probe --out out --providers AWS`.
+Raw: `raw/aws-host-run{1,2,3}`, `raw/aws-local-run1`, `raw/ovh-local-run{1,2,3}` (each: `<p>.txt`,
+`<p>.csv`, `<p>-samples.csv`, one row per timed request); MinIO: `raw/run{1,2}`.
+`spikes/s3probe/tools/pool.py` recomputes every percentile and fit from the sample CSVs.
 
 ## Provider matrix
 
-| provider | create-if-absent (412) | If-Match swap + stale 412 | 8-way create ×20 | 8-way swap ×100, no torn read | read-your-write GET / LIST | role | note |
+| provider | create-if-absent (412) | If-Match swap + stale 412 | 8-way create ×20 | 8-way swap ×100, no torn read | read-your-write GET / LIST | conditional Complete (If-None-Match) | role |
 |---|---|---|---|---|---|---|---|
-| AWS S3 | not run: no credentials | | | | | | |
+| AWS S3 Standard, same region | PASS (412), 2/2 sweeps | PASS / PASS (412), 2/2 | PASS 20/20, 2/2 | PASS 100/100, 0 torn of 1,166 and 1,178 reads | PASS / PASS | PASS: absent 30/30, existing 412 10/10, 8-way 70/70 rounds one winner | **authority-capable** |
+| AWS S3 Standard, from Hungary | PASS | PASS / PASS | PASS 20/20 | PASS 100/100, 0 torn of 590 | PASS / PASS | same | authority-capable |
+| OVH Object Storage Milan | PASS (412) | PASS / PASS (412) | PASS 20/20 | PASS 100/100, 0 torn of 1,030 reads | PASS / PASS | PASS: absent 30/30 (twice), existing 412 10/10 (twice), 8-way 50/50 rounds, one winner each | **authority-capable** |
+| MinIO RELEASE.2026-11-10, unversioned | PASS (412) | PASS / PASS (412) | PASS 20/20 | PASS 100/100, 0 torn of ~1,130 | PASS / PASS | not run (probe added later; the MinIO loopback smoke of the new suite passed 30/30, 10/10, 10/10 rounds) | authority-capable |
+| MinIO, versioning enabled | PASS (412) | PASS / PASS (412) | PASS 20/20 | PASS 100/100, 0 torn of ~1,140 | PASS / PASS | not run | authority-capable |
 | Cloudflare R2 | not run: no credentials | | | | | | |
-| OVH Object Storage | not run: no credentials | | | | | | |
-| MinIO RELEASE.2026-11-10, unversioned | PASS (412) | PASS / PASS (412) | PASS 20/20 | PASS 100/100, 0 torn of ~1,130 reads | PASS / PASS | authority-capable | see below |
-| MinIO, versioning enabled on the bucket | PASS (412) | PASS / PASS (412) | PASS 20/20 | PASS 100/100, 0 torn of ~1,140 reads | PASS / PASS | authority-capable | PUT returns a version id; CAS still atomic |
-| Google Cloud Storage | not run: no credentials | | | | | | needs a generation-precondition adapter (fact-check §A); the S3 probes would not apply on the interop endpoint |
-| Backblaze B2 | not run: no credentials | | | | | | fact-check §A: 501 for `If-None-Match: *`, mirror-only (secondary evidence) |
-| Scaleway, Wasabi, Hetzner, Tigris, DigitalOcean Spaces | not run: no credentials | | | | | | probe before use (fact-check §A) |
+| Google Cloud Storage | not run: no credentials | | | | | | needs a generation-precondition adapter (fact-check §A) |
+| Backblaze B2 | not run: no credentials | | | | | | fact-check §A: 501 for `If-None-Match: *`, mirror-only |
+| Scaleway, Wasabi, Hetzner, Tigris, DigitalOcean Spaces | not run: no credentials | | | | | | probe before use |
 
 Gate rule (plan 00, ADR-2, DESIGN §9): a provider is an *authority* backend iff create-if-absent
 and If-Match swap behave as above, the 8-way create has exactly one winner in 20/20 rounds, the
 8-way swap exactly one winner in 100/100 rounds with no torn reads, and PUT-then-GET is
-read-your-write. Otherwise it is mirror-only.
+read-your-write. Otherwise it is mirror-only. The conditional-Complete result is not part of the
+gate; it matters only for staging variant C.
 
-## Semantics, MinIO (identical on both runs; details from `raw/run1/minio.txt`)
+## Semantics, AWS S3 and OVH (identical across sweeps unless noted)
+
+| probe | AWS S3 Standard | OVH Milan |
+|---|---|---|
+| create-if-absent, second | 412 (`AlreadyExists`) | 412 |
+| If-Match swap with current ETag / stale ETag | new ETag / 412 | new ETag / 412 |
+| If-Match on a deleted key | 404 (`object_store` reports `Precondition`) | 404 |
+| 8-way create x20 | exactly one winner every round; losers 412 (140) | same; no 409 |
+| 8-way swap x100 | exactly one winner every round; losers 412 (700) and **409 retries: 369, 408 and 310 in the three sweeps** | same; 128 409 retries; 0 torn reads |
+| ranged GET (bounded, suffix, offset) | byte-exact | byte-exact |
+| read-your-write, PUT,PUT,GET x50; PUT-then-LIST x50; DELETE-then-LIST x20 | 0 stale, 0 missing, 0 lingering | same |
+| multipart create + abort | abort accepted, object absent | same |
+| bucket versioning | PUT returned no version id; `GetBucketVersioning` (read-only) has no `Status`: never enabled | **PUT returns a version id** (an integer-like timestamp string), yet `GetBucketVersioning` returns no `Status`; a read-only `list-object-versions` of the probe prefix after cleanup showed 0 versions and 0 delete markers |
+| ETag | quoted | quoted |
+| clock skew (Last-Modified against local clock, 1 s resolution) | 1 s (same region, T+0), 1 s (Hungary) | 0 s |
+
+Quirks against Constellation's `cas.rs`/`classify.rs`: both providers answer create-over-existing
+with 412 and stale If-Match with 412, which that classifier handles. **AWS and OVH both return 409
+(`ConditionalRequestConflict`) for concurrent If-Match swaps** (not for concurrent creates), so the
+"busy, retry the same attempt" path is exercised by real servers for the first time; the swap race
+counted every 409 as a retry and still ended with exactly one winner per round, so the 409 handling
+is a liveness concern only. MinIO never returned a 409. No bug to file against `replicix-objcas`.
+OVH's versioning state is ambiguous: object versions are minted but the bucket-level read reports
+nothing. ADR-2's rule ("versioning off unless the concurrent-CAS probe passes on the versioned
+bucket") is satisfied either way, because the probe passed on the bucket as OVH serves it.
+
+## Conditional `CompleteMultipartUpload`
+
+Hand-signed requests (`src/raw.rs`) because `object_store` cannot send the header on Complete.
+Create, UploadPart and Complete with `If-None-Match: *`.
+
+| check | AWS S3 | OVH |
+|---|---|---|
+| Complete on an absent key | 30/30 succeed, in every run | 30/30, in every run |
+| Complete on a key that already exists (10 rounds) | **412 x10** (not silently overwritten) | **412 x10** |
+| 8 uploads of one key complete together | 70/70 rounds with exactly one winner (10, 10, 10, 40 rounds across runs: 200 once, others 412 `PreconditionFailed`; two AWS runs each had one loser answered with a 5xx whose code was not captured, none in the 320 attempts of the run that did capture codes) | 50/50 rounds (10 + 40), 200 once, 412 for all 7 others, no 409 |
+
+Latency in milliseconds (p50 / p90; n=30 for 1 part, 8 for 2 parts, 6 for 4 parts; range of the runs
+given where there were several). The 2-part case is 5 MiB + 4 KiB and the 4-part case 3 x 5 MiB + 4 KiB.
+
+| step | AWS same region (3 runs) | OVH Hungary → Milan (2 runs) | AWS Hungary → us-west-2 |
+|---|---|---|---|
+| CreateMultipartUpload | 24.4-29.9 | 38.3-39.1 | 216-218 |
+| UploadPart 4 KiB | 33.2-38.4 | 47.4-48.5 | 227 |
+| Complete, 1 part, unconditional | 85.1-90.1 | 66.4-67.9 | 283 |
+| Complete, 1 part, `If-None-Match: *` | **86.6, 97.0, 91.8** | **75.5, 77.6** | 285 |
+| Complete, 2 parts (5 MiB + 4 KiB), conditional | 92.1-113.0 | 77.4-78.2 | 295 |
+| Complete, 4 parts (15 MiB + 4 KiB), conditional | 96.5-100.7 | 80.3-84.9 | 286 |
+| for comparison: plain 4 KiB PUT | 29-31 | 39-40 | 218 |
+
+Reading: on both providers Complete costs one slow request independent of part count and size
+(under 20 MiB): about 3 times a 4 KiB PUT on AWS (87 vs 30 ms) and about 2 times on OVH (76 vs 40 ms).
+The `If-None-Match` header adds roughly 1-9 ms over the unconditional Complete. A multipart commit
+(variant C: Create + parts + Complete) therefore costs far more than the single create-only PUT it
+would replace: 25 + 34 + 87 = about 146 ms sequentially on AWS against 30 ms, unless Create and the
+parts were done ahead of the flush. The fsync-staging note asked for exactly this number
+(open question 2) and AWS, OVH and MinIO now have it; R2 does not.
+
+## PUT latency by object size (concurrency 1, sequential, plain PUT, unique keys)
+
+n = 40 per size up to 1 MiB and 12 above, sizes interleaved round by round, connection warmed.
+Milliseconds; p99 over 40 or 12 samples is effectively the maximum. Two AWS same-region sweeps 31
+minutes apart are shown as `run 1 / run 2`.
+
+AWS S3 Standard, same region (us-west-2):
+
+| size | p50 | p90 | p99 |
+|---|---|---|---|
+| 4 KiB | 30.6 / 29.2 | 37.7 / 32.7 | 45.3 / 67.1 |
+| 64 KiB | 43.4 / 33.0 | 72.6 / 41.4 | 124.3 / 68.8 |
+| 256 KiB | 48.9 / 45.1 | 87.0 / 73.9 | 113.1 / 119.6 |
+| 1 MiB | 70.5 / 77.7 | 104.6 / 140.1 | 150.7 / 182.7 |
+| 2 MiB | 67.9 / 59.3 | 85.0 / 97.5 | 210.9 / 100.7 |
+| 4 MiB | 86.1 / 83.4 | 123.7 / 148.7 | 150.1 / 155.3 |
+| 8 MiB | 128.5 / 130.6 | 165.9 / 181.9 | 169.0 / 216.7 |
+| 16 MiB | 227.0 / 205.6 | 288.9 / 215.5 | 319.0 / 291.5 |
+
+Fit (least squares on the eight per-size percentiles, `t = fixed + slope x MiB`):
+
+| fit | fixed cost | slope | implied single-stream rate |
+|---|---|---|---|
+| AWS same region, p50, run 1 / run 2 / pooled samples | 43.5 / 42.1 / **42.3 ms** | 11.3 / 10.4 / **10.6 ms/MiB** | about 95 MiB/s |
+| same, 1-16 MiB points only (pooled) | 50.7 ms | 9.9 ms/MiB | about 100 MiB/s |
+| AWS same region, p99 (pooled) | 113 ms | 13.3 ms/MiB | |
+| OVH Hungary → Milan, p50, run 1 / run 3 | 70.2 / 72.2 ms | 53.7 / 52.0 ms/MiB | about 19 MiB/s (uplink-bound) |
+| OVH, p50, run 2 (degraded, see below) | 125.9 ms | 51.1 ms/MiB | |
+| OVH, p99, run 1 / run 3 | 202 / 160 ms | 74 / 56 ms/MiB | |
+| AWS Hungary → us-west-2, p50 | 291 ms | 328 ms/MiB | about 3 MiB/s |
+
+The AWS curve is not a straight line: 2 MiB (60-68 ms) is faster than 1 MiB (70-78 ms) in both
+sweeps, and 256 KiB (45-49) is already close to 1 MiB; the first 1 MiB is dominated by the fixed
+cost and what looks like a per-request cost step between 64 KiB and 1 MiB. A two-point fit on the
+4 KiB and 16 MiB medians gives 30 ms + 11.3 ms/MiB. The fact-check figure "Standard 500 KB PUT p50
+about 70 ms" sits at the top of what is measured here for 256 KiB-1 MiB (45-78 ms).
+
+OVH Hungary → Milan, run 1 / run 3 (run 2 in parentheses):
+
+| size | p50 | p90 | p99 |
+|---|---|---|---|
+| 4 KiB | 39.8 / 39.4 (104.6) | 41.5 / 40.7 (160.5) | 53.8 / 46.1 (235.4) |
+| 64 KiB | 82.5 / 79.3 (131.7) | 102.0 / 136.6 (195.2) | 157.3 / 205.8 (248.4) |
+| 256 KiB | 74.8 / 78.2 (140.1) | 112.4 / 107.8 (190.3) | 404.3 / 169.7 (252.5) |
+| 1 MiB | 130.0 / 137.5 (188.3) | 187.8 / 192.7 (289.8) | 346.6 / 357.4 (444.7) |
+| 2 MiB | 192.9 / 167.6 (236.7) | 267.1 / 223.2 (268.5) | 269.5 / 253.5 (288.8) |
+| 4 MiB | 276.4 / 304.2 (339.5) | 393.5 / 328.1 (352.7) | 483.7 / 330.7 (355.4) |
+| 8 MiB | 534.6 / 514.7 (519.9) | 701.7 / 564.1 (630.1) | 856.2 / 603.3 (644.7) |
+| 16 MiB | 911.2 / 886.1 (947.5) | 1119.5 / 947.9 (1000.2) | 1365.0 / 1060.6 (1020.3) |
+
+The TCP connect time to the endpoint was 20.1-20.5 ms in every run, so a 4 KiB PUT is about 2
+RTT (40 ms) on a warm connection. **Run 2 (T+37) was degraded**: the small-object medians were 2-2.6 times
+those of runs 1 and 3 while the TCP RTT was unchanged, so the cause is server-side latency or
+queueing on the path (not determined). Run 3 five minutes later matched run 1. Use runs 1 and 3 as
+the OVH figures and keep run 2 as the evidence that OVH latency varies in time.
+
+AWS Hungary → us-west-2 (one run): 4 KiB 217.9 / 222.9 / 301.7 ms; 64 KiB 418 / 453 / 604; 256 KiB 430 / 465 / 1,836; 1 MiB 630 / 1,004 / 2,197;
+2 MiB 844; 4 MiB 1,418; 8 MiB 3,177; 16 MiB 5,466 / 8,479 / 11,457 (p50 / p90 / p99). TCP connect 188 ms.
+
+Not run: the "8 parallel, idle" cell of the review's table per size (only the 16 MiB parallel
+aggregate was run, below), S3 Express One Zone, R2.
+
+## Two serial PUTs (the FLUSH-then-FUA pattern)
+
+A create-only PUT, then a second create-only PUT once the first returned; the pair time in
+milliseconds (p50 / p90 / p99), n=100 for 4 KiB + 4 KiB and n=40 for 1 MiB + 4 KiB (data object, then commit record).
+
+| pair | AWS same region run 1 | run 2 | OVH run 1 | OVH run 3 | AWS Hungary |
+|---|---|---|---|---|---|
+| 4 KiB + 4 KiB | 56.7 / 63.4 / 87.4 | 48.0 / 59.4 / 98.6 | 97.5 / 104.4 / 132.9 | 96.5 / 174.9 / 211.7 | 443.8 / 457.2 / 1,059 |
+| 1 MiB + 4 KiB | 81.8 / 116.0 / 133.4 | 81.4 / 113.7 / 188.8 | 192.5 / 250.7 / 362.3 | 192.0 / 270.0 / 377.5 | 695 / 1,035 / 2,281 |
+
+AWS 4 KiB pair pooled over both runs (n=200): p50 53.8, p90 62.3, p99 93.9 ms, which is 1.8
+times a single 4 KiB PUT (29.7 ms p50) and 2.1 times its p99 (45). OVH run 2 (degraded): 268 / 323 / 416 ms.
+A sync-mode flush that must write a 1 MiB data object and then the commit costs about 81 ms p50,
+133-189 ms p99 on AWS, with the second PUT about 27 ms p50 (the commit PUT after a data PUT is no
+slower than a stand-alone one).
+
+## Lane isolation: small create-only PUTs during a bulk upload
+
+Bulk: 16 MiB objects at concurrency 8, unthrottled, on one client; small PUTs: alternating 4 KiB and
+64 KiB create-only, sequential, either on a **separate client** (own connection pool) or on the
+**same client** as the bulk, counted only when the whole PUT lay inside the bulk window (the window
+ends when the first bulk worker finds the queue empty). "Idle" is the same small PUTs with no bulk.
+p50 / p90 / p99 in ms. Note that the `object_store`/reqwest pool is unbounded, so "same client" shares
+the pool object and idle connections but does not limit the connection count: a small PUT during bulk
+opens its own connection either way.
+
+AWS same region, samples pooled over three runs (idle n=90 per size; separate n=44 / 42; shared n=45 / 42):
+
+| small PUT | idle | bulk running, separate client | bulk running, same client |
+|---|---|---|---|
+| 4 KiB | 28.2 / 33.6 / 58.6 | 30.0 / 34.5 / 51.2 | 28.7 / 41.8 / 197.9 |
+| 64 KiB | 34.4 / 55.8 / 95.8 | 38.2 / 62.4 / 368 | 37.6 / 64.3 / 125.1 |
+
+Bulk goodput in MB/s (decimal) per run, runs 1 / 2 / 3: bulk alone 461 / 532 / 520; with the
+separate-client sampler 451 / 576 / 586; with the same-client sampler 447 / 529 / 580. The
+sampler cost the bulk nothing measurable, and the bulk (about 0.5 GB/s, 8 connections) cost the
+small PUTs about 2 ms at p50 (4 KiB, +6%) to 4 ms (64 KiB, +11%), with no difference between
+the two pool arrangements at p50. The tails (p99 of 44 samples is the maximum) are too thin to separate
+the arrangements; the largest outliers (198 ms shared 4 KiB, 368 ms separate 64 KiB) appeared in both.
+The bulk rate was limited by the 8 connections, not shown to be limited by the instance's network,
+so this does not test a saturated NIC.
+
+OVH Hungary → Milan (run 1; the uplink *was* saturated: bulk goodput 31 MB/s;
+idle n=30, separate n=97, shared n=101):
+
+| small PUT | idle | bulk running, separate client | bulk running, same client |
+|---|---|---|---|
+| 4 KiB | 47.7 / 49.2 / 58.8 | 52.7 / 60.3 / 66.6 | 52.3 / 57.8 / 69.5 |
+| 64 KiB | 81.4 / 132.9 / 238.1 | 87.7 / 130.8 / 196.8 | 86.7 / 115.3 / 157.1 |
+
+Bulk goodput alone / separate / shared: 31.2 / 31.4 / 30.7 MB/s. On a saturated uplink the small PUT
+p50 rose only 5 ms (+10%, 4 KiB) and 6 ms (+8%, 64 KiB), p99 +8 to +11 ms for 4 KiB, again with
+no difference between separate and shared clients. 
+
+AWS Hungary → us-west-2 (n=11-19 per cell, bulk goodput 6-7 MB/s): 4 KiB idle 217 / 245 / 335,
+separate 224 / 243 / 832, shared 218 / 226 / 229; 64 KiB idle 415 / 440 / 600, separate 421 / 449 /
+664, **shared 603 / 800 / 3,019**. The 64 KiB shared-client result (+45% p50) is the only sign of
+interference in the whole matrix; it is one run with 18 samples and a slow, lossy long-RTT path, so
+treat it as a hint that a separate pool matters when the path is slow, not as a result.
+
+Conclusion for the review's question ("does lane isolation keep the commit PUT near its idle
+latency?"): with 8 concurrent 16 MiB uploads the commit-sized PUT stays within about 10% of idle at
+p50 on AWS same-region and on a saturated Milan uplink, whether or not it has its own client. A
+separate pool was not needed for p50 in these tests; the p99 effect is unresolved and needs more
+samples. A shaped 200 MB/s upload on a bandwidth-constrained NIC was not tested.
+
+## Other latency and throughput (suite `seq`; AWS same region run 1, OVH run 1)
+
+Median / p90 / p99 in ms; sequential, one connection. The OVH 4 KiB PUT and GET were measured at a
+slow stretch of run 1 (the 4 KiB PUT of the later `sizes` suite was 40 ms).
+
+| operation | AWS same region | OVH Hungary → Milan |
+|---|---|---|
+| HEAD 1 KiB (n=100) | 11.7 / 13.4 / 21.7 | 29.1 / 30.7 / 33.9 |
+| LIST, 10 keys (n=50) | 14.4 / 16.2 / 19.9 | 31.8 / 36.2 / 42.0 |
+| GET 4 KiB (n=200) | 23.9 / 29.7 / 42.8 | 78.1 / 95.8 / 112.6 |
+| PUT 4 KiB (n=200) | 31.1 / 39.3 / 59.8 | 90.4 / 126.6 / 160.6 |
+| GET 64 KiB (n=200) | 26.0 / 41.4 / 86.4 | 78.9 / 107.7 / 132.0 |
+| PUT 64 KiB (n=200) | 39.9 / 79.4 / 161.8 | 128.4 / 193.4 / 288.5 |
+| PUT 16 MiB, one stream (n=3) | 214 (78 MB/s) | 861 (19.5 MB/s) |
+| GET 16 MiB, one stream (n=3) | 175 (96 MB/s), TTFB 27 | 887 (18.9 MB/s), TTFB 134 |
+
+Parallel 16 MiB (aggregate MB/s; few objects, so rough): AWS same region PUT 72 / 332 / 196 and
+GET 78 / 788 / 180 at concurrency 1 / 8 / 32 (the concurrency-32 cell had only 4 objects in flight);
+OVH Hungary → Milan PUT 19 / 26 / 30 and GET 18 / 28 / 26 MB/s, bounded by the uplink.
+
+## Cleanup and safety
+
+- After every run the probe listed and deleted only its own prefix and re-listed it: **leftover
+  objects 0 in all 9 real-provider runs**; it also listed open multipart uploads under its prefix: **0 open at the end of
+  every run**. Uploads created / aborted / completed per run: 164 / 80 / 84 (smoke, sweep) and
+  404 / 290 / 114 (the 40-round race runs); every created upload was either completed (and then
+  deleted as an object) or aborted.
+- An independent check afterwards with the AWS CLI (list objects, list multipart uploads, and for OVH
+  list object versions, all with the prefix `lunix-p0-probe/`): **empty** in both buckets, 0 versions and 0 delete markers on OVH.
+- No bucket configuration was read other than `GetBucketVersioning`, and none was written; the
+  `enable_versioning` tool was not run; nothing outside `lunix-p0-probe/` was touched.
+- The probe runs on the test host left no process, container or output directory behind.
+
+## Semantics, MinIO (earlier sweep) (identical on both runs; details from `raw/run1/minio.txt`)
 
 | probe | result | observed |
 |---|---|---|
@@ -112,79 +362,103 @@ has secondary figures: Standard 500 KB PUT p50 about 70 ms, Express same-AZ 4 KB
 6.4 ms). The 4 KiB PUT p50 of 3.8-5.5 ms here is MinIO's own durable-write cost on this
 disk.
 
-## Deviations from the plan
+## Deviations from the plan and from the request
 
 - **Output path.** Written to `bench/s3probe/` as the task asked; the plan text says
   `bench/s3-probe/`. Rename if the plan's spelling is wanted.
-- **Matrix trimmed to the 2 GB cap.** The plan's full matrix (16 MiB: sequential n = 40 each way,
-  parallel at 1/8/32) would transfer about 3 GB. Run: sequential 16 MiB PUT n = 40 but GET
-  n = 16 (not 40), parallel PUT and GET with 2 / 8 / 16 objects at concurrency 1 / 8 / 32 (the
-  concurrency-32 cell therefore keeps only 16 transfers in flight). Phases that would exceed the
-  cap are skipped and reported by the tool. Override with `LUNIX_PROBE_*_N`.
-- **No reuse of Constellation code.** The plan prefers `replicix-objcas` or a path dependency on
-  `constellation-store-s3`; the latter pulls Constellation's whole workspace into the build and
-  its toolchain pin (1.98) is newer than the host's 1.96. The status classification
-  (`http_status`, create/swap/missing mapping) is re-implemented in about 60 lines in
+- **Matrix trimmed to the byte cap.** To keep each run under about 3 GB the `seq` suite ran 16 MiB
+  PUT/GET n = 3 (not 40/16) and parallel 16 MiB with 1 / 8 / 4 objects at concurrency 1 / 8 / 32; the
+  16 MiB latency is carried by the `sizes` suite (n = 12) instead. MinIO (earlier sweep) used the
+  larger numbers, so its 16 MiB rows are not comparable in n.
+- **Lane bulk is unthrottled.** The review text names "a 200 MB/s upload"; the probe ran 8 concurrent
+  16 MiB uploads at whatever the path gave (about 0.5 GB/s on AWS same region, 31 MB/s from
+  Hungary), because shaping needs a rate limiter that the byte cap made hard to use. The AWS lane
+  samples are few (n about 45 per cell pooled over three runs), so only p50 is resolved.
+- **"Idle and 8 parallel" per size** (review table) was not run; only 16 MiB parallel aggregate.
+  **S3 Express One Zone and R2** were not available.
+- **Extra runs.** AWS same region ran three times (T+0, T+31, T+35), the last two without the
+  semantic sweep, and OVH three times; the OVH second run was degraded (see above) and a third was
+  added. AWS from Hungary ran once with a smaller lane (12 objects per phase) and without the
+  `seq` suite so that GET volume stayed near 40 MB.
+- **Per-sample cap.** `CAP_REQS` and `CAP_BYTES` were raised from 5,000 / 2 GB to 9,000 / 3 GB as the
+  request allowed.
+- **Conditional Complete** uses a hand-signed SigV4 client (`src/raw.rs`, `sha2` + `hmac` + `reqwest`,
+  pinned) because `object_store` 0.14.1 cannot send `If-None-Match` on Complete except inside its
+  copy-if-not-exists path. Complete responses are checked for an `<Error>` inside a 200 body.
+- **No reuse of Constellation code.** The status classification is re-implemented in about 60 lines in
   `spikes/s3probe/src/main.rs`; `object_store` is pinned to the same 0.14.1.
-- **Clock skew** uses the Last-Modified of a fresh object because `object_store` does not
-  expose the `Date` header; resolution is 1 s, enough for the 2 s flag.
-- **TLS RTT** is approximated as cold-HEAD minus warm-HEAD minus TCP connect; not applicable
-  here (plain HTTP).
-- **Time of day.** Both runs were within four minutes of each other; no second time of day.
-- **AWS shared-config profiles** (`_PROFILE`) are not resolved by the spike; export `AWS_*` or
-  the provider-specific key variables.
-- **MinIO image** is a Chainguard build of upstream MinIO, not the upstream-published image
-  (no longer available). The container ran single-drive on a bind mount, not in a
-  multi-drive erasure set.
-- **Extra:** a second bucket with versioning enabled (hand-signed `PutBucketVersioning` in
-  `tools/enable_versioning.py`), because ADR-2 has an explicit versioning rule.
-- Torn-read check uses 64 KiB uniform-byte bodies with two concurrent readers per swap round;
-  a provider that serves partial objects would show non-uniform bytes. 0 found.
+- **Clock skew** uses the Last-Modified of a fresh object (1 s resolution); `object_store` does not
+  expose `Date`.
+- **TLS set-up** is approximated as cold-HEAD minus warm-HEAD minus TCP connect from a single sample
+  each; it is noisy and negative in one run. Not a result.
+- **MinIO image** is a Chainguard build of upstream MinIO, single-drive on a bind mount.
+- **Extra (MinIO):** a second bucket with versioning enabled (`tools/enable_versioning.py`, run
+  against the throwaway MinIO only, never against AWS or OVH).
+- Torn-read check uses 64 KiB uniform-byte bodies with two concurrent readers per swap round; 0 found.
+- The two AWS conditional-Complete races that each had one 5xx loser did not record the error code;
+  the third did and saw none. Not explained.
+- OVH run 1's `seq` phase (4 KiB PUT 90 ms, GET 78 ms against HEAD 29 ms) was slower than its later
+  `sizes` phase (4 KiB PUT 40 ms); the fluctuation is of the same kind as the degraded run 2.
 
 ## Not run
 
-AWS S3, Cloudflare R2, OVH (the three launch providers), Google Cloud Storage, Backblaze B2,
-Scaleway, Wasabi, Hetzner, Tigris, DigitalOcean Spaces, S3 Express One Zone, Ceph RGW: **not
-run: no credentials**. Nothing about them was measured; any statement about them is from the
-fact-check note, which is secondary evidence for several of them.
+Cloudflare R2, Google Cloud Storage, Backblaze B2, Scaleway, Wasabi, Hetzner, Tigris, DigitalOcean
+Spaces, S3 Express One Zone, Ceph RGW: **not run: no credentials**. Nothing about them was measured;
+any statement about them is from the fact-check note, which is secondary evidence for several of
+them. Also not run: MinIO conditional Complete in the full sweep (smoke only), the 8-parallel-per-size
+cell, a throttled 200 MB/s lane.
 
 ## Cleanup and leftover check (remote)
 
-- Container `lunix-p0-minio`: removed (`docker rm -f`) at the end of each run; none remain.
-- Image `cgr.dev/chainguard/minio:latest` (236 MB, pulled by me): removed with `docker rmi`.
-- Volumes: none created (bind mount); the data directory `~/lunix-p0/s3probe-minio-data` was
-  deleted by the script. The docker image, container and volume lists equal the lists
-  recorded before the run (diff empty); pre-existing containers/images/volumes were not touched.
-- Objects: the probe lists and deletes only `lunix-p0-probe/<run-id>/`; "leftover objects under
-  the probe prefix: 0" on all four runs (the versioned bucket additionally held delete markers
-  and non-current versions, which vanished with the data directory).
-- Port 19000: free. No `s3probe`, `run-minio.sh` or MinIO process running.
-- Credentials: generated per run, in memory and a deleted env file only; the outputs and
-  sources were grepped for host identifiers (none found).
+- MinIO (earlier sweep): container `lunix-p0-minio` removed at the end of each run and the image
+  removed; a later loopback smoke of the new suites re-pulled the image and the script removed the
+  container and data directory again (no `lunix-p0` container remains).
+- Objects: the probe lists and deletes only `lunix-p0-probe/<run-id>/`; leftover objects 0 on every run
+  (see "Cleanup and safety" above for AWS and OVH).
+- Host: no `s3probe` process, no output directory; build artefacts under `~/lunix-p0/s3probe/target`
+  (about 700 MB, includes the musl target) remain until the lead removes them. Disk use well inside the
+  2 GiB budget apart from that build cache.
+- Credentials: environment only; the outputs and sources were grepped for the host's addresses,
+  user name, hostnames, bucket names, account ids and key prefixes before copying (none found).
 
 ## Open questions for the maintainer
 
-1. Credentials (even short-lived and restricted to a single bucket) for AWS S3, R2 and OVH to
-   complete the matrix and produce the "1 PUT RTT" figure; run
-   `LUNIX_PROBE_<NAME>_BUCKET=… ./target/release/s3probe --providers AWS,R2,OVH`. Expected
-   cost: about 3,800 requests and 2 GB of transfer per provider (AWS: under $0.20 at the
-   fact-check list prices, mostly egress for about 0.9 GB of GETs; R2 egress free; OVH no
-   request or egress charges per the fact-check, unverified for this account).
+1. R2 credentials to complete the launch-provider matrix (and S3 Express One Zone).
 2. A Ceph RGW target on a *versioned* bucket would exercise the one provider where ADR-2's
-   versioning rule matters.
+   versioning rule matters; OVH's mixed signal (version ids returned, no bucket-level status) is
+   worth asking OVH about.
 3. Should `lunix doctor` run this whole sweep or a reduced "quick" form (suggested: 5 create
-   rounds, 20 swap rounds, no 16 MiB transfers, about 300 requests)? The gate rule above was
-   written for the full form.
+   rounds, 20 swap rounds, no 16 MiB transfers, about 300 requests)? The gate rule was written
+   for the full form.
+4. The lane test should be repeated with a shaped 200 MB/s bulk on a bandwidth-limited NIC and
+   with enough samples for p99 before the `flush_segment` default depends on lane isolation.
 
 ## Proposed decision record (for the lead to merge; do not apply here)
 
 Append under ADR-2 in `docs/explanation/DECISIONS.md`:
 
-> **Gate outcome, partial (2026-11-11, P0.10):** the S3 probe harness (`spikes/s3probe`) is
-> built and verified against MinIO `RELEASE.2026-11-10T21-18-11Z`, which meets the authority
-> rule on an unversioned and on a versioned bucket (20/20 create races, 100/100 swap races,
-> 0 torn reads, 412 on lost races, 404 on If-Match for a deleted key, read-your-write for GET
-> and LIST). AWS S3, Cloudflare R2 and OVH were **not run: no credentials**; the claim that
-> the three launch providers can be authorities remains documentation-based (fact-check
-> §A) until those runs exist. Status of ADR-2 unchanged (proposed). Evidence:
-> `bench/s3probe/RESULTS.md`.
+> **Gate outcome (2026-11-12, P0.10):** `spikes/s3probe` ran the authority probes against AWS S3
+> Standard (three full sweeps, from the same region and from another continent), OVH Object Storage
+> Milan (one full sweep) and MinIO `RELEASE.2026-11-10T21-18-11Z`. All three meet the authority rule:
+> create-only PUT answers 412 on an existing key; If-Match swap and stale If-Match (412); 20/20
+> 8-way create races and 100/100 8-way swap races with exactly one winner and no torn read;
+> read-your-write by GET and LIST. **AWS S3 and OVH are confirmed authority backends.** Both also
+> accept `If-None-Match: *` on `CompleteMultipartUpload` (create-only; 412 when the key exists;
+> exactly one winner of an 8-way race, 70/70 rounds on AWS, 50/50 on OVH), so a multipart commit
+> is a valid fencing primitive. Both return 409 `ConditionalRequestConflict` for concurrent
+> If-Match swaps (hundreds per 100-round race), so a client must retry on 409. OVH returns version
+> ids on PUT while reporting no bucket versioning status; the probe passes on it as served.
+> Cloudflare R2 remains unverified (no credentials). Evidence: `bench/s3probe/RESULTS.md`.
+
+Numbers for DESIGN §20 / the fsync-scope note (concurrency 1, create-only or plain PUT):
+
+> AWS S3 Standard, same region: 4 KiB PUT p50 29.7 ms, p99 about 45-67 ms; 256 KiB 45-49 ms; 1 MiB
+> 70-78 ms; 16 MiB 205-227 ms; p50 fit 42 ms + 10.6 ms/MiB. Two serial 4 KiB create-only PUTs: p50
+> 54 ms, p99 94 ms (n=200); a 1 MiB data PUT then a 4 KiB commit PUT: p50 81 ms, p99 133-189 ms.
+> OVH Milan from Hungary (RTT 20 ms): 4 KiB 39.5 ms, 1 MiB 130-138 ms, two serial 4 KiB PUTs 97 ms,
+> 1 MiB + 4 KiB 192 ms; fit 71 ms + 53 ms/MiB (uplink-bound); OVH latency was 2-2.6 times worse in
+> one run 37 minutes after the first. Conditional or unconditional `CompleteMultipartUpload` of 1-4
+> parts under 20 MiB is one request of about 87 ms (AWS) or 76 ms (OVH), about 3 and 2 times a 4 KiB PUT,
+> so the multipart route is not cheaper on the flush path. Lane isolation: with 8 concurrent 16 MiB
+> uploads, a 4 or 64 KiB PUT stays within about 10% of idle at p50 on both AWS (0.5 GB/s) and a
+> saturated 31 MB/s uplink, with or without a separate client; p99 unresolved.

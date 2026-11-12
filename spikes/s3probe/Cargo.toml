@@ -12,6 +12,11 @@ object_store = { version = "=0.14.1", default-features = false, features = ["aws
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
 futures = "=0.3.34"
 bytes = "=1.12.1"
+# hand-signed requests (conditional CompleteMultipartUpload, ListMultipartUploads); the same
+# reqwest as object_store resolves, so no second HTTP stack is built
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
+sha2 = "=0.10.9"
+hmac = "=0.12.1"
 
 [profile.release]
 opt-level = 3

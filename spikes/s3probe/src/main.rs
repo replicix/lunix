@@ -22,6 +22,9 @@
 //! and deleted. Defaults are sized to stay under about 5,000 requests and 2 GB
 //! transferred per provider; phases that would exceed the cap are skipped and reported.
 
+mod lat2;
+mod raw;
+
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use object_store::aws::{AmazonS3Builder, S3ConditionalPut};
@@ -32,7 +35,7 @@ use object_store::{
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Barrier;
@@ -41,8 +44,8 @@ const KNOWN: &[&str] = &[
     "AWS", "R2", "OVH", "MINIO", "GCS", "B2", "SCALEWAY", "WASABI", "HETZNER", "TIGRIS", "SPACES",
 ];
 const RACERS: usize = 8;
-const CAP_REQS: u64 = 5000;
-const CAP_BYTES: u64 = 2_000_000_000;
+const CAP_REQS: u64 = 9000;
+const CAP_BYTES: u64 = 3_000_000_000;
 
 // ---------------------------------------------------------------- environment
 
@@ -300,9 +303,18 @@ struct Ctx {
     prefix: String,
     meter: Meter,
     stop: AtomicBool,
+    raw: Option<raw::Raw>,
+    /// multipart uploads this run created / aborted / completed (all under `prefix`)
+    mpu: [AtomicU64; 3],
+    /// every timed small/large PUT sample: (series, size, ms)
+    samples: std::sync::Mutex<Vec<(String, u64, f64)>>,
 }
 
 impl Ctx {
+    fn sample(&self, series: &str, size: u64, ms: f64) {
+        self.samples.lock().unwrap().push((series.into(), size, ms));
+    }
+
     fn key(&self, rel: &str) -> Path {
         Path::from(format!("{}/{}", self.prefix, rel))
     }
@@ -936,7 +948,7 @@ async fn sem_misc(c: &Ctx, out: &mut Vec<Sem>) {
     }
 }
 
-fn now_unix() -> i64 {
+pub(crate) fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -1231,15 +1243,50 @@ struct Report {
     bytes: u64,
     leftover: usize,
     started: String,
+    /// multipart uploads created / aborted / completed, and found still open at the end
+    mpu: [u64; 4],
+    samples: Vec<(String, u64, f64)>,
 }
 
-async fn run_all(store: Arc<dyn ObjectStore>, prov: Option<&Prov>) -> Report {
+fn suites_from(args: &[String]) -> Vec<String> {
+    let all = ["sem", "seq", "cond", "sizes", "pairs", "lane", "net"];
+    match args
+        .iter()
+        .position(|a| a == "--suites")
+        .and_then(|i| args.get(i + 1))
+    {
+        Some(s) => s.split(',').map(|x| x.trim().to_string()).collect(),
+        None => all.iter().map(|x| x.to_string()).collect(),
+    }
+}
+
+async fn run_all(
+    store: Arc<dyn ObjectStore>,
+    other: Arc<dyn ObjectStore>,
+    prov: Option<&Prov>,
+    suites: &[String],
+) -> Report {
+    let on = |n: &str| suites.iter().any(|s| s == n);
     let prefix = format!("lunix-p0-probe/{}", run_id());
+    let raw = prov.and_then(|p| {
+        raw::Raw::new(
+            p.endpoint.as_deref(),
+            &p.bucket,
+            &p.region,
+            &p.ak,
+            &p.sk,
+            p.token.as_deref(),
+        )
+        .ok()
+    });
     let c = Arc::new(Ctx {
         store,
         prefix: prefix.clone(),
         meter: Meter::default(),
         stop: AtomicBool::new(false),
+        raw,
+        mpu: Default::default(),
+        samples: Default::default(),
     });
     let started = utc_stamp();
     let mut sem = vec![];
@@ -1252,36 +1299,66 @@ async fn run_all(store: Arc<dyn ObjectStore>, prov: Option<&Prov>) -> Report {
     let warm: Vec<_> = (0..RACERS).map(|_| c.head(&wk)).collect();
     let _ = futures::future::join_all(warm).await;
 
-    sem_basic(&c, &mut sem).await;
-    sem_create_race(&c, env_n("LUNIX_PROBE_CREATE_ROUNDS", 20), &mut sem).await;
-    sem_swap_race(&c, env_n("LUNIX_PROBE_SWAP_ROUNDS", 100), &mut sem).await;
-    sem_misc(&c, &mut sem).await;
-
-    let n_small = env_n("LUNIX_PROBE_SMALL_N", 200);
-    lat_seq(&c, 4096, n_small, n_small, "4k", &mut lat).await;
-    lat_seq(&c, 65536, n_small, n_small, "64k", &mut lat).await;
-    let (put16, get16) = (
-        env_n("LUNIX_PROBE_SEQ16_PUT_N", 40),
-        env_n("LUNIX_PROBE_SEQ16_GET_N", 16),
-    );
-    lat_seq(&c, 16 << 20, put16, get16, "16m", &mut lat).await;
-    for i in 0..put16 {
-        let _ = c.delete(&c.key(&format!("lat/{}/{i}", 16 << 20))).await;
+    if on("sem") {
+        sem_basic(&c, &mut sem).await;
+        sem_create_race(&c, env_n("LUNIX_PROBE_CREATE_ROUNDS", 20), &mut sem).await;
+        sem_swap_race(&c, env_n("LUNIX_PROBE_SWAP_ROUNDS", 100), &mut sem).await;
+        sem_misc(&c, &mut sem).await;
+        lat2::versioning_state(&c, &mut sem).await;
     }
-    for (conc, n) in [
-        (1usize, env_n("LUNIX_PROBE_PAR1_N", 2)),
-        (8, env_n("LUNIX_PROBE_PAR8_N", 8)),
-        (32, env_n("LUNIX_PROBE_PAR32_N", 16)),
-    ] {
-        lat_parallel(&c, conc, n, &mut lat).await;
+    if on("cond") {
+        lat2::cond_complete(&c, &mut sem, &mut lat).await;
     }
-    lat_head_list(&c, &mut lat).await;
+    if on("seq") {
+        let n_small = env_n("LUNIX_PROBE_SMALL_N", 200);
+        lat_seq(&c, 4096, n_small, n_small, "4k", &mut lat).await;
+        lat_seq(&c, 65536, n_small, n_small, "64k", &mut lat).await;
+        let (put16, get16) = (
+            env_n("LUNIX_PROBE_SEQ16_PUT_N", 40),
+            env_n("LUNIX_PROBE_SEQ16_GET_N", 16),
+        );
+        lat_seq(&c, 16 << 20, put16, get16, "16m", &mut lat).await;
+        for i in 0..put16 {
+            let _ = c.delete(&c.key(&format!("lat/{}/{i}", 16 << 20))).await;
+        }
+        for (conc, n) in [
+            (1usize, env_n("LUNIX_PROBE_PAR1_N", 2)),
+            (8, env_n("LUNIX_PROBE_PAR8_N", 8)),
+            (32, env_n("LUNIX_PROBE_PAR32_N", 16)),
+        ] {
+            lat_parallel(&c, conc, n, &mut lat).await;
+        }
+        lat_head_list(&c, &mut lat).await;
+    }
+    if on("sizes") {
+        lat2::put_sizes(&c, &mut lat).await;
+    }
+    if on("pairs") {
+        lat2::serial_pairs(&c, &mut lat).await;
+    }
+    if on("lane") {
+        lat2::lane(&c, c.store.clone(), other, &mut lat).await;
+    }
     let net = match prov {
-        Some(p) => net_rtt(p, &c).await,
+        Some(p) if on("net") => {
+            let _ = c
+                .put(&c.key("lat/head-obj"), uniform(1024, 5), PutMode::Overwrite)
+                .await;
+            net_rtt(p, &c).await
+        }
+        Some(_) => "not run".into(),
         None => "n/a (in-memory)".into(),
     };
 
-    // cleanup: delete only our prefix, then verify it is empty
+    // cleanup: abort any multipart upload still open under our prefix, delete only our
+    // prefix, then verify both are empty
+    let open_mpu = match lat2::sweep_uploads(&c).await {
+        Ok(n) => n as u64,
+        Err(e) => {
+            println!("warning: upload sweep failed: {e}");
+            u64::MAX
+        }
+    };
     let p = Path::from(prefix.clone());
     let metas: Vec<_> = c
         .store
@@ -1290,6 +1367,7 @@ async fn run_all(store: Arc<dyn ObjectStore>, prov: Option<&Prov>) -> Report {
         .collect()
         .await;
     for m in &metas {
+        c.meter.reqs.fetch_add(1, Ordering::Relaxed);
         let _ = c.store.delete(&m.location).await;
     }
     let leftover = c
@@ -1298,15 +1376,35 @@ async fn run_all(store: Arc<dyn ObjectStore>, prov: Option<&Prov>) -> Report {
         .filter_map(|m| async { m.ok() })
         .count()
         .await;
+    let still_open = match c.raw.as_ref() {
+        Some(r) => r
+            .list_uploads(&format!("{prefix}/"))
+            .await
+            .map(|v| v.len() as u64)
+            .unwrap_or(u64::MAX),
+        None => 0,
+    };
     c.stop.store(true, Ordering::Relaxed);
+    let samples = c.samples.lock().unwrap().clone();
     Report {
         sem,
         lat,
         net,
-        reqs: c.meter.reqs.load(Ordering::Relaxed),
+        reqs: c.meter.reqs.load(Ordering::Relaxed) + 2,
         bytes: c.meter.up.load(Ordering::Relaxed) + c.meter.down.load(Ordering::Relaxed),
         leftover,
         started,
+        mpu: [
+            c.mpu[0].load(Ordering::Relaxed),
+            c.mpu[1].load(Ordering::Relaxed),
+            c.mpu[2].load(Ordering::Relaxed),
+            if open_mpu == u64::MAX || still_open == u64::MAX {
+                u64::MAX
+            } else {
+                still_open
+            },
+        ],
+        samples,
     }
 }
 
@@ -1351,10 +1449,16 @@ fn render(name: &str, label: &str, r: &Report) -> (String, String) {
     writeln!(txt, "classification: {v} ({why})").unwrap();
     writeln!(
         txt,
-        "requests: {}, bytes transferred: {} MB, leftover objects under probe prefix: {}",
+        "requests: {} (approximate; a few helper calls are not counted), bytes transferred: {} MB, leftover objects under probe prefix: {}",
         r.reqs,
         r.bytes / 1_000_000,
         r.leftover
+    )
+    .unwrap();
+    writeln!(
+        txt,
+        "multipart uploads: created={} aborted={} completed={} still open at end (u64::MAX = list failed)={}",
+        r.mpu[0], r.mpu[1], r.mpu[2], r.mpu[3]
     )
     .unwrap();
     writeln!(txt, "network: {}", r.net).unwrap();
@@ -1405,8 +1509,8 @@ fn render(name: &str, label: &str, r: &Report) -> (String, String) {
         csv,
         "meta,totals,,,,,,,,,,,,{}",
         csv_escape(&format!(
-            "requests={} bytes={} leftover={} started={}",
-            r.reqs, r.bytes, r.leftover, r.started
+            "requests={} bytes={} leftover={} started={} mpu_created={} mpu_aborted={} mpu_completed={} mpu_open_at_end={}",
+            r.reqs, r.bytes, r.leftover, r.started, r.mpu[0], r.mpu[1], r.mpu[2], r.mpu[3]
         ))
     )
     .unwrap();
@@ -1428,6 +1532,7 @@ async fn main() {
         .and_then(|i| args.get(i + 1))
         .map(|s| s.split(',').map(|x| x.trim().to_uppercase()).collect());
     let list_only = args.iter().any(|a| a == "--list");
+    let suites = suites_from(&args);
     std::fs::create_dir_all(&out_dir).expect("create out dir");
     let mut status_lines = BTreeMap::new();
     for name in discover() {
@@ -1449,8 +1554,21 @@ async fn main() {
                         continue;
                     }
                 };
-                let rep = run_all(store, Some(&p)).await;
+                let other = match build(&p) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("{name}: {e}");
+                        continue;
+                    }
+                };
+                let rep = run_all(store, other, Some(&p), &suites).await;
                 let (csv, txt) = render(&p.name, &p.label, &rep);
+                let mut sc = String::from("series,size_bytes,ms\n");
+                for (a, b, m) in &rep.samples {
+                    sc.push_str(&format!("{a},{b},{m:.3}\n"));
+                }
+                std::fs::write(format!("{out_dir}/{}-samples.csv", p.name.to_lowercase()), sc)
+                    .expect("write samples");
                 print!("{txt}");
                 std::fs::write(format!("{out_dir}/{}.csv", p.name.to_lowercase()), csv)
                     .expect("write csv");
@@ -1485,7 +1603,17 @@ mod tests {
         std::env::set_var("LUNIX_PROBE_PAR1_N", "1");
         std::env::set_var("LUNIX_PROBE_PAR8_N", "2");
         std::env::set_var("LUNIX_PROBE_PAR32_N", "2");
-        let rep = run_all(Arc::new(InMemory::new()), None).await;
+        let st: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let all: Vec<String> = ["sem", "seq", "sizes", "pairs", "lane"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect();
+        std::env::set_var("LUNIX_PROBE_SIZES_N_SMALL", "2");
+        std::env::set_var("LUNIX_PROBE_SIZES_N_BIG", "2");
+        std::env::set_var("LUNIX_PROBE_PAIR_N", "2");
+        std::env::set_var("LUNIX_PROBE_LANE_OBJS", "10");
+        std::env::set_var("LUNIX_PROBE_LANE_IDLE_N", "4");
+        let rep = run_all(st.clone(), st, None, &all).await;
         let (v, why) = verdict(&rep.sem);
         assert_eq!(
             v,

@@ -1,0 +1,28 @@
+provider OVH (Hungary → Milan), started 2026-11-12T08:42Z
+classification: MIRROR-ONLY (gate not met: create_if_absent_second_412=missing, if_match_swap_ok=missing, if_match_stale_412=missing, concurrent_create_x8=missing, concurrent_swap_x8=missing, read_your_write_get=missing, read_your_write_list=missing)
+requests: 3016 (approximate; a few helper calls are not counted), bytes transferred: 612 MB, leftover objects under probe prefix: 0
+multipart uploads: created=404 aborted=290 completed=114 still open at end (u64::MAX = list failed)=0
+network: tcp connect p50 20.08 ms (n=10); cold-HEAD 98.4 ms, warm-HEAD 80.4 ms, TLS+setup approx -2.1 ms
+  [PASS       ] cond_complete_create_absent    If-None-Match: * on Complete of an absent key: 30/30 succeeded
+  [PASS       ] cond_complete_existing_412     Complete with If-None-Match: * on an existing key, 10 rounds: 412=10, 200 (overwritten)=0, other=0
+  [PASS       ] cond_complete_race_x8          40/40 rounds with exactly one winner; Complete statuses over all 320 attempts: {"200": 40, "412 PreconditionFailed": 280}
+  mpu_complete_1part_4k_plain size=     4096 conc= 1 n= 30 p50=   66.52 p90=   73.01 p99=  104.01 max=  104.01 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 30/30 ok; other: 
+  mpu_create_1part_4k_plain size=        0 conc= 1 n= 30 p50=   38.50 p90=   40.72 p99=  115.87 max=  115.87 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 UploadPart / CreateMultipartUpload latency
+  mpu_part4k_1part_4k_plain size=     4096 conc= 1 n= 30 p50=   47.44 p90=   49.41 p99=   51.97 max=   51.97 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 UploadPart / CreateMultipartUpload latency
+  mpu_complete_1part_4k_cond size=     4096 conc= 1 n= 30 p50=   75.51 p90=   79.02 p99=   80.29 max=   80.29 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 30/30 ok; other: 
+  mpu_create_1part_4k_cond size=        0 conc= 1 n= 30 p50=   38.25 p90=   39.56 p99=   62.82 max=   62.82 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 UploadPart / CreateMultipartUpload latency
+  mpu_part4k_1part_4k_cond size=     4096 conc= 1 n= 30 p50=   47.65 p90=   49.59 p99=   66.23 max=   66.23 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 UploadPart / CreateMultipartUpload latency
+  mpu_complete_2part_5m_4k_cond size=  5246976 conc= 1 n=  8 p50=   77.42 p90=  144.70 p99=  156.82 max=  156.82 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 8/8 ok; other: 
+  mpu_complete_4part_15m_4k_cond size= 15732736 conc= 1 n=  6 p50=   84.86 p90=   87.54 p99=   87.54 max=   87.54 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 6/6 ok; other: 
+  put_size               size=     4096 conc= 1 n= 40 p50=  104.62 p90=  160.54 p99=  235.42 max=  235.42 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=    65536 conc= 1 n= 40 p50=  131.66 p90=  195.22 p99=  248.42 max=  248.42 ttfb50=    NaN ttfb99=    NaN MB/s=     0.5 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=   262144 conc= 1 n= 40 p50=  140.09 p90=  190.30 p99=  252.52 max=  252.52 ttfb50=    NaN ttfb99=    NaN MB/s=     1.9 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  1048576 conc= 1 n= 40 p50=  188.33 p90=  289.81 p99=  444.73 max=  444.73 ttfb50=    NaN ttfb99=    NaN MB/s=     5.6 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  2097152 conc= 1 n= 12 p50=  236.71 p90=  268.54 p99=  288.83 max=  288.83 ttfb50=    NaN ttfb99=    NaN MB/s=     8.9 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  4194304 conc= 1 n= 12 p50=  339.51 p90=  352.71 p99=  355.42 max=  355.42 ttfb50=    NaN ttfb99=    NaN MB/s=    12.4 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size=  8388608 conc= 1 n= 12 p50=  519.88 p90=  630.10 p99=  644.69 max=  644.69 ttfb50=    NaN ttfb99=    NaN MB/s=    16.1 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size               size= 16777216 conc= 1 n= 12 p50=  947.49 p90= 1000.21 p99= 1020.35 max= 1020.35 ttfb50=    NaN ttfb99=    NaN MB/s=    17.7 sequential, conc 1, plain PUT, unique keys; errors=0
+  put_size_fit_p50       size=        0 conc= 1 n=  8 p50=  125.86 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=     0.0 all sizes: fixed=125.9 ms, slope=51.14 ms/MiB (20 MiB/s); 1-16 MiB only: fixed=133.9 ms, slope=50.41 ms/MiB (20 MiB/s); fixed cost in the p50 column
+  put_size_fit_p99       size=        0 conc= 1 n=  8 p50=  250.97 p90=    0.00 p99=    0.00 max=    0.00 ttfb50=   0.00 ttfb99=   0.00 MB/s=     0.0 all sizes: fixed=251.0 ms, slope=47.34 ms/MiB (21 MiB/s); 1-16 MiB only: fixed=265.3 ms, slope=46.05 ms/MiB (22 MiB/s); fixed cost in the p50 column
+  serial_pair_4096_4096  size=     8192 conc= 1 n=100 p50=  268.32 p90=  323.02 p99=  416.08 max=  429.04 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 create-only PUT of 4096 B then, once complete, create-only PUT of 4096 B; first p50=128.2 p99=216.6, second p50=134.8 p99=245.4
+  serial_pair_1048576_4096 size=  1052672 conc= 1 n= 40 p50=  367.70 p90=  442.10 p99=  568.40 max=  568.40 ttfb50=    NaN ttfb99=    NaN MB/s=     0.0 create-only PUT of 1048576 B then, once complete, create-only PUT of 4096 B; first p50=223.1 p99=358.9, second p50=143.7 p99=246.0

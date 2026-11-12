@@ -60,4 +60,4 @@ export LUNIX_PROBE_MINIOVER_REGION=us-east-1 LUNIX_PROBE_MINIOVER_PATH_STYLE=1 L
 export LUNIX_PROBE_MINIOVER_LABEL="local docker, loopback, versioned bucket"
 export LUNIX_PROBE_MINIOVER_ACCESS_KEY_ID="$AK" LUNIX_PROBE_MINIOVER_SECRET_ACCESS_KEY="$SK"
 # other providers are skipped unless the caller exported their variables
-taskset -c "$CPUS" ./target/release/s3probe --out "$OUT"
+taskset -c "$CPUS" ./target/release/s3probe --out "$OUT" "$@"
