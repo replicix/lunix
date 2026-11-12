@@ -73,8 +73,9 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   Goldens: `10-lease.bin`, `10-lease-transferred.bin`.
 - [x] **11. Key-purpose table** (§4.2): purpose ids and messages, default
   and FIPS derivations.
-  Goldens: `11-purposes.txt` (every purpose message and the KAT outputs
-  `purpose_*`, `purpose_fips_*`, `purpose_msg_dek1`).
+  Goldens: `11-purposes.txt` (every purpose message, including 0x0a from the
+  2026-11-12 amendment, and the KAT outputs `purpose_*`, `purpose_fips_*`,
+  `purpose_msg_dek1`).
 - [x] **12. Bucket and local paths** (§22): one function per path, the
   local-to-bucket-relative mapping (D9).
   Goldens: `12-paths.txt` (every path for fixed ids, local and
@@ -86,8 +87,9 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   item 8), `volume.json`, `volumes.json`, `state/checkpoint`,
   `state/device`, `state/pins`.
   Goldens: `14-checkpoint.bin` (both slots valid, and one torn),
-  `14-device.bin`, `14-pins.bin`, `14-pins-none.bin`, `14-volume.json`,
-  `14-volumes.json`.
+  `14-device.bin`, `14-pins.bin` and `14-pins-none.bin` (version 1 files,
+  now read-only inputs), `14-pins-v2.bin` (§23.9), `14-pins-v1-read.bin`
+  (version 1, read as "no floor"), `14-volume.json`, `14-volumes.json`.
 - [x] **15. GC files** (§16): the `gc/<pass:016x>` object (envelope kind 7,
   opaque body `ver` 1) and the `state/gc/condemned` envelope.
   Goldens: `15-gc-pass.bin`, `15-gc-condemned-envelope.bin`.
@@ -95,4 +97,18 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
 The attach matrix is not a byte layout; M2 loads Tables A-D of
 `attach-matrix.md` as its expected table.
 
-Signed off by: the maintainer (Attila Nagy) on 2026-11-12
+**Amendment 2026-11-12** (after the M2 security review; on-disk-formats.md
+§24 items 45 and 46, attach-matrix.md Table E). It changes the signed layout
+of items 1, 3, 5, 11, 13 (keyed chunk ids in integrity mode, purpose 0x0a)
+and 14 (`state/pins` version 2 with the rollback anchor). The checkboxes
+above record the goldens of the signed layout; the goldens derived from
+§23.2, §23.4, §23.5 and §23.6 (`a0-extent-plain-keyed`,
+`a0-segment-one-extent`, `04-segment-footer-body` if it is the §23.4 body,
+`a0-node-leaf-one-entry`, `05-node-interior-root`, `a0-commit-full-1`)
+change with the amendment and must be regenerated, `11-purposes.txt` gains
+purpose 0x0a, and `14-pins-v2.bin` (§23.9) and `14-pins-v1-read.bin`
+(a version 1 file read as "no floor") are added, before the re-sign.
+
+The first sign-off (before the amendment): the maintainer, 2026-11-12.
+
+Re-signed by: the maintainer (Attila Nagy) on 2026-11-12 (amendment: keyed integrity chunk ids, rollback floor)

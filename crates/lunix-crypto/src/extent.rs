@@ -9,7 +9,10 @@
 //! * [`PlainExtents`] is the `integrity` and `plain` volume: no cipher, the
 //!   16-byte tag is BLAKE3-128 over every byte of the extent before it, keyed
 //!   with the extent tag key in `integrity` mode and unkeyed in `plain` mode
-//!   (D11).
+//!   (D11). The chunk id of a data chunk is keyed BLAKE3 under the integrity
+//!   addressing key (purpose 0x0a) in `integrity` mode and unkeyed in `plain`
+//!   mode; node hashes are unkeyed in both (amendment 2026-11-12,
+//!   on-disk-formats.md section 4.5).
 //!
 //! # What the unencrypted tag does not bind
 //!
@@ -24,13 +27,13 @@
 //! * **R2.** `verify_id` is ignored for `ExtentKind::Node` (a node's hash
 //!   input is not its stored encoding); the map recomputes node hashes and
 //!   compares them with the parent's `child_hash` and the extent's `chunk_id`.
-//! * **`id_len` 16.** A map leaf stores a 16-byte prefix, so on an
-//!   `integrity` volume a guest that finds two chunks with equal prefixes (a
-//!   2^64 BLAKE3 birthday search over its own data), together with a writer of
-//!   the bucket, can have one served for the other on a local read, which does
-//!   not recompute the id. Use `id_len` 32 or `verify_reads` on integrity
-//!   volumes that hold untrusted guest content. Encrypted volumes use keyed
-//!   ids and are not affected.
+//! * **A node presented as data fails R1** in `integrity` mode: the leaf
+//!   expects a prefix of the keyed data id, the node extent's header holds the
+//!   unkeyed node hash, and the two agree only by chance.
+//! * **`id_len` 16.** Chunk ids of `integrity` and `encrypted` volumes are
+//!   keyed, so nobody without the key can search for a 16-byte prefix
+//!   collision offline. `plain` volumes keep public ids and give no
+//!   protection against a bucket writer (on-disk-formats.md section 4.1).
 //!
 //! # Open order
 //!
@@ -403,6 +406,18 @@ impl PlainExtents {
         Ok(Self { keys })
     }
 
+    /// The chunk id (or node hash) of `data`: keyed BLAKE3 under the
+    /// integrity addressing key for data chunks in `integrity` mode, unkeyed
+    /// BLAKE3-256 otherwise.
+    fn id_hash(&self, kind: ExtentKind, data: &[u8]) -> [u8; 32] {
+        match (self.keys.material(), kind) {
+            (Material::Integrity { addressing, .. }, ExtentKind::Data) => {
+                mac::addressing_hash(self.keys.profile(), addressing.expose(), data)
+            }
+            _ => *blake3::hash(data).as_bytes(),
+        }
+    }
+
     /// The BLAKE3-128 tag of `input`: keyed in `integrity` mode.
     fn tag(&self, input: &[u8]) -> [u8; TAG_LEN] {
         let full = match self.keys.material() {
@@ -446,7 +461,7 @@ impl PlainExtents {
             start,
             out,
             expect,
-            |plain| ct::eq(blake3::hash(plain).as_bytes(), &ext.chunk_id.0),
+            |plain| ct::eq(&self.id_hash(kind, plain), &ext.chunk_id.0),
         )?;
         meta_of(&ext.header, ext.chunk_id)
     }
@@ -457,8 +472,8 @@ impl ExtentCodec for PlainExtents {
         self.keys.mode()
     }
 
-    fn chunk_id(&self, _kind: ExtentKind, data: &[u8]) -> ChunkId {
-        ChunkId(*blake3::hash(data).as_bytes())
+    fn chunk_id(&self, kind: ExtentKind, data: &[u8]) -> ChunkId {
+        ChunkId(self.id_hash(kind, data))
     }
 
     fn seal(

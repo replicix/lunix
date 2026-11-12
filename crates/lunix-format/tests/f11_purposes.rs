@@ -61,6 +61,7 @@ fn messages_and_kat_outputs() {
         (Purpose::KeyringMac, None),
         (Purpose::IntegrityHmac, None),
         (Purpose::ExtentTag, None),
+        (Purpose::IntegrityAddressing, None),
     ];
     let mut text = String::new();
     text.push_str(
@@ -136,6 +137,11 @@ fn volume_a_and_b_keys_of_the_worked_examples() {
         common::to_hex(&key(Purpose::ExtentTag)),
         "8f5a8aa5bd1c61e6d9b3e275436f35de2673144fc8d12cb7aab4b39398b09322"
     );
+    // Purpose 0x0a (amendment 2026-11-12), section 23's table of derived keys.
+    assert_eq!(
+        common::to_hex(&key(Purpose::IntegrityAddressing)),
+        "3e596debe98cf9c82d88e17c63d875e3f16dc9334a2dbe870f4dd827679372b8"
+    );
 }
 
 #[test]
@@ -145,7 +151,11 @@ fn id_table_and_modes() {
         assert_eq!(PurposeId::from_u8(p.id()).expect("id"), *p);
     }
     assert!(PurposeId::from_u8(0).is_err());
-    assert!(PurposeId::from_u8(0x0a).is_err());
+    assert_eq!(
+        PurposeId::from_u8(0x0a).expect("0x0a"),
+        PurposeId::IntegrityAddressing
+    );
+    assert!(PurposeId::from_u8(0x0b).is_err());
     assert!(PurposeId::from_u8(0xff).is_err());
     // Table 4.2, "used in mode".
     use CryptoMode::*;
@@ -164,6 +174,13 @@ fn id_table_and_modes() {
     assert_eq!(used(PurposeId::KeyringMac), vec![Integrity, Encrypted]);
     assert_eq!(used(PurposeId::IntegrityHmac), vec![Integrity]);
     assert_eq!(used(PurposeId::ExtentTag), vec![Integrity]);
+    assert_eq!(used(PurposeId::IntegrityAddressing), vec![Integrity]);
+    assert_eq!(PurposeId::ALL.len(), 10);
+    assert_eq!(PurposeId::IntegrityAddressing.id(), 0x0a);
+    assert_eq!(
+        PurposeId::IntegrityAddressing.name(),
+        "integrity addressing key"
+    );
     // Plain has no key at all.
     assert!(PurposeId::ALL.iter().all(|p| !p.allowed_in(Plain)));
     // The keyring is never sealed: it has no metadata key.

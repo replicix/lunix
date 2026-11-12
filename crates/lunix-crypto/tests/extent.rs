@@ -176,23 +176,214 @@ fn map_nodes_round_trip_with_their_own_cap() {
 
 #[test]
 fn node_ids_are_separate_from_data_ids_when_keyed() {
+    let d = pattern(300, 4);
+    // Encrypted: separate addressing keys for data and nodes.
     let vol = volume(CryptoMode::Encrypted, 16_384, 14);
     let c = vol.crypto.extents();
-    let d = pattern(300, 4);
     assert_ne!(
         c.chunk_id(ExtentKind::Data, &d),
         c.chunk_id(ExtentKind::Node, &d)
     );
-    // Unkeyed modes hash the same way for both.
+    // Integrity (amendment 2026-11-12): a data id is keyed BLAKE3 under the
+    // integrity addressing key (purpose 0x0a), a node hash stays unkeyed.
     let p = volume(CryptoMode::Integrity, 16_384, 14);
+    let key = p
+        .crypto
+        .volume_keys()
+        .addressing_key_for_tests(false)
+        .expect("integrity addressing key");
+    let data_id = p.crypto.extents().chunk_id(ExtentKind::Data, &d);
+    let node_id = p.crypto.extents().chunk_id(ExtentKind::Node, &d);
+    assert_eq!(data_id.0, *blake3::keyed_hash(&key, &d).as_bytes());
+    assert_eq!(node_id.0, *blake3::hash(&d).as_bytes());
+    assert_ne!(data_id, node_id);
+    // An integrity volume has no node addressing key.
+    assert!(p
+        .crypto
+        .volume_keys()
+        .addressing_key_for_tests(true)
+        .is_none());
+    // Plain stays unkeyed for both kinds.
+    let q = volume(CryptoMode::Plain, 16_384, 14);
     assert_eq!(
-        p.crypto.extents().chunk_id(ExtentKind::Data, &d),
-        p.crypto.extents().chunk_id(ExtentKind::Node, &d)
+        q.crypto.extents().chunk_id(ExtentKind::Data, &d),
+        q.crypto.extents().chunk_id(ExtentKind::Node, &d)
     );
     assert_eq!(
-        p.crypto.extents().chunk_id(ExtentKind::Data, &d).0,
+        q.crypto.extents().chunk_id(ExtentKind::Data, &d).0,
         *blake3::hash(&d).as_bytes()
     );
+}
+
+#[test]
+fn integrity_ids_depend_on_the_family_root() {
+    // Dedup stays within a family: another IK gives other ids for the same
+    // chunk, and the unkeyed hash is never the id.
+    let d = pattern(16_384, 6);
+    let a = volume(CryptoMode::Integrity, 16_384, 21);
+    let b = volume(CryptoMode::Integrity, 16_384, 22);
+    let ia = a.crypto.extents().chunk_id(ExtentKind::Data, &d);
+    let ib = b.crypto.extents().chunk_id(ExtentKind::Data, &d);
+    assert_ne!(ia, ib);
+    assert_ne!(ia.0, *blake3::hash(&d).as_bytes());
+    // The same volume gives the same id every time.
+    assert_eq!(ia, a.crypto.extents().chunk_id(ExtentKind::Data, &d));
+}
+
+#[test]
+fn an_unkeyed_id_fails_verify_id_in_integrity_mode() {
+    let data = pattern(16_384, 5);
+    let vol = volume(CryptoMode::Integrity, 16_384, 23);
+    let c = vol.crypto.extents();
+    // A writer that knows the data (a guest, or a bucket writer) can compute
+    // the old public id, but the volume no longer accepts it on a scan.
+    let public = ChunkId(*blake3::hash(&data).as_bytes());
+    let mut ext = Vec::new();
+    c.seal(
+        ExtentKind::Data,
+        &public,
+        &enc_desc(Codec::Raw, data.len()),
+        &data,
+        &mut ext,
+    )
+    .expect("seal");
+    c.open(
+        ExtentKind::Data,
+        &ext,
+        &expect_plain(16_384, Some(&public), false),
+        &mut Vec::new(),
+    )
+    .expect("a local read trusts the tag and the expected id");
+    let mut out = Vec::new();
+    let err = c
+        .open(
+            ExtentKind::Data,
+            &ext,
+            &expect_plain(16_384, Some(&public), true),
+            &mut out,
+        )
+        .expect_err("verify_id recomputes the keyed id");
+    assert_eq!(err.kind(), ErrorKind::Auth);
+    assert!(out.is_empty());
+    // The keyed id passes the same check.
+    let keyed = c.chunk_id(ExtentKind::Data, &data);
+    let mut ext2 = Vec::new();
+    c.seal(
+        ExtentKind::Data,
+        &keyed,
+        &enc_desc(Codec::Raw, data.len()),
+        &data,
+        &mut ext2,
+    )
+    .expect("seal");
+    c.open(
+        ExtentKind::Data,
+        &ext2,
+        &expect_plain(16_384, Some(&keyed), true),
+        &mut Vec::new(),
+    )
+    .expect("keyed id verifies");
+    // Plain mode still verifies the unkeyed id.
+    let plain = volume(CryptoMode::Plain, 16_384, 23);
+    let pc = plain.crypto.extents();
+    let mut ext3 = Vec::new();
+    pc.seal(
+        ExtentKind::Data,
+        &public,
+        &enc_desc(Codec::Raw, data.len()),
+        &data,
+        &mut ext3,
+    )
+    .expect("seal");
+    pc.open(
+        ExtentKind::Data,
+        &ext3,
+        &expect_plain(16_384, Some(&public), true),
+        &mut Vec::new(),
+    )
+    .expect("plain verifies the unkeyed id");
+}
+
+/// Rule R1 of the M2 review in `integrity` mode: a node extent presented as a
+/// data extent never carries the id the leaf expects, and the reverse fails
+/// R2's unkeyed node hash.
+#[test]
+fn a_node_presented_as_data_fails_r1_in_integrity_mode() {
+    // A node-sized payload that is exactly one chunk, so the structural
+    // checks (the data `ulen` rule) pass and only the id decides.
+    let chunk = 16_384usize;
+    let vol = volume(CryptoMode::Integrity, chunk as u32, 24);
+    let c = vol.crypto.extents();
+    let node = pattern(chunk, 12);
+    let node_hash = c.chunk_id(ExtentKind::Node, &node);
+    assert_eq!(node_hash.0, *blake3::hash(&node).as_bytes());
+    let mut node_ext = Vec::new();
+    c.seal(
+        ExtentKind::Node,
+        &node_hash,
+        &enc_desc(Codec::Raw, node.len()),
+        &node,
+        &mut node_ext,
+    )
+    .expect("seal node");
+
+    // What a leaf would expect for data holding exactly these bytes (the
+    // guest wrote the node's bytes as its own data): the keyed id.
+    let data_id = c.chunk_id(ExtentKind::Data, &node);
+    assert_ne!(data_id, node_hash);
+    let prefix16 = lunix_format::IdPrefix::of(&data_id, IdLen::Sixteen);
+    let prefix32 = lunix_format::IdPrefix::of(&data_id, IdLen::ThirtyTwo);
+    for (what, prefix) in [("16", &prefix16), ("32", &prefix32)] {
+        for verify in [false, true] {
+            let mut e = expect_plain(chunk, None, verify);
+            e.id_prefix = Some(prefix);
+            let mut out = Vec::new();
+            let err = c
+                .open(ExtentKind::Data, &node_ext, &e, &mut out)
+                .expect_err("node as data must fail R1");
+            assert_eq!(err.kind(), ErrorKind::Auth, "prefix {what} verify {verify}");
+            assert!(out.is_empty());
+        }
+    }
+    let err = c
+        .open(
+            ExtentKind::Data,
+            &node_ext,
+            &expect_plain(chunk, Some(&data_id), false),
+            &mut Vec::new(),
+        )
+        .expect_err("full id");
+    assert_eq!(err.kind(), ErrorKind::Auth);
+    // The tag alone does not tell the kinds apart (D11): with the node's own
+    // hash as the expectation the extent opens, which is why R1 matters.
+    c.open(
+        ExtentKind::Data,
+        &node_ext,
+        &expect_plain(chunk, Some(&node_hash), false),
+        &mut Vec::new(),
+    )
+    .expect("the tag binds bytes, the expected id binds the kind");
+
+    // Data presented as a node: the data extent's header holds the keyed id,
+    // R2 expects the unkeyed node hash of the opened bytes.
+    let mut data_ext = Vec::new();
+    c.seal(
+        ExtentKind::Data,
+        &data_id,
+        &enc_desc(Codec::Raw, node.len()),
+        &node,
+        &mut data_ext,
+    )
+    .expect("seal data");
+    let mut e = expect_plain(chunk, Some(&node_hash), false);
+    e.chunk_size = 0;
+    let err = c
+        .open(ExtentKind::Node, &data_ext, &e, &mut Vec::new())
+        .expect_err("data as node must fail R2");
+    assert_eq!(err.kind(), ErrorKind::Auth);
+    // The old behaviour is gone: with unkeyed ids a node written as data was
+    // indistinguishable from data holding the same bytes.
+    assert_ne!(data_ext[16..48], node_ext[16..48]);
 }
 
 /// Flipping any single byte of an extent fails `open`: header, id, `clen`,
