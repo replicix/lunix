@@ -24,6 +24,9 @@ pub(crate) enum Material {
     Integrity {
         hmac: MacKey,
         tag: TagKey,
+        /// Purpose 0x0a: the keyed chunk id of data chunks (amendment
+        /// 2026-11-12). Node hashes stay unkeyed in this mode.
+        addressing: AddressingKey,
     },
     Encrypted {
         /// Kept to derive the DEK of an older `dek_gen` on demand.
@@ -96,11 +99,14 @@ impl VolumeKeys {
             (CryptoMode::Integrity, Some(root @ Root::Ik(_))) => {
                 let hmac = kdf::purpose_secret(profile, &root, &family, &Purpose::IntegrityHmac)?;
                 let tag = kdf::purpose_secret(profile, &root, &family, &Purpose::ExtentTag)?;
+                let addressing =
+                    kdf::purpose_secret(profile, &root, &family, &Purpose::IntegrityAddressing)?;
                 let fp = kdf::fingerprint(profile, &root, &family)?;
                 (
                     Material::Integrity {
                         hmac: MacKey::from_secret(hmac),
                         tag: TagKey::from_secret(tag),
+                        addressing: AddressingKey::from_secret(addressing),
                     },
                     fp,
                     DekGen(0),
@@ -250,6 +256,7 @@ impl VolumeKeys {
     #[cfg(feature = "test-rng")]
     pub fn addressing_key_for_tests(&self, node: bool) -> Option<[u8; 32]> {
         match &self.material {
+            Material::Integrity { addressing, .. } if !node => Some(addressing.expose_for_tests()),
             Material::Encrypted {
                 addressing,
                 node: n,

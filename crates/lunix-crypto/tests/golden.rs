@@ -22,6 +22,17 @@ use lunix_format::{
 use lunix_iface::crypto::{CommitCodec, EncodingDesc};
 use lunix_iface::store::CommitStore;
 
+macro_rules! golden {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../lunix-format/tests/golden/",
+            $name
+        ))
+        .to_vec()
+    };
+}
+
 const KAT: &str = include_str!("../../../bench/crypto-kat/raw/kat-vectors.json");
 
 fn kat(name: &str) -> Vec<u8> {
@@ -126,6 +137,18 @@ fn descriptor_b_and_its_derived_keys_match_the_doc() {
         hex::encode(&key[..]),
         "d56ef6bb95bf87c7b14ec9ad25b9eae3132d9120d815b04d6f467207f705d972"
     );
+    let ia = lunix_crypto::testing::purpose_key(
+        Profile::Default,
+        &ik_b(),
+        &desc.family_id,
+        &lunix_format::purpose::Purpose::IntegrityAddressing,
+    )
+    .expect("integrity addressing key");
+    assert_eq!(
+        hex::encode(ia),
+        "3e596debe98cf9c82d88e17c63d875e3f16dc9334a2dbe870f4dd827679372b8"
+    );
+    assert_eq!(keys.addressing_key_for_tests(false), Some(ia));
     // An IK has no data addressing key, no DEK and no metadata key.
     for p in [
         lunix_format::purpose::Purpose::DataAddressing,
@@ -143,6 +166,7 @@ fn descriptor_b_and_its_derived_keys_match_the_doc() {
     for p in [
         lunix_format::purpose::Purpose::IntegrityHmac,
         lunix_format::purpose::Purpose::ExtentTag,
+        lunix_format::purpose::Purpose::IntegrityAddressing,
     ] {
         assert!(
             lunix_crypto::testing::purpose_key(Profile::Default, &kmk, &desc.family_id, &p)
@@ -151,9 +175,15 @@ fn descriptor_b_and_its_derived_keys_match_the_doc() {
     }
 }
 
+/// Section 23.2: the doc's keyed id, the tag of the doc and its unkeyed twin
+/// on a plain volume.
 #[test]
 fn plain_and_keyed_tags_of_the_worked_extent() {
+    // Keyed BLAKE3 under the integrity addressing key (purpose 0x0a).
     let id = ChunkId(arr(&hex(
+        "8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede",
+    )));
+    let plain_id = ChunkId(arr(&hex(
         "c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566",
     )));
     // The 75-byte LZ4 block of the doc, written out.
@@ -173,29 +203,128 @@ fn plain_and_keyed_tags_of_the_worked_extent() {
         dict_id: None,
     };
 
-    // Volume B (integrity): the keyed tag of the doc.
+    // Volume B (integrity): the keyed id and the keyed tag of the doc.
     let (_, b) = volume_b();
+    assert_eq!(
+        hex::encode(
+            b.volume_keys()
+                .addressing_key_for_tests(false)
+                .expect("0x0a")
+        ),
+        "3e596debe98cf9c82d88e17c63d875e3f16dc9334a2dbe870f4dd827679372b8"
+    );
     assert_eq!(b.extents().chunk_id(ExtentKind::Data, &data), id);
     let mut out = Vec::new();
     b.extents()
         .seal(ExtentKind::Data, &id, &desc, &block, &mut out)
         .expect("seal");
     assert_eq!(out.len(), 143);
-    assert_eq!(hex::encode(&out[127..]), "5f2205bd62159515ed219a089987bb03");
+    assert_eq!(hex::encode(&out[127..]), "4e700344dd5d9ea60a34ba09c8a5f115");
+    assert_eq!(&out[16..48], &id.0);
+    // The whole extent equals the golden transcribed from the doc.
+    assert_eq!(out, golden!("a0-extent-plain-keyed.bin"));
 
-    // The same extent on a plain volume: the unkeyed tag.
+    // The same chunk on a plain volume: the unkeyed id and the unkeyed tag.
     let plain = volume(CryptoMode::Plain, 16_384, 3);
+    assert_eq!(
+        plain.crypto.extents().chunk_id(ExtentKind::Data, &data),
+        plain_id
+    );
     let mut out2 = Vec::new();
     plain
         .crypto
         .extents()
-        .seal(ExtentKind::Data, &id, &desc, &block, &mut out2)
+        .seal(ExtentKind::Data, &plain_id, &desc, &block, &mut out2)
         .expect("seal");
-    assert_eq!(&out2[..127], &out[..127]);
+    assert_eq!(&out2[..16], &out[..16]);
+    assert_eq!(&out2[16..48], &plain_id.0);
+    assert_eq!(&out2[48..127], &out[48..127]);
     assert_eq!(
         hex::encode(&out2[127..]),
         "f21b8c973dcefd5e68954f1c2261587a"
     );
+    assert_eq!(out2, golden!("03-extent-plain-unkeyed.bin"));
+}
+
+/// Section 23.5: the leaf, its node hash and its extent in the map pack, and
+/// the data prefix inside it.
+#[test]
+fn the_worked_leaf_and_its_extent_are_reproduced() {
+    let (_, b) = volume_b();
+    let c = b.extents();
+    let leaf = golden!("a0-node-leaf-one-entry.bin");
+    assert_eq!(leaf.len(), 45);
+    // The leaf's id column is the first 16 bytes of §23.2's keyed id.
+    let data = vec![0x41u8; 16_384];
+    let data_id = c.chunk_id(ExtentKind::Data, &data);
+    assert_eq!(&leaf[29..], &data_id.0[..16]);
+    // The node hash is unkeyed in integrity mode.
+    let leaf_hash = c.chunk_id(ExtentKind::Node, &leaf);
+    assert_eq!(
+        hex::encode(leaf_hash.0),
+        "dca03248122f117b77f7f5aeefbdd4867e0b4c958a051c8a245251324ef3b573"
+    );
+    let desc = EncodingDesc {
+        codec: Codec::Raw,
+        level: Level(0),
+        ulen: 45,
+        dict_id: None,
+    };
+    let mut ext = Vec::new();
+    c.seal(ExtentKind::Node, &leaf_hash, &desc, &leaf, &mut ext)
+        .expect("seal");
+    assert_eq!(ext.len(), 113);
+    assert_eq!(hex::encode(&ext[97..]), "26ff3ed4285b58271c9db42e836fb5b8");
+    assert_eq!(ext, golden!("03-extent-node.bin"));
+    let mut e = expect(0, Some(&leaf_hash));
+    let mut got = Vec::new();
+    c.open(ExtentKind::Node, &ext, &e, &mut got).expect("open");
+    assert_eq!(got, leaf);
+
+    // The root: header, child 0 = the leaf, 511 empty children.
+    let root = golden!("05-node-interior-root.bin");
+    assert_eq!(root.len(), 24_579);
+    // An interior node's hash input is its children's hashes, not its stored
+    // encoding (section 8.5), so the id comes from the doc, not from `chunk_id`.
+    let root_hash = ChunkId(arr(&hex(
+        "d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a",
+    )));
+    let mut rext = Vec::new();
+    let rdesc = EncodingDesc {
+        ulen: 24_579,
+        ..desc
+    };
+    c.seal(ExtentKind::Node, &root_hash, &rdesc, &root, &mut rext)
+        .expect("seal root");
+    assert_eq!(rext.len(), 24_647);
+    e = expect(0, Some(&root_hash));
+    got.clear();
+    c.open(ExtentKind::Node, &rext, &e, &mut got).expect("open");
+    assert_eq!(got, root);
+
+    // R1: the node extent presented as data never matches the data prefix.
+    let prefix = lunix_format::IdPrefix::of(&data_id, IdLen::Sixteen);
+    let mut as_data = expect(16_384, None);
+    as_data.id_prefix = Some(&prefix);
+    assert!(c
+        .open(ExtentKind::Data, &ext, &as_data, &mut Vec::new())
+        .is_err());
+    // And the data extent of 23.2 presented as the leaf fails R2's hash.
+    let data_ext = golden!("a0-extent-plain-keyed.bin");
+    let wrong_node = expect(0, Some(&leaf_hash));
+    assert!(c
+        .open(ExtentKind::Node, &data_ext, &wrong_node, &mut Vec::new())
+        .is_err());
+}
+
+fn expect<'a>(chunk: u32, id: Option<&'a ChunkId>) -> lunix_iface::crypto::OpenExpect<'a> {
+    lunix_iface::crypto::OpenExpect {
+        chunk_size: chunk,
+        chunk_id: id,
+        id_prefix: None,
+        verify_id: false,
+        output: lunix_iface::crypto::OpenOutput::Plaintext,
+    }
 }
 
 #[test]
@@ -217,11 +346,11 @@ fn genesis_and_commit_one_of_volume_b_are_reproduced() {
          338e717684fbe16a5d22c7618a3d893a25d6808689df893eb6af53d942bb03c2
          30510ecda1010000
          0200000000000000 0000004000000000 0000000000000000
-         69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca
+         d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a
          0200000000000000 71000000 476000 00
          0000000000000000 01000000 01000000 00000000 00000000
          0200000000000000 0100000000000000
-         4e3dc3b9db3ed5edee1f2bf7414bd1b5b70eb08bec33b9f5d53e00377e84ca00");
+         90291d1de8e5cebcf11f7b0b56d5c3c18925025604df373365cda4762166731d");
     let meta = crypto.meta();
     for (seq, bytes) in [(0u64, &genesis), (1, &commit1)] {
         // Opening authenticates the doc's bytes, sealing reproduces them.
@@ -251,17 +380,6 @@ fn genesis_and_commit_one_of_volume_b_are_reproduced() {
         .is_err());
     assert!(meta.open_commit(CommitSeq(1), &genesis).is_err());
     let _ = desc;
-}
-
-macro_rules! golden {
-    ($name:literal) => {
-        include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../lunix-format/tests/golden/",
-            $name
-        ))
-        .to_vec()
-    };
 }
 
 /// Golden commit objects of each non-FULL kind, MAC'd under volume B.

@@ -123,6 +123,11 @@ fn load() -> (usize, Vec<Expected>) {
     let mut rows = 0;
     let mut out = Vec::new();
     for line in text.lines() {
+        // Table E (amendment 2026-11-12) is the rollback-anchor stage that
+        // runs after `verify_chain`; it is not a result of `check_attach`.
+        if line.starts_with("## Table E") {
+            break;
+        }
         let Some(rest) = line.strip_prefix("| ") else {
             continue;
         };
@@ -307,6 +312,35 @@ fn name(r: &Result<lunix_crypto::AttachOk, AttachError>) -> String {
         Err(AttachError::WrongKmk) => "WrongKmk".into(),
         Err(other) => format!("{other:?}"),
     }
+}
+
+/// Table E is outside `check_attach`: pin the shape the chain step will load
+/// (rows 120-126, results `pass`, `Rollback` and `Fork`).
+#[test]
+fn table_e_rows_are_there_but_not_check_attach_cases() {
+    let text = std::fs::read_to_string(MATRIX).expect("attach-matrix.md");
+    let table_e = text.split("## Table E").nth(1).expect("Table E section");
+    let rows: Vec<Vec<&str>> = table_e
+        .lines()
+        .filter_map(|l| l.strip_prefix("| "))
+        .map(|r| {
+            r.trim_end()
+                .trim_end_matches('|')
+                .split('|')
+                .map(str::trim)
+                .collect()
+        })
+        .filter(|c: &Vec<&str>| c[0].parse::<u32>().is_ok())
+        .collect();
+    let ids: Vec<u32> = rows.iter().map(|c| c[0].parse().unwrap()).collect();
+    assert_eq!(ids, (120..=126).collect::<Vec<_>>());
+    assert!(rows.iter().all(|c| c.len() == 6));
+    let results: Vec<&str> = rows.iter().map(|c| c[4]).collect();
+    assert_eq!(results.iter().filter(|r| r.contains("Rollback")).count(), 1);
+    assert_eq!(results.iter().filter(|r| r.contains("Fork")).count(), 2);
+    // None of them is a case of `load`.
+    let (_, cases) = load();
+    assert!(cases.iter().all(|c| c.row < 120));
 }
 
 #[test]
