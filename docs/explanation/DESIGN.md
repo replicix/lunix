@@ -1075,13 +1075,16 @@ queues, not 8.
    tip_hash}` per volume (cheap, but a fresh host has none), a CSI-object
    floor hint, the maximum across mirrors, or a write-only notary bucket.
    A KMS has no monotonic counter.
-2. **Default chunk size.** 64 KiB against 16 KiB; ADR-5 gate, not run
-   (no trace could be obtained).
+2. **Default chunk size.** 64 KiB against 16 KiB. The MSR Cambridge
+   simulation favours 16 KiB on upload bytes but costs 4× the map and
+   index entries (ADR-5 gate outcome). Decided after phase 1 benchmarks.
 3. **Map write amplification** under scattered writes. Measured in
    phase 0: 0.18-0.55 of the dirty logical bytes in map bytes. DELTA-
    style map-delta records are the fallback if phase 1 finds that too
    high.
-4. **Cache policy** on block traces; ADR-14 gate, not run.
+4. **Cache policy.** S3-FIFO narrowly fails the ADR-14 rule on MSR
+   Cambridge; the policies differ by at most about 4 %. Revisited in
+   phase 2 with segment-granular eviction.
 5. **Express One Zone as a `sync-fast-wal` tier.** A later ADR.
 6. **Cross-volume dedup on the node cache** (golden images) without
    leaking across families.

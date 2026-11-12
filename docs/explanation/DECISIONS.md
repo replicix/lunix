@@ -20,8 +20,9 @@ carries a dated **Gate outcome** block, and the numbers are in
   ADR-11 (2026-11-12) for the format, with the six amendments from the
   crypto review (F2, F5, F6, F7, F9, F10). An external cryptographer
   review is still recommended before release; it does not block phase 1.
-- **Proposed, gate not run:** ADR-5 and ADR-14 (no trace could be
-  obtained without a licence acceptance).
+- **Proposed, gate run without a pass:** ADR-5 (the rule points to
+  16 KiB; the maintainer decides the default after phase 1) and ADR-14
+  (S3-FIFO narrowly fails; the policies differ by at most about 4 %).
 - **Proposed, phase 3 gate open:** ADR-28 (the phase 0 lane and
   two-PUT evidence is recorded).
 - **Proposed, no phase 0 gate:** all the others.
@@ -218,17 +219,26 @@ evaluated at 2 K and 5 K rec/s. Evidence:
 
 ## ADR-5: Fixed, aligned chunks; default 64 KiB; no content-defined chunking
 
-**Gate outcome (phase 0, 2026-11-12):** not run — no trace could be
-obtained without a licence acceptance; simulators ready
-(`spikes/tracesim`). MSR Cambridge and Tencent CBS sit behind a SNIA bot
-challenge and licence step, and Alibaba's link is behind a survey.
-Nothing was downloaded and no synthetic data is presented as a trace. 64
-KiB stays the proposed default and ADR-5 stays proposed. To close the
-gate, a person accepts the licence, downloads MSR (about 5 GB) onto the
-test host and runs `spikes/tracesim/run.sh`; the fixed rule then
-decides: 64 KiB is confirmed if at p50 and p90 S3(64) ≤ 1.25× the best
-S3(C), RMW(64) ≤ 2× RMW(16) and map write amplification p90 ≤ 25 %.
-Evidence: [tracesim](../../bench/tracesim/RESULTS.md),
+**Gate outcome (phase 0, 2026-11-12):** run on MSR Cambridge (27 of
+36 volumes with at least 1 GiB written; Alibaba and Tencent CBS not
+run). The fixed rule does **not** confirm 64 KiB and points to 16 KiB:
+S3 bytes per logical GiB written (data plus sealed map, T = 60 s,
+compression ratio 0.5) are p50 0.76 / p90 1.05 at 16 KiB against
+1.30 / 1.95 at 64 KiB and 3.03 / 5.57 at 256 KiB, and map write
+amplification p90 at 64 KiB is 68.8 % against the 25 % limit. The cost
+of 16 KiB: 3.9× the map (2,627 against 671 MiB per TiB touched, 48 B
+entries; about 0.46× that with ADR-8's encoding), 4× the chunk-index
+entries, per-extent crypto overhead about 19 % of a core at 5 GB/s
+against 4 %, and sealed map bytes above the uploaded data at T ≤ 60 s
+(193 % p90), which would need map-delta records. RMW per 1,000 writes:
+71 at 16 KiB, 58 at 64 KiB. The traces are 2007 enterprise servers with
+small random writes and no VM-image or database workloads.
+**Maintainer decision (2026-11-12): the default is decided after
+phase 1**, from phase 1 benchmarks with real file systems, databases and
+VM images; both 16 KiB and 64 KiB stay supported. Chunk size is a
+per-volume setting in the descriptor, so the default is not part of the
+format freeze. ADR-5 stays proposed. Evidence:
+[tracesim](../../bench/tracesim/RESULTS.md),
 [traces](../../bench/tracesim/TRACES.md).
 
 **Decision:**
@@ -758,15 +768,21 @@ owned by an independent writer.
 
 *Amended by ADR-26:* the local store is optional. Its role is `store`, `cache` or `none`.
 
-**Gate outcome (phase 0, 2026-11-12):** not run — no trace could be
-obtained without a licence acceptance; simulators ready
-(`spikes/tracesim`). All four policies (S3-FIFO, SIEVE, W-TinyLFU, LRU)
-are implemented and unit-tested, including the scan test, but nothing
-was measured. S3-FIFO stays proposed and ADR-14 stays proposed. The
-fixed rule that will decide: S3-FIFO is accepted if at 1, 5 and 10 %
-cache sizes its median miss ratio is ≤ 1.05× the best and ≤ LRU's, it
-loses to LRU on under 25 % of volumes, and it does not fail the scan
-test (more than 2 % absolute worse than LRU). Evidence:
+**Gate outcome (phase 0, 2026-11-12):** run on MSR Cambridge (27
+volumes, 64 KiB chunks). The fixed rule does **not** accept S3-FIFO, and
+no other policy meets the amendment margin. Median request miss ratios
+at 1 / 5 / 10 % of the working set: LRU 0.395 / 0.315 / 0.271, S3-FIFO
+0.382 / 0.297 / 0.261, SIEVE 0.396 / 0.294 / 0.255, W-TinyLFU 0.397 /
+0.309 / 0.269. S3-FIFO is within 5 % of the best and below LRU at every
+size, but it loses to LRU on 33 % of volumes at 1 % (limit under 25 %)
+and fails the scan test on one volume (mds_1, 5.1-5.3 points worse than
+LRU at 0.5-1 %; the mean over the 9 scan volumes is better than LRU).
+SIEVE is not 5 % better than S3-FIFO at two sizes; W-TinyLFU is worse.
+The policies differ by at most about 4 % in miss ratio, and the policy
+is implementation only (nothing on disk or in S3), so it can change in
+any release. S3-FIFO stays the working default and ADR-14 stays
+proposed; phase 2 revisits it with segment-granular eviction and
+Lunix's own traces. Evidence:
 [tracesim](../../bench/tracesim/RESULTS.md).
 
 **Decision:**

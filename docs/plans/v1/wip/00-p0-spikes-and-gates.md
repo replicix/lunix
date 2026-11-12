@@ -58,7 +58,7 @@ until the coordinator reviews it.
 | P0.3 recovery and feature table | done | ADR-16 and ADR-17 accepted (gate) with amendments; `BATCH_IO` with QUIESCE failed |
 | P0.4 `UPDATE_SIZE`, FLUSH/FUA | done | ADR-20 accepted (gate); the daemon validates sizes |
 | P0.5 journal | done | ADR-4 accepted (gate); group commit; one run per cell |
-| P0.6 trace simulation | not run | no trace could be obtained without a licence acceptance; simulators built and tested |
+| P0.6 trace simulation | done on MSR Cambridge | ADR-5: rule points to 16 KiB, default decided after phase 1 (maintainer); ADR-14: S3-FIFO narrowly fails, stays proposed; Alibaba and Tencent CBS not run |
 | P0.7 radix map | done | ADR-8 accepted (gate) with amendments |
 | P0.8 crypto review | done | review done; six format-changing findings; amendments accepted and ADR-11 accepted for the format by the maintainer (2026-11-12); external review still recommended before release |
 | P0.9 `replicix-core` | done outside this plan | commit `caa47b4`; Constellation `6e25bad6`; ADR-19 accepted |
@@ -67,9 +67,8 @@ until the coordinator reviews it.
 | P0.12 keeper-held RAM buffer | done | ADR-26 accepted (gate) for the keeper; the systemd FD-store variant is not run |
 
 **Remaining:**
-- **P0.6 traces.** A person accepts the SNIA licence and downloads MSR
-  (and Tencent CBS, or Alibaba through its survey) onto the test host,
-  then runs `spikes/tracesim/run.sh`. That decides ADR-5 and ADR-14.
+- **P0.6.** MSR Cambridge done (2026-11-12). Alibaba and Tencent CBS
+  remain optional; the chunk-size default moves to phase 1.
 - **P0.10.** R2, GCS and B2 credentials; S3 Express One Zone; the lane
   test with a shaped 200 MB/s bulk upload and enough samples for p99;
   PUT latency per size with 8 parallel streams.
