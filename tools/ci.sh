@@ -40,6 +40,10 @@ step "lunix-store with crashpoints: clippy and kill-sweep tests (lead, M7 review
 cargo clippy -j "$jobs" -p lunix-store --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-store --features crashpoints
 
+step "lunix-journal with crashpoints: clippy and kill tests (lead, M3)"
+cargo clippy -j "$jobs" -p lunix-journal --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-journal --features crashpoints --test crashpoints
+
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 
