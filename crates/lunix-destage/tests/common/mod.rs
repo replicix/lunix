@@ -351,10 +351,9 @@ impl Rig {
         destage_cut(cut, &self.deps(&index))
     }
 
-    /// The caller's steps after a successful destage: seal (C4), index inserts,
-    /// release (C9).
-    pub fn finish(&self, cut: &OverlayCut, mut out: DestageOutcome) -> DestageOutcome {
-        out.seal_open().expect("seal");
+    /// The coordinator's steps after a successful destage and its commit:
+    /// index inserts, release (C9).
+    pub fn finish(&self, cut: &OverlayCut, out: DestageOutcome) -> DestageOutcome {
         out.insert_into_index(&*self.index()).expect("index");
         self.overlay.release(cut);
         out
@@ -544,5 +543,101 @@ impl Rig {
     pub fn write_chunk(&self, ci: u64, data: &[u8]) {
         assert_eq!(data.len(), self.chunk_bytes());
         self.write(ci as usize * self.chunk_bytes(), data);
+    }
+}
+
+/// A map that fails `MapFull` once a transaction has taken `cap` updates, at
+/// `set` time like `lunix-map`, so that a probe transaction sees it before
+/// anything is stored.
+pub struct CapMap<'a> {
+    pub inner: &'a FlatMap,
+    pub cap: u64,
+}
+
+struct CapTxn<'a> {
+    inner: Box<dyn lunix_iface::map::MapTxn + 'a>,
+    left: u64,
+}
+
+impl lunix_iface::map::MapTxn for CapTxn<'_> {
+    fn set(&mut self, ci: ChunkNo, entry: DataEntry) -> lunix_iface::Result<()> {
+        self.take()?;
+        self.inner.set(ci, entry)
+    }
+    fn set_hole(&mut self, ci: ChunkNo) -> lunix_iface::Result<()> {
+        self.take()?;
+        self.inner.set_hole(ci)
+    }
+    fn rehint(&mut self, ci: ChunkNo, old: Hint, new: Hint) -> lunix_iface::Result<()> {
+        self.inner.rehint(ci, old, new)
+    }
+    fn commit(self: Box<Self>) -> lunix_iface::Result<lunix_iface::map::TxnReport> {
+        self.inner.commit()
+    }
+}
+
+impl CapTxn<'_> {
+    fn take(&mut self) -> lunix_iface::Result<()> {
+        if self.left == 0 {
+            return Err(lunix_iface::Error::MapFull);
+        }
+        self.left -= 1;
+        Ok(())
+    }
+}
+
+impl BlockMap for CapMap<'_> {
+    fn chunk_count(&self) -> u64 {
+        self.inner.chunk_count()
+    }
+    fn get(&self, ci: ChunkNo) -> lunix_iface::Result<Option<DataEntry>> {
+        self.inner.get(ci)
+    }
+    fn try_get_cached(&self, ci: ChunkNo) -> lunix_iface::map::Cached {
+        self.inner.try_get_cached(ci)
+    }
+    fn begin_update(&self) -> lunix_iface::Result<Box<dyn lunix_iface::map::MapTxn + '_>> {
+        Ok(Box::new(CapTxn {
+            inner: self.inner.begin_update()?,
+            left: self.cap,
+        }))
+    }
+    fn seal(
+        &self,
+        packs: &mut dyn lunix_iface::store::PackWrite,
+    ) -> lunix_iface::Result<lunix_iface::map::SealResult> {
+        self.inner.seal(packs)
+    }
+    fn grow(&self, n: u64) -> lunix_iface::Result<()> {
+        self.inner.grow(n)
+    }
+    fn root(&self) -> lunix_format::commit::MapRoot {
+        self.inner.root()
+    }
+    fn dirty_leaf_count(&self) -> u64 {
+        self.inner.dirty_leaf_count()
+    }
+    fn walk_leaves_skipping(
+        &self,
+        root: &lunix_format::commit::MapRoot,
+        skip: &std::collections::HashSet<lunix_iface::map::NodeHash>,
+        f: &mut dyn FnMut(ChunkNo, &DataEntry),
+    ) -> lunix_iface::Result<()> {
+        self.inner.walk_leaves_skipping(root, skip, f)
+    }
+    fn walk_nodes(
+        &self,
+        root: &lunix_format::commit::MapRoot,
+        f: &mut dyn FnMut(&lunix_iface::map::NodeRef),
+    ) -> lunix_iface::Result<()> {
+        self.inner.walk_nodes(root, f)
+    }
+    fn walk_nodes_skipping(
+        &self,
+        root: &lunix_format::commit::MapRoot,
+        skip: &std::collections::HashSet<lunix_iface::map::NodeHash>,
+        f: &mut dyn FnMut(&lunix_iface::map::NodeRef),
+    ) -> lunix_iface::Result<()> {
+        self.inner.walk_nodes_skipping(root, skip, f)
     }
 }

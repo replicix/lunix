@@ -13,7 +13,10 @@ use lunix_format::WriteSeq;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
 
-const CHUNKS: u64 = 6;
+/// Device sizes in chunks: small (dense overwrites) and larger (many jobs,
+/// the result window, more segments per cut).
+const SMALL: u64 = 6;
+const BIG: u64 = 40;
 
 #[derive(Clone, Debug)]
 enum Op {
@@ -43,13 +46,14 @@ struct Case {
     batch: u8,
     small_segments: bool,
     codec: u8,
+    big: bool,
 }
 
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        5 => (0..CHUNKS as u8, 0u8..16, 1u8..40, 0u8..5, any::<u16>())
+        5 => (0..BIG as u8, 0u8..16, 1u8..40, 0u8..5, any::<u16>())
             .prop_map(|(chunk, blk, nblk, kind, seed)| Op::Write { chunk, blk, nblk, kind, seed }),
-        2 => (0..CHUNKS as u8, 0u8..16, 1u8..40)
+        2 => (0..BIG as u8, 0u8..16, 1u8..40)
             .prop_map(|(chunk, blk, nblk)| Op::Discard { chunk, blk, nblk }),
         3 => (0u8..4).prop_map(|back| Op::Cut { back }),
         1 => Just(Op::ReopenIndex),
@@ -64,15 +68,17 @@ fn case() -> impl Strategy<Value = Case> {
         prop::sample::select(vec![1u8, 2, 16]),
         any::<bool>(),
         0u8..5,
+        any::<bool>(),
     )
         .prop_map(
-            |(ops, policy, workers, batch, small_segments, codec)| Case {
+            |(ops, policy, workers, batch, small_segments, codec, big)| Case {
                 ops,
                 policy,
                 workers,
                 batch,
                 small_segments,
                 codec,
+                big,
             },
         )
 }
@@ -103,7 +109,8 @@ fn run_case(cs: u32, c: &Case, cuts: &AtomicUsize) {
         (CodecPolicy::Auto, 5),
     ];
     let (policy, level) = policies[usize::from(c.policy)];
-    let mut rc = RigConfig::new(cs, CHUNKS);
+    let chunks = if c.big { BIG } else { SMALL };
+    let mut rc = RigConfig::new(cs, chunks);
     rc.policy = policy;
     rc.level = level;
     rc.workers = usize::from(c.workers);
@@ -114,7 +121,7 @@ fn run_case(cs: u32, c: &Case, cuts: &AtomicUsize) {
     let mut r = Rig::new(rc);
     r.config.batch_chunks = usize::from(c.batch);
     let chunk_blocks = u64::from(cs) / BLOCK as u64;
-    let total_blocks = CHUNKS * chunk_blocks;
+    let total_blocks = chunks * chunk_blocks;
     let mut prev_cut = WriteSeq(0);
 
     let do_cut = |r: &Rig, back: u8, prev: &mut WriteSeq| {
@@ -137,13 +144,15 @@ fn run_case(cs: u32, c: &Case, cuts: &AtomicUsize) {
                 kind,
                 seed,
             } => {
-                let start = u64::from(chunk) * chunk_blocks + u64::from(blk) % chunk_blocks;
+                let start =
+                    (u64::from(chunk) % chunks) * chunk_blocks + u64::from(blk) % chunk_blocks;
                 let n = u64::from(nblk).min(total_blocks - start);
                 let bytes = data(kind, seed, n as usize * BLOCK);
                 r.write(start as usize * BLOCK, &bytes);
             }
             Op::Discard { chunk, blk, nblk } => {
-                let start = u64::from(chunk) * chunk_blocks + u64::from(blk) % chunk_blocks;
+                let start =
+                    (u64::from(chunk) % chunks) * chunk_blocks + u64::from(blk) % chunk_blocks;
                 let n = u64::from(nblk).min(total_blocks - start);
                 r.discard(start as usize * BLOCK, n as usize * BLOCK);
             }

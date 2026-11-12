@@ -31,7 +31,11 @@ pub(crate) struct PieceFacts {
 
 /// Validates the pieces against their chunk (a violation is a bug in the
 /// overlay, not a data error) and summarises them.
-pub(crate) fn check_pieces(cc: &CutChunk, chunk_blocks: u64) -> Result<PieceFacts> {
+pub(crate) fn check_pieces(
+    cc: &CutChunk,
+    chunk_blocks: u64,
+    cut_seq: WriteSeq,
+) -> Result<PieceFacts> {
     let bad = |why: &'static str| Error::Invalid { why };
     let base = cc
         .chunk
@@ -55,6 +59,11 @@ pub(crate) fn check_pieces(cc: &CutChunk, chunk_blocks: u64) -> Result<PieceFact
             PieceSource::None => continue,
             PieceSource::Hole => {}
             PieceSource::Journal(_) => all_holes = false,
+        }
+        // The cut holds exactly the records up to `cut_seq`; one above it
+        // would put a later write into a commit that does not own it.
+        if p.write_seq == WriteSeq(0) || p.write_seq > cut_seq {
+            return Err(bad("piece write_seq outside 1 ..= cut_seq"));
         }
         covered += p.range.blocks;
         lo = lo.min(p.write_seq);

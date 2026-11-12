@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use common::*;
-use lunix_destage::{destage_cut_with_cancel, DestageConfig};
+use lunix_destage::{destage_cut_with_cancel, DestageConfig, ErrorClass, Pressure};
 use lunix_format::volume::CodecPolicy;
 use lunix_format::{Codec, CryptoMode, WriteSeq};
 use lunix_iface::crypto::ExtentCodec;
@@ -48,7 +48,7 @@ fn identical_chunks_make_one_extent() {
         let out = r.run_cut(r.last_seq());
         assert_eq!(out.stats.dedup_hits, 1);
         assert_eq!(out.stats.unique_stored, 0);
-        assert!(out.segments.is_empty() && out.open.is_none());
+        assert!(out.segments.is_empty());
         assert_eq!(r.extent_count(), 1);
         r.assert_equals(&r.model_at(r.last_seq()));
     }
@@ -216,15 +216,8 @@ fn full_segments_roll_and_the_cut_lists_them() {
     let cut = r.cut(r.last_seq());
     let out = r.destage(&cut).expect("destage");
     assert!(out.segments.len() >= 6, "{} segments", out.segments.len());
-    let (rolled, last) = out.segments.split_at(out.segments.len() - 1);
-    assert!(
-        rolled.iter().all(|s| s.sealed.is_some()),
-        "full ones are sealed"
-    );
-    assert!(
-        last[0].sealed.is_none() && out.open.is_some(),
-        "the last stays open"
-    );
+    // Every segment is already on disk and sealed when the cut returns.
+    assert_eq!(r.store.list().unwrap().len(), out.segments.len());
     let total: usize = out.segments.iter().map(|s| s.entries.len()).sum();
     assert_eq!(total, 20);
     // LBA order: segment ids and offsets grow with the chunk number.
@@ -235,7 +228,6 @@ fn full_segments_roll_and_the_cut_lists_them() {
         assert!((e.seg.raw(), e.off) > prev, "chunk {ci} out of order");
         prev = (e.seg.raw(), e.off);
     }
-    // write_seq ranges are ordered and disjoint-ish (one record per chunk here).
     for w in out.segments.windows(2) {
         assert!(w[0].writes.last < w[1].writes.first);
     }
@@ -253,7 +245,7 @@ fn full_segments_roll_and_the_cut_lists_them() {
 }
 
 #[test]
-fn a_failed_chunk_fails_the_cut_and_applies_nothing() {
+fn a_failed_chunk_fails_the_cut_applies_nothing_and_deletes_its_segments() {
     let cs = 16u32 << 10;
     let mut c = RigConfig::new(cs, 32);
     c.policy = CodecPolicy::None;
@@ -267,12 +259,17 @@ fn a_failed_chunk_fails_the_cut_and_applies_nothing() {
     let cut = r.cut(r.last_seq());
     let err = r.destage(&cut).expect_err("must fail");
     assert_eq!(err.kind(), ErrorKind::NoSpace);
+    assert_eq!(err.class, ErrorClass::AfterSpace);
     assert!(r.snapshot().is_empty(), "nothing applied to the map");
     assert!(
         !err.partial.segments.is_empty(),
         "the rolled segments are reported"
     );
-    assert!(err.partial.segments.iter().any(|s| s.sealed.is_some()));
+    assert!(err.partial.freed_bytes > 0);
+    assert!(
+        r.store.list().unwrap().is_empty(),
+        "the orphans were deleted"
+    );
     // The overlay still holds the data; the retry succeeds and equals the model.
     let out = r.destage(&cut).expect("retry");
     r.finish(&cut, out);
@@ -280,7 +277,78 @@ fn a_failed_chunk_fails_the_cut_and_applies_nothing() {
 }
 
 #[test]
-fn map_full_leaves_the_map_untouched() {
+fn map_full_is_found_before_anything_is_stored() {
+    let cs = 16u32 << 10;
+    let r = Rig::new(RigConfig::new(cs, 16));
+    for ci in 0..6u64 {
+        r.write_chunk(ci, &random_bytes(ci, cs as usize));
+    }
+    let cut = r.cut(r.last_seq());
+    let index = r.index();
+    // The map takes five updates per transaction; the cut has six chunks.
+    let cap = CapMap {
+        inner: &r.map,
+        cap: 5,
+    };
+    let mut deps = r.deps(&index);
+    deps.map = &cap;
+    let err = lunix_destage::destage_cut(&cut, &deps).expect_err("map full");
+    assert_eq!(err.kind(), ErrorKind::MapFull);
+    assert_eq!(
+        err.class,
+        ErrorClass::CutTooLarge,
+        "no dirty leaf: sealing cannot help"
+    );
+    assert!(err.partial.segments.is_empty());
+    assert_eq!(
+        r.store.faults().hits().get("segment.append"),
+        None,
+        "nothing was stored"
+    );
+    assert!(r.store.list().unwrap().is_empty());
+    assert!(r.snapshot().is_empty());
+    // A cut that fits goes through the same map.
+    let cap = CapMap {
+        inner: &r.map,
+        cap: 6,
+    };
+    deps.map = &cap;
+    lunix_destage::destage_cut(&cut, &deps).expect("fits");
+}
+
+#[test]
+fn a_commit_time_map_full_deletes_what_the_cut_stored() {
+    // FlatMap checks its cap at commit, so this one is found after the extents
+    // are on disk: they must not stay behind.
+    let cs = 16u32 << 10;
+    let r = Rig::new(RigConfig::new(cs, 1200));
+    let map = lunix_testkit::FlatMap::new(
+        r.codec.clone(),
+        Arc::new(r.store.clone()),
+        1200,
+        lunix_format::IdLen::ThirtyTwo,
+    )
+    .with_dirty_leaf_cap(1);
+    // Chunks 0 and 600 sit in two different leaves of 512 chunks.
+    r.write_chunk(0, &random_bytes(1, cs as usize));
+    r.write_chunk(600, &random_bytes(2, cs as usize));
+    let cut = r.cut(r.last_seq());
+    let index = r.index();
+    let mut deps = r.deps(&index);
+    deps.map = &map;
+    let err = lunix_destage::destage_cut(&cut, &deps).expect_err("map full");
+    assert_eq!(err.kind(), ErrorKind::MapFull);
+    assert_eq!(err.class, ErrorClass::CutTooLarge);
+    assert!(!err.partial.segments.is_empty() && err.partial.freed_bytes > 0);
+    assert!(
+        r.store.list().unwrap().is_empty(),
+        "the cut's segments are gone"
+    );
+    assert!(map.snapshot().is_empty());
+}
+
+#[test]
+fn a_map_with_dirty_leaves_asks_for_a_seal_not_a_smaller_cut() {
     let cs = 16u32 << 10;
     let r = Rig::new(RigConfig::new(cs, 16));
     let map = lunix_testkit::FlatMap::new(
@@ -289,15 +357,47 @@ fn map_full_leaves_the_map_untouched() {
         16,
         lunix_format::IdLen::ThirtyTwo,
     )
-    .with_dirty_leaf_cap(0);
+    .with_dirty_leaf_cap(1);
     r.write_chunk(0, &random_bytes(1, cs as usize));
-    let cut = r.cut(r.last_seq());
     let index = r.index();
     let mut deps = r.deps(&index);
     deps.map = &map;
-    let err = lunix_destage::destage_cut(&cut, &deps).expect_err("map full");
-    assert_eq!(err.kind(), ErrorKind::MapFull);
-    assert!(map.snapshot().is_empty());
+    let cut = r.cut(r.last_seq());
+    lunix_destage::destage_cut(&cut, &deps).expect("first cut");
+    r.write_chunk(1, &random_bytes(2, cs as usize));
+    let cut = r.cut(r.last_seq());
+    let err = lunix_destage::destage_cut(&cut, &deps).expect_err("cap reached");
+    assert_eq!(
+        (err.kind(), err.class),
+        (ErrorKind::MapFull, ErrorClass::AfterMapSeal)
+    );
+    assert!(err.class.is_retryable());
+}
+
+#[test]
+fn every_map_entry_is_readable_the_moment_the_cut_returns() {
+    // A partial overwrite stores a new extent in the last segment of the cut;
+    // the untouched blocks of that chunk are served by the map alone.
+    for cs in SIZES {
+        let r = rig(cs);
+        let base = random_bytes(5, cs as usize);
+        r.write_chunk(1, &base);
+        r.run_cut(r.last_seq());
+        r.write(cs as usize, &random_bytes(6, BLOCK));
+        let cut = r.cut(r.last_seq());
+        let out = r.destage(&cut).expect("destage");
+        assert_eq!(out.stats.cold_rmw, 1);
+        // Before the coordinator does anything else: read through the map.
+        let got = r.read_chunk(1);
+        assert_eq!(&got[BLOCK..], &base[BLOCK..], "untouched blocks of {cs}");
+        for e in r.snapshot().values() {
+            let mut raw = Vec::new();
+            r.store
+                .read_extent(&lunix_iface::map::entry_hint(e), &mut raw)
+                .expect("sealed and readable");
+        }
+        r.finish(&cut, out);
+    }
 }
 
 #[test]
@@ -338,7 +438,7 @@ fn read_only_and_cancelled_and_malformed_cuts_are_refused() {
 fn an_empty_cut_does_nothing() {
     let r = rig(16 << 10);
     let out = r.destage(&r.cut(WriteSeq(0))).expect("empty");
-    assert!(out.segments.is_empty() && out.open.is_none());
+    assert!(out.segments.is_empty());
     assert_eq!(out.stats.chunks_total, 0);
 }
 
@@ -450,29 +550,88 @@ fn accounting_adds_up() {
 }
 
 #[test]
-fn backpressure_degrades_to_lz4_then_raw() {
+fn backpressure_degrades_to_lz4_then_raw_one_level_per_cut() {
     let cs = 16u32 << 10;
-    let mut c = RigConfig::new(cs, 16);
-    c.workers = 2;
-    let mut r = Rig::new(c);
-    r.config = DestageConfig {
-        workers: 2,
-        batch_chunks: 1,
-        lz4_depth: Some(2),
-        raw_depth: Some(6),
-        ..DestageConfig::default()
-    };
-    for ci in 0..12u64 {
-        r.write_chunk(ci, &text_bytes(500 + ci, cs as usize));
+    for (pressure, lz4_bytes, raw_bytes) in [
+        (Pressure::Lz4, None, None),
+        (Pressure::Raw, None, None),
+        (Pressure::None, Some(u64::from(cs) * 5), None),
+        (Pressure::None, Some(1), Some(u64::from(cs) * 5)),
+    ] {
+        let mut r = Rig::new(RigConfig::new(cs, 16));
+        r.config = DestageConfig {
+            pressure,
+            lz4_cut_bytes: lz4_bytes,
+            raw_cut_bytes: raw_bytes,
+            ..r.config
+        };
+        for ci in 0..12u64 {
+            r.write_chunk(ci, &text_bytes(500 + ci, cs as usize));
+        }
+        let out = r.run_cut(r.last_seq());
+        let s = out.stats;
+        if pressure == Pressure::Raw || raw_bytes.is_some() {
+            assert_eq!((s.degraded_raw, s.degraded_lz4, s.zstd_calls), (12, 0, 0));
+            assert_eq!(s.chunks_by_codec[Codec::Raw.id() as usize], 12);
+        } else {
+            assert_eq!((s.degraded_raw, s.degraded_lz4, s.zstd_calls), (0, 12, 0));
+            assert_eq!(s.chunks_by_codec[Codec::Lz4.id() as usize], 12);
+        }
+        r.assert_equals(&r.model_at(r.last_seq()));
     }
+}
+
+#[test]
+fn the_layout_under_pressure_does_not_depend_on_which_job_claims_a_duplicate() {
+    let cs = 16u32 << 10;
+    let mut snaps = Vec::new();
+    for workers in [1usize, 2, 4, 8] {
+        let mut c = RigConfig::new(cs, 40);
+        c.workers = workers;
+        let mut r = Rig::new(c);
+        r.config = DestageConfig {
+            workers,
+            batch_chunks: 1,
+            pressure: Pressure::Lz4,
+            ..r.config
+        };
+        for ci in 0..40u64 {
+            let kind = [1u64, 2, 1, 3, 2, 1, 9, 4][ci as usize % 8];
+            r.write_chunk(ci, &text_bytes(kind, cs as usize));
+        }
+        r.run_cut(r.last_seq());
+        r.assert_equals(&r.model_at(r.last_seq()));
+        snaps.push(r.snapshot());
+    }
+    assert!(snaps.windows(2).all(|w| w[0] == w[1]));
+}
+
+#[test]
+fn a_lean_volume_reads_its_base_as_a_scan() {
+    let cs = 16u32 << 10;
+    let mut c = RigConfig::new(cs, 8);
+    c.id_len = lunix_format::IdLen::Zero;
+    let r = Rig::new(c);
+    r.write_chunk(0, &random_bytes(1, cs as usize));
+    r.run_cut(r.last_seq());
+    r.write(BLOCK, &random_bytes(2, BLOCK));
     let out = r.run_cut(r.last_seq());
-    // Job i starts with 11 - i jobs behind it: 11..=7 raw, 6..=3 LZ4, 2..=0 normal.
-    assert_eq!(out.stats.degraded_raw, 5);
-    assert_eq!(out.stats.degraded_lz4, 4);
-    assert_eq!(out.stats.zstd_calls, 3);
-    assert_eq!(out.stats.lz4_calls, 4);
-    assert_eq!(out.stats.chunks_by_codec[Codec::Raw.id() as usize], 5);
+    assert_eq!(out.stats.cold_rmw, 1);
     r.assert_equals(&r.model_at(r.last_seq()));
+}
+
+#[test]
+fn a_piece_above_the_cut_is_refused() {
+    let cs = 16u32 << 10;
+    let r = Rig::new(RigConfig::new(cs, 4));
+    r.write_chunk(0, &random_bytes(1, cs as usize));
+    let mut cut = r.cut(r.last_seq());
+    cut.cut_seq = WriteSeq(0);
+    let err = r.destage(&cut).expect_err("overlay bug");
+    assert_eq!(
+        (err.kind(), err.class),
+        (ErrorKind::Invalid, ErrorClass::Permanent)
+    );
 }
 
 #[test]
@@ -484,6 +643,7 @@ fn a_destage_error_leaves_overlay_and_index_alone() {
     let cut = r.cut(r.last_seq());
     let err = r.destage(&cut).expect_err("io");
     assert_eq!(err.kind(), ErrorKind::Io);
+    assert_eq!(err.class, ErrorClass::Transient);
     assert_eq!(r.index().dirty_entries(), 0);
     assert_eq!(r.overlay.len_blocks(), (cs as u64) / 4096);
 }
@@ -511,6 +671,7 @@ fn a_host_eio_makes_the_volume_read_only_and_names_the_cause() {
     let cut = r.cut(r.last_seq());
     let err = r.destage_via(&cut, &t).expect_err("eio");
     assert_eq!(err.kind(), ErrorKind::Io, "the cause, not a bare Closed");
+    assert_eq!((err.class, err.chunk), (ErrorClass::Stop, Some(0)));
     assert!(r.space.is_read_only(), "fatal_io was called");
 }
 

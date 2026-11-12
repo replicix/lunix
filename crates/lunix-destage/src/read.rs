@@ -90,11 +90,14 @@ pub(crate) fn read_base(
     stats: &mut DestageStats,
 ) -> Result<()> {
     let hint = entry_hint(entry);
+    // R1: a lean volume (`id_len = 0`) has no prefix to compare, so its reads
+    // are scans and recompute the id (the key commitment).
+    let lean = deps.params.id_len == lunix_format::IdLen::Zero;
     let expect = OpenExpect {
         chunk_size: deps.params.chunk_size,
         chunk_id: None,
         id_prefix: Some(&entry.prefix),
-        verify_id: false,
+        verify_id: lean,
         output: OpenOutput::Plaintext,
     };
     let first = match read_open(deps, &hint, &expect, raw, out) {

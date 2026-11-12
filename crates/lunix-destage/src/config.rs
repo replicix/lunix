@@ -4,6 +4,8 @@ use lunix_format::volume::{CodecPolicy, VolumeDescriptor};
 use lunix_format::IdLen;
 use lunix_iface::{Error, Result};
 
+use crate::compress::Pressure;
+
 /// 4 KiB: the overlay's block size.
 pub(crate) const BLOCK: u64 = 4096;
 
@@ -64,16 +66,20 @@ pub struct DestageConfig {
     /// `min(batch_chunks, batch_bytes / chunk_size)` chunks, at least one.
     pub batch_bytes: usize,
     /// How many jobs may be finished and waiting for the in-order packer
-    /// before workers hold back (bounds the memory of sealed extents).
-    /// Default `4 * workers`.
+    /// before workers hold back (bounds the memory of sealed extents). At
+    /// least `workers`. Default `4 * workers`.
     pub result_window: usize,
-    /// Backpressure step 1: a job that starts while more than this many jobs
-    /// have not started yet compresses with LZ4 instead of the policy's codec.
-    /// `None` switches degrading off.
-    pub lz4_depth: Option<usize>,
-    /// Backpressure step 2: above this depth chunks are stored raw. Must not
-    /// be below `lz4_depth`.
-    pub raw_depth: Option<usize>,
+    /// Backpressure the coordinator asks for (journal fill, dirty bytes, the
+    /// ladder's "throttle destage" rung). One level for the whole cut, so the
+    /// stored codec never depends on thread timing.
+    pub pressure: Pressure,
+    /// A cut of more than this many bytes (chunks times chunk size) is
+    /// compressed with LZ4 instead of the policy's codec, whatever `pressure`
+    /// says (a large backlog is itself pressure). `None` switches it off.
+    pub lz4_cut_bytes: Option<u64>,
+    /// A cut of more than this many bytes is stored raw. Must not be below
+    /// `lz4_cut_bytes`.
+    pub raw_cut_bytes: Option<u64>,
     /// Bytes the `auto` probe compresses (default 4096).
     pub probe_len: usize,
     /// The probe must save at least this percentage of its input for `auto`
@@ -90,8 +96,9 @@ impl Default for DestageConfig {
             batch_chunks: 16,
             batch_bytes: 1 << 20,
             result_window: workers * 4,
-            lz4_depth: Some(4096),
-            raw_depth: Some(16384),
+            pressure: Pressure::None,
+            lz4_cut_bytes: Some(4 << 30),
+            raw_cut_bytes: Some(16 << 30),
             probe_len: 4096,
             probe_min_saving_percent: 6,
         }
@@ -102,17 +109,17 @@ impl DestageConfig {
     /// Checks the tuning.
     ///
     /// # Errors
-    /// `Invalid` for a zero worker count, batch or window, a probe length of
-    /// zero or a saving above 100, or `raw_depth` below `lz4_depth`.
+    /// `Invalid` for a zero worker count or batch, a result window below the worker count, a probe length of
+    /// zero or a saving above 100, or `raw_cut_bytes` below `lz4_cut_bytes`.
     pub fn validate(&self) -> Result<()> {
-        let depths_ok = match (self.lz4_depth, self.raw_depth) {
+        let depths_ok = match (self.lz4_cut_bytes, self.raw_cut_bytes) {
             (Some(l), Some(r)) => l <= r,
             _ => true,
         };
         let ok = self.workers >= 1
             && self.batch_chunks >= 1
             && self.batch_bytes >= 1
-            && self.result_window >= 1
+            && self.result_window >= self.workers
             && self.probe_len >= 1
             && self.probe_min_saving_percent <= 100
             && depths_ok;
@@ -127,5 +134,20 @@ impl DestageConfig {
     pub(crate) fn chunks_per_job(&self, chunk_size: u32) -> usize {
         let by_bytes = self.batch_bytes / chunk_size as usize;
         self.batch_chunks.min(by_bytes).max(1)
+    }
+}
+
+impl DestageConfig {
+    /// The pressure for a cut of `bytes` bytes: the larger of the requested
+    /// level and the one the cut's size implies.
+    pub(crate) fn pressure_for(&self, bytes: u64) -> Pressure {
+        let by_size = if self.raw_cut_bytes.is_some_and(|t| bytes > t) {
+            Pressure::Raw
+        } else if self.lz4_cut_bytes.is_some_and(|t| bytes > t) {
+            Pressure::Lz4
+        } else {
+            Pressure::None
+        };
+        self.pressure.max(by_size)
     }
 }

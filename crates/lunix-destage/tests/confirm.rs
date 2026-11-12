@@ -4,6 +4,7 @@
 mod common;
 
 use common::*;
+use lunix_destage::ErrorClass;
 use lunix_format::node::DataEntry;
 use lunix_format::Hint;
 use lunix_iface::map::{entry_hint, BlockMap, ChunkNo};
@@ -95,7 +96,7 @@ fn a_correct_hinted_hit_is_adopted_without_a_store() {
         assert_eq!(out.stats.dedup_confirmed, 1, "{name}");
         assert_eq!(out.stats.dedup_hits, 1);
         assert_eq!(out.stats.unique_stored, 0);
-        assert!(out.segments.is_empty() && out.open.is_none());
+        assert!(out.segments.is_empty());
         assert_eq!(t.reads(), 1, "exactly one confirmation read");
         r.finish(&cut, out);
         assert_eq!(r.extent_count(), extents);
@@ -202,6 +203,12 @@ fn r1_a_leaf_naming_a_with_a_hint_at_b_fails_the_rmw() {
         let empty = MemIndex::new(r.store.mem_ids());
         let err = r.destage_with_index(&cut, &empty).expect_err("must fail");
         assert_eq!(err.kind(), ErrorKind::Auth, "{name}");
+        assert_eq!(
+            err.class,
+            ErrorClass::Permanent,
+            "never retry a forged base"
+        );
+        assert_eq!(err.chunk, Some(2), "the failing chunk is named");
         assert!(err.partial.stats.extent_auth_failures >= 1);
         assert_eq!(r.snapshot(), before, "{name}: the map is untouched");
         assert_eq!(

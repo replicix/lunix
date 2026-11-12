@@ -20,6 +20,25 @@ use crate::read::confirm_hint;
 use crate::scan::is_all_zero;
 use crate::stats::{ns, DestageStats};
 
+/// A failure and the chunk it happened at, where there is one.
+pub(crate) struct Failure {
+    pub error: Error,
+    pub chunk: Option<u64>,
+}
+
+impl Failure {
+    pub(crate) fn at(error: Error, chunk: u64) -> Self {
+        Self {
+            error,
+            chunk: Some(chunk),
+        }
+    }
+
+    pub(crate) fn general(error: Error) -> Self {
+        Self { error, chunk: None }
+    }
+}
+
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -180,15 +199,19 @@ impl<'a> Worker<'a> {
     pub(crate) fn job(
         &mut self,
         chunks: &[CutChunk],
+        cut_seq: WriteSeq,
         pressure: Pressure,
         stats: &mut DestageStats,
-    ) -> Result<Vec<ChunkResult>> {
+    ) -> std::result::Result<Vec<ChunkResult>, Failure> {
         let mut out = Vec::with_capacity(chunks.len());
         for cc in chunks {
             if (self.cancel)() {
-                return Err(Error::Closed);
+                return Err(Failure::general(Error::Closed));
             }
-            out.push(self.chunk(cc, pressure, stats)?);
+            out.push(
+                self.chunk(cc, cut_seq, pressure, stats)
+                    .map_err(|e| Failure::at(e, cc.chunk))?,
+            );
         }
         Ok(out)
     }
@@ -196,13 +219,14 @@ impl<'a> Worker<'a> {
     fn chunk(
         &mut self,
         cc: &CutChunk,
+        cut_seq: WriteSeq,
         pressure: Pressure,
         stats: &mut DestageStats,
     ) -> Result<ChunkResult> {
         let deps = self.deps;
         let size = deps.params.chunk_size;
         let t = Instant::now();
-        let facts = check_pieces(cc, deps.params.chunk_blocks())?;
+        let facts = check_pieces(cc, deps.params.chunk_blocks(), cut_seq)?;
         if cc.chunk >= deps.map.chunk_count() {
             return Err(Error::invalid("cut chunk beyond the map"));
         }
@@ -243,7 +267,16 @@ impl<'a> Worker<'a> {
         let hit = deps.index.get_for_dedup(&id)?;
         let adopted = match hit {
             None => None,
-            Some(h) if h.confirm == Confirm::Verified => Some(h.hint),
+            // A verified hint is trusted, but the map entry's invariant is kept
+            // locally: a payload is 1 ..= chunk size bytes.
+            Some(h) if h.confirm == Confirm::Verified => {
+                if h.hint.clen == 0 || h.hint.clen > size {
+                    stats.dedup_rejected += 1;
+                    None
+                } else {
+                    Some(h.hint)
+                }
+            }
             Some(h) => {
                 if confirm_hint(deps, &id, &h.hint, &mut self.raw, &mut self.scratch, stats)? {
                     stats.dedup_confirmed += 1;

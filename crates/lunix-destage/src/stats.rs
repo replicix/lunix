@@ -10,6 +10,7 @@ pub const CODEC_SLOTS: usize = 4;
 
 /// Index of `codec` in the per-codec arrays.
 pub fn codec_slot(codec: Codec) -> usize {
+    debug_assert!(usize::from(codec.id()) < CODEC_SLOTS);
     usize::from(codec.id()).min(CODEC_SLOTS - 1)
 }
 

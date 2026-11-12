@@ -1,7 +1,7 @@
 //! Compression policy (ADR-12): `none`, `lz4`, `zstd:N` and `auto`, with the
 //! two degrade steps of backpressure.
 //!
-//! The decision table, by policy and pressure:
+//! The decision table, by policy and pressure (one level per cut):
 //!
 //! | policy | no pressure | `Lz4` pressure | `Raw` pressure |
 //! |---|---|---|---|
@@ -27,10 +27,11 @@ use lunix_iface::{Error, Result};
 
 use crate::stats::DestageStats;
 
-/// How hard the pool is pressed (set per job from the queue depth).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub(crate) enum Pressure {
-    /// Normal operation.
+/// How hard destage is pressed: the compression it may afford (ADR-12).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+pub enum Pressure {
+    /// Normal operation: the policy's codec.
+    #[default]
     None,
     /// Use LZ4 whatever the policy.
     Lz4,

@@ -158,22 +158,22 @@ fn explicit_policies_ignore_the_probe() {
 
 #[test]
 fn degradation_is_reported_per_level_and_changes_the_codec() {
-    let mut r = rig();
-    r.config = DestageConfig {
-        workers: 1,
-        batch_chunks: 1,
-        // Everything but the last job is above both thresholds.
-        lz4_depth: Some(0),
-        raw_depth: Some(100),
-        ..r.config
-    };
-    for ci in 0..4u64 {
-        r.write_chunk(ci, &text_bytes(ci, CS as usize));
+    use lunix_destage::Pressure;
+    for (pressure, want, lz4, raw) in [
+        (Pressure::Lz4, Codec::Lz4, 4, 0),
+        (Pressure::Raw, Codec::Raw, 0, 4),
+    ] {
+        let mut r = rig();
+        r.config = DestageConfig {
+            pressure,
+            ..r.config
+        };
+        for ci in 0..4u64 {
+            r.write_chunk(ci, &text_bytes(ci, CS as usize));
+        }
+        let out = r.run_cut(r.last_seq());
+        assert_eq!((out.stats.degraded_lz4, out.stats.degraded_raw), (lz4, raw));
+        assert_eq!(out.stats.zstd_calls, 0);
+        assert_eq!(codec_of(&r, 0).0, want);
     }
-    let out = r.run_cut(r.last_seq());
-    assert_eq!(out.stats.degraded_lz4, 3);
-    assert_eq!(out.stats.degraded_raw, 0);
-    assert_eq!(out.stats.zstd_calls, 1);
-    assert_eq!(codec_of(&r, 0).0, Codec::Lz4);
-    assert_eq!(codec_of(&r, 3).0, Codec::Zstd);
 }

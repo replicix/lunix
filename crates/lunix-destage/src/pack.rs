@@ -1,11 +1,12 @@
-//! Steps 7 and 8, in LBA order: append the sealed extents to segments, roll a
-//! full segment, and collect the map updates.
+//! Steps 7 and 8, in LBA order: append the sealed extents to segments, seal a
+//! segment when it is full and the last one at the end of the cut, and collect
+//! the map updates.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use lunix_format::node::DataEntry;
-use lunix_format::{ChunkId, Hint, IdLen, WriteSeq};
+use lunix_format::{ChunkId, Hint, IdLen, SegId, WriteSeq};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::ChunkNo;
 use lunix_iface::store::{SegmentStore, SegmentWriter};
@@ -21,14 +22,22 @@ pub(crate) enum MapOp {
     Hole(ChunkNo),
 }
 
+/// The segment being appended to.
+struct Current {
+    writer: Box<dyn SegmentWriter>,
+    seg: SegId,
+    writes: WriteSeqRange,
+    entries: Vec<(ChunkId, Hint)>,
+    extent_bytes: u64,
+}
+
 pub(crate) struct Packer<'a> {
     segments: &'a dyn SegmentStore,
     id_len: IdLen,
-    writer: Option<Box<dyn SegmentWriter>>,
-    cur: Option<DestagedSegment>,
+    cur: Option<Current>,
     done: Vec<DestagedSegment>,
     /// Ids appended in this cut, for dedup against the cut's own extents (the
-    /// index only learns them after the segment is sealed).
+    /// index only learns them after the commit).
     appended: HashMap<ChunkId, Hint>,
     pub(crate) ops: Vec<MapOp>,
     pub(crate) stats: DestageStats,
@@ -39,7 +48,6 @@ impl<'a> Packer<'a> {
         Self {
             segments,
             id_len,
-            writer: None,
             cur: None,
             done: Vec::new(),
             appended: HashMap::new(),
@@ -81,30 +89,30 @@ impl<'a> Packer<'a> {
 
     fn append(&mut self, id: &ChunkId, s: Sealed, seq: (WriteSeq, WriteSeq)) -> Result<Hint> {
         let t = Instant::now();
-        if self.writer.is_none() {
-            let w = self.segments.open_segment()?;
-            self.cur = Some(DestagedSegment {
-                seg: w.id(),
+        if self.cur.is_none() {
+            let writer = self.segments.open_segment()?;
+            self.cur = Some(Current {
+                seg: writer.id(),
+                writer,
                 writes: WriteSeqRange {
                     first: seq.0,
                     last: seq.1,
                 },
                 entries: Vec::new(),
                 extent_bytes: 0,
-                sealed: None,
             });
-            self.writer = Some(w);
             self.stats.segments += 1;
         }
-        let (Some(w), Some(cur)) = (self.writer.as_mut(), self.cur.as_mut()) else {
-            return Err(Error::invalid("segment writer without a record"));
+        let Some(cur) = self.cur.as_mut() else {
+            return Err(Error::invalid("segment writer missing"));
         };
-        let hint = w.append_extent(id, None, &s.extent)?;
+        let hint = cur.writer.append_extent(id, None, &s.extent)?;
         lunix_iface::crashpoint!("destage.after_segment_append");
         cur.entries.push((*id, hint));
         cur.extent_bytes += s.extent.len() as u64;
         cur.writes.first = cur.writes.first.min(seq.0);
         cur.writes.last = cur.writes.last.max(seq.1);
+        let full = cur.writer.is_full();
         let slot = codec_slot(s.codec);
         self.stats.unique_stored += 1;
         self.stats.ulen_by_codec[slot] += u64::from(s.ulen);
@@ -112,19 +120,28 @@ impl<'a> Packer<'a> {
         self.stats.chunks_by_codec[slot] += 1;
         self.stats.extent_bytes += s.extent.len() as u64;
         // A full segment is sealed now so that the next extent opens a new one.
-        if w.is_full() {
+        if full {
             self.seal_current()?;
         }
         self.stats.append_ns += ns(t.elapsed());
         Ok(hint)
     }
 
-    fn seal_current(&mut self) -> Result<()> {
-        let (Some(w), Some(mut cur)) = (self.writer.take(), self.cur.take()) else {
+    /// Seals the segment being written, if any (its file is durable and named
+    /// `segments/<id>` when this returns).
+    pub(crate) fn seal_current(&mut self) -> Result<()> {
+        let Some(cur) = self.cur.take() else {
             return Ok(());
         };
-        cur.sealed = Some(w.seal(Some(cur.writes))?);
-        self.done.push(cur);
+        let sealed = cur.writer.seal(Some(cur.writes))?;
+        lunix_iface::crashpoint!("destage.after_segment_seal");
+        self.done.push(DestagedSegment {
+            seg: cur.seg,
+            writes: cur.writes,
+            entries: cur.entries,
+            extent_bytes: cur.extent_bytes,
+            sealed,
+        });
         Ok(())
     }
 
@@ -133,11 +150,9 @@ impl<'a> Packer<'a> {
         std::mem::take(&mut self.ops)
     }
 
-    /// Ends the pack: the segments so far and the still-open writer.
-    pub(crate) fn finish(mut self) -> (Vec<DestagedSegment>, Option<Box<dyn SegmentWriter>>) {
-        if let Some(cur) = self.cur.take() {
-            self.done.push(cur);
-        }
-        (self.done, self.writer)
+    /// Ends the pack. A segment still being written is abandoned (the store
+    /// removes the file); the sealed ones are returned.
+    pub(crate) fn finish(self) -> Vec<DestagedSegment> {
+        self.done
     }
 }

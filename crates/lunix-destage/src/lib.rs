@@ -28,10 +28,14 @@
 //!    `zstd:N` and `none` as the descriptor says. Backpressure degrades to LZ4,
 //!    then raw.
 //! 6. **Seal** through `ExtentCodec::seal`; the salt is drawn inside it.
-//! 7. **Pack** into segments in LBA order; a full segment is sealed at once.
+//! 7. **Pack** into segments in LBA order. A full segment is sealed at once,
+//!    and the last one before the map commit, so every map entry names a
+//!    sealed, readable file (DESIGN section 5 step 7: seal at a commit cut).
 //! 8. **Map update**: one `MapTxn` for the whole cut, applied only if every
-//!    chunk succeeded. The index insert is the caller's, after the segments are
-//!    sealed ([`DestageOutcome::insert_into_index`]).
+//!    chunk succeeded, after a probe transaction showed before any extent was
+//!    stored that the map can take the cut. The index insert is the
+//!    coordinator's, after the commit that names the segments is durable
+//!    ([`DestageOutcome::insert_into_index`]).
 //!
 //! # Rule R1
 //!
@@ -40,6 +44,10 @@
 //! the volume's chunk size, so an extent that is valid but not the one named
 //! fails with `Auth` instead of being patched into a new chunk or adopted.
 //!
+//! The confirmation is a defence against damaged or forged **run** entries, not
+//! a security control in `plain` mode: there a writer of the bucket can forge a
+//! tag-valid extent carrying any id, and D16 accepts that.
+//!
 //! # Determinism
 //!
 //! Workers race, the layout does not. Packing happens in chunk order on the
@@ -47,8 +55,8 @@
 //! is resolved there (the first in LBA order is stored, the rest point at it),
 //! so the same cut over the same state gives the same ids, entries and segment
 //! layout; only the salt-dependent ciphertext differs between runs. Under
-//! backpressure the codec depends on the job index (the depth of the queue
-//! when a job starts), not on timing.
+//! backpressure the codec depends on one [`Pressure`] level per cut (set by the
+//! coordinator, or implied by the cut's size), never on timing.
 //!
 //! # Threads and blocking
 //!
@@ -70,8 +78,9 @@ mod worker;
 pub mod scan;
 pub mod stats;
 
+pub use compress::Pressure;
 pub use config::{DestageConfig, DestageParams};
 pub use deps::DestageDeps;
-pub use outcome::{DestageError, DestageOutcome, DestagedSegment, Partial};
+pub use outcome::{DestageError, DestageOutcome, DestagedSegment, ErrorClass, Partial};
 pub use pipeline::{destage_cut, destage_cut_with_cancel};
 pub use stats::DestageStats;

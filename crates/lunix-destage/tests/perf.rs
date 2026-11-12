@@ -77,8 +77,8 @@ fn destage_throughput_with_8_workers_on_text() {
         let mut r = Rig::new(c);
         r.config = DestageConfig {
             workers: 8,
-            lz4_depth: None,
-            raw_depth: None,
+            lz4_cut_bytes: None,
+            raw_cut_bytes: None,
             ..r.config
         };
         for ci in 0..CHUNKS {
