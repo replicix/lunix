@@ -10,6 +10,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiles the crash points in (tests only; never on a normal build).
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
@@ -22,3 +26,5 @@ replicix-chunkfmt.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 lunix-testkit.workspace = true
+# The real extent codecs, for the determinism and key-separation gates (M2 is merged).
+lunix-crypto.workspace = true
