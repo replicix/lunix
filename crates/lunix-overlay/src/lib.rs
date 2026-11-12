@@ -13,16 +13,20 @@
 //!   (The plan says "shard by `lba / chunk`"; a stripe of several chunks keeps
 //!   that property and lets a long sequential write stay one interval per
 //!   stripe instead of one per chunk. See `OverlayOptions::stripe_chunks`.)
-//! * A shard is a `BTreeMap<start_lba, Entry>` of non-overlapping intervals.
+//! * A layer is a `BTreeMap<start_lba, Entry>` of non-overlapping intervals.
 //!   An entry is `{blocks, journal location | hole, write_seq}` in 32 bytes;
 //!   with the key and the B-tree's fill that is about 60 to 85 bytes per
 //!   unmergeable entry (the memory gate is 96).
-//! * One version per block: the entry with the newest `write_seq` wins, and an
-//!   equal `write_seq` replaces (a later insert of the same record's range). A
-//!   late insert with an older `write_seq` only fills the blocks that no newer
-//!   entry holds, so arrival order never matters.
-//! * Neighbouring entries merge when they have the same `write_seq` and the
-//!   same kind and, for journal data, contiguous locations. Records have
+//! * **Versions.** A block may hold several versions (different `write_seq`).
+//!   A shard is a stack of layers: layer 0 holds the newest version of every
+//!   block it has, layer `k` the `k`-th newest; a block present in layer
+//!   `k + 1` is present in layer `k` with a larger `write_seq`. Almost every
+//!   shard has one layer. An insert goes into layer 0; whatever it displaces
+//!   (an older entry) or whatever a newer entry shadows (the inserted data)
+//!   sinks to the next layer, recursively. An equal `write_seq` replaces. Arrival
+//!   order never matters.
+//! * Neighbouring entries of a layer merge when they have the same `write_seq`
+//!   and the same kind and, for journal data, contiguous locations. Records have
 //!   distinct `write_seq`, so only one record's own range (or a repeated
 //!   insert of it) merges; that is by design, because the `write_seq` of each
 //!   block is needed by [`cut`](Overlay::cut) and [`release`](Overlay::release).
@@ -42,24 +46,25 @@
 //!
 //! # MVCC choice
 //!
-//! Entries are **single-version**; a cut is a copy taken under the shard read
-//! locks. The returned [`OverlayCut`] is owned data, so later inserts cannot
-//! change it. The alternative (versioned entries) would keep an overwritten
-//! older version alive until release; the trait never asks for it, and
-//! `FlatOverlay` (the test oracle) does not keep it either. The
-//! consequence, shared with the oracle: a block whose newest entry has
-//! `write_seq > c` is **absent** from `cut(c)`, even if an older entry
-//! `<= c` once covered it. Its newer record covers the block in a later cut.
+//! Superseded versions are **kept** until released (ADR-3, DESIGN section 8.1
+//! step 3: a commit for cut `c` holds every write `<= c`, also a block that a
+//! write `> c` has since overwritten). [`lookup`](Overlay::lookup) reads layer
+//! 0 only. [`cut(c)`](Overlay::cut) returns, per block, the newest version with
+//! `write_seq <= c`: it walks the layers from the newest and takes each entry
+//! `<= c` where no newer layer already supplied the block, under read locks, and
+//! copies. The returned [`OverlayCut`] is owned data, so later inserts cannot
+//! change it. [`release`](Overlay::release) removes every version with
+//! `write_seq <= cut_seq` (the newest one `<= c` of a block and all older ones;
+//! newer versions survive). Versions are counted in
+//! [`dirty_bytes`](Overlay::dirty_bytes), so the cap bounds them: a block
+//! rewritten many times between cuts costs 4 KiB per version until the seal.
 //!
-//! `release(cut)` removes every entry with `write_seq <= cut.cut_seq`, as the
-//! oracle does. That equals "the entries of the cut that are still visible"
-//! provided that no insert with `write_seq <= c` arrives after the cut; the
-//! cut protocol guarantees it by waiting for the in-flight writes (DESIGN
-//! section 8.1 step 2) before `cut(c)`.
+//! `release` assumes the cut protocol: no insert with `write_seq <= c` arrives
+//! after `cut(c)` (DESIGN section 8.1 step 2 waits for the in-flight writes).
 //!
 //! # Dirty-memory cap
 //!
-//! [`dirty_bytes`](Overlay::dirty_bytes) is exact. [`OverlayOptions::dirty_cap_bytes`]
+//! [`dirty_bytes`](Overlay::dirty_bytes) is exact and counts every version held. [`OverlayOptions::dirty_cap_bytes`]
 //! (default 1 GiB, the `B` trigger of DESIGN section 8.2) and
 //! [`ShardedOverlay::over_cap`] let the engine ask "must I seal now?" after each
 //! insert without any extra state: the cap itself never blocks an insert.
@@ -190,7 +195,16 @@ impl Entry {
     }
 }
 
-type Shard = BTreeMap<u64, Entry>;
+/// One layer: non-overlapping intervals.
+type Layer = BTreeMap<u64, Entry>;
+
+/// A shard: version stacks as layers. Layer 0 holds, per block, the newest
+/// version; layer `k` the `k`-th newest. So a block present in layer `k + 1` is
+/// present in layer `k` with a larger `write_seq`. Most shards have one layer.
+#[derive(Debug, Default)]
+struct Shard {
+    layers: Vec<Layer>,
+}
 
 fn read(s: &RwLock<Shard>) -> RwLockReadGuard<'_, Shard> {
     s.read().unwrap_or_else(|p| p.into_inner())
@@ -200,15 +214,14 @@ fn write(s: &RwLock<Shard>) -> RwLockWriteGuard<'_, Shard> {
     s.write().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Puts `[a, b)` (inside one stripe) as new data into `map`, merging with its
-/// neighbours. `s` is the first block of the whole stripe piece that `src`
-/// describes.
-fn fill(map: &mut Shard, stripe: u64, s: u64, a: u64, b: u64, seq: u64, src: Src) {
+/// Puts `[a, b)` of the new entry `new` (which starts at `s`) into `map`,
+/// merging with its neighbours. Never merges across a stripe boundary: an
+/// interval stays inside its stripe.
+fn fill(map: &mut Layer, stripe: u64, s: u64, new: &Entry, a: u64, b: u64) {
     if a >= b {
         return;
     }
-    let ent = Entry::new(src, a - s, b - a, seq);
-    // Never merge across a stripe boundary: an interval stays inside its stripe.
+    let ent = new.part(a - s, b - a);
     let prev = if a.is_multiple_of(stripe) {
         None
     } else {
@@ -240,8 +253,19 @@ fn fill(map: &mut Shard, stripe: u64, s: u64, a: u64, b: u64, seq: u64, src: Src
     }
 }
 
-/// Applies one insert of `[s, e)` to a shard; returns blocks `(removed, added)`.
-fn put(map: &mut Shard, stripe: u64, s: u64, e: u64, seq: u64, src: Src) -> (u64, u64) {
+/// Inserts `new` (starting at block `s`, inside one stripe) into one layer.
+/// Where the layer holds a newer entry, the new data goes to `cascade` (for
+/// the next layer); where it holds an older one, that entry's overlapped part
+/// goes to `cascade`; an entry with the same `write_seq` is replaced.
+/// Returns the blocks `(removed, added)` in this layer.
+fn put(
+    map: &mut Layer,
+    stripe: u64,
+    s: u64,
+    new: &Entry,
+    cascade: &mut Vec<(u64, Entry)>,
+) -> (u64, u64) {
+    let e = s + new.len();
     let first = match map.range(..=s).next_back() {
         Some((&k, en)) if k + en.len() > s => k,
         _ => s,
@@ -262,17 +286,23 @@ fn put(map: &mut Shard, stripe: u64, s: u64, e: u64, seq: u64, src: Src) -> (u64
             added += o_end - e;
         }
         let (ms, me) = (k.max(s), o_end.min(e));
-        if o.seq > seq {
-            // A newer entry stays; the new data fills only around it.
-            fill(map, stripe, s, cursor, ms, seq, src);
-            added += ms.saturating_sub(cursor);
-            map.insert(ms, o.part(ms - k, me - ms));
-            added += me - ms;
-            cursor = me;
+        match o.seq.cmp(&new.seq) {
+            std::cmp::Ordering::Greater => {
+                // The older new data fills around the newer entry and goes
+                // below it too.
+                fill(map, stripe, s, new, cursor, ms);
+                added += ms.saturating_sub(cursor);
+                map.insert(ms, o.part(ms - k, me - ms));
+                added += me - ms;
+                cascade.push((ms, new.part(ms - s, me - ms)));
+                cursor = me;
+            }
+            std::cmp::Ordering::Less => cascade.push((ms, o.part(ms - k, me - ms))),
+            std::cmp::Ordering::Equal => {}
         }
         from = me;
     }
-    fill(map, stripe, s, cursor, e, seq, src);
+    fill(map, stripe, s, new, cursor, e);
     added += e - cursor;
     (removed, added)
 }
@@ -289,6 +319,42 @@ fn push_none(out: &mut Vec<Piece>, lba: u64, blocks: u64) {
         source: PieceSource::None,
         write_seq: WriteSeq(0),
     });
+}
+
+/// The parts of `[a, b)` that `chosen` (disjoint intervals, start to end) does
+/// not cover, ascending.
+fn uncovered(chosen: &BTreeMap<u64, u64>, a: u64, b: u64, out: &mut Vec<(u64, u64)>) {
+    let mut pos = a;
+    let start = match chosen.range(..=a).next_back() {
+        Some((&cs, &ce)) if ce > a => cs,
+        _ => a,
+    };
+    for (&cs, &ce) in chosen.range(start..b) {
+        if cs > pos {
+            out.push((pos, cs));
+        }
+        pos = pos.max(ce);
+    }
+    if pos < b {
+        out.push((pos, b));
+    }
+}
+
+fn cover(chosen: &mut BTreeMap<u64, u64>, gaps: &[(u64, u64)]) {
+    for &(a, b) in gaps {
+        chosen.insert(a, b);
+    }
+}
+
+/// `source` moved `blocks` blocks further.
+fn advance(source: PieceSource, blocks: u64) -> PieceSource {
+    match source {
+        PieceSource::Journal(l) => PieceSource::Journal(JournalLoc {
+            offset: l.offset + blocks * BLOCK,
+            ..l
+        }),
+        other => other,
+    }
 }
 
 /// The sharded interval-map overlay. See the [crate docs](crate).
@@ -327,7 +393,7 @@ impl ShardedOverlay {
             opts,
             stripe_blocks,
             shards: (0..opts.shards)
-                .map(|_| RwLock::new(Shard::new()))
+                .map(|_| RwLock::new(Shard::default()))
                 .collect(),
             dirty_blocks: AtomicU64::new(0),
         })
@@ -344,38 +410,67 @@ impl ShardedOverlay {
         self.opts.dirty_cap_bytes
     }
 
-    /// Number of intervals held (for tests and metrics; takes every read lock
-    /// in turn).
+    /// Number of intervals held, versions included (for tests and metrics;
+    /// takes every read lock in turn).
     pub fn entries(&self) -> usize {
-        self.shards.iter().map(|s| read(s).len()).sum()
+        self.shards
+            .iter()
+            .map(|s| read(s).layers.iter().map(Layer::len).sum::<usize>())
+            .sum()
     }
 
     /// Checks the structural invariants: intervals are non-empty, ordered,
-    /// non-overlapping, inside one stripe of their own shard, and the dirty
-    /// counter equals the blocks held. Meant for tests; quiesce writers first.
+    /// non-overlapping, inside one stripe of their own shard; a block in layer
+    /// `k + 1` is in layer `k` with a larger `write_seq`; the dirty counter
+    /// equals the blocks (versions) held. Meant for tests; quiesce writers
+    /// first.
     ///
     /// # Errors
     /// A description of the first violation.
     pub fn validate(&self) -> std::result::Result<(), String> {
         let mut total = 0u64;
         for (i, sh) in self.shards.iter().enumerate() {
-            let m = read(sh);
-            let mut prev_end = 0u64;
-            for (&k, e) in m.iter() {
-                if e.blocks == 0 {
-                    return Err(format!("empty interval at {k}"));
+            let g = read(sh);
+            for (li, m) in g.layers.iter().enumerate() {
+                if m.is_empty() {
+                    return Err(format!("empty layer {li}"));
                 }
-                if k < prev_end {
-                    return Err(format!("overlap at {k}"));
+                let mut prev_end = 0u64;
+                for (&k, e) in m.iter() {
+                    if e.blocks == 0 {
+                        return Err(format!("empty interval at {k}"));
+                    }
+                    if k < prev_end {
+                        return Err(format!("overlap at {k}"));
+                    }
+                    prev_end = k + e.len();
+                    if k / self.stripe_blocks != (prev_end - 1) / self.stripe_blocks {
+                        return Err(format!("interval at {k} crosses a stripe"));
+                    }
+                    if self.shard_of(k) != i {
+                        return Err(format!("interval at {k} is in the wrong shard"));
+                    }
+                    total += e.len();
+                    if li > 0 {
+                        // Every block of this entry must be covered by layer
+                        // li - 1 with a larger seq.
+                        let above = &g.layers[li - 1];
+                        let mut pos = k;
+                        let start = match above.range(..=k).next_back() {
+                            Some((&ak, ae)) if ak + ae.len() > k => ak,
+                            _ => k,
+                        };
+                        for (&ak, ae) in above.range(start..prev_end) {
+                            if ak > pos || ae.seq <= e.seq {
+                                return Err(format!("layer order broken at {pos}"));
+                            }
+                            pos = ak + ae.len();
+                        }
+                        if pos < prev_end {
+                            return Err(format!("layer {li} entry at {k} has no newer version"));
+                        }
+                    }
                 }
-                prev_end = k + e.len();
-                if k / self.stripe_blocks != (prev_end - 1) / self.stripe_blocks {
-                    return Err(format!("interval at {k} crosses a stripe"));
-                }
-                if self.shard_of(k) != i {
-                    return Err(format!("interval at {k} is in the wrong shard"));
-                }
-                total += e.len();
             }
         }
         let counted = self.dirty_blocks.load(Ordering::Relaxed);
@@ -427,17 +522,30 @@ impl ShardedOverlay {
             l.advance(bytes).expect("journal offset overflow");
         }
         self.for_stripes(range.lba, end, |shard, a, b| {
-            // The location of block `a` of the insert.
-            let at = match src {
-                Src::Hole => Src::Hole,
-                Src::Journal(l) => {
-                    Src::Journal(l.advance((a - range.lba) * BLOCK).expect("checked above"))
-                }
-            };
-            let (removed, added) = put(&mut write(shard), self.stripe_blocks, a, b, seq.0, at);
+            let new = Entry::new(src, a - range.lba, b - a, seq.0);
+            let (removed, added) = insert_stripe(&mut write(shard), self.stripe_blocks, a, new);
             self.adjust(removed, added);
         });
     }
+}
+
+/// Inserts into layer 0 and lets displaced and shadowed parts sink through the
+/// layers. Returns the blocks `(removed, added)` over all layers.
+fn insert_stripe(g: &mut Shard, stripe: u64, s: u64, new: Entry) -> (u64, u64) {
+    let (mut removed, mut added) = (0u64, 0u64);
+    let mut cascade = Vec::new();
+    let mut pending: Vec<(usize, u64, Entry)> = Vec::new();
+    let mut cur = Some((0usize, s, new));
+    while let Some((k, at, ent)) = cur.take().or_else(|| pending.pop()) {
+        if k == g.layers.len() {
+            g.layers.push(Layer::new());
+        }
+        let (r, a) = put(&mut g.layers[k], stripe, at, &ent, &mut cascade);
+        removed += r;
+        added += a;
+        pending.extend(cascade.drain(..).map(|(at, e)| (k + 1, at, e)));
+    }
+    (removed, added)
 }
 
 impl Overlay for ShardedOverlay {
@@ -458,7 +566,11 @@ impl Overlay for ShardedOverlay {
             .end()
             .expect("overlay range end overflows the block address space");
         self.for_stripes(range.lba, end, |shard, s, e| {
-            let m = read(shard);
+            let g = read(shard);
+            let Some(m) = g.layers.first() else {
+                push_none(out, s, e - s);
+                return;
+            };
             let start = match m.range(..=s).next_back() {
                 Some((&k, en)) if k + en.len() > s => k,
                 _ => s,
@@ -486,40 +598,65 @@ impl Overlay for ShardedOverlay {
     }
 
     fn cut(&self, c: WriteSeq) -> OverlayCut {
-        let mut pieces: Vec<Piece> = Vec::new();
+        let mut raw: Vec<Piece> = Vec::new();
         for sh in self.shards.iter() {
-            let m = read(sh);
-            for (&k, en) in m.iter().filter(|(_, en)| en.seq <= c.0) {
-                // Split at chunk boundaries so that a piece stays in its chunk.
-                let end = k + en.len();
-                let mut a = k;
-                while a < end {
-                    let next_chunk = (a / self.opts.chunk_blocks)
-                        .saturating_add(1)
-                        .saturating_mul(self.opts.chunk_blocks);
-                    let b = end.min(next_chunk);
-                    pieces.push(Piece {
-                        range: BlockRange {
-                            lba: a,
-                            blocks: b - a,
-                        },
-                        source: en.source(a - k),
-                        write_seq: WriteSeq(en.seq),
-                    });
-                    a = b;
+            let g = read(sh);
+            // Blocks already chosen from a newer layer (start -> end); only
+            // needed with more than one layer.
+            let mut chosen: BTreeMap<u64, u64> = BTreeMap::new();
+            let multi = g.layers.len() > 1;
+            for layer in &g.layers {
+                let mut gaps: Vec<(u64, u64)> = Vec::new();
+                for (&k, en) in layer.iter().filter(|(_, en)| en.seq <= c.0) {
+                    let end = k + en.len();
+                    gaps.clear();
+                    uncovered(&chosen, k, end, &mut gaps);
+                    for &(a, b) in &gaps {
+                        raw.push(Piece {
+                            range: BlockRange {
+                                lba: a,
+                                blocks: b - a,
+                            },
+                            source: en.source(a - k),
+                            write_seq: WriteSeq(en.seq),
+                        });
+                    }
+                    // Collected after the layer is done: a layer's own
+                    // entries never overlap.
+                    if multi {
+                        cover(&mut chosen, &gaps);
+                    }
                 }
             }
         }
-        pieces.sort_unstable_by_key(|p| p.range.lba);
+        raw.sort_unstable_by_key(|p| p.range.lba);
         let mut chunks: Vec<CutChunk> = Vec::new();
-        for p in pieces {
-            let chunk = p.range.lba / self.opts.chunk_blocks;
-            match chunks.last_mut() {
-                Some(last) if last.chunk == chunk => last.pieces.push(p),
-                _ => chunks.push(CutChunk {
-                    chunk,
-                    pieces: vec![p],
-                }),
+        for p in raw {
+            // Split at chunk boundaries so that a piece stays in its chunk.
+            let end = p.range.lba + p.range.blocks;
+            let mut a = p.range.lba;
+            while a < end {
+                let next_chunk = (a / self.opts.chunk_blocks)
+                    .saturating_add(1)
+                    .saturating_mul(self.opts.chunk_blocks);
+                let b = end.min(next_chunk);
+                let part = Piece {
+                    range: BlockRange {
+                        lba: a,
+                        blocks: b - a,
+                    },
+                    source: advance(p.source, a - p.range.lba),
+                    write_seq: p.write_seq,
+                };
+                let chunk = a / self.opts.chunk_blocks;
+                match chunks.last_mut() {
+                    Some(last) if last.chunk == chunk => last.pieces.push(part),
+                    _ => chunks.push(CutChunk {
+                        chunk,
+                        pieces: vec![part],
+                    }),
+                }
+                a = b;
             }
         }
         OverlayCut { cut_seq: c, chunks }
@@ -528,13 +665,22 @@ impl Overlay for ShardedOverlay {
     fn release(&self, cut: &OverlayCut) {
         for sh in self.shards.iter() {
             let mut removed = 0u64;
-            write(sh).retain(|_, en| {
-                let keep = en.seq > cut.cut_seq.0;
-                if !keep {
-                    removed += en.len();
-                }
-                keep
-            });
+            let mut g = write(sh);
+            // Per block the versions `<= cut_seq` are the oldest ones, so
+            // removing them keeps every remaining version's rank.
+            for layer in &mut g.layers {
+                layer.retain(|_, en| {
+                    let keep = en.seq > cut.cut_seq.0;
+                    if !keep {
+                        removed += en.len();
+                    }
+                    keep
+                });
+            }
+            while g.layers.last().is_some_and(Layer::is_empty) {
+                g.layers.pop();
+            }
+            drop(g);
             self.adjust(removed, 0);
         }
     }

@@ -1,5 +1,6 @@
-//! Proptest against `FlatOverlay`: the same operations on both, and every
-//! lookup, cut and the final state agree (modulo the merging that the trait
+//! Proptest against two oracles: the same operations on each. Lookups agree with
+//! `FlatOverlay` (single version) and with a multi-version oracle; cuts, dirty
+//! bytes and the final state agree with the multi-version oracle (modulo the merging that the trait
 //! allows, removed by `coalesce`).
 
 use lunix_format::WriteSeq;
@@ -8,6 +9,9 @@ use lunix_iface::overlay::{BlockRange, Overlay, OverlayCut, Piece};
 use lunix_overlay::{OverlayOptions, ShardedOverlay};
 use lunix_testkit::strategies::{overlay_ops, OverlayOp};
 use lunix_testkit::{coalesce, FlatOverlay};
+
+mod common;
+use common::Versioned;
 use proptest::prelude::*;
 use proptest::test_runner::Config;
 
@@ -61,6 +65,7 @@ fn same_cut(a: &OverlayCut, b: &OverlayCut) -> Result<(), TestCaseError> {
 fn insert_both(
     a: &dyn Overlay,
     b: &dyn Overlay,
+    f: &dyn Overlay,
     lba: u64,
     blocks: u64,
     seq: u64,
@@ -81,7 +86,7 @@ fn insert_both(
             lba: lba + off,
             blocks: n,
         };
-        for o in [a, b] {
+        for o in [a, b, f] {
             match l {
                 Some(l) => o.insert_write(r, l.advance(off * 4096).unwrap(), WriteSeq(seq)),
                 None => o.insert_hole(r, WriteSeq(seq)),
@@ -103,7 +108,9 @@ fn check(
     })
     .unwrap();
     let flat = FlatOverlay::new(chunk_blocks);
-    let (mut cuts_m, mut cuts_f): (Vec<OverlayCut>, Vec<OverlayCut>) = (vec![], vec![]);
+    let ver = Versioned::new(chunk_blocks);
+    let (mut cuts_m, mut cuts_v, mut cuts_f): (Vec<OverlayCut>, Vec<OverlayCut>, Vec<OverlayCut>) =
+        (vec![], vec![], vec![]);
     for op in ops {
         match *op {
             OverlayOp::Write {
@@ -113,6 +120,7 @@ fn check(
                 write_seq,
             } => insert_both(
                 &mine,
+                &ver,
                 &flat,
                 lba,
                 blocks,
@@ -123,15 +131,16 @@ fn check(
                 lba,
                 blocks,
                 write_seq,
-            } => insert_both(&mine, &flat, lba, blocks, write_seq, None),
+            } => insert_both(&mine, &ver, &flat, lba, blocks, write_seq, None),
             OverlayOp::Lookup { lba, blocks } => {
-                let (m, f) = (lookup(&mine, lba, blocks), lookup(&flat, lba, blocks));
+                let m = lookup(&mine, lba, blocks);
                 assert_tiles(&m, lba, blocks)?;
-                prop_assert_eq!(coalesce(&m), coalesce(&f));
+                prop_assert_eq!(coalesce(&m), coalesce(&lookup(&ver, lba, blocks)));
+                prop_assert_eq!(coalesce(&m), coalesce(&lookup(&flat, lba, blocks)));
             }
             OverlayOp::Cut { seq } => {
-                let (m, f) = (mine.cut(WriteSeq(seq)), flat.cut(WriteSeq(seq)));
-                same_cut(&m, &f)?;
+                let (m, v) = (mine.cut(WriteSeq(seq)), ver.cut(WriteSeq(seq)));
+                same_cut(&m, &v)?;
                 for c in &m.chunks {
                     for p in &c.pieces {
                         prop_assert!(p.write_seq.0 <= seq);
@@ -140,24 +149,27 @@ fn check(
                     }
                 }
                 cuts_m.push(m);
-                cuts_f.push(f);
+                cuts_v.push(v);
+                cuts_f.push(flat.cut(WriteSeq(seq)));
             }
             OverlayOp::Release { n } => {
                 if !cuts_m.is_empty() {
                     let i = n % cuts_m.len();
                     mine.release(&cuts_m[i]);
+                    ver.release(&cuts_v[i]);
                     flat.release(&cuts_f[i]);
                 }
             }
         }
-        prop_assert_eq!(mine.dirty_bytes(), flat.dirty_bytes());
+        prop_assert_eq!(mine.dirty_bytes(), ver.dirty_bytes());
         mine.validate().map_err(TestCaseError::fail)?;
     }
     // Cuts taken earlier are still what they were when taken (owned data), and
     // a final full lookup and full cut agree.
-    let (m, f) = (lookup(&mine, 0, UNIVERSE), lookup(&flat, 0, UNIVERSE));
-    prop_assert_eq!(coalesce(&m), coalesce(&f));
-    same_cut(&mine.cut(WriteSeq(u64::MAX)), &flat.cut(WriteSeq(u64::MAX)))
+    let m = lookup(&mine, 0, UNIVERSE);
+    prop_assert_eq!(coalesce(&m), coalesce(&lookup(&ver, 0, UNIVERSE)));
+    prop_assert_eq!(coalesce(&m), coalesce(&lookup(&flat, 0, UNIVERSE)));
+    same_cut(&mine.cut(WriteSeq(u64::MAX)), &ver.cut(WriteSeq(u64::MAX)))
 }
 
 fn layout() -> impl Strategy<Value = (usize, u64)> {

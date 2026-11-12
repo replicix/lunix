@@ -1,6 +1,8 @@
 //! Stress: 8 writers (disjoint and overlapping ranges), 2 readers and a cutter
-//! for 10 s (`LUNIX_STRESS_SECS` overrides), then a comparison with a serial
-//! replay into `FlatOverlay`.
+//! for 10 s (`LUNIX_STRESS_SECS` overrides). Afterwards every cut taken during
+//! the run is compared with a serial replay of the writes `R < write_seq <= c`
+//! (`R` = the highest `cut_seq` released before that cut: everything `<= R` is
+//! gone by design), and the final state with a replay of everything.
 //!
 //! The cutter follows the engine's protocol (DESIGN 8.1): it picks `c` while no
 //! writer is between "assign `write_seq`" and "insert", so every later insert
@@ -15,6 +17,9 @@ use lunix_iface::journal::{JournalLoc, LaneId};
 use lunix_iface::overlay::{BlockRange, Overlay, PieceSource};
 use lunix_overlay::ShardedOverlay;
 use lunix_testkit::{coalesce, FlatOverlay};
+
+mod common;
+use common::Versioned;
 
 const UNIVERSE: u64 = 4096;
 const WRITERS: u64 = 8;
@@ -143,13 +148,18 @@ fn concurrent_writers_readers_and_a_cutter_equal_a_serial_replay() {
         std::thread::spawn(move || {
             let mut max_released = 0u64;
             let mut cuts = 0u64;
+            let mut taken = Vec::new();
             while Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(7));
                 let c = {
                     let _g = gate.write().unwrap();
                     counter.load(Ordering::SeqCst)
                 };
+                // Writers insert seq > c while we get to `cut`: overwrites of
+                // blocks whose version <= c is shadowed by the time of the cut.
+                std::thread::yield_now();
                 let cut = o.cut(WriteSeq(c));
+                let seen = counter.load(Ordering::SeqCst);
                 for ch in &cut.chunks {
                     let mut prev_end = ch.chunk * chunk_blocks;
                     for p in &ch.pieces {
@@ -159,25 +169,28 @@ fn concurrent_writers_readers_and_a_cutter_equal_a_serial_replay() {
                         assert!(prev_end <= (ch.chunk + 1) * chunk_blocks);
                     }
                 }
+                // Inserts after `c` cannot change a cut at `c`.
                 let again = o.cut(WriteSeq(c));
-                // Inserts after `c` cannot change what a cut at `c` returns
-                // unless they overwrote a block (then it is absent): compare
-                // piece by piece against the first cut.
-                for ch in &again.chunks {
-                    let first = cut.chunks.iter().find(|x| x.chunk == ch.chunk);
-                    assert!(
-                        first.is_some(),
-                        "a later cut at c gained chunk {}",
-                        ch.chunk
+                assert_eq!(
+                    again.chunks.iter().map(|x| x.chunk).collect::<Vec<_>>(),
+                    cut.chunks.iter().map(|x| x.chunk).collect::<Vec<_>>()
+                );
+                for (x, y) in again.chunks.iter().zip(&cut.chunks) {
+                    assert_eq!(
+                        coalesce(&x.pieces),
+                        coalesce(&y.pieces),
+                        "chunk {}",
+                        x.chunk
                     );
                 }
+                taken.push((c, max_released, seen, cut.clone()));
                 if cuts.is_multiple_of(3) {
                     o.release(&cut);
                     max_released = max_released.max(c);
                 }
                 cuts += 1;
             }
-            (max_released, cuts)
+            (max_released, cuts, taken)
         })
     };
 
@@ -185,7 +198,7 @@ fn concurrent_writers_readers_and_a_cutter_equal_a_serial_replay() {
         .into_iter()
         .flat_map(|h| h.join().unwrap())
         .collect();
-    let (max_released, cuts) = cutter.join().unwrap();
+    let (max_released, cuts, taken) = cutter.join().unwrap();
     stop.store(true, Ordering::Relaxed);
     let reads: u64 = readers.into_iter().map(|h| h.join().unwrap()).sum();
     eprintln!(
@@ -199,26 +212,64 @@ fn concurrent_writers_readers_and_a_cutter_equal_a_serial_replay() {
 
     o.validate().unwrap();
     ops.sort_by_key(|op| op.seq);
-    let flat = FlatOverlay::new(chunk_blocks);
-    for op in &ops {
+    let apply = |ov: &dyn Overlay, op: &Op| {
         let range = BlockRange {
             lba: op.lba,
             blocks: op.blocks,
         };
         if op.hole {
-            flat.insert_hole(range, WriteSeq(op.seq));
+            ov.insert_hole(range, WriteSeq(op.seq));
         } else {
-            flat.insert_write(range, loc_for(op.seq), WriteSeq(op.seq));
+            ov.insert_write(range, loc_for(op.seq), WriteSeq(op.seq));
+        }
+    };
+
+    // Every cut equals the replay of its writes.
+    let mut overwritten_before_cut = 0usize;
+    for (c, r, seen, cut) in &taken {
+        let replay = FlatOverlay::new(chunk_blocks);
+        for op in ops.iter().filter(|op| op.seq > *r && op.seq <= *c) {
+            apply(&replay, op);
+        }
+        let want = replay.cut(WriteSeq(*c));
+        assert_eq!(cut.cut_seq, want.cut_seq);
+        assert_eq!(
+            cut.chunks.iter().map(|x| x.chunk).collect::<Vec<_>>(),
+            want.chunks.iter().map(|x| x.chunk).collect::<Vec<_>>(),
+            "cut {c} (released up to {r})"
+        );
+        for (x, y) in cut.chunks.iter().zip(&want.chunks) {
+            assert_eq!(
+                coalesce(&x.pieces),
+                coalesce(&y.pieces),
+                "cut {c}, chunk {}",
+                x.chunk
+            );
+        }
+        // Writes with seq > c had been issued by the time the cut returned.
+        if seen > c {
+            overwritten_before_cut += 1;
         }
     }
-    flat.release(&flat.cut(WriteSeq(max_released)));
+    eprintln!(
+        "stress: {} cuts verified ({overwritten_before_cut} with later writes)",
+        taken.len()
+    );
+
+    // The final state equals a replay of everything, released up to the last
+    // release; versions included (dirty bytes).
+    let ver = Versioned::new(chunk_blocks);
+    for op in &ops {
+        apply(&ver, op);
+    }
+    ver.release(&ver.cut(WriteSeq(max_released)));
     let (mut a, mut b) = (Vec::new(), Vec::new());
     let all = BlockRange {
         lba: 0,
         blocks: UNIVERSE,
     };
     o.lookup(all, &mut a);
-    flat.lookup(all, &mut b);
+    ver.lookup(all, &mut b);
     assert_eq!(coalesce(&a), coalesce(&b));
-    assert_eq!(o.dirty_bytes(), flat.dirty_bytes());
+    assert_eq!(o.dirty_bytes(), ver.dirty_bytes());
 }

@@ -76,7 +76,8 @@ fn an_insert_with_an_older_seq_never_hides_a_newer_entry() {
         pieces[2].source,
         PieceSource::Journal(loc(0x10000 + 8 * 4096))
     );
-    assert_eq!(o.dirty_bytes(), 12 * 4096);
+    // The shadowed part of the older write stays as a version: 12 + 4 blocks.
+    assert_eq!(o.dirty_bytes(), 16 * 4096);
 }
 
 #[test]
@@ -174,4 +175,82 @@ fn the_top_of_the_address_space_works() {
     o.validate().unwrap();
     let cut = o.cut(WriteSeq(1));
     assert_eq!(cut.chunks.last().unwrap().chunk, (u64::MAX - 1) / 4);
+}
+
+/// The lead's scenario: X written at 5, acknowledged by a FLUSH at 8,
+/// overwritten at 12; `cut(10)` must still contain X at seq 5.
+#[test]
+fn a_cut_keeps_the_version_that_a_later_overwrite_shadows() {
+    for o in [ShardedOverlay::new(4), tiny(4)] {
+        o.insert_write(r(2, 6), loc(4096), WriteSeq(5));
+        o.insert_write(r(4, 2), loc(1 << 20), WriteSeq(12));
+        // Lookup sees the newest.
+        let p = coalesce(&look(&o, 2, 6));
+        assert_eq!(p[1].write_seq, WriteSeq(12));
+        o.validate().unwrap();
+        assert_eq!(o.dirty_bytes(), 8 * 4096);
+        let cut = o.cut(WriteSeq(10));
+        let all: Vec<Piece> = cut.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+        // Blocks 2..8 all come from seq 5, also 4 and 5.
+        assert!(all.iter().all(|p| p.write_seq == WriteSeq(5)));
+        let blocks: u64 = all.iter().map(|p| p.range.blocks).sum();
+        assert_eq!(blocks, 6);
+        // Release of that cut keeps the newer overwrite only.
+        o.release(&cut);
+        o.validate().unwrap();
+        assert_eq!(o.dirty_bytes(), 2 * 4096);
+        let p = look(&o, 4, 2);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].write_seq, WriteSeq(12));
+        // A cut at 12 then holds the overwrite.
+        let cut = o.cut(WriteSeq(12));
+        assert_eq!(cut.chunks.iter().map(|c| c.pieces.len()).sum::<usize>(), 1);
+    }
+}
+
+#[test]
+fn deep_version_stacks_cut_and_release_per_seq() {
+    let o = tiny(4);
+    // Ten overwrites of the same 3 blocks, interleaved arrival order.
+    for seq in [3u64, 9, 1, 7, 5, 10, 2, 8, 4, 6] {
+        o.insert_write(r(6, 3), loc(seq << 20), WriteSeq(seq));
+    }
+    o.validate().unwrap();
+    assert_eq!(o.dirty_bytes(), 30 * 4096);
+    for c in 1..=10u64 {
+        let cut = o.cut(WriteSeq(c));
+        let all: Vec<Piece> = cut.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+        assert_eq!(all.iter().map(|p| p.range.blocks).sum::<u64>(), 3);
+        assert!(all.iter().all(|p| p.write_seq == WriteSeq(c)), "cut {c}");
+    }
+    // Release at 4 drops versions 1..=4 (12 blocks); 6 versions remain.
+    let cut = o.cut(WriteSeq(4));
+    o.release(&cut);
+    o.validate().unwrap();
+    assert_eq!(o.dirty_bytes(), 18 * 4096);
+    assert_eq!(look(&o, 6, 3)[0].write_seq, WriteSeq(10));
+    let cut = o.cut(WriteSeq(7));
+    assert!(cut
+        .chunks
+        .iter()
+        .flat_map(|c| &c.pieces)
+        .all(|p| p.write_seq == WriteSeq(7)));
+    o.release(&o.cut(WriteSeq(10)));
+    assert_eq!(o.dirty_bytes(), 0);
+    assert_eq!(o.entries(), 0);
+}
+
+#[test]
+fn versions_count_towards_the_dirty_cap() {
+    let o = ShardedOverlay::with_options(OverlayOptions {
+        dirty_cap_bytes: 8 * 4096,
+        ..OverlayOptions::new(4)
+    })
+    .unwrap();
+    for seq in 1..=7u64 {
+        o.insert_write(r(0, 1), loc(seq << 20), WriteSeq(seq));
+    }
+    assert!(!o.over_cap());
+    o.insert_write(r(0, 1), loc(8 << 20), WriteSeq(8));
+    assert!(o.over_cap(), "one block rewritten 8 times is 8 versions");
 }
