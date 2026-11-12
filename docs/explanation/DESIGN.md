@@ -266,6 +266,16 @@ journal):
        `gen`, which no guest write can see; random damage passing `gen`,
        `off` and the CRC is about 2^-160. The cost is reading the rest of
        a 64 MiB file after a hit. `fsck` reports the damaged range.
+     - **Stale tail wipe (M3 review, 2026-11-12).** `recover` never writes.
+       The first `open_lane` after it (and any `reclaim`) durably zeroes
+       every record past the recovery stop point before any append, so a
+       second crash cannot bring them back. The wipe is **irreversible**:
+       records beyond a gap or a damaged record are gone after it. So the
+       daemon logs `ignored_after_gap` and `damaged` (with seq bounds)
+       **before** the first `open_lane`, and a mount option chooses
+       `on_journal_damage = wipe` (default, availability first) or `refuse`
+       (the volume stays offline for `fsck`, which reads but never opens a
+       lane). A clean restart writes nothing to the journal.
   3. Merge the lanes by `write_seq` and accept records in contiguous
      order. This global contiguity, not file position, decides what is
      kept, so resync is safe: a damaged record at or below the floor costs

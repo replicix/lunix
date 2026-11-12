@@ -2143,6 +2143,14 @@ wedged device in the smoke test.
 device smoke test.
 **Reads:** DESIGN §2, §3, §4, §15, §16, §18; ADR-16, 17, 22 (volume id
 `lunix1:<uuid>` is phase 6; do not implement); `lunix-iface::ctl`.
+**Journal damage at startup (M3 review, lead 2026-11-12):** before the
+first `open_lane` of a recovered volume, log `ignored_after_gap` and every
+`damaged` range with seq bounds; honour the mount option
+`on_journal_damage = wipe | refuse` (default `wipe`; `refuse` keeps the
+volume offline for `fsck`). Gate: a test with a damaged record above the
+floor shows the log line before the wipe, and `refuse` leaves the journal
+untouched.
+
 **Steps:**
 
 1. **Config** (`/etc/lunix/lunixd.toml`, overridable): state dir (default
