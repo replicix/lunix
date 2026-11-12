@@ -13,6 +13,13 @@ const CHUNK_BLOCKS: u64 = 8;
 const BLOCK: u64 = 4096;
 
 type Slot = Option<(PieceSource, u64)>;
+/// Every version a block holds, by `write_seq` (ADR-3: superseded versions
+/// `<= c` stay until a release).
+type Versions = std::collections::BTreeMap<u64, PieceSource>;
+
+fn newest(v: &Versions, c: u64) -> Slot {
+    v.range(..=c).next_back().map(|(&seq, &src)| (src, seq))
+}
 type CutBlocks = Vec<(u64, PieceSource, u64)>;
 
 fn loc(ordinal: u32, seq: u64) -> JournalLoc {
@@ -24,17 +31,14 @@ fn loc(ordinal: u32, seq: u64) -> JournalLoc {
 }
 
 fn model_put(
-    model: &mut [Slot],
+    model: &mut [Versions],
     lba: u64,
     blocks: u64,
     seq: u64,
     src: impl Fn(u64) -> PieceSource,
 ) {
     for i in 0..blocks {
-        let slot = &mut model[(lba + i) as usize];
-        if slot.is_none_or(|(_, old)| seq >= old) {
-            *slot = Some((src(i), seq));
-        }
+        model[(lba + i) as usize].insert(seq, src(i));
     }
 }
 
@@ -60,13 +64,12 @@ fn per_block(pieces: &[Piece], from: u64, to: u64) -> Result<Vec<Slot>, TestCase
     Ok(out)
 }
 
-fn expected_cut(model: &[Slot], c: u64) -> Vec<(u64, CutBlocks)> {
+fn expected_cut(model: &[Versions], c: u64) -> Vec<(u64, CutBlocks)> {
     let mut chunks: Vec<(u64, CutBlocks)> = Vec::new();
-    for (lba, slot) in model.iter().enumerate() {
-        let Some((src, seq)) = *slot else { continue };
-        if seq > c {
+    for (lba, versions) in model.iter().enumerate() {
+        let Some((src, seq)) = newest(versions, c) else {
             continue;
-        }
+        };
         let chunk = lba as u64 / CHUNK_BLOCKS;
         match chunks.last_mut() {
             Some((ch, v)) if *ch == chunk => v.push((lba as u64, src, seq)),
@@ -76,7 +79,7 @@ fn expected_cut(model: &[Slot], c: u64) -> Vec<(u64, CutBlocks)> {
     chunks
 }
 
-fn check_cut(cut: &OverlayCut, model: &[Slot], c: u64) -> Result<(), TestCaseError> {
+fn check_cut(cut: &OverlayCut, model: &[Versions], c: u64) -> Result<(), TestCaseError> {
     prop_assert_eq!(cut.cut_seq, WriteSeq(c));
     let want = expected_cut(model, c);
     prop_assert_eq!(cut.chunks.len(), want.len());
@@ -111,7 +114,7 @@ proptest! {
     #[test]
     fn flat_overlay_matches_the_dense_model(ops in overlay_ops(UNIVERSE, 100)) {
         let o = FlatOverlay::new(CHUNK_BLOCKS);
-        let mut model: Vec<Slot> = vec![None; UNIVERSE as usize];
+        let mut model: Vec<Versions> = vec![Versions::new(); UNIVERSE as usize];
         let mut cuts: Vec<(OverlayCut, u64)> = Vec::new();
         for op in ops {
             match op {
@@ -132,7 +135,11 @@ proptest! {
                         write_seq: WriteSeq(7),
                     }];
                     o.lookup(BlockRange { lba, blocks }, &mut out);
-                    let want = &model[lba as usize..(lba + blocks) as usize];
+                    let want: Vec<Slot> = model[lba as usize..(lba + blocks) as usize]
+                        .iter()
+                        .map(|v| newest(v, u64::MAX))
+                        .collect();
+                    let want = &want[..];
                     prop_assert_eq!(&per_block(&out, lba, lba + blocks)?[..], want);
                     // Merging keeps the content and never crosses a difference.
                     let merged = coalesce(&out);
@@ -148,15 +155,13 @@ proptest! {
                 OverlayOp::Release { n } => {
                     if let Some((cut, seq)) = cuts.get(n % cuts.len().max(1)) {
                         o.release(cut);
-                        for slot in &mut model {
-                            if slot.is_some_and(|(_, s)| s <= *seq) {
-                                *slot = None;
-                            }
+                        for versions in &mut model {
+                            versions.retain(|s, _| s > seq);
                         }
                     }
                 }
             }
-            let held = model.iter().flatten().count() as u64;
+            let held: u64 = model.iter().map(|v| v.len() as u64).sum();
             prop_assert_eq!(o.dirty_bytes(), held * BLOCK);
         }
     }

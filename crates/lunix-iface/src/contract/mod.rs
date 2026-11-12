@@ -124,6 +124,7 @@ macro_rules! contract_overlay_suite {
                     lookup_tiles_the_range,
                     hole_hides_data,
                     cut_is_frozen,
+                    cut_keeps_versions_shadowed_by_newer_writes,
                     cut_groups_by_chunk,
                     release_keeps_later_overwrites,
                     dirty_bytes_follow_inserts,

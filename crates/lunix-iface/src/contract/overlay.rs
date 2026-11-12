@@ -119,6 +119,51 @@ pub fn cut_is_frozen<O: Overlay>(o: &O, _chunk_blocks: u64) {
     assert_eq!(m[&1], (journal_at(loc(1), 1), 1));
 }
 
+/// ADR-3: a cut holds the newest version of every block with `write_seq <= c`
+/// **even when a newer write (`> c`) already shadows it**, a lookup still sees
+/// the newest, and `release` drops the superseded version with the cut.
+pub fn cut_keeps_versions_shadowed_by_newer_writes<O: Overlay>(o: &O, _chunk_blocks: u64) {
+    o.insert_write(range(0, 1), loc(1), WriteSeq(5));
+    o.insert_write(range(0, 1), loc(2), WriteSeq(12));
+    let cut = o.cut(WriteSeq(10));
+    let all: Vec<Piece> = cut.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+    let m = per_block(&all);
+    assert_eq!(m.len(), 1);
+    assert_eq!(
+        m[&0],
+        (journal_at(loc(1), 0), 5),
+        "the seq 5 version is in the cut"
+    );
+    // The view is frozen and lookups see the newest.
+    o.insert_write(range(0, 1), loc(3), WriteSeq(20));
+    let again: Vec<Piece> = cut.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+    assert_eq!(per_block(&again)[&0], (journal_at(loc(1), 0), 5));
+    assert_eq!(
+        per_block(&lookup(o, range(0, 1)))[&0],
+        (journal_at(loc(3), 0), 20)
+    );
+    // A cut at 12 still sees the seq 12 version, not 20.
+    let later = o.cut(WriteSeq(12));
+    let all: Vec<Piece> = later.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+    assert_eq!(per_block(&all)[&0], (journal_at(loc(2), 0), 12));
+    // Releasing the cut at 10 drops the seq 5 version only; 12 and 20 stay.
+    o.release(&cut);
+    let again = o.cut(WriteSeq(12));
+    let all: Vec<Piece> = again.chunks.iter().flat_map(|c| c.pieces.clone()).collect();
+    assert_eq!(per_block(&all)[&0], (journal_at(loc(2), 0), 12));
+    assert_eq!(
+        per_block(&lookup(o, range(0, 1)))[&0],
+        (journal_at(loc(3), 0), 20)
+    );
+    // Releasing the cut at 12 leaves only the newest.
+    o.release(&later);
+    assert_eq!(
+        per_block(&lookup(o, range(0, 1)))[&0],
+        (journal_at(loc(3), 0), 20)
+    );
+    assert!(o.cut(WriteSeq(12)).chunks.is_empty());
+}
+
 /// A cut groups pieces by chunk, chunks ascending, pieces inside their chunk.
 pub fn cut_groups_by_chunk<O: Overlay>(o: &O, chunk_blocks: u64) {
     let start = chunk_blocks - 2;

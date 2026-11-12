@@ -9,7 +9,7 @@ use super::lock;
 
 pub struct TOverlay {
     chunk_blocks: u64,
-    blocks: Mutex<BTreeMap<u64, (PieceSource, WriteSeq)>>,
+    blocks: Mutex<BTreeMap<u64, BTreeMap<WriteSeq, PieceSource>>>,
 }
 
 impl TOverlay {
@@ -23,10 +23,7 @@ impl TOverlay {
     fn put(&self, range: BlockRange, f: impl Fn(u64) -> PieceSource, seq: WriteSeq) {
         let mut m = lock(&self.blocks);
         for i in 0..range.blocks {
-            let e = m.entry(range.lba + i).or_insert((f(i), seq));
-            if seq >= e.1 {
-                *e = (f(i), seq);
-            }
+            m.entry(range.lba + i).or_default().insert(seq, f(i));
         }
     }
 }
@@ -50,8 +47,8 @@ impl Overlay for TOverlay {
         for lba in range.lba..range.lba + range.blocks {
             let (source, write_seq) = m
                 .get(&lba)
-                .copied()
-                .unwrap_or((PieceSource::None, WriteSeq(0)));
+                .and_then(|v| v.iter().next_back())
+                .map_or((PieceSource::None, WriteSeq(0)), |(&s, &src)| (src, s));
             out.push(Piece {
                 range: BlockRange { lba, blocks: 1 },
                 source,
@@ -63,8 +60,8 @@ impl Overlay for TOverlay {
     fn cut(&self, c: WriteSeq) -> OverlayCut {
         let m = lock(&self.blocks);
         let mut chunks: BTreeMap<u64, Vec<Piece>> = BTreeMap::new();
-        for (&lba, &(source, write_seq)) in m.iter() {
-            if write_seq <= c {
+        for (&lba, versions) in m.iter() {
+            if let Some((&write_seq, &source)) = versions.range(..=c).next_back() {
                 chunks
                     .entry(lba / self.chunk_blocks)
                     .or_default()
@@ -86,10 +83,17 @@ impl Overlay for TOverlay {
 
     fn release(&self, cut: &OverlayCut) {
         let mut m = lock(&self.blocks);
-        m.retain(|_, (_, seq)| *seq > cut.cut_seq);
+        for v in m.values_mut() {
+            v.retain(|seq, _| *seq > cut.cut_seq);
+        }
+        m.retain(|_, v| !v.is_empty());
     }
 
     fn dirty_bytes(&self) -> u64 {
-        lock(&self.blocks).len() as u64 * 4096
+        lock(&self.blocks)
+            .values()
+            .map(|v| v.len() as u64)
+            .sum::<u64>()
+            * 4096
     }
 }

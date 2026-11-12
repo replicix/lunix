@@ -37,7 +37,10 @@ pub struct IoSpec {
 impl IoSpec {
     /// True when the engine must accept the request on a device of
     /// `dev_bytes`: 4 KiB aligned offset and length, inside the device.
-    /// Anything else must complete with `EINVAL`.
+    /// Anything else must complete with `EINVAL`. The engine's
+    /// `max_io_buf_bytes` is not considered: the strategies never produce more
+    /// than [`MAX_IO_BYTES`] for a read or write, which every test's buffer
+    /// size must cover.
     pub fn is_valid(&self, dev_bytes: u64) -> bool {
         if self.op == IoOp::Flush {
             return true;
@@ -61,17 +64,24 @@ impl IoSpec {
 /// `len` deterministic, non-constant bytes derived from `seed` (splitmix64),
 /// so two writes with different seeds never agree by accident.
 pub fn pattern(seed: u64, len: usize) -> Vec<u8> {
-    let mut state = seed;
-    let mut out = Vec::with_capacity(len);
-    while out.len() < len {
-        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    fn mix(state: u64) -> [u8; 8] {
         let mut z = state;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         z ^= z >> 31;
-        let bytes = z.to_le_bytes();
-        let take = (len - out.len()).min(8);
-        out.extend_from_slice(&bytes[..take]);
+        z.to_le_bytes()
+    }
+    let mut out = vec![0u8; len];
+    let mut state = seed;
+    let (words, rest) = out.as_chunks_mut::<8>();
+    for w in words {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        *w = mix(state);
+    }
+    if !rest.is_empty() {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let bytes = mix(state);
+        rest.copy_from_slice(&bytes[..rest.len()]);
     }
     out
 }

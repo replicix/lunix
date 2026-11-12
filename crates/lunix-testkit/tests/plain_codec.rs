@@ -114,19 +114,111 @@ fn modes_and_layout() {
 }
 
 #[test]
-fn seal_is_deterministic_and_the_chunk_id_ignores_the_key() {
+fn seal_is_deterministic_and_integrity_ids_are_keyed_for_data_only() {
     let data = vec![3u8; CHUNK as usize];
     let (a, x) = sealed(&PlainCodec::new(), &data);
     let (b, y) = sealed(&PlainCodec::new(), &data);
     assert_eq!((a, &x), (b, &y));
     let (c, z) = sealed(&PlainCodec::with_key([9; 16]), &data);
-    assert_eq!(a, c, "the id depends on the content only");
-    assert_ne!(x, z, "the tag depends on the key");
+    assert_ne!(a, c, "the data id depends on the integrity key");
+    assert_ne!(x, z);
     assert_ne!(
-        PlainCodec::new().chunk_id(ExtentKind::Data, &data),
-        PlainCodec::new().chunk_id(ExtentKind::Node, &data),
-        "data and node ids live in separate domains"
+        a.0,
+        *blake3::hash(&data).as_bytes(),
+        "keyed, not the plain hash"
     );
+    // Plain mode and every node hash are unkeyed BLAKE3 (D11, amendment).
+    assert_eq!(
+        PlainCodec::unkeyed().chunk_id(ExtentKind::Data, &data).0,
+        *blake3::hash(&data).as_bytes()
+    );
+    for codec in [
+        PlainCodec::new(),
+        PlainCodec::with_key([9; 16]),
+        PlainCodec::unkeyed(),
+    ] {
+        assert_eq!(
+            codec.chunk_id(ExtentKind::Node, &data).0,
+            *blake3::hash(&data).as_bytes()
+        );
+    }
+}
+
+#[test]
+fn a_node_never_passes_as_data_under_the_integrity_key() {
+    let c = PlainCodec::new();
+    let body = vec![0x44u8; CHUNK as usize];
+    let node_id = c.chunk_id(ExtentKind::Node, &body);
+    assert_ne!(node_id, c.chunk_id(ExtentKind::Data, &body));
+    // A raw extent carrying that node hash and the same bytes, opened as data
+    // with verify_id, fails the key commitment.
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Data,
+        &node_id,
+        &desc(Codec::Raw, CHUNK),
+        &body,
+        &mut ext,
+    )
+    .unwrap();
+    let mut out = Vec::new();
+    let e = open_ext(
+        &c,
+        ExtentKind::Data,
+        &ext,
+        &expect(OpenOutput::Plaintext, true),
+        &mut out,
+    )
+    .expect_err("node hash presented as a data id");
+    assert_eq!(e.kind(), ErrorKind::Auth);
+    // verify_id is ignored for nodes (the map checks the hash).
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Node,
+        &node_id,
+        &desc(Codec::Raw, CHUNK),
+        &body,
+        &mut ext,
+    )
+    .unwrap();
+    open_ext(
+        &c,
+        ExtentKind::Node,
+        &ext,
+        &expect(OpenOutput::Plaintext, true),
+        &mut Vec::new(),
+    )
+    .expect("node opens");
+}
+
+#[test]
+fn a_dict_id_is_only_for_codec_3() {
+    let c = PlainCodec::new();
+    let id = ChunkId([1; 32]);
+    let mut out = Vec::new();
+    let with = EncodingDesc {
+        dict_id: Some(4),
+        ..desc(Codec::Zstd, 100)
+    };
+    assert_eq!(
+        seal_ext(&c, ExtentKind::Data, &id, &with, &[0u8; 50], &mut out)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Invalid
+    );
+    let without = EncodingDesc {
+        dict_id: None,
+        ..desc(Codec::ZstdDict, 100)
+    };
+    assert_eq!(
+        seal_ext(&c, ExtentKind::Data, &id, &without, &[0u8; 50], &mut out)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Invalid
+    );
+    assert!(out.is_empty());
 }
 
 #[test]
@@ -164,47 +256,195 @@ fn meta_moved_to_another_kind_is_an_auth_failure() {
     );
 }
 
+fn compress(codec: Codec, plain: &[u8]) -> Vec<u8> {
+    match codec {
+        Codec::Raw => plain.to_vec(),
+        Codec::Lz4 => lz4_flex::block::compress(plain),
+        Codec::Zstd => zstd::bulk::compress(plain, 3).expect("zstd"),
+        Codec::ZstdDict => unreachable!("no dictionary codec"),
+    }
+}
+
+fn seal_codec(c: &PlainCodec, codec: Codec, plain: &[u8]) -> (ChunkId, Vec<u8>) {
+    let id = c.chunk_id(ExtentKind::Data, plain);
+    let payload = compress(codec, plain);
+    let mut ext = Vec::new();
+    seal_ext(
+        c,
+        ExtentKind::Data,
+        &id,
+        &desc(codec, plain.len() as u32),
+        &payload,
+        &mut ext,
+    )
+    .expect("seal");
+    (id, ext)
+}
+
 #[test]
-fn only_the_raw_codec_has_a_plaintext() {
+fn lz4_and_zstd_open_to_plaintext_and_verify_the_id() {
+    let plain: Vec<u8> = (0..CHUNK).map(|i| (i / 7) as u8).collect();
+    for codec in [Codec::Raw, Codec::Lz4, Codec::Zstd] {
+        let c = PlainCodec::new();
+        let (id, ext) = seal_codec(&c, codec, &plain);
+        let mut out = vec![1u8];
+        let meta = open_ext(
+            &c,
+            ExtentKind::Data,
+            &ext,
+            &expect(OpenOutput::Plaintext, true),
+            &mut out,
+        )
+        .expect("open");
+        assert_eq!((meta.chunk_id, meta.desc.codec), (id, codec));
+        assert_eq!(&out[1..], &plain[..], "{codec:?}: appended to out");
+        // The stored form is the compressed payload, also with verify_id.
+        let mut stored = Vec::new();
+        open_ext(
+            &c,
+            ExtentKind::Data,
+            &ext,
+            &expect(OpenOutput::Stored, true),
+            &mut stored,
+        )
+        .expect("stored");
+        assert_eq!(stored, compress(codec, &plain));
+    }
+}
+
+#[test]
+fn a_payload_that_does_not_match_its_id_fails_verify_id_only() {
     let c = PlainCodec::new();
-    let payload = vec![0xabu8; 100];
+    let plain = vec![0x5au8; CHUNK as usize];
+    for codec in [Codec::Raw, Codec::Lz4, Codec::Zstd] {
+        let other = vec![0x5bu8; CHUNK as usize];
+        let id = c.chunk_id(ExtentKind::Data, &plain);
+        let mut ext = Vec::new();
+        seal_ext(
+            &c,
+            ExtentKind::Data,
+            &id,
+            &desc(codec, CHUNK),
+            &compress(codec, &other),
+            &mut ext,
+        )
+        .expect("seal");
+        let e = open_ext(
+            &c,
+            ExtentKind::Data,
+            &ext,
+            &expect(OpenOutput::Plaintext, true),
+            &mut Vec::new(),
+        )
+        .expect_err("id mismatch");
+        assert_eq!(e.kind(), ErrorKind::Auth, "{codec:?}");
+        // Without verify_id the tag is the only check, and it holds.
+        open_ext(
+            &c,
+            ExtentKind::Data,
+            &ext,
+            &expect(OpenOutput::Stored, false),
+            &mut Vec::new(),
+        )
+        .expect("tag is valid");
+    }
+}
+
+#[test]
+fn undecodable_payloads_are_corrupt_and_the_dictionary_codec_is_unsupported() {
+    let c = PlainCodec::new();
     let id = ChunkId([4; 32]);
+    for codec in [Codec::Lz4, Codec::Zstd] {
+        let mut ext = Vec::new();
+        seal_ext(
+            &c,
+            ExtentKind::Data,
+            &id,
+            &desc(codec, CHUNK),
+            &[0xffu8; 40],
+            &mut ext,
+        )
+        .expect("seal");
+        let mut out = Vec::new();
+        let e = open_ext(
+            &c,
+            ExtentKind::Data,
+            &ext,
+            &expect(OpenOutput::Plaintext, false),
+            &mut out,
+        )
+        .expect_err("garbage payload under a valid tag");
+        assert_eq!(e.kind(), ErrorKind::Corrupt, "{codec:?}");
+        assert!(out.is_empty());
+    }
+    // A frame that decodes to fewer bytes than the header's ulen.
     let mut ext = Vec::new();
     seal_ext(
         &c,
         ExtentKind::Data,
         &id,
         &desc(Codec::Zstd, CHUNK),
-        &payload,
+        &compress(Codec::Zstd, &[1u8; 100]),
         &mut ext,
     )
-    .expect("a compressed payload can be sealed");
-    let mut out = Vec::new();
-    let meta = open_ext(
+    .expect("seal");
+    let e = open_ext(
         &c,
         ExtentKind::Data,
         &ext,
-        &expect(OpenOutput::Stored, false),
-        &mut out,
+        &expect(OpenOutput::Plaintext, false),
+        &mut Vec::new(),
     )
-    .expect("stored form opens");
-    assert_eq!(
-        (out.as_slice(), meta.desc.codec),
-        (&payload[..], Codec::Zstd)
-    );
-    for (output, verify) in [(OpenOutput::Plaintext, false), (OpenOutput::Stored, true)] {
-        let mut out = Vec::new();
-        let e = open_ext(
-            &c,
-            ExtentKind::Data,
-            &ext,
-            &expect(output, verify),
-            &mut out,
-        )
-        .expect_err("unsupported");
-        assert_eq!(e.kind(), ErrorKind::Unsupported);
-        assert!(out.is_empty());
-    }
+    .expect_err("length mismatch");
+    assert_eq!(e.kind(), ErrorKind::Corrupt);
+    // Codec 3 can be sealed and opened stored, never decoded.
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Data,
+        &id,
+        &EncodingDesc {
+            dict_id: Some(1),
+            ..desc(Codec::ZstdDict, CHUNK)
+        },
+        &[1u8; 30],
+        &mut ext,
+    )
+    .expect("seal");
+    let e = open_ext(
+        &c,
+        ExtentKind::Data,
+        &ext,
+        &expect(OpenOutput::Plaintext, false),
+        &mut Vec::new(),
+    )
+    .expect_err("unsupported");
+    assert_eq!(e.kind(), ErrorKind::Unsupported);
+}
+
+#[test]
+fn decompression_is_capped_at_the_chunk_size() {
+    let c = PlainCodec::new();
+    let big = vec![9u8; 2 * CHUNK as usize];
+    let id = c.chunk_id(ExtentKind::Data, &big);
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Data,
+        &id,
+        &desc(Codec::Zstd, 2 * CHUNK),
+        &compress(Codec::Zstd, &big),
+        &mut ext,
+    )
+    .expect("seal");
+    assert!(open_ext(
+        &c,
+        ExtentKind::Data,
+        &ext,
+        &expect(OpenOutput::Plaintext, false),
+        &mut Vec::new()
+    )
+    .is_err());
 }
 
 #[test]
