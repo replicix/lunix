@@ -32,9 +32,10 @@
 //! `*.open` leftover (size at the time) that `leftovers()` reports and the
 //! sweep removes. [`MemStore::close`] is a clean shutdown (open writers are
 //! abandoned). After a crash or close the old handle is dead (`Io`).
-//! The id allocator of an opened image starts at the highest id on disk, not at
-//! the old counter, so a caller that forgets `observe` can reuse the id of an
-//! abandoned segment; M11's startup order is what prevents it.
+//! The id allocator of an opened image starts at the highest id on disk (and the
+//! checkpoint's `id_high`, as `LocalVolume::open` does), not at the old counter,
+//! so a caller that forgets `observe` can reuse the id of an abandoned segment
+//! whose `.open` file is gone; M11's startup order is what prevents it.
 //!
 //! # Fault points
 //!
@@ -281,6 +282,18 @@ impl MemStore {
             .max()
             .unwrap_or(0);
         ids.observe(highest);
+        // Like `LocalVolume::open`: the checkpoint's `id_high` is an allocator
+        // input too, so an abandoned `.open` id below it is not handed out again.
+        if let Some(high) = d
+            .checkpoint
+            .iter()
+            .flatten()
+            .filter(|s| s.volume_uuid == image.cfg.uuid)
+            .map(|s| s.id_high)
+            .max()
+        {
+            ids.observe(high);
+        }
         Self(Arc::new(Shared {
             cfg: image.cfg.clone(),
             state: Mutex::new(State {

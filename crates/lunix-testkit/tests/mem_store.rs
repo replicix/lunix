@@ -173,7 +173,7 @@ fn reads_are_bounds_checked_and_locate_gives_a_working_fd() {
 }
 
 #[test]
-fn a_clean_close_forgets_open_writers_and_reuses_their_ids_only_above_what_is_on_disk() {
+fn a_clean_close_abandons_open_writers_and_their_ids_come_back_unless_observed() {
     let store = MemStore::new();
     let (kept, _) = sealed_segment(&store, 1);
     let mut w = store.open_segment().unwrap();
@@ -554,5 +554,31 @@ fn the_checkpoint_belongs_to_one_volume_and_the_tail_guard_zeroes_stale_tails() 
         store.load().unwrap().unwrap().lane_tail_ordinals,
         vec![3, 4],
         "load returns the slot as written"
+    );
+}
+
+#[test]
+fn open_observes_the_checkpoint_id_high() {
+    let store = MemStore::new();
+    let mut w = store.open_segment().unwrap();
+    w.append_extent(&cid(1), None, &data_extent(&cid(1), 50))
+        .unwrap();
+    let abandoned = w.id();
+    store
+        .store(&lunix_format::local::CheckpointSlot {
+            slot_seq: 0,
+            volume_uuid: store.uuid(),
+            last_commit_seq: 0,
+            id_high: abandoned.raw(),
+            lane_tail_ordinals: vec![0],
+            stats: vec![],
+        })
+        .unwrap();
+    let image = store.close();
+    drop(w);
+    let again = MemStore::from_image(&image);
+    assert!(
+        again.open_segment().unwrap().id().raw() > abandoned.raw(),
+        "an id the checkpoint recorded is never reissued"
     );
 }
