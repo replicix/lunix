@@ -19,7 +19,7 @@ Headline numbers (create-only or plain PUT, concurrency 1, medians; details belo
 | | 4 KiB PUT p50 / p99 | 1 MiB PUT p50 | 16 MiB PUT p50 | fixed cost + slope (fit of p50) | two serial 4 KiB create-only PUTs p50 / p99 |
 |---|---|---|---|---|---|
 | AWS, same region (us-west-2) | 29.7 / 45 ms (2 runs pooled, n=80) | 73 ms | 210 ms | 42 ms + 10.6 ms/MiB (about 95 MiB/s) | 54 / 94 ms (n=200) |
-| OVH, Hungary → Milan | 39.6 / 46-54 ms (runs 1 and 3) | 130-138 ms | 886-911 ms | 71 ms + 52.9 ms/MiB (about 19 MiB/s, uplink-bound) | 97 / 133-212 ms |
+| OVH, Hungary → Milan | 39.6 / 46-54 ms (runs 1 and 3) | 130-138 ms | 886-911 ms | 71 ms + 52.9 ms/MiB (about 19 MiB/s, Wi-Fi-bound) | 97 / 133-212 ms |
 | AWS, Hungary → us-west-2 | 218 / 302 ms | 630 ms | 5.5 s | 291 ms + 328 ms/MiB (3 MiB/s) | 444 / 1,059 ms |
 
 ## Header
@@ -28,7 +28,7 @@ Headline numbers (create-only or plain PUT, concurrency 1, medians; details belo
 |---|---|
 | dates | 2026-11-12 (MinIO: 2026-11-11). All times below are offsets from the start of the first AWS sweep, T+0 |
 | AWS client ("same region (us-west-2)") | test host: AMD EPYC (Zen 5), 16 vCPUs, SMT off, 1 NUMA node, ~30 GiB RAM, local NVMe SSD, ext4 root; kernel 7.0.0 (Ubuntu), Ubuntu 26.04.1 LTS; probe pinned `taskset -c 8-15`, build `-j 4`; glibc build |
-| OVH and cross-continent clients ("Hungary → Milan", "Hungary → us-west-2") | the local workstation, running a static musl binary built on the test host (the workstation never compiled anything). the single-stream rate (19 MiB/s to Milan) and the aggregate upload rate (31 MB/s) were bound by that machine's uplink, so large-object numbers from Hungary describe that path, not the provider |
+| OVH and cross-continent clients ("Hungary → Milan", "Hungary → us-west-2") | the local workstation, running a static musl binary built on the test host (the workstation never compiled anything). the single-stream rate (19 MiB/s to Milan) and the aggregate upload rate (31 MB/s) were bound by that machine's Wi-Fi link (5 GHz, about 270 Mbit/s link rate, -61 dBm; the wired uplink behind it is 1 Gbit/s), so large-object numbers from Hungary describe that path, not the provider |
 | probe | `spikes/s3probe` (uncommitted), `object_store` 0.14.1, reqwest 0.13.5, sha2 0.10.9, hmac 0.12.1, tokio 1.54.1, futures 0.3.34, bytes 1.12.1, rustc 1.96.0; `musl-tools` installed on the host with `apt-get` for the static build |
 | credentials | short-lived SSO credentials for AWS and the OVH profile's keys, each read with `aws configure export-credentials`, held only in the environment of the probe process (AWS: piped over ssh stdin); never in a file, log or command line |
 | scope | only the key prefix `lunix-p0-probe/<run-id>/` of each bucket. No bucket setting was changed (versioning was only read), no lifecycle/policy/CORS/ACL/tags; every multipart upload the probe started was completed or aborted |
@@ -162,7 +162,7 @@ Fit (least squares on the eight per-size percentiles, `t = fixed + slope x MiB`)
 | AWS same region, p50, run 1 / run 2 / pooled samples | 43.5 / 42.1 / **42.3 ms** | 11.3 / 10.4 / **10.6 ms/MiB** | about 95 MiB/s |
 | same, 1-16 MiB points only (pooled) | 50.7 ms | 9.9 ms/MiB | about 100 MiB/s |
 | AWS same region, p99 (pooled) | 113 ms | 13.3 ms/MiB | |
-| OVH Hungary → Milan, p50, run 1 / run 3 | 70.2 / 72.2 ms | 53.7 / 52.0 ms/MiB | about 19 MiB/s (uplink-bound) |
+| OVH Hungary → Milan, p50, run 1 / run 3 | 70.2 / 72.2 ms | 53.7 / 52.0 ms/MiB | about 19 MiB/s (Wi-Fi-bound) |
 | OVH, p50, run 2 (degraded, see below) | 125.9 ms | 51.1 ms/MiB | |
 | OVH, p99, run 1 / run 3 | 202 / 160 ms | 74 / 56 ms/MiB | |
 | AWS Hungary → us-west-2, p50 | 291 ms | 328 ms/MiB | about 3 MiB/s |
@@ -240,7 +240,7 @@ the arrangements; the largest outliers (198 ms shared 4 KiB, 368 ms separate 64 
 The bulk rate was limited by the 8 connections, not shown to be limited by the instance's network,
 so this does not test a saturated NIC.
 
-OVH Hungary → Milan (run 1; the uplink *was* saturated: bulk goodput 31 MB/s;
+OVH Hungary → Milan (run 1; the client's Wi-Fi link *was* saturated: bulk goodput 31 MB/s;
 idle n=30, separate n=97, shared n=101):
 
 | small PUT | idle | bulk running, separate client | bulk running, same client |
@@ -248,7 +248,7 @@ idle n=30, separate n=97, shared n=101):
 | 4 KiB | 47.7 / 49.2 / 58.8 | 52.7 / 60.3 / 66.6 | 52.3 / 57.8 / 69.5 |
 | 64 KiB | 81.4 / 132.9 / 238.1 | 87.7 / 130.8 / 196.8 | 86.7 / 115.3 / 157.1 |
 
-Bulk goodput alone / separate / shared: 31.2 / 31.4 / 30.7 MB/s. On a saturated uplink the small PUT
+Bulk goodput alone / separate / shared: 31.2 / 31.4 / 30.7 MB/s. On a saturated Wi-Fi link the small PUT
 p50 rose only 5 ms (+10%, 4 KiB) and 6 ms (+8%, 64 KiB), p99 +8 to +11 ms for 4 KiB, again with
 no difference between separate and shared clients. 
 
@@ -260,7 +260,7 @@ treat it as a hint that a separate pool matters when the path is slow, not as a 
 
 Conclusion for the review's question ("does lane isolation keep the commit PUT near its idle
 latency?"): with 8 concurrent 16 MiB uploads the commit-sized PUT stays within about 10% of idle at
-p50 on AWS same-region and on a saturated Milan uplink, whether or not it has its own client. A
+p50 on AWS same-region and on a saturated Wi-Fi link to Milan, whether or not it has its own client. A
 separate pool was not needed for p50 in these tests; the p99 effect is unresolved and needs more
 samples. A shaped 200 MB/s upload on a bandwidth-constrained NIC was not tested.
 
@@ -282,7 +282,7 @@ slow stretch of run 1 (the 4 KiB PUT of the later `sizes` suite was 40 ms).
 
 Parallel 16 MiB (aggregate MB/s; few objects, so rough): AWS same region PUT 72 / 332 / 196 and
 GET 78 / 788 / 180 at concurrency 1 / 8 / 32 (the concurrency-32 cell had only 4 objects in flight);
-OVH Hungary → Milan PUT 19 / 26 / 30 and GET 18 / 28 / 26 MB/s, bounded by the uplink.
+OVH Hungary → Milan PUT 19 / 26 / 30 and GET 18 / 28 / 26 MB/s, bounded by the client's Wi-Fi link.
 
 ## Cleanup and safety
 
@@ -456,9 +456,9 @@ Numbers for DESIGN §20 / the fsync-scope note (concurrency 1, create-only or pl
 > 70-78 ms; 16 MiB 205-227 ms; p50 fit 42 ms + 10.6 ms/MiB. Two serial 4 KiB create-only PUTs: p50
 > 54 ms, p99 94 ms (n=200); a 1 MiB data PUT then a 4 KiB commit PUT: p50 81 ms, p99 133-189 ms.
 > OVH Milan from Hungary (RTT 20 ms): 4 KiB 39.5 ms, 1 MiB 130-138 ms, two serial 4 KiB PUTs 97 ms,
-> 1 MiB + 4 KiB 192 ms; fit 71 ms + 53 ms/MiB (uplink-bound); OVH latency was 2-2.6 times worse in
+> 1 MiB + 4 KiB 192 ms; fit 71 ms + 53 ms/MiB (Wi-Fi-bound); OVH latency was 2-2.6 times worse in
 > one run 37 minutes after the first. Conditional or unconditional `CompleteMultipartUpload` of 1-4
 > parts under 20 MiB is one request of about 87 ms (AWS) or 76 ms (OVH), about 3 and 2 times a 4 KiB PUT,
 > so the multipart route is not cheaper on the flush path. Lane isolation: with 8 concurrent 16 MiB
 > uploads, a 4 or 64 KiB PUT stays within about 10% of idle at p50 on both AWS (0.5 GB/s) and a
-> saturated 31 MB/s uplink, with or without a separate client; p99 unresolved.
+> saturated 31 MB/s Wi-Fi link, with or without a separate client; p99 unresolved.
