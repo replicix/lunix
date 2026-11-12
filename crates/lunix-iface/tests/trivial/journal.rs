@@ -30,6 +30,29 @@ struct State {
     /// Sequence numbers issued and not yet completed (slot or append).
     inflight: BTreeSet<u64>,
     pending_flushes: Vec<(WriteSeq, FlushDone)>,
+    /// The lowest failed sequence number once poisoned.
+    poisoned: Option<u64>,
+    /// Lane whose next append fails (test hook).
+    fail_next: Option<u16>,
+}
+
+/// Poisons the journal at `seq` and fails the flushes that cover it.
+fn poison(st: &mut State, seq: u64) {
+    let at = st.poisoned.map_or(seq, |p| p.min(seq));
+    st.poisoned = Some(at);
+    let mut i = 0;
+    while i < st.pending_flushes.len() {
+        if st.pending_flushes[i].0 .0 >= at {
+            let (_, done) = st.pending_flushes.remove(i);
+            done(Err(io_err()));
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn io_err() -> Error {
+    Error::Io(std::io::Error::other("journal poisoned"))
 }
 
 pub struct TJournal {
@@ -100,6 +123,7 @@ struct Lane {
     wake: WakeFd,
     done: Vec<JournalCompletion>,
     last: WriteSeq,
+    outstanding: Option<u64>,
 }
 
 impl JournalLane for Lane {
@@ -112,25 +136,50 @@ impl JournalLane for Lane {
             return Err(Error::invalid("bad record length"));
         }
         let mut st = lock(&self.state);
+        if st.poisoned.is_some() {
+            return Err(io_err());
+        }
+        if let Some(seq) = self.outstanding {
+            poison(&mut st, seq);
+            return Err(Error::invalid(
+                "an earlier slot of this lane is outstanding",
+            ));
+        }
         let seq = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
         st.inflight.insert(seq);
+        self.outstanding = Some(seq);
         Ok(SlotOutcome::Reserved(Slot::new(
             WriteSeq(seq),
             kind,
             blocks,
-            0,
+            u64::from(self.id),
         )))
     }
 
     fn append(&mut self, slot: Slot, lba: u64, data: &[u8]) -> Result<Appended> {
+        let slot = slot.take();
+        let mut st = lock(&self.state);
+        if self.outstanding != Some(slot.write_seq.0) || slot.token != u64::from(self.id) {
+            poison(&mut st, slot.write_seq.0);
+            return Err(Error::invalid("slot was not issued by this lane"));
+        }
+        self.outstanding = None;
+        if st.poisoned.is_some() {
+            return Err(io_err());
+        }
+        if st.fail_next == Some(self.id) {
+            st.fail_next = None;
+            poison(&mut st, slot.write_seq.0);
+            return Err(io_err());
+        }
         let want = match slot.kind {
             RecordKind::Write => slot.blocks as usize * 4096,
             RecordKind::Hole => 0,
         };
         if data.len() != want {
+            poison(&mut st, slot.write_seq.0);
             return Err(Error::invalid("data does not match the slot"));
         }
-        let mut st = lock(&self.state);
         let off = st.next_offset[usize::from(self.id)];
         st.next_offset[usize::from(self.id)] = off + record_bytes(slot.kind, slot.blocks);
         let record = RecordInfo {
@@ -206,6 +255,7 @@ impl Journal for TJournal {
             wake,
             done: Vec::new(),
             last: WriteSeq(0),
+            outstanding: None,
         }))
     }
 
@@ -215,6 +265,11 @@ impl Journal for TJournal {
 
     fn submit_group_flush(&self, upto: WriteSeq, done: FlushDone) -> Result<()> {
         let mut st = lock(&self.state);
+        if st.poisoned.is_some_and(|p| upto.0 >= p) {
+            drop(st);
+            done(Err(io_err()));
+            return Ok(());
+        }
         st.pending_flushes.push((upto, done));
         settle(&mut st);
         Ok(())
@@ -313,6 +368,11 @@ impl JournalFixture for JFix {
 
     /// Keeps flushed records and, to be adversarial, the unflushed ones with an
     /// odd `write_seq` (so recovery meets a gap and must ignore what follows).
+    fn fail_next_append(&mut self, lane: LaneId) -> bool {
+        lock(&self.j.state).fail_next = Some(lane.0);
+        true
+    }
+
     fn crash_and_reopen(&mut self) {
         let old = lock(&self.j.state).records.clone();
         let fresh = TJournal::new(self.j.lanes);

@@ -28,6 +28,13 @@ pub trait JournalFixture {
     /// journal replaces the old one. Lanes opened before are gone. The caller
     /// runs `recover` afterwards, as the engine does.
     fn crash_and_reopen(&mut self);
+
+    /// Makes the next `append` on `lane` fail with a fatal I/O error (after the
+    /// slot was consumed). Returns false when the fixture cannot inject
+    /// failures, in which case the test that needs it returns early.
+    fn fail_next_append(&mut self, _lane: LaneId) -> bool {
+        false
+    }
 }
 
 /// The data of a record: every byte derives from the sequence number.
@@ -364,4 +371,71 @@ pub fn reclaim_keeps_records_above_the_tail<F: JournalFixture>(f: &mut F) {
         f.journal().read_at(rec.loc, &mut buf).expect("read_at");
         assert_eq!(buf, pattern(rec.record.write_seq.0, 1));
     }
+}
+
+/// A failed append poisons the journal: a flush covering the failed sequence
+/// number, pending or later, never reports success, and no lane accepts further
+/// reservations or appends. (Skipped when the fixture cannot inject failures.)
+pub fn failed_append_poisons_the_journal<F: JournalFixture>(f: &mut F) {
+    f.journal().recover(None, WriteSeq(0)).expect("recover");
+    if !f.fail_next_append(LaneId(0)) {
+        eprintln!("skipped: fixture cannot inject append failures");
+        return;
+    }
+    let j = f.journal();
+    let mut l0 = open_lane(j, 0);
+    let mut l1 = open_lane(j, 1);
+    let pending = reserve(&mut *l0, 1); // seq 1
+    write(&mut *l1, 40, 1); // seq 2, acknowledged
+    complete_appends(&mut *l1, 1);
+    let rx = flush_channel(j, j.last_issued());
+    let e = l0
+        .append(pending, 4, &pattern(1, 1))
+        .expect_err("injected failure");
+    assert_eq!(e.kind(), crate::ErrorKind::Io);
+    assert!(
+        !rx.recv_timeout(T).expect("the pending flush must complete"),
+        "a flush over a missing sequence number must not succeed"
+    );
+    assert!(!flush_channel(j, j.last_issued())
+        .recv_timeout(T)
+        .expect("later flush"));
+    for lane in [&mut l0, &mut l1] {
+        let e = lane
+            .try_reserve(RecordKind::Write, 1)
+            .expect_err("poisoned");
+        assert_eq!(e.kind(), crate::ErrorKind::Io);
+    }
+}
+
+/// A slot that is never appended is detected at the next call on its lane:
+/// `Invalid`, and the journal is poisoned so a covering flush fails instead of
+/// hanging. (The slot is leaked on purpose; `Drop` would assert in debug builds.)
+pub fn a_dropped_slot_is_detected_and_poisons<F: JournalFixture>(f: &mut F) {
+    f.journal().recover(None, WriteSeq(0)).expect("recover");
+    let j = f.journal();
+    let mut lane = open_lane(j, 0);
+    std::mem::forget(reserve(&mut *lane, 1));
+    let e = lane
+        .try_reserve(RecordKind::Write, 1)
+        .expect_err("outstanding slot");
+    assert_eq!(e.kind(), crate::ErrorKind::Invalid);
+    assert!(!flush_channel(j, j.last_issued())
+        .recv_timeout(T)
+        .expect("flush completes"));
+    assert!(lane.try_reserve(RecordKind::Write, 1).is_err());
+}
+
+/// A slot from another lane is refused with `Invalid` (and poisons).
+pub fn a_foreign_slot_is_refused<F: JournalFixture>(f: &mut F) {
+    f.journal().recover(None, WriteSeq(0)).expect("recover");
+    let j = f.journal();
+    let mut l0 = open_lane(j, 0);
+    let mut l1 = open_lane(j, 1);
+    let slot = reserve(&mut *l0, 1);
+    let e = l1
+        .append(slot, 4, &pattern(1, 1))
+        .expect_err("foreign slot");
+    assert_eq!(e.kind(), crate::ErrorKind::Invalid);
+    assert!(l1.try_reserve(RecordKind::Write, 1).is_err());
 }

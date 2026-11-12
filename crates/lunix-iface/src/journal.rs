@@ -23,10 +23,25 @@
 //! consuming a sequence number**, or returns a [`Slot`] holding a freshly
 //! allocated global `write_seq` that the lane has already registered as
 //! in-flight. [`JournalLane::append`] then consumes the slot and cannot fail
-//! except on a fatal I/O error, which poisons the volume (the engine calls
-//! `SpaceEvents::fatal_io`; no further appends happen anywhere, so the gap is
-//! at the tail). A [`Slot`] must be appended before the next call on its lane;
-//! dropping one is a bug.
+//! except on a fatal I/O error.
+//!
+//! # Failure poisons the journal
+//!
+//! An `append` that returns `Io`, an [`JournalCompletion::Append`] with an
+//! error status, or a failed `fdatasync` **poisons the journal**: every pending
+//! and every later group flush with `upto >=` the failed sequence number
+//! completes with `Err(Io)`, and `try_reserve` and `append` return `Io` on every
+//! lane from then on. No FLUSH ever completes past a missing sequence number,
+//! so the gap is at the tail and nothing acknowledged after it is promised. A
+//! flush whose `upto` is below the failed sequence number is unaffected. The
+//! engine also calls `SpaceEvents::fatal_io` so the volume goes read-only.
+//!
+//! A [`Slot`] must be appended before the next call on its lane. This is
+//! checked: `try_reserve` while a slot is outstanding, or `append` with a slot
+//! this lane did not issue, returns `Invalid` **and poisons the journal** (the
+//! outstanding sequence number counts as the failed one). A dropped slot would
+//! otherwise leave its sequence number in flight and hang every later flush
+//! silently; `Slot` is `#[must_use]` and asserts in `Drop` in debug builds.
 //!
 //! # Group flush
 //!
@@ -36,7 +51,9 @@
 //! Every acknowledged write has a sequence number `<= upto`; the coordinator
 //! waits until no slot or append with `write_seq <= upto` is in flight on any
 //! lane (a reserved but not yet appended slot counts), then syncs. A write
-//! whose slot is outstanding at that moment is waited for, never skipped.
+//! whose slot is outstanding at that moment is waited for, never skipped. A
+//! FUA write passes its own sequence number as `upto`, which may be below
+//! `last_issued()`; it waits for every lower sequence number, not for higher ones.
 //!
 //! # `JournalReserved` units
 //!
@@ -116,8 +133,10 @@ pub fn record_bytes(kind: RecordKind, blocks: u32) -> u64 {
 }
 
 /// A reserved place in a lane with its sequence number. Obtained from
-/// [`JournalLane::try_reserve`], consumed by [`JournalLane::append`].
+/// [`JournalLane::try_reserve`], consumed by [`JournalLane::append`]. Dropping
+/// one unconsumed leaves its sequence number in flight (see the module docs).
 #[derive(Debug)]
+#[must_use = "a slot must be passed to JournalLane::append"]
 #[non_exhaustive]
 pub struct Slot {
     /// The sequence number, already registered as in-flight.
@@ -129,6 +148,20 @@ pub struct Slot {
     /// Implementation-private.
     #[doc(hidden)]
     pub token: u64,
+    consumed: bool,
+}
+
+/// The contents of a consumed [`Slot`], for journal implementations.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SlotParts {
+    /// The sequence number.
+    pub write_seq: WriteSeq,
+    /// Write or hole.
+    pub kind: RecordKind,
+    /// Length in blocks.
+    pub blocks: u32,
+    /// The implementation's token.
+    pub token: u64,
 }
 
 impl Slot {
@@ -139,6 +172,19 @@ impl Slot {
             kind,
             blocks,
             token,
+            consumed: false,
+        }
+    }
+
+    /// Consumes the slot (marking it used) and returns its parts. Journal
+    /// implementations call this in `append`, also on the error paths.
+    pub fn take(mut self) -> SlotParts {
+        self.consumed = true;
+        SlotParts {
+            write_seq: self.write_seq,
+            kind: self.kind,
+            blocks: self.blocks,
+            token: self.token,
         }
     }
 
@@ -148,15 +194,25 @@ impl Slot {
     }
 }
 
+impl Drop for Slot {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.consumed || std::thread::panicking(),
+            "journal Slot {} dropped without append",
+            self.write_seq
+        );
+    }
+}
+
 /// The outcome of a non-blocking reservation that did not fail.
 #[derive(Debug)]
+#[must_use]
 pub enum SlotOutcome {
     /// A slot with a fresh `write_seq`.
     Reserved(Slot),
     /// No free ring file, or the lane's bounded buffer pool is exhausted.
     /// Nothing was consumed, not even a sequence number; retry after a
-    /// completion or a reclaim. The queue parks the write (and, to keep the
-    /// lane's records in order, every later write of that queue behind it).
+    /// completion or a reclaim. The queue parks the write until then.
     Full,
     /// The host file system is out of space for the lane. Nothing consumed.
     NoSpace,
@@ -180,7 +236,7 @@ pub enum JournalCompletion {
     Append {
         /// The record.
         write_seq: WriteSeq,
-        /// Success or `-errno`.
+        /// Success or `-errno`; an error poisons the journal.
         status: IoStatus,
     },
     /// A [`JournalLane::submit_read`] finished; `buf` is the buffer that was
@@ -207,8 +263,9 @@ pub trait JournalLane: Send {
     /// `JournalReserved` with [`record_bytes`] and releases it on a refusal.
     ///
     /// # Errors
-    /// `Invalid` for a malformed request (`blocks` 0, or above 256 for a write);
-    /// `Io` for a fatal ring error (poisoned).
+    /// `Invalid` for a malformed request (`blocks` 0, or above 256 for a write)
+    /// or while an earlier slot of this lane is still outstanding (this also
+    /// poisons the journal); `Io` once the journal is poisoned.
     fn try_reserve(&mut self, kind: RecordKind, blocks: u32) -> Result<SlotOutcome>;
 
     /// Copies `data` (`blocks * 4096` bytes for a write, empty for a hole) into
@@ -219,7 +276,9 @@ pub trait JournalLane: Send {
     /// the group flush.
     ///
     /// # Errors
-    /// `Invalid` if `data` does not match the slot (a caller bug); `Io` (fatal).
+    /// `Invalid` if `data` does not match the slot or the slot was not issued by
+    /// this lane (a caller bug; poisons the journal); `Io` for a failed write or
+    /// a poisoned journal (poisons it: see the module docs).
     fn append(&mut self, slot: Slot, lba: u64, data: &[u8]) -> Result<Appended>;
 
     /// Queues a read of `buf.len()` bytes of record data at `loc`. Non-blocking.
@@ -375,6 +434,10 @@ pub trait Journal: Send + Sync {
     /// write **acknowledged before the group formed**: with
     /// `upto = last_issued()` read at formation, all of them have a sequence
     /// number `<= upto` (see the module docs).
+    ///
+    /// If the journal is poisoned and `upto >=` the failed sequence number, `done`
+    /// receives `Err(Io)` (immediately or when the poisoning happens); a flush
+    /// below the failed number completes normally.
     ///
     /// # Errors
     /// `Closed` after shutdown. A later failure is passed to `done`.
