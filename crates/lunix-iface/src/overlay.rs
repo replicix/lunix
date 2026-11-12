@@ -92,12 +92,19 @@ pub trait Overlay: Send + Sync {
 
     /// Freezes the entries with `write_seq <= c`. Later inserts, including
     /// overwrites of the same blocks, do not change the returned view.
+    /// The view holds, for every block, the newest version with
+    /// `write_seq <= c`, **even when a newer write (`> c`) already shadows it**
+    /// (ADR-3, DESIGN §8.1 step 3): the overlay therefore keeps superseded
+    /// versions `<= c` until a `release` makes them redundant. A commit built
+    /// from the cut must contain every write `<= c`.
     /// Destage thread.
     fn cut(&self, c: WriteSeq) -> OverlayCut;
 
     /// Removes the entries with `write_seq <= cut.cut_seq` that are still the
-    /// visible version of their block; a later overwrite survives. Destage
-    /// thread, after the commit covering the cut is durable (C9).
+    /// visible version of their block, and every superseded version with
+    /// `write_seq <= cut.cut_seq` (the commit now holds them); a later
+    /// overwrite (`> cut_seq`) survives. Destage thread, after the commit
+    /// covering the cut is durable (C9).
     fn release(&self, cut: &OverlayCut);
 
     /// Dirty bytes currently held (for the `B` commit trigger). Non-blocking.
