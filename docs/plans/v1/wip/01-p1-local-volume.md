@@ -523,7 +523,7 @@ conflict is reported to the lead, not resolved locally.
 | D4 | All byte layouts are decided in M1.A0, with maintainer sign-off, before any code. |
 | D5 | Genesis commit: `commit_seq` 0, `parent_seq` none, `parent_hash` = BLAKE3 of the exact `volume` object bytes. Every later commit has `commit_seq = parent_seq + 1`. The commit counter is independent of the `write_seq` (FULL carries both `commit_seq` and `cut_seq`; `cut_seq` is a `write_seq`). Field names are `commit_seq`, `parent_seq`, `cut_seq` and `write_seq`; the `lunix-format` types are `CommitSeq` and `WriteSeq`, never a bare `Seq`. `chain_floor` is the `commit_seq` of the oldest retained FULL commit. Phase 1 retention is `last:N` FULL commits, default N = 2 (the tip and its predecessor), so the floor moves with every FULL once N FULLs exist; it is not genesis. Mount and fsck verify the chain from the tip down to `chain_floor`; the floor commit's parent may be absent. |
 | D6 | `heat/`, `gc/` and `dicts/` freeze **envelope and kind id only**; the body is `{ver: u16, bytes}` defined by the phase or crate that writes it (`gc/` by M17 in phase 1: one sealed create-only object per GC pass, `gc/<pass:016x>`, body `{ver: 1, bytes}`; `dicts/` by `replicix-zdict`, M18a). |
-| D7 | Journal lanes: one lane per ublk queue, a global `write_seq` assigned by the caller, lanes merged at recovery. Local `epoch` is 0 in every journal record and every commit. FLUSH is a **group flush** across lanes (interface in M1.B1). Recovery is floor-based: `recover(hint, floor)` with `floor` = the tip FULL's `cut_seq`. |
+| D7 | Journal lanes: one lane per ublk queue, a global `write_seq` taken from one global counter by the writer's lane at `try_reserve` (never consumed by a refused reservation), lanes merged at recovery. Local `epoch` is 0 in every journal record and every commit. FLUSH is a **group flush** across lanes (interface in M1.B1). Recovery is floor-based: `recover(hint, floor)` with `floor` = the tip FULL's `cut_seq`. |
 | D8 | Local file set: `volume` (the exact descriptor bytes), `volume.json` (local settings only), `families/<id>/keyring`, `state/device` (with `boot_id`), `state/checkpoint`, `state/pins`, the host registry `<state_dir>/volumes.json`; plus, new in this plan, the local mirrors of the GC-root objects `snapshots/`, `readers/`, `holds/` (empty in phase 1) and `gc/` (one sealed evidence object per pass, `gc/<pass:016x>`) and the local-only `state/gc/` (condemned list, the only mutable GC state, atomic replace). |
 | D9 | The object name inside every metadata AAD is **bucket-relative** (`commits/<commit_seq:016x>`, `segments/<seg:016x>`, ...), never the local path, so local bytes upload verbatim in phase 2 (ADR-7, §13.3). |
 | D10 | EPOCH body includes `authority` (optional). Lease body includes `transferred_to` (optional, best effort, ADR-24 step 6). `snapshots/`, `readers/` and `holds/` bodies name their §6.1 fields in the freeze list (`{seq, created, consistency, label}`, `{seq, deadline}`, `{base_seq}`). |
@@ -877,22 +877,27 @@ change after B1 merges costs a rebase of every wave 1 branch.
    and `on_resize`.
 2. **Journal** (`journal`). `Journal` creates `JournalLane`s (one per
    queue, non-blocking) and a **flush coordinator**:
-   - `JournalLane::try_append(&RecordHeader, data: &[u8]) ->
-     Appended{loc} | Full | NoSpace`. The data is **copied** into a buffer
-     from the lane's bounded pool of aligned, registered buffers; `Full`
-     is also returned when the pool is exhausted. The caller's buffer is
-     free on return.
-   - `JournalLane::submit_read(loc, buf, token)`, `poll(&mut
-     Vec<Completion>)`, and `completed_watermark() -> WriteSeq` (the highest
-     write_seq `s` such that every append with `write_seq ≤ s` on this lane has
-     completed its write).
-   - `Journal::submit_group_flush(upto: WriteSeq, token)`: runs on a ring owned
-     by the engine's flush coordinator (a dedicated thread; the lane fds
-     are shared), waits until every lane's `completed_watermark() ≥ upto`
-     (or the lane has nothing at or below `upto`), then issues one
-     `fdatasync` per lane with unflushed appends in parallel; the token
-     completes when all have. A FLUSH covers writes **completed before the
-     group formed**. Lane threads never wait for the coordinator.
+   - **Superseded by the merged `lunix-iface` (M1.B1 review, 2026-11-12);
+     the iface rustdoc is normative.** `JournalLane::try_reserve(kind,
+     blocks) -> Slot | Full | NoSpace`: a refusal consumes no `write_seq`;
+     a `Slot` carries a fresh global `write_seq` and is registered in
+     flight. `append(slot, lba, data) -> Appended{write_seq, loc}` copies
+     the data into the lane's bounded pool and fails only with a fatal
+     `Io`. A `Slot` must be appended before the next call on its lane
+     (`#[must_use]`; violating it is `Invalid` and poisons the volume).
+     `Journal::last_issued()` gives the highest issued `write_seq`.
+   - `JournalLane::submit_read(loc, buf, token)` accepts any lane's
+     completed append; `poll(&mut Vec<Completion>)`.
+   - `Journal::submit_group_flush(upto, done)`: the engine passes
+     `upto = last_issued()` read when the group forms; the coordinator
+     waits until no reserved or appending slot with `write_seq ≤ upto` is
+     in flight on any lane, then `fdatasync`s every lane with unflushed
+     appends. A FLUSH covers every write acknowledged before the group
+     formed. **Poisoning:** an `append` `Io` error or an `Append`
+     completion with an error status fails every pending and later group
+     with `upto ≥` the failed seq (`Err(Io)`), and every later
+     `try_reserve` or `append` returns `Io`. Lane threads never wait for
+     the coordinator.
    - Blocking: `read_at(loc, buf)`, `recover(hint: Option<&Checkpoint>,
      floor: WriteSeq) -> Recovered {records, next_seq, ignored_after_gap:
      Option<WriteSeqRange>}` (all lanes scanned, records with `write_seq > floor`
@@ -1195,19 +1200,20 @@ README and report):**
 - **Lanes.** One lane per ublk queue. A lane owns its ring of files
   (`journal/q<lane>-<ordinal:08x>.j`, 64 MiB each, preallocated and
   physically zero-filled, `O_DIRECT`, `chattr +C` on btrfs). `write_seq` is
-  global and comes from the caller; `epoch` is 0. FLUSH is a **group
-  flush** assembled by the engine's flush coordinator through
-  `Journal::submit_group_flush(upto, token)` on a ring the coordinator owns:
-  it waits until every lane's `completed_watermark() ≥ upto`, then
-  `fdatasync`s every lane with unflushed appends in parallel; at most one
-  group is in flight; a FLUSH covers writes completed before the group
-  formed.
+  global, taken from one global counter by the lane at `try_reserve`
+  (see the M1.B1 contract above; the iface rustdoc is normative); `epoch`
+  is 0. FLUSH is a **group flush**: `submit_group_flush(upto =
+  last_issued(), done)` waits until no reserved or appending slot with
+  `write_seq ≤ upto` is in flight, then `fdatasync`s every lane with
+  unflushed appends in parallel; at most one group is in flight; a FLUSH
+  covers every write acknowledged before the group formed; any append
+  failure poisons the journal as stated above.
 - **Ring size** `journal_max` (default 2 GiB per volume, minimum 256 MiB,
   split evenly across lanes). A lane with no free file returns `Full` and
   the engine parks the write until reclaim.
 - Records are written with `io_uring` (`io-uring` crate, registered files
   and fixed buffers), batched per submission; the lane is single-threaded
-  and never blocks. `try_append` **copies** the data into a buffer from the
+  and never blocks. `append` **copies** the data into a buffer from the
   lane's bounded pool of aligned fixed buffers (`Full` when the pool is
   exhausted). Packing (D12, DESIGN §4.1): each record is a 64-byte inline
   header plus data; records of one batch are packed back to back, 8-byte
@@ -1218,9 +1224,10 @@ README and report):**
 
 1. Ring file creation with header, zero fill, directory fsync; ring
    open/validate; ordinal and generation bookkeeping.
-2. `JournalLane`: `try_append(&RecordHeader, &[u8])` (reserve space,
-   build the record with `lunix-format`, copy, queue the batch write),
-   `submit_read`, `poll`, `completed_watermark`. A 64 KiB write is one
+2. `JournalLane`: `try_reserve` and `append` (reserve space and a
+   `write_seq`, build the record with `lunix-format`, copy, queue the batch
+   write), `submit_read` (any lane), `poll`, the poisoning rule and the
+   dropped-`Slot` check. A 64 KiB write is one
    record. The flush coordinator (`submit_group_flush`) on its own ring.
 3. Blocking `read_at` for destage workers and for recovery.
 4. `recover(hint: Option<&Checkpoint>, floor: WriteSeq)`: `floor` is the tip
@@ -1811,9 +1818,11 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
 **Steps:**
 
 1. **Write path** (queue thread, non-blocking): reserve journal space
-   (`SpaceGate`), `write_seq = next()` (one global atomic), `try_append`, update
-   the overlay, complete on journal completion; `Full`/`NoSpace` parks the
-   tag and resumes from a wake-up. Writes past the volume size or not
+   (`SpaceGate`, charge = `Slot::record_bytes()`), `try_reserve` on the
+   queue's lane (which assigns `write_seq`), `append`, update the overlay on
+   the `Append` completion, complete the request; `Full`/`NoSpace` parks
+   the tag (no `write_seq` consumed) and resumes from a wake-up. A FLUSH
+   forms its group with `upto = Journal::last_issued()`. Writes past the volume size or not
    4096-aligned are rejected with `EINVAL`. FUA: as WRITE, then join the
    next flush group.
 2. **FLUSH and flush groups:** waiters gather into a group; one
