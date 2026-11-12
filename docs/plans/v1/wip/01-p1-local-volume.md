@@ -1525,7 +1525,7 @@ order lives). **Review:** recommended, durable order.
    N2). Sealed files at or below the mark that nothing references are left
    for GC (M17), which treats them as dead objects; the store only lists
    them.
-7. GC support: `SegmentStore::delete`, `delete_pack`, `delete_run`,
+7. GC support: `SegmentStore::delete`, `delete_pack` (index runs are M6's files: `ChunkIndex::delete_run`; the store only creates `index/` and counts its ids),
    `CommitStore::delete(commit_seq)` (refuses at or above the tip's
    `chain_floor`), the local `snapshots/`, `readers/`, `holds/` and `gc/`
    directories (empty in phase 1) behind `PinSource` and `GcStateStore`
