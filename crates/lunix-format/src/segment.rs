@@ -518,7 +518,7 @@ pub fn footer_frame(body: &FooterBody, how: FrameCompression) -> Result<Vec<u8>>
 
 /// The declared content size of a single-frame zstd stream without a
 /// dictionary, or an error for anything else.
-fn frame_content_size(frame: &[u8]) -> Result<u64> {
+pub(crate) fn frame_content_size(frame: &[u8]) -> Result<u64> {
     const W: &str = "footer frame";
     let mut r = Reader::new(frame, W);
     r.magic(&[0x28, 0xb5, 0x2f, 0xfd])?;
@@ -547,6 +547,12 @@ fn frame_content_size(frame: &[u8]) -> Result<u64> {
 /// `extents_len` is the trailer's `footer_off`; it sets the cap on the
 /// decoded size, which is checked against the frame's declared content size
 /// before anything is decompressed. The frame must be exactly one frame.
+///
+/// This does not know the container: the caller must follow with
+/// [`FooterBody::check_trailer`] (agreement with the trailer) and
+/// [`FooterBody::check_tiling`] (the extents tile `[0, footer_off)`), which
+/// need the trailer and `OVH`. A reader that skips them accepts a footer the
+/// layout forbids.
 pub fn decode_footer_frame(frame: &[u8], extents_len: u64) -> Result<FooterBody> {
     const W: &str = "footer frame";
     let cap = footer_body_cap(extents_len)?;

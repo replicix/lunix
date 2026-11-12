@@ -571,6 +571,15 @@ impl Delta {
         match self.records_codec {
             RecordsCodec::Raw => Ok(self.records.clone()),
             RecordsCodec::Zstd => {
+                // The allocation is bounded by what the frame claims, and a
+                // frame that lies about its size is refused before it.
+                let claimed = crate::segment::frame_content_size(&self.records)?;
+                if claimed != u64::from(self.records_ulen) {
+                    return Err(FormatError::invalid(
+                        WHAT,
+                        "records_ulen differs from the frame",
+                    ));
+                }
                 let out = zstd::bulk::decompress(&self.records, self.records_ulen as usize)
                     .map_err(|_| FormatError::Compression {
                         what: WHAT,
