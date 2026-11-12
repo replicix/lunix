@@ -582,3 +582,83 @@ fn open_observes_the_checkpoint_id_high() {
         "an id the checkpoint recorded is never reissued"
     );
 }
+
+#[test]
+fn the_encrypted_layout_is_parsed_with_its_own_overhead() {
+    use lunix_format::extent::{Cch1Header, CryptoRegion, Extent, TAG_LEN};
+    use lunix_format::{CryptoMode, DekGen};
+    let store = MemStore::with_config(MemStoreConfig {
+        mode: CryptoMode::Encrypted,
+        ..MemStoreConfig::default()
+    });
+    let id = cid(3);
+    let payload = vec![0x77u8; 300];
+    let ext = Extent {
+        header: Cch1Header {
+            codec: Codec::Raw,
+            level: Level(0),
+            ulen: 300,
+        },
+        chunk_id: id,
+        crypto: Some(CryptoRegion {
+            dek_gen: DekGen(1),
+            salt: [5; 24],
+            nonce: [0; 12],
+        }),
+        payload: &payload,
+        tag: [9; TAG_LEN],
+    };
+    let mut bytes = Vec::new();
+    ext.encode(&mut bytes).unwrap();
+    assert_eq!(
+        bytes.len(),
+        300 + CryptoMode::Encrypted.extent_ovh() as usize
+    );
+    let mut w = store.open_segment().unwrap();
+    let h = w.append_extent(&id, None, &bytes).unwrap();
+    assert_eq!(h.clen, 300);
+    // The unencrypted layout is refused on an encrypted volume.
+    assert_eq!(
+        w.append_extent(&id, None, &data_extent(&id, 300))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Invalid
+    );
+    w.seal(None).unwrap();
+    let mut got = Vec::new();
+    store.read_extent(&h, &mut got).unwrap();
+    assert_eq!(got, bytes);
+    assert_eq!(store.locate(&h).unwrap().len as usize, bytes.len());
+}
+
+#[test]
+fn read_path_faults_and_pins_device_crash_points() {
+    let store = MemStore::new();
+    let (seg, h) = sealed_segment(&store, 1);
+    store.faults().arm("segment.read", 1, Fault::Io);
+    assert_eq!(
+        store.read_extent(&h, &mut Vec::new()).unwrap_err().kind(),
+        ErrorKind::Io
+    );
+    store.read_extent(&h, &mut Vec::new()).unwrap();
+    store.faults().arm("segment.footer", 1, Fault::Io);
+    assert_eq!(store.footer(seg).unwrap_err().kind(), ErrorKind::Io);
+    store.footer(seg).unwrap();
+    store.faults().arm("device.store.before", 1, Fault::Crash);
+    let rec = lunix_format::local::DeviceRecord {
+        nr_queues: 1,
+        queue_depth: 8,
+        dev_id: 1,
+        max_io_buf_bytes: 262_144,
+        boot_id: [0; 16],
+        volume_uuid: store.uuid(),
+        dev_sectors: 8,
+        flags: 0,
+    };
+    assert!(store.store_device_record(&rec).is_err());
+    let after = MemStore::from_image(&store.crash(0));
+    assert!(
+        after.device_record().unwrap().is_none(),
+        "a kill before the write"
+    );
+}

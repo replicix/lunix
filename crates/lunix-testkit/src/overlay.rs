@@ -1,4 +1,4 @@
-//! [`FlatOverlay`]: one entry per 4 KiB block. The simplest thing that obeys
+//! [`FlatOverlay`]: every version of every 4 KiB block (ADR-3). The simplest thing that obeys
 //! the [`Overlay`] contract, and the oracle for `lunix-overlay` (M4).
 //!
 //! Pieces come out one block wide so that nothing in this file can be wrong
@@ -52,7 +52,9 @@ pub fn coalesce(pieces: &[Piece]) -> Vec<Piece> {
 #[derive(Debug)]
 pub struct FlatOverlay {
     chunk_blocks: u64,
-    blocks: Mutex<BTreeMap<u64, (PieceSource, WriteSeq)>>,
+    /// Per block, every version by `write_seq`: superseded versions `<= c`
+    /// stay until a `release` of a cut at or above them.
+    blocks: Mutex<BTreeMap<u64, BTreeMap<WriteSeq, PieceSource>>>,
 }
 
 impl FlatOverlay {
@@ -69,20 +71,18 @@ impl FlatOverlay {
         }
     }
 
-    /// Blocks currently held.
+    /// Block versions currently held (what `dirty_bytes` counts).
     pub fn len_blocks(&self) -> u64 {
-        lock(&self.blocks).len() as u64
+        lock(&self.blocks).values().map(|v| v.len() as u64).sum()
     }
 
     fn put(&self, range: BlockRange, source: impl Fn(u64) -> PieceSource, seq: WriteSeq) {
         let mut m = lock(&self.blocks);
         for i in 0..range.blocks {
             let lba = range.lba + i;
-            // Newest write_seq wins; an equal one is a later insert of the same
-            // record's range and replaces.
-            if m.get(&lba).is_none_or(|(_, old)| seq >= *old) {
-                m.insert(lba, (source(i), seq));
-            }
+            // An equal write_seq is a later insert of the same record's range
+            // and replaces; lookups pick the newest version.
+            m.entry(lba).or_default().insert(seq, source(i));
         }
     }
 }
@@ -111,8 +111,8 @@ impl Overlay for FlatOverlay {
         for lba in range.lba..range.lba + range.blocks {
             let (source, write_seq) = m
                 .get(&lba)
-                .copied()
-                .unwrap_or((PieceSource::None, WriteSeq(0)));
+                .and_then(|v| v.iter().next_back())
+                .map_or((PieceSource::None, WriteSeq(0)), |(&s, &src)| (src, s));
             out.push(Piece {
                 range: BlockRange { lba, blocks: 1 },
                 source,
@@ -124,8 +124,10 @@ impl Overlay for FlatOverlay {
     fn cut(&self, c: WriteSeq) -> OverlayCut {
         let m = lock(&self.blocks);
         let mut chunks: BTreeMap<u64, Vec<Piece>> = BTreeMap::new();
-        for (&lba, &(source, write_seq)) in m.iter() {
-            if write_seq <= c {
+        for (&lba, versions) in m.iter() {
+            // The newest version at or below the cut, even when a newer write
+            // already shadows it.
+            if let Some((&write_seq, &source)) = versions.range(..=c).next_back() {
                 chunks
                     .entry(lba / self.chunk_blocks)
                     .or_default()
@@ -146,12 +148,15 @@ impl Overlay for FlatOverlay {
     }
 
     fn release(&self, cut: &OverlayCut) {
-        // A block overwritten after the cut holds a newer write_seq, so
-        // "still the visible version" is exactly "write_seq <= cut_seq".
-        lock(&self.blocks).retain(|_, (_, seq)| *seq > cut.cut_seq);
+        // The commit holds every version `<= cut_seq`, visible or superseded.
+        let mut m = lock(&self.blocks);
+        for versions in m.values_mut() {
+            versions.retain(|seq, _| *seq > cut.cut_seq);
+        }
+        m.retain(|_, v| !v.is_empty());
     }
 
     fn dirty_bytes(&self) -> u64 {
-        lock(&self.blocks).len() as u64 * BLOCK
+        self.len_blocks() * BLOCK
     }
 }

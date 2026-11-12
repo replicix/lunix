@@ -221,7 +221,8 @@ impl ExtentCodec for PlainCodec {
             ExtentKind::Node => lunix_format::extent::MAX_NODE_ULEN as usize,
         };
         let ulen = usize::try_from(e.header.ulen).map_err(|_| Error::invalid("ulen"))?;
-        let needs_plain = (expect.verify_id && kind == ExtentKind::Data) || expect.output == OpenOutput::Plaintext;
+        let needs_plain = (expect.verify_id && kind == ExtentKind::Data)
+            || expect.output == OpenOutput::Plaintext;
         let plain = if needs_plain {
             Some(Self::decompress(e.header.codec, e.payload, ulen, cap)?)
         } else {

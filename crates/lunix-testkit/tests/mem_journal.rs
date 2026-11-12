@@ -593,3 +593,156 @@ fn random_workloads_keep_everything_a_completed_flush_covered() {
         );
     }
 }
+
+#[test]
+fn mixed_mode_completes_out_of_order_from_poll_and_the_watermark_is_the_minimum() {
+    for seed in 0..40u64 {
+        let cfg = MemJournalConfig {
+            mode: JournalMode::Mixed(seed),
+            pool_depth: 6,
+            ..MemJournalConfig::with_lanes(1)
+        };
+        let j = MemJournal::new(cfg);
+        j.recover(None, WriteSeq(0)).unwrap();
+        let mut l = lane(&j, 0);
+        let (mut out_of_order, mut full) = (false, false);
+        let mut seen: Vec<u64> = Vec::new();
+        let mut written = 0u64;
+        while seen.len() < 40 {
+            if written < 40 {
+                match l.try_reserve(RecordKind::Write, 1).unwrap() {
+                    SlotOutcome::Reserved(slot) => {
+                        let data = pattern(slot.write_seq.0, 1);
+                        l.append(slot, 0, &data).unwrap();
+                        written += 1;
+                    }
+                    SlotOutcome::Full => full = true,
+                    SlotOutcome::NoSpace => panic!("no space"),
+                }
+            }
+            let mut got = Vec::new();
+            l.poll(&mut got);
+            for c in got {
+                if let JournalCompletion::Append { write_seq, status } = c {
+                    assert!(status.is_ok());
+                    if seen.last().is_some_and(|&p| p > write_seq.0) {
+                        out_of_order = true;
+                    }
+                    seen.push(write_seq.0);
+                }
+            }
+            // The watermark never passes a held append.
+            let w = l.completed_watermark().0;
+            assert!(
+                seen.iter().all(|&s| s != w + 1),
+                "seed {seed}: {w} {seen:?}"
+            );
+            assert!(w <= written);
+        }
+        let mut sorted = seen.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (1..=40).collect::<Vec<_>>(), "each completes once");
+        if seed == 39 {
+            assert!(out_of_order || full);
+        }
+        assert!(out_of_order || full || seed > 0);
+    }
+}
+
+#[test]
+fn manual_mode_completes_a_chosen_append_out_of_order_and_fills_the_pool() {
+    let cfg = MemJournalConfig {
+        mode: JournalMode::Manual,
+        pool_depth: 3,
+        ..MemJournalConfig::with_lanes(1)
+    };
+    let j = MemJournal::new(cfg);
+    j.recover(None, WriteSeq(0)).unwrap();
+    let mut l = lane(&j, 0);
+    for _ in 0..3 {
+        write(&mut *l, 1);
+    }
+    assert!(matches!(
+        l.try_reserve(RecordKind::Write, 1).unwrap(),
+        SlotOutcome::Full
+    ));
+    assert!(j.complete_append_seq(LaneId(0), WriteSeq(2)));
+    assert!(!j.complete_append_seq(LaneId(0), WriteSeq(2)));
+    assert_eq!(l.completed_watermark(), WriteSeq(0), "seq 1 is still held");
+    let done = drain(&mut *l);
+    assert!(matches!(
+        done.as_slice(),
+        [JournalCompletion::Append {
+            write_seq: WriteSeq(2),
+            ..
+        }]
+    ));
+    j.complete_appends(LaneId(0), 5);
+    assert_eq!(l.completed_watermark(), WriteSeq(3));
+}
+
+#[test]
+fn lanes_cannot_open_before_recover() {
+    let j = MemJournal::new(MemJournalConfig::with_lanes(1));
+    assert_eq!(
+        j.open_lane(LaneId(0), WakeFd::new().unwrap())
+            .err()
+            .map(|e| e.kind()),
+        Some(ErrorKind::Invalid)
+    );
+    j.recover(None, WriteSeq(0)).unwrap();
+    assert!(j.open_lane(LaneId(0), WakeFd::new().unwrap()).is_ok());
+}
+
+#[test]
+fn a_flush_below_the_poison_point_promises_nothing_above_it() {
+    let j = journal(1);
+    let mut l = lane(&j, 0);
+    write(&mut *l, 1); // 1
+    assert!(flush(&j, WriteSeq(1)).recv_timeout(T).unwrap());
+    write(&mut *l, 1); // 2
+    write(&mut *l, 1); // 3
+    j.fail_next_flush();
+    assert!(!flush(&j, WriteSeq(3)).recv_timeout(T).unwrap());
+    assert!(
+        flush(&j, WriteSeq(1)).recv_timeout(T).unwrap(),
+        "below the failure"
+    );
+    let image = j.crash_with(1, CrashModel::lose_all());
+    let r = MemJournal::from_image(&image)
+        .recover(None, WriteSeq(0))
+        .unwrap();
+    assert_eq!(seqs(&r), vec![1], "records 2 and 3 were never made durable");
+}
+
+#[test]
+fn reclaim_refuses_a_tail_that_would_drop_a_record_above_the_last_cut() {
+    let cfg = MemJournalConfig {
+        file_bytes: MIN_FILE_BYTES,
+        ..MemJournalConfig::with_lanes(1)
+    };
+    let j = MemJournal::new(cfg);
+    j.recover(None, WriteSeq(0)).unwrap();
+    let mut l = lane(&j, 0);
+    for _ in 0..3 {
+        write(&mut *l, 256);
+    }
+    let tail = lunix_iface::journal::JournalTail {
+        lane_ordinals: vec![2],
+    };
+    assert_eq!(
+        j.reclaim(&tail).unwrap_err().kind(),
+        ErrorKind::Invalid,
+        "no cut was ever asked about: everything is above it"
+    );
+    assert_eq!(j.reclaim_calls(), 0);
+    j.tail_after(WriteSeq(1)).unwrap();
+    assert_eq!(
+        j.reclaim(&tail).unwrap_err().kind(),
+        ErrorKind::Invalid,
+        "file 1 holds seq 2"
+    );
+    j.tail_after(WriteSeq(2)).unwrap();
+    assert_eq!(j.reclaim(&tail).unwrap().files, 2);
+    assert_eq!(j.reclaim_calls(), 1);
+}

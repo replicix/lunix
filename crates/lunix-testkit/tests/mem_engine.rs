@@ -351,3 +351,47 @@ fn grow_extends_the_device_calls_the_hook_and_refuses_shrinking() {
     assert!(data.iter().all(|&b| b == 0));
     assert_eq!(eng.snapshot().len() as u64, 2 * DEV);
 }
+
+#[test]
+fn a_dropped_handler_frees_its_queue_and_mixed_mode_reorders_completions() {
+    let eng = engine(CompletionMode::Mixed(5));
+    {
+        let _h = eng.queue_handler(&qcfg(0, 1)).unwrap();
+        assert!(eng.queue_handler(&qcfg(0, 1)).is_err());
+    }
+    let mut h = eng
+        .queue_handler(&qcfg(0, 1))
+        .expect("rebuilt after the drop");
+    let mut c = TestCompleter::new(MAX_IO);
+    let mut bufs: Vec<Vec<u8>> = (0..8).map(|_| Vec::new()).collect();
+    let f = IoSpec {
+        op: IoOp::Flush,
+        fua: false,
+        offset_bytes: 0,
+        len: 0,
+        seed: 0,
+    };
+    let (mut reordered, mut survived) = (false, false);
+    for round in 0..40u16 {
+        let base = (round % 2) * 8;
+        for i in 0..8u16 {
+            h.on_request(req(&f, base + i), &mut bufs[usize::from(i)], &mut c);
+        }
+        let mut order = Vec::new();
+        order.extend(c.take_completed().into_iter().map(|d| d.0 .0));
+        let inline = order.len();
+        let mut polls = 0;
+        while order.len() < 8 {
+            h.poll(&mut c);
+            polls += 1;
+            order.extend(c.take_completed().into_iter().map(|d| d.0 .0));
+            assert!(polls <= 2, "a held request waits one more poll at most");
+        }
+        survived |= polls == 2;
+        reordered |= order.windows(2).any(|w| w[0] > w[1]) || inline > 0;
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (base..base + 8).collect::<Vec<_>>());
+    }
+    assert!(reordered && survived);
+}

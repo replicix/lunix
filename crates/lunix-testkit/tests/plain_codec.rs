@@ -114,24 +114,111 @@ fn modes_and_layout() {
 }
 
 #[test]
-fn seal_is_deterministic_and_the_chunk_id_ignores_the_key() {
+fn seal_is_deterministic_and_integrity_ids_are_keyed_for_data_only() {
     let data = vec![3u8; CHUNK as usize];
     let (a, x) = sealed(&PlainCodec::new(), &data);
     let (b, y) = sealed(&PlainCodec::new(), &data);
     assert_eq!((a, &x), (b, &y));
     let (c, z) = sealed(&PlainCodec::with_key([9; 16]), &data);
-    assert_eq!(a, c, "the id depends on the content only");
-    assert_ne!(x, z, "the tag depends on the key");
-    assert_eq!(
+    assert_ne!(a, c, "the data id depends on the integrity key");
+    assert_ne!(x, z);
+    assert_ne!(
         a.0,
         *blake3::hash(&data).as_bytes(),
-        "the id is BLAKE3 of the plaintext (D11)"
+        "keyed, not the plain hash"
     );
+    // Plain mode and every node hash are unkeyed BLAKE3 (D11, amendment).
     assert_eq!(
-        PlainCodec::unkeyed().chunk_id(ExtentKind::Node, &data),
-        a,
-        "plain mode uses the same ids"
+        PlainCodec::unkeyed().chunk_id(ExtentKind::Data, &data).0,
+        *blake3::hash(&data).as_bytes()
     );
+    for codec in [
+        PlainCodec::new(),
+        PlainCodec::with_key([9; 16]),
+        PlainCodec::unkeyed(),
+    ] {
+        assert_eq!(
+            codec.chunk_id(ExtentKind::Node, &data).0,
+            *blake3::hash(&data).as_bytes()
+        );
+    }
+}
+
+#[test]
+fn a_node_never_passes_as_data_under_the_integrity_key() {
+    let c = PlainCodec::new();
+    let body = vec![0x44u8; CHUNK as usize];
+    let node_id = c.chunk_id(ExtentKind::Node, &body);
+    assert_ne!(node_id, c.chunk_id(ExtentKind::Data, &body));
+    // A raw extent carrying that node hash and the same bytes, opened as data
+    // with verify_id, fails the key commitment.
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Data,
+        &node_id,
+        &desc(Codec::Raw, CHUNK),
+        &body,
+        &mut ext,
+    )
+    .unwrap();
+    let mut out = Vec::new();
+    let e = open_ext(
+        &c,
+        ExtentKind::Data,
+        &ext,
+        &expect(OpenOutput::Plaintext, true),
+        &mut out,
+    )
+    .expect_err("node hash presented as a data id");
+    assert_eq!(e.kind(), ErrorKind::Auth);
+    // verify_id is ignored for nodes (the map checks the hash).
+    let mut ext = Vec::new();
+    seal_ext(
+        &c,
+        ExtentKind::Node,
+        &node_id,
+        &desc(Codec::Raw, CHUNK),
+        &body,
+        &mut ext,
+    )
+    .unwrap();
+    open_ext(
+        &c,
+        ExtentKind::Node,
+        &ext,
+        &expect(OpenOutput::Plaintext, true),
+        &mut Vec::new(),
+    )
+    .expect("node opens");
+}
+
+#[test]
+fn a_dict_id_is_only_for_codec_3() {
+    let c = PlainCodec::new();
+    let id = ChunkId([1; 32]);
+    let mut out = Vec::new();
+    let with = EncodingDesc {
+        dict_id: Some(4),
+        ..desc(Codec::Zstd, 100)
+    };
+    assert_eq!(
+        seal_ext(&c, ExtentKind::Data, &id, &with, &[0u8; 50], &mut out)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Invalid
+    );
+    let without = EncodingDesc {
+        dict_id: None,
+        ..desc(Codec::ZstdDict, 100)
+    };
+    assert_eq!(
+        seal_ext(&c, ExtentKind::Data, &id, &without, &[0u8; 50], &mut out)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Invalid
+    );
+    assert!(out.is_empty());
 }
 
 #[test]

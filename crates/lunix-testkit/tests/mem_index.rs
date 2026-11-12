@@ -319,3 +319,14 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_planted_hinted_entry_is_hinted_and_not_in_any_run() {
+    let (ids, ix) = fresh();
+    ix.insert_hinted(cid(1), hint(1, 0));
+    let hit = ix.get_for_dedup(&cid(1)).unwrap().unwrap();
+    assert_eq!(hit.confirm, Confirm::Hinted);
+    assert_eq!(ix.dirty_entries(), 0);
+    assert!(ix.persist(seg(9)).unwrap().is_empty());
+    assert!(reopen(&ids, &ix).get(&cid(1)).unwrap().is_none());
+}

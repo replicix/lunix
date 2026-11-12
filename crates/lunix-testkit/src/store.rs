@@ -636,7 +636,9 @@ impl SegmentWriter for MemSegmentWriter {
         dict_id: Option<u32>,
         extent: &[u8],
     ) -> Result<Hint> {
-        let (off, clen) = self.b.append(chunk_id, dict_id, extent, MAX_DATA_ULEN, "segment.append")?;
+        let (off, clen) =
+            self.b
+                .append(chunk_id, dict_id, extent, MAX_DATA_ULEN, "segment.append")?;
         Ok(Hint {
             seg: self.b.id,
             off,
@@ -776,7 +778,9 @@ impl PackWrite for MemPackWriter {
 
     fn append_node(&mut self, hash: &[u8; 32], extent: &[u8]) -> Result<NodeLoc> {
         let id = ChunkId(*hash);
-        let (off, _) = self.b.append(&id, None, extent, MAX_NODE_ULEN, "pack.append")?;
+        let (off, _) = self
+            .b
+            .append(&id, None, extent, MAX_NODE_ULEN, "pack.append")?;
         Ok(NodeLoc {
             pack: self.b.id,
             off,

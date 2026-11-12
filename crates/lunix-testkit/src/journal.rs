@@ -443,11 +443,10 @@ impl MemJournal {
     pub fn complete_append_seq(&self, lane: LaneId, seq: WriteSeq) -> bool {
         let mut st = lock(&self.inner.state);
         let idx = usize::from(lane.0);
-        let found = st.lanes.get(idx).and_then(|l| {
-            l.pending_complete
-                .iter()
-                .position(|e| e.0 == seq.0)
-        });
+        let found = st
+            .lanes
+            .get(idx)
+            .and_then(|l| l.pending_complete.iter().position(|e| e.0 == seq.0));
         let Some(i) = found else {
             return false;
         };
@@ -828,11 +827,14 @@ impl Journal for MemJournal {
         let max_cut = st.max_cut;
         for (l, &limit) in st.lanes.iter().zip(&upto.lane_ordinals) {
             let limit = limit.min(l.cur);
-            let live_above = l.files.range(..limit).any(|(_, f)| {
-                f.recs.values().any(|r| !r.torn && r.seq > max_cut)
-            });
+            let live_above = l
+                .files
+                .range(..limit)
+                .any(|(_, f)| f.recs.values().any(|r| !r.torn && r.seq > max_cut));
             if live_above {
-                return Err(Error::invalid("tail would drop a record above the last cut"));
+                return Err(Error::invalid(
+                    "tail would drop a record above the last cut",
+                ));
             }
         }
         st.reclaims += 1;
@@ -996,7 +998,7 @@ impl JournalLane for MemLane {
             && match st.mode {
                 JournalMode::Immediate => true,
                 JournalMode::Manual => false,
-                JournalMode::Mixed(_) => st.rand() % 2 == 0,
+                JournalMode::Mixed(_) => st.rand().is_multiple_of(2),
             };
         let rec = Rec {
             seq,
@@ -1086,7 +1088,7 @@ impl JournalLane for MemLane {
                 held.swap(i, j);
             }
             for e in held {
-                if st.rand() % 2 == 0 {
+                if st.rand().is_multiple_of(2) {
                     st.finish_append(idx, e);
                 } else {
                     st.lanes[idx].pending_complete.push(e);
