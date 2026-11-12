@@ -1,15 +1,18 @@
 //! [`PlainCodec`]: the three crypto traits without encryption.
 //!
-//! Extents carry the D11 tag (the first 16 bytes of a digest over every byte
-//! before it, keyed in integrity mode and unkeyed in plain mode); metadata and
-//! commits use the real form 0 envelope with a 32-byte MAC. The digest is the
-//! testkit's own (see [`crate::digest`]), not BLAKE3 and not HMAC, so the bytes
-//! are *not* those of `lunix-crypto`; every framing rule is.
+//! Chunk ids are `BLAKE3(plaintext)` (DESIGN, D11). Extents carry the D11 tag:
+//! BLAKE3-128 over every byte before it, keyed by a key derived from the test
+//! integrity key in integrity mode and unkeyed in plain mode. Metadata and
+//! commits use the real form 0 envelope with a 32-byte MAC: keyed BLAKE3 in
+//! integrity mode (the real codec uses HMAC-SHA-256 there; the testkit has no
+//! `hmac`/`sha2`) and unkeyed BLAKE3 in plain mode, as in D16. So extents and
+//! plain-mode objects carry the real bytes; only the integrity-mode metadata
+//! MAC differs from `lunix-crypto`.
 //!
-//! Limits, by design: payloads are opened only for [`Codec::Raw`] (the testkit
-//! has no zstd or LZ4 dependency). Other codecs can be sealed and opened as
-//! [`OpenOutput::Stored`], but asking for their plaintext, or `verify_id` on
-//! them, is `Unsupported`.
+//! Codecs: raw, LZ4 (a raw block, no size prefix) and zstd are supported by
+//! `open` for [`OpenOutput::Plaintext`] and `verify_id`, with decompression
+//! capped at the volume chunk size (64 KiB for nodes). The dictionary codec is
+//! `Unsupported`, as in phase 1.
 
 use lunix_format::commit::{decode_object, Commit};
 use lunix_format::envelope::{self, Envelope, EnvelopeBody};
@@ -21,8 +24,6 @@ use lunix_iface::crypto::{
 };
 use lunix_iface::{Error, Result};
 
-use crate::digest::digest;
-
 /// The fixed integrity key of [`PlainCodec::new`].
 pub const TEST_INTEGRITY_KEY: [u8; 16] = *b"lunix-test-key-1";
 
@@ -31,16 +32,11 @@ pub const TEST_VOLUME_ID: [u8; 16] = *b"lunix-test-vol-1";
 
 const NO_KEY: [u8; 16] = [0; 16];
 
-const D_ID_DATA: u8 = 1;
-const D_ID_NODE: u8 = 2;
-const D_EXTENT_TAG: u8 = 3;
-const D_META_MAC: u8 = 4;
-const D_OBJECT_HASH: u8 = 5;
-
 /// `ExtentCodec + MetaCodec + CommitCodec` with no encryption.
 #[derive(Clone, Copy, Debug)]
 pub struct PlainCodec {
     mode: CryptoMode,
+    /// The integrity key; all zero in plain mode (unused there).
     key: [u8; 16],
 }
 
@@ -73,13 +69,62 @@ impl PlainCodec {
         }
     }
 
+    /// A hasher for `purpose`: keyed under a key derived from the integrity
+    /// key in integrity mode, unkeyed in plain mode.
+    fn hasher(&self, purpose: &str) -> blake3::Hasher {
+        match self.mode {
+            CryptoMode::Plain => blake3::Hasher::new(),
+            _ => blake3::Hasher::new_keyed(&blake3::derive_key(purpose, &self.key)),
+        }
+    }
+
     fn tag_of(&self, input: &[u8]) -> [u8; TAG_LEN] {
-        let full = digest(D_EXTENT_TAG, &self.key, &[input]);
-        full[..TAG_LEN].try_into().expect("16 bytes")
+        let mut h = self.hasher("lunix testkit extent tag");
+        h.update(input);
+        h.finalize().as_bytes()[..TAG_LEN]
+            .try_into()
+            .expect("16 bytes")
     }
 
     fn mac_of(&self, aad: &[u8], signed: &[u8]) -> [u8; 32] {
-        digest(D_META_MAC, &self.key, &[aad, signed])
+        let mut h = self.hasher("lunix testkit metadata mac");
+        h.update(aad).update(signed);
+        *h.finalize().as_bytes()
+    }
+
+    /// The plaintext of a verified payload, capped at `cap` bytes.
+    fn decompress(codec: Codec, payload: &[u8], ulen: usize, cap: usize) -> Result<Vec<u8>> {
+        if ulen > cap {
+            return Err(Error::Corrupt {
+                what: "extent",
+                detail: "ulen above the cap",
+            });
+        }
+        let plain = match codec {
+            Codec::Raw => payload.to_vec(),
+            Codec::Lz4 => {
+                lz4_flex::block::decompress(payload, ulen).map_err(|_| Error::Corrupt {
+                    what: "extent",
+                    detail: "lz4 block",
+                })?
+            }
+            Codec::Zstd => zstd::bulk::decompress(payload, ulen).map_err(|_| Error::Corrupt {
+                what: "extent",
+                detail: "zstd frame",
+            })?,
+            Codec::ZstdDict => {
+                return Err(Error::Unsupported {
+                    what: "dictionary codec",
+                })
+            }
+        };
+        if plain.len() != ulen {
+            return Err(Error::Corrupt {
+                what: "extent",
+                detail: "decompressed length differs from ulen",
+            });
+        }
+        Ok(plain)
     }
 
     fn aad(kind: ObjectKind, name: &str) -> Result<Vec<u8>> {
@@ -93,11 +138,10 @@ impl ExtentCodec for PlainCodec {
     }
 
     fn chunk_id(&self, kind: ExtentKind, data: &[u8]) -> ChunkId {
-        let domain = match kind {
-            ExtentKind::Data => D_ID_DATA,
-            ExtentKind::Node => D_ID_NODE,
-        };
-        ChunkId(digest(domain, &NO_KEY, &[data]))
+        // Data: BLAKE3 of the plaintext. Node: the node hash, which the map
+        // computes over `hash_input` and passes here as `data`.
+        let _ = kind;
+        ChunkId(*blake3::hash(data).as_bytes())
     }
 
     fn seal(
@@ -161,14 +205,22 @@ impl ExtentCodec for PlainCodec {
         {
             return Err(Error::Auth { what: "chunk id" });
         }
-        let raw = e.header.codec == Codec::Raw;
-        if !raw && (expect.verify_id || expect.output == OpenOutput::Plaintext) {
-            return Err(Error::Unsupported {
-                what: "PlainCodec opens only the raw codec",
-            });
-        }
-        if raw && expect.verify_id && self.chunk_id(kind, e.payload) != e.chunk_id {
-            return Err(Error::Auth { what: "chunk id" });
+        let cap = match kind {
+            ExtentKind::Data => expect.chunk_size as usize,
+            ExtentKind::Node => lunix_format::extent::MAX_NODE_ULEN as usize,
+        };
+        let ulen = usize::try_from(e.header.ulen).map_err(|_| Error::invalid("ulen"))?;
+        let needs_plain = expect.verify_id || expect.output == OpenOutput::Plaintext;
+        let plain = if needs_plain {
+            Some(Self::decompress(e.header.codec, e.payload, ulen, cap)?)
+        } else {
+            None
+        };
+        if expect.verify_id {
+            let plain = plain.as_deref().expect("decompressed above");
+            if self.chunk_id(kind, plain) != e.chunk_id {
+                return Err(Error::Auth { what: "chunk id" });
+            }
         }
         let desc = EncodingDesc {
             codec: e.header.codec,
@@ -176,7 +228,10 @@ impl ExtentCodec for PlainCodec {
             ulen: u32::try_from(e.header.ulen).map_err(|_| Error::invalid("ulen"))?,
             dict_id: None,
         };
-        out.extend_from_slice(e.payload);
+        match (&plain, expect.output) {
+            (Some(plain), OpenOutput::Plaintext) => out.extend_from_slice(plain),
+            _ => out.extend_from_slice(e.payload),
+        }
         Ok(OpenedMeta {
             desc,
             chunk_id: e.chunk_id,
@@ -243,6 +298,6 @@ impl CommitCodec for PlainCodec {
     }
 
     fn object_hash(&self, bytes: &[u8]) -> [u8; 32] {
-        digest(D_OBJECT_HASH, &NO_KEY, &[bytes])
+        *blake3::hash(bytes).as_bytes()
     }
 }

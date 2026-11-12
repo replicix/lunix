@@ -1,6 +1,7 @@
 //! [`MemPacks`]: map packs in memory. Just enough of [`PackStore`] for
-//! [`FlatMap`](crate::FlatMap) and its tests; the full store (segments,
-//! commits, checkpoint, GC state) is `MemStore` in M1.B2b.
+//! [`FlatMap`](crate::FlatMap) and its tests, with no footers and no
+//! validation. [`MemStore`](crate::MemStore) (M1.B2b) is the full store, with
+//! checked pack footers; `FlatMap` passes the map contract on either.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -100,7 +101,7 @@ impl PackRead for MemPacks {
 
     fn pack_footer(&self, _pack: PackId) -> Result<FooterBody> {
         Err(Error::Unsupported {
-            what: "MemPacks has no pack footers (MemStore in M1.B2b does)",
+            what: "MemPacks has no pack footers (MemStore does)",
         })
     }
 
