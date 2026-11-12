@@ -467,3 +467,92 @@ fn sweep_counts_leftovers_and_lists_unreferenced_packs() {
     assert_eq!(report.deleted_temp, 2);
     assert_eq!(report.highest_id_before, 0xff, "a leftover's id counts");
 }
+
+#[test]
+fn the_sweep_refuses_a_mark_below_a_named_id_and_feeds_the_allocator() {
+    let store = MemStore::new();
+    let (seg, _) = sealed_segment(&store, 1);
+    let named: HashSet<_> = [seg].into_iter().collect();
+    let none = HashSet::new();
+    let e = store
+        .sweep_orphans(&SweepRequest {
+            high_water_mark: seg.raw() - 1,
+            named_segments: &named,
+            named_packs: &none,
+        })
+        .unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::Invalid);
+    store.add_leftover("segments/00000000000000ff.open", 1);
+    let report = store
+        .sweep_orphans(&SweepRequest {
+            high_water_mark: seg.raw(),
+            named_segments: &named,
+            named_packs: &none,
+        })
+        .unwrap();
+    assert_eq!(report.highest_id_before, 0xff);
+    assert!(
+        store.ids().high_water() >= 0xff,
+        "the sweep observes the ids it saw"
+    );
+}
+
+#[test]
+fn a_hint_with_the_wrong_clen_is_corrupt_and_open_writers_are_not_leftovers() {
+    let store = MemStore::new();
+    let (_, h) = sealed_segment(&store, 1);
+    let wrong = Hint {
+        clen: h.clen - 1,
+        ..h
+    };
+    assert_eq!(
+        store
+            .read_extent(&wrong, &mut Vec::new())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Corrupt
+    );
+    let mut w = store.open_segment().unwrap();
+    w.append_extent(&cid(2), None, &data_extent(&cid(2), 50))
+        .unwrap();
+    assert!(
+        store.leftovers().unwrap().is_empty(),
+        "the file of a live writer is in use"
+    );
+    assert_eq!(store.remove_leftovers().unwrap(), 0);
+}
+
+#[test]
+fn the_checkpoint_belongs_to_one_volume_and_the_tail_guard_zeroes_stale_tails() {
+    let store = MemStore::new();
+    let slot = |uuid: [u8; 16], last: u64| lunix_format::local::CheckpointSlot {
+        slot_seq: 0,
+        volume_uuid: lunix_format::VolumeUuid(uuid),
+        last_commit_seq: last,
+        id_high: 9,
+        lane_tail_ordinals: vec![3, 4],
+        stats: vec![],
+    };
+    assert_eq!(
+        store.store(&slot([9; 16], 0)).unwrap_err().kind(),
+        ErrorKind::Invalid,
+        "another volume's slot"
+    );
+    store.put(CommitSeq(0), b"c0").unwrap();
+    store.put(CommitSeq(1), b"c1").unwrap();
+    store.store(&slot(store.uuid().0, 1)).unwrap();
+    let hint = store.load_checkpoint_hint().unwrap().unwrap();
+    assert!(hint.tails_usable);
+    assert_eq!(hint.slot.lane_tail_ordinals, vec![3, 4]);
+    // After `--truncate-tip` the checkpoint names a commit the chain lost.
+    store.set_aside(CommitSeq(1)).unwrap();
+    let hint = store.load_checkpoint_hint().unwrap().unwrap();
+    assert!(!hint.tails_usable);
+    assert_eq!(hint.slot.lane_tail_ordinals, vec![0, 0]);
+    assert_eq!(hint.slot.id_high, 9, "id_high stays usable");
+    assert_eq!(
+        store.load().unwrap().unwrap().lane_tail_ordinals,
+        vec![3, 4],
+        "load returns the slot as written"
+    );
+}

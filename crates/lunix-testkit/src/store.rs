@@ -14,12 +14,16 @@
 //!   to equal the one passed, `clen`/`ulen` to agree with the codec, and
 //!   builds the footer (entries sorted by `(chunk_id, off)`, `seg_hash`,
 //!   `write_seq` range, dictionary ids) as `FooterBody`;
-//! * `read_extent` bounds-checks the hint (`Corrupt`), only sealed containers
-//!   are readable;
+//! * `read_extent` bounds-checks the hint and compares the stored `clen` with
+//!   it (`Corrupt`), only sealed containers are readable;
 //! * `delete` of a commit refuses the tip and anything at or above `chain_floor`;
 //! * the checkpoint is two slots, the store assigns `slot_seq`;
-//! * the sweep deletes unnamed containers above the mark and reports the
-//!   highest id present before it deleted anything.
+//! * the sweep refuses a named id above the mark (`Invalid`), deletes unnamed
+//!   containers above it, reports the highest id present before it deleted
+//!   anything and feeds that id to the allocator;
+//! * `leftovers` and the sweep ignore the file of a writer open in this process;
+//! * `CheckpointStore::store` refuses a slot of another volume, `load` ignores
+//!   one; [`MemStore::load_checkpoint_hint`] applies the tail guard.
 //!
 //! # Crash model
 //!
@@ -136,7 +140,7 @@ pub struct MemStoreConfig {
 impl Default for MemStoreConfig {
     fn default() -> Self {
         Self {
-            uuid: VolumeUuid([0x42; 16]),
+            uuid: VolumeUuid([7; 16]),
             volume_bytes: b"volume-descriptor".to_vec(),
             segment_target: 16 << 20,
             capacity_bytes: None,
@@ -658,6 +662,17 @@ impl SegmentStore for MemStore {
                 what: "segment",
                 detail: "hint outside the extent region",
             })?;
+        // The stored clen must be the hint's: a misaligned hint is `Corrupt`.
+        let stored = bytes
+            .get(48..52)
+            .and_then(|b| <[u8; 4]>::try_from(b).ok())
+            .map(u32::from_le_bytes);
+        if stored != Some(hint.clen) {
+            return Err(Error::Corrupt {
+                what: "segment",
+                detail: "stored clen differs from the hint",
+            });
+        }
         out.extend_from_slice(bytes);
         Ok(())
     }
@@ -907,6 +922,7 @@ impl CommitStore for MemStore {
 
 impl CheckpointStore for MemStore {
     fn load(&self) -> Result<Option<CheckpointSlot>> {
+        // A slot written for another volume is ignored, like a torn one.
         Ok(self
             .st()?
             .d
@@ -914,10 +930,14 @@ impl CheckpointStore for MemStore {
             .iter()
             .flatten()
             .max_by_key(|s| s.slot_seq)
+            .filter(|s| s.volume_uuid == self.0.cfg.uuid)
             .cloned())
     }
 
     fn store(&self, slot: &CheckpointSlot) -> Result<()> {
+        if slot.volume_uuid != self.0.cfg.uuid {
+            return Err(Error::invalid("checkpoint is for another volume"));
+        }
         self.0.faults.point("checkpoint.store.before")?;
         {
             let mut st = lock(&self.0.state);
@@ -937,6 +957,45 @@ impl CheckpointStore for MemStore {
     fn zero(&self) -> Result<()> {
         self.st()?.d.checkpoint = [None, None];
         Ok(())
+    }
+}
+
+/// A checkpoint slot plus the verdict of the tail guard (as `lunix-store`'s
+/// `CheckpointHint`).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CheckpointHint {
+    /// The newest valid slot; its `lane_tail_ordinals` are all zero when
+    /// `tails_usable` is false ("skip no journal file").
+    pub slot: CheckpointSlot,
+    /// True when the slot was written for a commit at or below the tip.
+    pub tails_usable: bool,
+}
+
+/// The tail guard: lane tails are usable only if the checkpoint was written
+/// for a commit at or below the tip.
+pub fn tails_usable(slot: &CheckpointSlot, tip: Option<CommitSeq>) -> bool {
+    tip.is_some_and(|t| slot.last_commit_seq <= t.0)
+}
+
+impl MemStore {
+    /// The checkpoint with the tail guard applied against the commit tip. The
+    /// plain [`CheckpointStore::load`] returns the slot as written. An inherent
+    /// method on the real `LocalVolume` too, not part of the traits.
+    ///
+    /// # Errors
+    /// `Io` when the store is dead.
+    pub fn load_checkpoint_hint(&self) -> Result<Option<CheckpointHint>> {
+        let Some(mut slot) = CheckpointStore::load(self)? else {
+            return Ok(None);
+        };
+        let usable = tails_usable(&slot, CommitStore::tip(self)?);
+        if !usable {
+            slot.lane_tail_ordinals.iter_mut().for_each(|o| *o = 0);
+        }
+        Ok(Some(CheckpointHint {
+            slot,
+            tails_usable: usable,
+        }))
     }
 }
 
@@ -1044,6 +1103,7 @@ impl VolumeDir for MemStore {
     }
 
     fn leftovers(&self) -> Result<Vec<Leftover>> {
+        // A writer open in this process is not a leftover: its file is in use.
         let st = self.st()?;
         let mut v: Vec<Leftover> =
             st.d.leftovers
@@ -1052,10 +1112,6 @@ impl VolumeDir for MemStore {
                     name: l.name.clone(),
                     size_bytes: l.size,
                 })
-                .chain(st.writers.values().map(|w| Leftover {
-                    name: w.name.clone(),
-                    size_bytes: w.len,
-                }))
                 .collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
@@ -1069,6 +1125,12 @@ impl VolumeDir for MemStore {
     }
 
     fn sweep_orphans(&self, req: &SweepRequest<'_>) -> Result<SweepReport> {
+        let bad = |id: &ObjId| id.raw() > req.high_water_mark;
+        if req.named_segments.iter().any(bad) || req.named_packs.iter().any(bad) {
+            return Err(Error::invalid(
+                "a named id is above high_water_mark: the mark was computed wrongly",
+            ));
+        }
         self.0.faults.point("sweep.before")?;
         let mut st = lock(&self.0.state);
         let highest_id_before =
@@ -1079,6 +1141,8 @@ impl VolumeDir for MemStore {
                 .chain(st.d.leftovers.iter().filter_map(|l| l.id))
                 .max()
                 .unwrap_or(0);
+        // Ids on disk count for the allocator before anything is deleted.
+        self.0.ids.observe(highest_id_before);
         let mut report = SweepReport {
             highest_id_before,
             ..SweepReport::default()

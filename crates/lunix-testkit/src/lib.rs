@@ -53,4 +53,4 @@ pub use overlay::{coalesce, FlatOverlay};
 pub use packs::MemPacks;
 pub use plain::PlainCodec;
 pub use space::{MemSpace, MemSpaceConfig};
-pub use store::{MemIds, MemStore, MemStoreConfig, StoreImage};
+pub use store::{tails_usable, CheckpointHint, MemIds, MemStore, MemStoreConfig, StoreImage};
