@@ -1,0 +1,16 @@
+# lunix-format golden file 09-keyring-passphrase.bin (193 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f09_keyring
+00000000  4c 55 4e 49 58 4b 52 47 01 00 01 01 07 00 00 00
+00000010  40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f
+00000020  03 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00
+00000030  01 00 00 00 01 00 1c 00 49 00 00 00 00 4c 00 00
+00000040  02 00 00 00 01 00 00 00 11 11 11 11 11 11 11 11
+00000050  11 11 11 11 11 11 11 11 01 30 31 32 33 34 35 36
+00000060  37 38 39 3a 3b 3c 3d 3e 3f 40 41 42 43 44 45 46
+00000070  47 aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
+00000080  aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa aa
+00000090  aa 55 55 55 55 55 55 55 55 55 55 55 55 55 55 55
+000000a0  55 25 2f 22 1d ef ec 18 63 72 c8 b9 08 a7 8f 41
+000000b0  80 8c d0 78 f4 fa 48 30 a2 fc a8 0e e8 68 fe 7b
+000000c0  82

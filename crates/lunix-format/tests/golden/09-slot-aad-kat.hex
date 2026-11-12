@@ -1,0 +1,7 @@
+# lunix-format golden file 09-slot-aad-kat.bin (63 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f09_keyring
+00000000  6c 75 6e 69 78 20 73 6c 6f 74 20 76 31 00 40 41
+00000010  42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 01 00
+00000020  00 00 01 00 4c 00 00 02 00 00 00 01 00 00 00 11
+00000030  11 11 11 11 11 11 11 11 11 11 11 11 11 11 11
