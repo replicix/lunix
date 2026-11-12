@@ -12,7 +12,7 @@ use std::cell::Cell;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use lunix_format::FormatError;
 use sha2::Sha256;
 
@@ -81,7 +81,7 @@ pub fn alloc_limit(len: usize) -> usize {
 /// Parses hex, ignoring ASCII whitespace.
 pub fn hex(s: &str) -> Vec<u8> {
     let digits: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    assert!(digits.len() % 2 == 0, "odd number of hex digits");
+    assert!(digits.len().is_multiple_of(2), "odd number of hex digits");
     digits
         .chunks(2)
         .map(|p| {
@@ -316,7 +316,7 @@ pub fn blake3_128(data: &[u8]) -> [u8; 16] {
 }
 
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac key");
+    let mut m = <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("hmac key");
     m.update(data);
     m.finalize().into_bytes().into()
 }
