@@ -1,8 +1,9 @@
 # On-disk and on-bucket formats (phase 1 freeze)
 
-Status: **draft of M1.A0, 2026-11-12, revised after the independent A0
-review (`docs/plans/v1/wip/01-p1-m1a0-review.md`); awaiting the
-maintainer's sign-off** (`crates/lunix-format/FREEZE.md`). Once signed,
+Status: **M1.A0, signed off by the maintainer on 2026-11-12, then amended
+on 2026-11-12 after the M2 security review** (keyed chunk ids in integrity
+mode and the local rollback anchor, [§24](#24-decided-in-a0) items 45 and
+46); **re-sign pending** (`crates/lunix-format/FREEZE.md`). Once signed,
 every layout here is frozen for the life of the product: later phases add
 code, not migrations (ROADMAP). A change after sign-off is a format change
 and needs the maintainer.
@@ -133,9 +134,9 @@ confirmed before use ([§17.3](#173-authentication)), and the checkpoint and
 
 | type | width | encoding | legal range | notes |
 |---|---|---|---|---|
-| `ChunkId` | 32 | bytes | any | Data extent: BLAKE3-256 of the plaintext chunk (plain and integrity modes); keyed BLAKE3 under the data addressing key (encrypted, default profile); HMAC-SHA-256 under it (encrypted, FIPS profile). In a map-node extent the same field holds the node hash ([§8.5](#85-node-hash-and-empty-hashes)). |
+| `ChunkId` | 32 | bytes | any | Data extent: BLAKE3-256 of the plaintext chunk (plain mode); keyed BLAKE3 under the integrity addressing key, purpose 0x0a (integrity mode, amendment 2026-11-12, [§4.5](#45-keyed-chunk-ids-in-integrity-mode-amendment-2026-11-12)); keyed BLAKE3 under the data addressing key (encrypted, default profile); HMAC-SHA-256 under it (encrypted, FIPS profile). In a map-node extent the same field holds the node hash ([§8.5](#85-node-hash-and-empty-hashes)). |
 | `IdLen` | 1 | u8 | 0, 16, 32 | Map id-prefix length, from the descriptor. 0 (lean) decodes but `volume create` refuses it in v1 (ADR-8). |
-| `IdPrefix` | `IdLen` | bytes | | The first `IdLen` bytes of a `ChunkId`. |
+| `IdPrefix` | `IdLen` | bytes | | The first `IdLen` bytes of a `ChunkId`, so of a keyed id in integrity and encrypted mode. |
 | `ObjId` (`SegId`, `PackId`, `RunId`) | 8 | u64 | `epoch << 40 \| counter`, `epoch` < 2^24, `counter` 1 ..= 2^40 − 1 | One id space per volume for segments, map packs and index runs (one counter). 0 means "none" and is never allocated. Ids are never reused: at open, before the orphan sweep deletes anything, the allocator's next counter is 1 + the maximum of the checkpoint's `id_high`, the highest id any commit present names, and the highest id of any segment, pack or run file present (A0 review finding 10). |
 | `WriteSeq` | 8 | u64 | ≥ 1 for a record; 0 = before any write | Global write sequence (DESIGN §8.1). `cut_seq` is a `WriteSeq`. |
 | `CommitSeq` | 8 | u64 | 0 = genesis | Commit position in the chain; `parent_seq`, `chain_floor`, `since_seq`, `base_seq`, pin and heat names are `CommitSeq`. |
@@ -161,7 +162,7 @@ authenticated descriptor, never from an object.
 | mode | value | family root secret (in the keyring) | chunk id | extent tag | metadata objects | descriptor MAC |
 |---|---|---|---|---|---|---|
 | `plain` | 0 | none (no keyring) | BLAKE3-256 | BLAKE3-128, unkeyed | envelope form 0, `mac` = BLAKE3-256 checksum | BLAKE3-256 checksum |
-| `integrity` | 1 | integrity key IK (32 bytes) | BLAKE3-256 | BLAKE3-128 keyed with the extent tag key | envelope form 0, `mac` = HMAC-SHA-256 under the integrity HMAC key | HMAC-SHA-256 |
+| `integrity` | 1 | integrity key IK (32 bytes) | keyed (integrity addressing key, 0x0a) | BLAKE3-128 keyed with the extent tag key | envelope form 0, `mac` = HMAC-SHA-256 under the integrity HMAC key | HMAC-SHA-256 |
 | `encrypted` | 2 | KMK (32 bytes) | keyed (data addressing key) | AES-256-GCM tag | envelope form 1, XChaCha20-Poly1305 under the per-kind metadata key | HMAC-SHA-256 |
 
 **`plain` is corruption detection only** (maintainer, 2026-11-12). It is
@@ -210,7 +211,8 @@ msg = "lunix kdf v1\0" ‖ family_id(16) ‖ purpose(u8) ‖ args
 | keyring MAC key | 0x07 | none | KMK or IK | encrypted, integrity | HMAC key of the keyring `mac` | none (A0) |
 | integrity HMAC key | 0x08 | none | IK | integrity | HMAC key of envelope form 0 `mac` (commits, lease, pins, footers, opaque bodies) | none (A0) |
 | extent tag key | 0x09 | none | IK | integrity | key of the keyed BLAKE3-128 extent tag (D11) | none (A0) |
-| reserved | 0x00, 0x0a ..= 0xff | | | | never used | |
+| integrity addressing key | 0x0a | none | IK | integrity | keyed `chunk_id` of data chunks (amendment 2026-11-12, [§4.5](#45-keyed-chunk-ids-in-integrity-mode-amendment-2026-11-12)) | none (§23 example) |
+| reserved | 0x00, 0x0b ..= 0xff | | | | never used | |
 
 A purpose is never used in a mode that the "used in mode" column does not
 list. In `plain` mode no key exists.
@@ -259,6 +261,53 @@ meta_aad(id, kind, name) = "lunix meta v1\0" ‖ id(16) ‖ kind(u8) ‖ name_le
 
 The same `meta_aad` is the AEAD AAD of envelope form 1 and the prefix of the
 MAC input of envelope form 0 ([§9](#9-metadata-envelope-freeze-item-7)).
+
+### 4.5 Keyed chunk ids in integrity mode (amendment 2026-11-12)
+
+Decided by the maintainer after the M2 security review (finding 8), and
+needing the re-sign of [FREEZE.md](../../crates/lunix-format/FREEZE.md).
+
+- **Rule.** In `integrity` mode the chunk id of a data chunk is
+  `keyed BLAKE3(K_ia, plaintext)`, where `K_ia` is the integrity addressing
+  key, purpose 0x0a of the IK. This is exactly how `encrypted` mode keys
+  its ids (purpose 0x01 of the KMK). `plain` mode stays unkeyed
+  (`BLAKE3-256(plaintext)`). `integrity` mode has only the default profile,
+  so there is no FIPS variant.
+- **Where the keyed id is used.** Everything that holds or compares a data
+  chunk id uses this value: the extent header `chunk_id`
+  ([§6](#6-extent-freeze-item-3)); the leaf `id_prefix`, which is its first
+  `id_len` bytes ([§8.3](#83-leaf-encoding-rb16)); the footer entries
+  ([§7.2](#72-footer)); the index runs and the dedup lookup
+  ([§17](#17-index-run-freeze-item-13)); and every recompute of the id
+  (`verify_reads`, fetched extents, fsck), which hashes the decompressed
+  plaintext with `K_ia`. Dedup stays within the family, as before.
+- **Why this closes the `id_len = 16` collision search.** Before, the id was
+  public: a guest could search its own data offline for two chunks whose
+  16-byte prefixes collide (a 2^64 birthday search), and a bucket writer
+  could then swap them on a local read, which compares only the prefix
+  (D11). With a keyed id nobody without `K_ia` can compute an id, so the
+  search cannot be run offline at all; a guest that only sees the ids a
+  bucket reader leaks would have to write about 2^64 chunks through the
+  device to find one prefix collision. Neither the guest nor a bucket writer
+  holds the IK.
+- **Node and data stay apart (rules R1 and R2 of the M2 review).** Node
+  hashes are unchanged: in `integrity` mode they remain unkeyed
+  BLAKE3-256 ([§8.5](#85-node-hash-and-empty-hashes)). A data id is now a
+  keyed hash, a node id an unkeyed one, so:
+  - *a node presented as data fails R1*: the read expects the leaf's
+    `id_prefix`, a prefix of a keyed id, and the node extent's header holds
+    `BLAKE3(node encoding)`. They agree only by a chance collision of the
+    keyed and the unkeyed function (2^-128 per pair at 16 bytes), which no
+    one can aim for without `K_ia`. (Before the amendment a node passed as
+    data only if the guest had written exactly those bytes, so the data was
+    right; now it never passes.)
+  - *data presented as a node fails R2*: R2 recomputes the unkeyed node
+    hash of the opened bytes and requires it to equal the extent header's
+    `chunk_id`, which for a data extent is a keyed id.
+  - The extent tag key is shared by both kinds, as before; the tag binds the
+    bytes, R1 and R2 bind the kind.
+- **`plain` mode** keeps the residual: ids are public and a bucket writer
+  can do anything there anyway ([§4.1](#41-crypto-modes)).
 
 ## 5. Journal file and record (freeze item 2)
 
@@ -728,7 +777,9 @@ level and is never stored. Size: 24 579 bytes at fanout 512, 12 291 at 256.
 
 `H` is BLAKE3-256 in plain and integrity mode, keyed BLAKE3 under the
 map-node addressing key in encrypted mode (default profile), HMAC-SHA-256
-under it (fips). The level byte separates leaf (0) from interior (≥ 1)
+under it (fips). In integrity mode node hashes stay unkeyed while data ids
+are keyed ([§4.5](#45-keyed-chunk-ids-in-integrity-mode-amendment-2026-11-12)),
+which keeps the two kinds apart under rules R1 and R2. The level byte separates leaf (0) from interior (≥ 1)
 inputs. Locations are hints, so two stores with the nodes at different pack
 offsets have the same root (ADR-8).
 
@@ -950,9 +1001,15 @@ TRANSFER:
   the create-only name `commits/<tip>` and lose journal records already
   reclaimed. The repair is offline: `lunix fsck --repair --truncate-tip`
   moves the damaged object aside and makes `tip − 1` the tip. It also
-  zeroes both checkpoint slots ([§18](#18-checkpoint-freeze-item-14)); the
+  zeroes both checkpoint slots ([§18](#18-checkpoint-freeze-item-14)) and
+  lowers the rollback anchor in `state/pins` to the new tip
+  ([§20](#20-local-pins-file-freeze-item-14)); the
   `ObjId` allocator rule ([§3](#3-primitives-freeze-item-1)) keeps the ids of
   the files the next open sweeps from being reused.
+- **Rollback anchor** (amendment 2026-11-12): at attach, after the chain
+  is verified, a tip below the local floor `max_commit_seq` of
+  `state/pins` is `Rollback`, and a commit at the floor's height whose hash
+  differs from `tip_hash` is `Fork` ([§20](#20-local-pins-file-freeze-item-14)).
 - Every object a commit names is durable before the commit (ADR-9); a FULL
   names only index runs durable before its C6 (D3).
 - The tip's high-water mark is the highest segment or pack id any retained
@@ -1180,7 +1237,9 @@ Block (exactly 4 096 bytes, at offset `i × 4096`):
 
 Entry (48 bytes): `chunk_id` [32] at 0, `seg` u64 at 32, `off` u32 at 40,
 `clen` u32 at 44. Entries are sorted strictly ascending by `chunk_id`
-across the whole run: one entry per chunk id (the current copy).
+across the whole run: one entry per chunk id (the current copy). The
+ids are the mode's chunk ids, keyed in integrity and encrypted mode
+([§4.5](#45-keyed-chunk-ids-in-integrity-mode-amendment-2026-11-12)).
 
 Block index (at `nblocks × 4096`): `nblocks` × 32 bytes, the first
 `chunk_id` of each block.
@@ -1310,25 +1369,77 @@ Length: 96 bytes.
 
 ## 20. Local pins file (freeze item 14)
 
-`state/pins` (atomic replace) holds the monotonic floors and the local
-trust-on-first-use pin (ADR-11 F6, F7).
+`state/pins` (atomic replace: tmp, `fdatasync`, rename, directory `fsync`)
+holds the monotonic floors, the local trust-on-first-use pin (ADR-11 F6,
+F7) and, from version 2, the local **rollback anchor** (amendment
+2026-11-12, needing re-sign; M2 review, "Attack 8").
+
+Version 2 (written by every writer from the amendment on):
 
 | field | offset | width | encoding | legal range | notes |
 |---|---|---|---|---|---|
 | `magic` | 0 | 8 | bytes | `"LUNIXPIN"` | |
-| `ver` | 8 | 2 | u16 | 1 | |
+| `ver` | 8 | 2 | u16 | 2 | |
 | `pin_present` | 10 | 1 | u8 | 0, 1 | |
 | `pin_mode` | 11 | 1 | u8 | a `crypto_mode`; 0 if no pin | |
-| reserved | 12 | 4 | | zero | |
+| `floor_present` | 12 | 1 | u8 | 0, 1 | 1 once a verified tip has been recorded |
+| reserved | 13 | 3 | | zero | |
 | `volume_uuid` | 16 | 16 | bytes | | |
 | `family_id` | 32 | 16 | bytes | | |
 | `max_keyring_seq` | 48 | 8 | u64 | | highest `keyring_seq` seen |
 | `max_epoch` | 56 | 8 | u64 | | highest epoch seen |
 | `pin_fingerprint` | 64 | 16 | bytes | zero unless a keyed mode is pinned | the KMK fingerprint pin |
-| reserved | 80 | 12 | | zero | |
-| `crc32c` | 92 | 4 | u32 | `crc32c(bytes 0..92)` | |
+| `max_commit_seq` | 80 | 8 | u64 (`CommitSeq`) | 0 if `floor_present` = 0 | the highest verified tip this host has recorded |
+| `tip_hash` | 88 | 32 | bytes | zero if `floor_present` = 0 | BLAKE3-256 of that commit object's bytes as stored (the value its child would carry as `parent_hash`) |
+| reserved | 120 | 12 | | zero | |
+| `crc32c` | 132 | 4 | u32 | `crc32c(bytes 0..132)` | |
 
-Length: 96 bytes.
+Length: 136 bytes.
+
+Version 1 (the signed layout before the amendment) is still **read**, never
+written: bytes 0-79 as above with `ver` = 1 and bytes 12-15 reserved, then
+reserved bytes 80-91 and `crc32c(bytes 0..92)` at 92; 96 bytes. A version 1
+file means **no floor** (`floor_present` = 0); the next write upgrades it to
+version 2. A reader rejects any other `ver` and any length other than 96
+(v1) or 136 (v2), and treats a rejected file as absent.
+
+**The rollback anchor.**
+
+- *Written* (raise only: `max_commit_seq` never decreases) after every
+  verified attach, with the verified tip (and again after the attach's own
+  EPOCH commit, when it writes one, once that commit is durable), and after
+  every FULL commit, after its durability point C6. It is never written
+  ahead of a durable commit, so a crash leaves the floor at or below the
+  tip, never above it.
+- *Checked* at attach, after the descriptor check
+  ([attach-matrix.md](attach-matrix.md)) and after `verify_chain` (rule R4
+  of the M2 review), when `floor_present` = 1:
+  - tip `commit_seq` < `max_commit_seq` → **`Rollback`**;
+  - the commit at height `max_commit_seq` in the verified chain (the tip
+    itself when the heights are equal) hashes to anything other than
+    `tip_hash` → **`Fork`**;
+  - if that height is below the tip's `chain_floor`, the commit is gone and
+    the check cannot be made: attach proceeds and raises the floor.
+- `lunix fsck --repair --truncate-tip` is the one operation that lowers the
+  floor: it rewrites it to the new tip, as an explicit offline act of the
+  operator ([§10.7](#107-chain-rules)).
+- The checkpoint's `last_commit_seq` is a hint and is never used as the
+  anchor ([§18](#18-checkpoint-freeze-item-14)).
+
+**What it does not cover.** The anchor detects a rollback or fork seen from
+a host that has attached before. A host with no floor (a first attach, an
+ephemeral client, a version 1 file) cannot detect a rollback to an older
+valid chain: that is ADR-11 F7's "by construction" case, restated for
+history. **A purely local volume cannot be protected from someone who can
+write its local disk**: whoever can write the store can also write
+`integrity.key` and `state/pins`. Integrity mode defends the bucket copy;
+for a modified local disk the honest claim is corruption detection plus
+crash safety (encrypted mode with a passphrase slot resists a reader of the
+disk, not a writer). The later anchors need no layout now: the maximum over
+InSync mirrors (phase 5) reads the tips that already exist, a raise-only
+floor in a Kubernetes resource (phase 5) lives outside this format, and a
+write-only notary bucket (a later upgrade) would add a new object kind and
+path, which the reserved kind ids 14 and up allow without a migration.
 
 ## 21. `volume.json` and `volumes.json` (freeze item 14)
 
@@ -1415,7 +1526,10 @@ by Lunix code. Hash, CRC and MAC values were computed with the reference
 `crc32c("123456789") = e3069283`, the BLAKE3 empty-input hash and RFC 4231
 case 1; the same tool reproduces the KAT's `purpose_pin`,
 `purpose_volume_mac`, `purpose_meta_commit` and `xchacha_ct`. M1.A decodes
-and re-encodes each example byte for byte.
+and re-encodes each example byte for byte. The amendments of 2026-11-12
+changed §23.2, §23.4, §23.5 and §23.6 (keyed chunk ids in integrity mode)
+and added §23.9 (the `state/pins` floor); they were recomputed the same way
+on the test host.
 
 Two example volumes:
 
@@ -1437,6 +1551,7 @@ purpose` under IK):
 | 0x05 fingerprint (first 16 bytes) | `92a4ec2689f62aab86bc8f278713183e` |
 | 0x08 integrity HMAC key | `aa13505a19bd5e783cbc31582031cb918c1dfaa9aa6b94b27057acb06306f4df` |
 | 0x09 extent tag key | `8f5a8aa5bd1c61e6d9b3e275436f35de2673144fc8d12cb7aab4b39398b09322` |
+| 0x0a integrity addressing key | `3e596debe98cf9c82d88e17c63d875e3f16dc9334a2dbe870f4dd827679372b8` |
 
 Volume A's keys are KAT vectors: descriptor MAC key = `purpose_volume_mac`,
 fingerprint = the first 16 bytes of `purpose_pin`.
@@ -1505,9 +1620,10 @@ this file.
 
 ### 23.2 Plain extent (volume B)
 
-Chunk 0 of volume B after destaging record 1: 16 384 bytes of `0x41`,
-`chunk_id` = BLAKE3-256 of the chunk =
-`c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566`. Codec 2
+Chunk 0 of volume B after destaging record 1: 16 384 bytes of `0x41`.
+Volume B is in integrity mode, so `chunk_id` = keyed BLAKE3 of the chunk
+under the integrity addressing key (purpose 0x0a, amendment 2026-11-12) =
+`8f6cf4e5e665b21ac12bd316397d883cb284a14b4999f9ee99301971d1b55ede`. Codec 2
 (LZ4); the 75-byte LZ4 block is: token `1f` (1 literal, match length
 15 + extension), literal `41`, offset `01 00`, 64 × `ff` and `27` (match
 length 15 + 64 × 255 + 39 + 4 = 16 378), token `50` (5 final literals),
@@ -1520,14 +1636,16 @@ length 15 + 64 × 255 + 39 + 4 = 16 378), token `50` (5 final literals),
 | 5 | `02 00` | `codec` | 2 (LZ4) |
 | 7 | `00` | `level` | 0 |
 | 8 | `00 40 00 00 00 00 00 00` | `ulen` | 16 384 = the chunk size |
-| 16 | `c6 c4 89 01 19 d8 34 da 40 4b 94 c7 07 aa 46 a5 79 d7 7f 12 22 11 d1 45 98 2c 8c eb 83 e7 f5 66` | `chunk_id` | |
+| 16 | `8f 6c f4 e5 e6 65 b2 1a c1 2b d3 16 39 7d 88 3c b2 84 a1 4b 49 99 f9 ee 99 30 19 71 d1 b5 5e de` | `chunk_id` | keyed (purpose 0x0a) |
 | 48 | `4b 00 00 00` | `clen` | 75 |
 | 52 | `1f 41 01 00`, 64 × `ff`, `27 50 41 41 41 41 41` | payload | the LZ4 block above |
-| 127 | `5f 22 05 bd 62 15 95 15 ed 21 9a 08 99 87 bb 03` | `tag` | BLAKE3-128 of `keyed BLAKE3(extent tag key, extent[0..127])` |
+| 127 | `4e 70 03 44 dd 5d 9e a6 0a 34 ba 09 c8 a5 f1 15` | `tag` | BLAKE3-128 of `keyed BLAKE3(extent tag key, extent[0..127])` |
 
-Length 143 = `OVH` (68) + 75. The same extent on a **plain-mode** volume
-has the unkeyed tag `f2 1b 8c 97 3d ce fd 5e 68 95 4f 1c 22 61 58 7a`
-(BLAKE3-128 of `extent[0..127]`). The `CCH1` object `extent[0..16] ‖
+Length 143 = `OVH` (68) + 75. The same chunk on a **plain-mode** volume has
+the unkeyed `chunk_id` BLAKE3-256(chunk) =
+`c6c4890119d834da404b94c707aa46a579d77f122211d145982c8ceb83e7f566` at offset 16 and the unkeyed tag
+`f2 1b 8c 97 3d ce fd 5e 68 95 4f 1c 22 61 58 7a` (BLAKE3-128 of that
+extent's bytes 0..127); every other byte is the same. The `CCH1` object `extent[0..16] ‖
 extent[52..127]` decodes with `chunkfmt` to the 16 KiB chunk.
 
 ### 23.3 Encrypted extent (volume A, KAT inputs)
@@ -1585,7 +1703,7 @@ Footer envelope at 143:
 | 17 | `78` | frame content size | 120 |
 | 18 | `c1 03 00` | block header | last block, raw, size 120 (`120 << 3 \| 1`) |
 | 21 | 120 bytes | footer body | below |
-| 141 | `d9 45 f9 bf 84 b0 99 59 46 22 21 ec 6e 2c b1 54 f5 1d 6a d0 fa ce 0e 97 87 8d db 19 75 ee 59 7f` | `mac` | HMAC-SHA-256(integrity HMAC key, `meta_aad(B, 6, "segments/0000000000000001")` ‖ envelope[0..141]) |
+| 141 | `a6 d6 32 64 53 23 ac 81 d8 d6 08 53 99 e7 4e 26 81 50 6d 45 9a 90 17 9f 90 f6 b0 9c 05 ee 38 81` | `mac` | HMAC-SHA-256(integrity HMAC key, `meta_aad(B, 6, "segments/0000000000000001")` ‖ envelope[0..141]) |
 
 Footer body (the 120 bytes at envelope offset 21):
 
@@ -1599,8 +1717,8 @@ Footer body (the 120 bytes at envelope offset 21):
 | 16 | `8f 00 00 00 00 00 00 00` | `extents_len` | 143 |
 | 24 | `01 00 00 00 00 00 00 00` | `write_seq_lo` | 1 |
 | 32 | `01 00 00 00 00 00 00 00` | `write_seq_hi` | 1 |
-| 40 | `03 92 36 2e cd c4 5e e0 63 46 46 a9 45 1b 18 7b 44 56 25 8c 25 a1 5c 7d 17 2e 79 99 c7 df 06 66` | `seg_hash` | BLAKE3-256 of bytes `[0, 143)` |
-| 72 | `c6 c4 … f5 66` (32 bytes) | entry `chunk_id` | |
+| 40 | `25 67 f1 0b ff 71 29 dc 5d a5 c2 06 d1 ea d8 25 ad be e6 d0 f5 5d 02 a8 ba f2 69 ce f1 8f 91 62` | `seg_hash` | BLAKE3-256 of bytes `[0, 143)` |
+| 72 | `8f 6c … 5e de` (32 bytes) | entry `chunk_id` | the keyed id of §23.2 |
 | 104 | `00 00 00 00` | entry `off` | 0 |
 | 108 | `4b 00 00 00` | entry `clen` | 75 |
 | 112 | `00 40 00 00` | entry `ulen` | 16 384 |
@@ -1650,21 +1768,21 @@ bits(75) = 7, `wcum` = 0; `rw` = 9 + 1 + 0 + 10 = 20 bits.
 | 23 | `00 02 10 40 00` | run table | run 0 = `0x00200` (start 0, seg_idx 1, rank 0), run 1 = `0x00401` (start 1, seg_idx 0, rank 1), packed LSB first: `0x0040100200` |
 | 28 | `4b` | `clen` column | 75 |
 | 29 | (none) | `cum` column | 1 × 0 bits |
-| 29 | `c6 c4 89 01 19 d8 34 da 40 4b 94 c7 07 aa 46 a5` | id column | `id_prefix` (16 bytes) |
+| 29 | `8f 6c f4 e5 e6 65 b2 1a c1 2b d3 16 39 7d 88 3c` | id column | `id_prefix` (16 bytes) |
 
-Length 45. Leaf hash (BLAKE3-256, integrity mode) =
-`b2b3b7ec14023024c44cad3ad2595e908b40ebb7fb91d667ddd8153909114469`. Lookup
+Length 45. Leaf hash (BLAKE3-256, unkeyed in integrity mode) =
+`dca03248122f117b77f7f5aeefbdd4867e0b4c958a051c8a245251324ef3b573`. Lookup
 of entry 0: run 0, `k` = 0, `seg` = 1 + 0, `off` = 0, `clen` = 75, prefix
-`c6c4…46a5`; entry 7: run 1, a hole.
+`8f6c…883c` (the first 16 bytes of the keyed id); entry 7: run 1, a hole.
 
 The leaf is stored in map pack 2 at offset 0 as a codec-0 extent of 113
 bytes (`ulen` = `clen` = 45, `chunk_id` = the leaf hash, keyed tag
-`2f 16 49 5d 64 b5 48 2a 66 1e c5 c1 f6 aa 7d 67`). The root (level 1) is
+`26 ff 3e d4 28 5b 58 27 1c 9d b4 2e 83 6f b5 b8`). The root (level 1) is
 stored after it at offset 113: header `01 00 02`, child 0 = `{leaf hash,
 pack 2, off 0, len 113, lineage_idx 0}` (bytes 32-47 of the entry: `02 00 00 00 00 00 00 00 00 00 00 00 71 00 00 00`),
 children 1-511 = `{E0, 0, 0, 0, 0}`; 24 579 bytes,
 extent length 24 647. Root hash = BLAKE3-256(`01 00 02` ‖ leaf hash ‖ `E0` ×
-511) = `69a6249dad0e6c194b6400c39e38e8f97a0c39cb37b005bda3a9b791f516e6ca`.
+511) = `d126ea2c8ccdc011f08eeb71db94c59e659f9aba0229c8ea07bed39c2dfb5d0a`.
 
 ### 23.6 FULL commits: genesis and commit 1 (volume B)
 
@@ -1726,7 +1844,7 @@ FULL 2 (D3).
 | 84 | `02 00 00 00 00 00 00 00` | `cut_seq` | 2 |
 | 92 | `00 00 00 40 00 00 00 00` | `size` | 1 GiB |
 | 100 | `00 00 00 00 00 00 00 00` | `chain_floor` | 0 (retained FULLs: 0 and 1) |
-| 108 | `69 a6 24 9d ad 0e 6c 19 4b 64 00 c3 9e 38 e8 f9 7a 0c 39 cb 37 b0 05 bd a3 a9 b7 91 f5 16 e6 ca` | `map_root.hash` | the root of §23.5 |
+| 108 | `d1 26 ea 2c 8c cd c0 11 f0 8e eb 71 db 94 c5 9e 65 9f 9a ba 02 29 c8 ea 07 be d3 9c 2d fb 5d 0a` | `map_root.hash` | the root of §23.5 |
 | 140 | `02 00 00 00 00 00 00 00` | `map_root.pack` | 2 |
 | 148 | `71 00 00 00` | `map_root.off` | 113 |
 | 152 | `47 60 00` | `map_root.len` | 24 647 |
@@ -1738,7 +1856,7 @@ FULL 2 (D3).
 | 176 | `00 00 00 00` | reserved | |
 | 180 | `02 00 00 00 00 00 00 00` | `map_packs[0]` | 2 |
 | 188 | `01 00 00 00 00 00 00 00` | `new_segments[0]` | 1 |
-| 196 | `4e 3d c3 b9 db 3e d5 ed ee 1f 2b f7 41 4b d1 b5 b7 0e b0 8b ec 33 b9 f5 d5 3e 00 37 7e 84 ca 00` | `mac` | HMAC-SHA-256(integrity HMAC key, `meta_aad(B, 1, "commits/0000000000000001")` ‖ bytes 0..196) |
+| 196 | `90 29 1d 1d e8 e5 ce bc f1 1f 7b 0b 56 d5 c3 c1 89 25 02 56 04 df 37 33 65 cd a4 76 21 66 73 1d` | `mac` | HMAC-SHA-256(integrity HMAC key, `meta_aad(B, 1, "commits/0000000000000001")` ‖ bytes 0..196) |
 
 ### 23.7 Empty leaf and empty hashes
 
@@ -1804,6 +1922,34 @@ Full bytes of B:
 `b0b1b2b3b4b546b788b9babbbcbdbebf 505152535455565758595a5b5c5d5e5f`
 `92a4ec2689f62aab86bc8f278713183e 00dc0dcda1010000`
 `4951c7ffd237693e73cd15e17c6916869a540c098bc6fdbe90340ceba80801b5`.
+
+### 23.9 `state/pins` version 2 with a floor (volume B)
+
+The pins file of volume B after FULL commit 1 (§23.6) is durable: the CLI
+has pinned the integrity mode and the IK's fingerprint, the keyring is at
+`keyring_seq` 1, and the floor is commit 1. 136 bytes:
+
+| offset | bytes | field | value |
+|---|---|---|---|
+| 0 | `4c 55 4e 49 58 50 49 4e` | `magic` | `"LUNIXPIN"` |
+| 8 | `02 00` | `ver` | 2 |
+| 10 | `01` | `pin_present` | 1 |
+| 11 | `01` | `pin_mode` | 1 (integrity) |
+| 12 | `01` | `floor_present` | 1 |
+| 13 | `00 00 00` | reserved |  |
+| 16 | `b0 b1 b2 b3 b4 b5 46 b7 88 b9 ba bb bc bd be bf` | `volume_uuid` | volume B |
+| 32 | `50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f` | `family_id` | volume B |
+| 48 | `01 00 00 00 00 00 00 00` | `max_keyring_seq` | 1 |
+| 56 | `00 00 00 00 00 00 00 00` | `max_epoch` | 0 |
+| 64 | `92 a4 ec 26 89 f6 2a ab 86 bc 8f 27 87 13 18 3e` | `pin_fingerprint` | the IK fingerprint of §23 |
+| 80 | `01 00 00 00 00 00 00 00` | `max_commit_seq` | 1 |
+| 88 | `64 8d 4f c9 be 60 93 83 79 21 d9 a1 73 9f e6 ac 80 a7 41 41 56 64 f5 e2 d2 fe ed 4d ef e7 54 de` | `tip_hash` | BLAKE3-256 of the 228 bytes of commit 1 (§23.6) |
+| 120 | 12 × `00` | reserved |  |
+| 132 | `c6 03 74 2b` | `crc32c` | `0x2b7403c6` over bytes 0..132 |
+
+An attach that then finds tip 0 is `Rollback`; one that finds a commit 1
+with other bytes is `Fork`; tip 2 whose parent (commit 1) hashes to
+`648d4fc9…54de` passes and raises the floor to 2.
 
 ## 24. Decided in A0
 
@@ -2018,6 +2164,32 @@ maintainer's sign-off covers them all.
     apart from the credential alone. The check order is in
     [attach-matrix.md](attach-matrix.md).
 
+**Amendments of 2026-11-12 (after the M2 security review; need the
+maintainer's re-sign)**
+
+45. **Keyed chunk ids in integrity mode**, under a new purpose, 0x0a, the
+    integrity addressing key derived from the IK
+    ([§4.5](#45-keyed-chunk-ids-in-integrity-mode-amendment-2026-11-12)).
+    `plain` stays unkeyed; node hashes stay unkeyed in integrity mode.
+    Reason: M2 review finding 8. A public id lets a guest search its own
+    data for a 16-byte prefix collision that a bucket writer then swaps on a
+    local read; a keyed id cannot be computed without the IK. Data and node
+    extents stay apart under R1 and R2 (a keyed data id never equals an
+    unkeyed node hash except by chance). Changes freeze items 1, 3, 5
+    (`id_prefix` values), 11 and 13 (index entries hold keyed ids), and the
+    examples of §23.2, §23.4, §23.5 and §23.6.
+46. **`state/pins` version 2 carries a local rollback anchor**
+    `{max_commit_seq, tip_hash}`, raised after every verified attach and
+    every FULL's C6, checked at attach with two new results, `Rollback` and
+    `Fork`; version 1 is still read and means no floor
+    ([§20](#20-local-pins-file-freeze-item-14)). Reason: M2 review, "Attack
+    8": nothing in the bucket can detect a rollback to an older fully valid
+    chain, and the existing `max_epoch` misses commits hidden from the
+    host's own last session. Recommendation A of that review; B (maximum
+    over mirrors) and C (a raise-only Kubernetes floor) come in phase 5 and
+    D (a notary bucket) later, none of them needing a layout now. Changes
+    freeze item 14 and adds §23.9.
+
 ### 24.1 Differences from the spec and plan text
 
 | where | text | resolution here |
@@ -2035,10 +2207,13 @@ maintainer's sign-off covers them all.
 | DESIGN §5 step 4 | a dedup hit points the map at the hit and stops | a hit taken from an index run is first confirmed against the extent's full `chunk_id` and tag or AEAD ([§17.3](#173-authentication); A0 review finding 9); M9's destage follows it |
 | DESIGN §4.1 | the checkpoint is a hint whose loss is harmless | its lane tails are used only when `last_commit_seq` ≤ the tip, and `--truncate-tip` zeroes it ([§18](#18-checkpoint-freeze-item-14); A0 review finding 10) |
 | A0 draft open question; ADR-11 "Rejected: corruption detection only" | plain mode | `plain` is supported everywhere, backends included, as corruption detection only; the default of `volume create` is `integrity` (maintainer, 2026-11-12; [§4.1](#41-crypto-modes)) |
+| ADR-6, DESIGN §5 step 3 ("keyed if the family is encrypted"), signed layout §3 and §4.1 | the chunk id is unkeyed BLAKE3 in integrity mode | **amendment 2026-11-12, needs re-sign:** keyed under purpose 0x0a of the IK in integrity mode; plain stays unkeyed (item 45, M2 review finding 8) |
+| DESIGN §22.1 (rollback anchor, open), signed layout §20 (`state/pins` version 1) | no anchor against rollback to an older valid chain | **amendment 2026-11-12, needs re-sign:** `state/pins` version 2 with `{max_commit_seq, tip_hash}`, results `Rollback` and `Fork`; version 1 still read as "no floor" (item 46, M2 review "Attack 8") |
 
 ## 25. Open questions for the maintainer
 
-None open.
+None open. The amendments of 2026-11-12 (items 45 and 46) were decided by
+the maintainer and wait only for the re-sign of FREEZE.md.
 
 1. **Resolved (maintainer, 2026-11-12): default crypto mode.** `plain` is
    supported and allowed everywhere, including volumes with S3 backends, as

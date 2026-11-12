@@ -95,4 +95,18 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
 The attach matrix is not a byte layout; M2 loads Tables A-D of
 `attach-matrix.md` as its expected table.
 
-Signed off by: the maintainer (Attila Nagy) on 2026-11-12
+**Amendment 2026-11-12** (after the M2 security review; on-disk-formats.md
+§24 items 45 and 46, attach-matrix.md Table E). It changes the signed layout
+of items 1, 3, 5, 11, 13 (keyed chunk ids in integrity mode, purpose 0x0a)
+and 14 (`state/pins` version 2 with the rollback anchor). The checkboxes
+above record the goldens of the signed layout; the goldens derived from
+§23.2, §23.4, §23.5 and §23.6 (`a0-extent-plain-keyed`,
+`a0-segment-one-extent`, `04-segment-footer-body` if it is the §23.4 body,
+`a0-node-leaf-one-entry`, `05-node-interior-root`, `a0-commit-full-1`)
+change with the amendment and must be regenerated, `11-purposes.txt` gains
+purpose 0x0a, and `14-pins-v2.bin` (§23.9) and `14-pins-v1-read.bin`
+(a version 1 file read as "no floor") are added, before the re-sign.
+
+The first sign-off (before the amendment): the maintainer, 2026-11-12.
+
+Re-sign pending (amendment 2026-11-12): ____
