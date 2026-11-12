@@ -107,3 +107,21 @@ where the doc says `commit_seq` (the doc wins, as D10's note says).
 
 `~/lunix-p1/target-m1a` is 3.4 GiB (may stay). Source copy `~/lunix-p1/m1-a`; scratch `~/lunix-p1/m1a`.
 Fork build directories were removed.
+
+## Review fixes (code review `01-p1-m1a-code-review.md`)
+
+1. `Envelope::decode` now caps `body_len` at `min(caller bound, kind.max_body_len())`; test: kind 1 with 4 MiB + 1 rejected, kind 3 not.
+2. `check-ownership.sh` tries `<first><second>` then `<first>`, whichever has an entry; `tools/tests/run.sh` checks 14 branch names.
+3. Journal resync compares `gen`, `off`, `write_seq` before the CRC.
+4. `Delta::records_decoded` checks the frame's declared size against `records_ulen` before decompressing.
+5. `decode_footer_frame` documents the mandatory `check_trailer` / `check_tiling` follow-ups.
+6. Header of `check-ownership.sh` says the `deps:` title rule runs only in git mode (GitHub job should be required).
+7. Unused `n` removed; `# shellcheck source=/dev/null` added.
+8. `df-guard` usage says absolute path.
+9. `VolumeJson::from_json` requires `version`, like `VolumesJson` (choice 10 resolved).
+10. Choice 11, for the lead to confirm: CONFIG enforces `policy_ver == 0` iff `policy_len == 0` (the text only says 0 when empty).
+11. `ObjectKind::max_body_len` doc notes `decode_footer_envelope` always tightens the footer bound.
+
+API changes for B1: none in signatures. Behaviour: stricter `Envelope::decode`, `VolumeJson::from_json` requires `version`;
+new `pub(crate)` only for `segment::frame_content_size`. No golden changed.
+Gate re-run: `ci: all green`, 159 tests in `lunix-format`.
