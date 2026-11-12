@@ -95,4 +95,4 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
 The attach matrix is not a byte layout; M2 loads Tables A-D of
 `attach-matrix.md` as its expected table.
 
-Signed off by: ____ on ____
+Signed off by: the maintainer (Attila Nagy) on 2026-11-12
