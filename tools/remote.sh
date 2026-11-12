@@ -23,6 +23,8 @@
 #   LUNIX_M or -m      milestone id, e.g. m1a                     (required)
 #   LUNIX_HOST_SRC     override of <base>/<m>/src
 #   LUNIX_HOST_TARGET  override of <base>/<m>/target (CARGO_TARGET_DIR)
+#   LUNIX_OVERLAY      space-separated paths: sync HEAD plus only these paths
+#                      from the working tree (parallel agents in one worktree)
 #   LUNIX_JOBS         cargo -j value                             (default 4)
 #   LUNIX_CPUS         if set, run commands under `taskset -c $LUNIX_CPUS`
 #   LUNIX_MIN_FREE_GIB                                            (default 120)
@@ -69,6 +71,18 @@ wrap() { if [ -n "${LUNIX_CPUS:-}" ]; then printf 'taskset -c %q ' "$LUNIX_CPUS"
 
 do_sync() {
   ssh_ "mkdir -p $(printf '%q' "$src")"
+  if [ -n "${LUNIX_OVERLAY:-}" ]; then
+    # Several agents edit one worktree: sync the committed tree (HEAD) plus
+    # only the listed paths from the working tree, so another agent's
+    # half-written file never reaches this build.
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' RETURN
+    git -C "$root" archive HEAD | tar -x -C "$stage"
+    rsync -a --delete --exclude target/ -e "ssh -o BatchMode=yes" "$stage/" "$LUNIX_HOST:$src/"
+    # shellcheck disable=SC2086
+    (cd "$root" && rsync -a --relative -e "ssh -o BatchMode=yes" $LUNIX_OVERLAY "$LUNIX_HOST:$src/")
+    return 0
+  fi
   rsync -a --delete --exclude target/ --exclude .git/ -e "ssh -o BatchMode=yes" \
     "$root/" "$LUNIX_HOST:$src/"
   # The host copy has no .git: hand check-ownership the changed paths.
