@@ -29,8 +29,13 @@ sha2.workspace = true
 zeroize.workspace = true
 lz4_flex.workspace = true
 zstd.workspace = true
+# mlock/madvise of the key arena (the plan's only other unsafe, besides one test).
+rustix.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 hex.workspace = true
 serde_json.workspace = true
+# The test-only features reach the crate's own unit and integration tests through this
+# dev edge; tools/check-features.sh looks at normal and build edges only.
+lunix-crypto = { workspace = true, features = ["test-rng", "tripwire"] }
