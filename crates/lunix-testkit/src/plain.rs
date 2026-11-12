@@ -138,10 +138,18 @@ impl ExtentCodec for PlainCodec {
     }
 
     fn chunk_id(&self, kind: ExtentKind, data: &[u8]) -> ChunkId {
-        // Data: BLAKE3 of the plaintext. Node: the node hash, which the map
-        // computes over `hash_input` and passes here as `data`.
-        let _ = kind;
-        ChunkId(*blake3::hash(data).as_bytes())
+        // Data in integrity mode: keyed BLAKE3 under an addressing key derived
+        // from the test key (as the amendment of 2026-11-12). Otherwise, and
+        // always for nodes (the node hash the map computes over `hash_input`
+        // and passes as `data`), unkeyed BLAKE3. A node therefore never passes
+        // as data under the integrity key, and the reverse.
+        match (self.mode, kind) {
+            (CryptoMode::Integrity, ExtentKind::Data) => {
+                let key = blake3::derive_key("lunix testkit addressing", &self.key);
+                ChunkId(*blake3::keyed_hash(&key, data).as_bytes())
+            }
+            _ => ChunkId(*blake3::hash(data).as_bytes()),
+        }
     }
 
     fn seal(
@@ -152,6 +160,9 @@ impl ExtentCodec for PlainCodec {
         compressed: &[u8],
         out: &mut Vec<u8>,
     ) -> Result<()> {
+        if desc.dict_id.is_some() != (desc.codec == Codec::ZstdDict) {
+            return Err(Error::invalid("dict_id is for codec 3 only"));
+        }
         if desc.ulen == 0 {
             return Err(Error::invalid("extent ulen is zero"));
         }
@@ -210,13 +221,14 @@ impl ExtentCodec for PlainCodec {
             ExtentKind::Node => lunix_format::extent::MAX_NODE_ULEN as usize,
         };
         let ulen = usize::try_from(e.header.ulen).map_err(|_| Error::invalid("ulen"))?;
-        let needs_plain = expect.verify_id || expect.output == OpenOutput::Plaintext;
+        let needs_plain = (expect.verify_id && kind == ExtentKind::Data) || expect.output == OpenOutput::Plaintext;
         let plain = if needs_plain {
             Some(Self::decompress(e.header.codec, e.payload, ulen, cap)?)
         } else {
             None
         };
-        if expect.verify_id {
+        // A node's hash is checked by the map, not here (R2 of the amendment).
+        if expect.verify_id && kind == ExtentKind::Data {
             let plain = plain.as_deref().expect("decompressed above");
             if self.chunk_id(kind, plain) != e.chunk_id {
                 return Err(Error::Auth { what: "chunk id" });

@@ -13,7 +13,7 @@ use lunix_iface::journal::{
 use lunix_iface::wake::WakeFd;
 use lunix_iface::ErrorKind;
 use lunix_testkit::journal::MIN_FILE_BYTES;
-use lunix_testkit::{CrashModel, MemJournal, MemJournalConfig};
+use lunix_testkit::{CrashModel, JournalMode, MemJournal, MemJournalConfig};
 
 const T: Duration = Duration::from_secs(10);
 const SHORT: Duration = Duration::from_millis(100);
@@ -74,7 +74,7 @@ fn seqs(r: &Recovered) -> Vec<u64> {
 #[test]
 fn held_completions_hold_the_flush_and_the_watermark() {
     let j = journal(1);
-    j.set_manual_completions(true);
+    j.set_completion_mode(JournalMode::Manual);
     let mut l = lane(&j, 0);
     write(&mut *l, 1);
     write(&mut *l, 1);
@@ -110,7 +110,7 @@ fn a_flush_waits_only_for_sequence_numbers_up_to_its_upto() {
 #[test]
 fn groups_complete_in_submission_order() {
     let j = journal(1);
-    j.set_manual_completions(true);
+    j.set_completion_mode(JournalMode::Manual);
     let mut l = lane(&j, 0);
     write(&mut *l, 1);
     let first = flush(&j, WriteSeq(1));
@@ -131,6 +131,7 @@ fn a_full_ring_refuses_without_consuming_a_sequence_number_and_reclaim_frees_it(
         file_bytes: MIN_FILE_BYTES,
         max_files: 2,
         pool_depth: 8,
+        mode: JournalMode::Immediate,
     };
     let j = MemJournal::new(cfg);
     j.recover(None, WriteSeq(0)).expect("recover");
@@ -170,7 +171,7 @@ fn nospace_and_pool_exhaustion_consume_nothing() {
     };
     let j = MemJournal::new(cfg);
     j.recover(None, WriteSeq(0)).expect("recover");
-    j.set_manual_completions(true);
+    j.set_completion_mode(JournalMode::Manual);
     let mut l = lane(&j, 0);
     j.set_nospace(true);
     assert!(matches!(
@@ -309,7 +310,7 @@ fn lanes_and_recovery_are_checked() {
 #[test]
 fn reads_need_a_completed_data_record() {
     let j = journal(1);
-    j.set_manual_completions(true);
+    j.set_completion_mode(JournalMode::Manual);
     let mut l = lane(&j, 0);
     let a = write(&mut *l, 1);
     let mut buf = vec![0u8; BLOCK];
@@ -387,7 +388,7 @@ fn reclaimed_files_are_gone_and_report_what_they_held() {
 #[test]
 fn a_crash_freezes_the_journal_and_fails_pending_flushes() {
     let j = journal(1);
-    j.set_manual_completions(true);
+    j.set_completion_mode(JournalMode::Manual);
     let mut l = lane(&j, 0);
     write(&mut *l, 1);
     let rx = {

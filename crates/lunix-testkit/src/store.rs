@@ -39,7 +39,9 @@
 //!
 //! # Fault points
 //!
-//! `segment.append`, `segment.seal.{before,after}`, `segment.delete.{before,after}`,
+//! `segment.append`, `pack.append`, `segment.{read,footer}` and `pack.read` (read-path
+//! errors: arm `Fault::Io`), `pins.store.*`, `device.{store,clear}.*`,
+//! `checkpoint.zero.*`, `leftovers.remove.*`, `segment.seal.{before,after}`, `segment.delete.{before,after}`,
 //! `pack.seal.{before,after}`, `pack.delete.{before,after}`,
 //! `commit.put.{before,after}`, `commit.delete.{before,after}`,
 //! `commit.set_aside.{before,after}`, `checkpoint.store.{before,after}`,
@@ -136,6 +138,9 @@ pub struct MemStoreConfig {
     pub segment_target: u64,
     /// Total bytes the store may hold; creates beyond it fail `NoSpace`.
     pub capacity_bytes: Option<u64>,
+    /// The volume mode: decides the extent layout (`OVH` 68 or 108) the store
+    /// parses and sizes, as `LocalVolume` takes it from its `MetaCodec`.
+    pub mode: CryptoMode,
 }
 
 impl Default for MemStoreConfig {
@@ -145,6 +150,7 @@ impl Default for MemStoreConfig {
             volume_bytes: b"volume-descriptor".to_vec(),
             segment_target: 16 << 20,
             capacity_bytes: None,
+            mode: CryptoMode::Integrity,
         }
     }
 }
@@ -443,11 +449,13 @@ fn parse_extent(
     expect_id: &ChunkId,
     dict_id: Option<u32>,
     max_ulen: u32,
+    mode: CryptoMode,
 ) -> Result<Parsed> {
     let bad = |why: &'static str| Error::Invalid { why };
     let (hdr, id, clen) =
         lunix_format::extent::parse_plain_prefix(extent).map_err(|_| bad("not an extent"))?;
-    let ovh = CryptoMode::Plain.extent_ovh() as usize;
+    // The first 52 bytes (header, id, clen) are the same in both layouts.
+    let ovh = mode.extent_ovh() as usize;
     if extent.len() != ovh + clen as usize {
         return Err(bad("extent length does not match its clen"));
     }
@@ -519,9 +527,10 @@ impl Builder {
         dict_id: Option<u32>,
         extent: &[u8],
         max_ulen: u32,
+        point: &'static str,
     ) -> Result<(u32, u32)> {
-        self.shared.faults.point("segment.append")?;
-        let mut p = parse_extent(extent, id, dict_id, max_ulen)?;
+        self.shared.faults.point(point)?;
+        let mut p = parse_extent(extent, id, dict_id, max_ulen, self.shared.cfg.mode)?;
         let off = u32::try_from(self.buf.len()).map_err(|_| Error::NoSpace)?;
         u32::try_from(self.buf.len() + p.total).map_err(|_| Error::NoSpace)?;
         {
@@ -599,7 +608,9 @@ impl Drop for Builder {
         let Some(w) = st.writers.remove(&self.id.raw()) else {
             return;
         };
-        // Abandoned cleanly: the file is removed. After a crash it stays.
+        // Abandoned cleanly: the file is removed. After a crash it always stays
+        // (a writer open at `crash(seed)` instead leaves one at random; both
+        // are legal outcomes of a kill).
         if self.shared.faults.is_dead() {
             st.d.leftovers.push(LeftoverFile {
                 name: w.name,
@@ -625,7 +636,7 @@ impl SegmentWriter for MemSegmentWriter {
         dict_id: Option<u32>,
         extent: &[u8],
     ) -> Result<Hint> {
-        let (off, clen) = self.b.append(chunk_id, dict_id, extent, MAX_DATA_ULEN)?;
+        let (off, clen) = self.b.append(chunk_id, dict_id, extent, MAX_DATA_ULEN, "segment.append")?;
         Ok(Hint {
             seg: self.b.id,
             off,
@@ -661,12 +672,13 @@ impl SegmentStore for MemStore {
     }
 
     fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
+        self.0.faults.point("segment.read")?;
         let st = self.st()?;
         let c =
             st.d.segments
                 .get(&hint.seg.raw())
                 .ok_or(Error::not_found("segment"))?;
-        let len = CryptoMode::Plain.extent_ovh() as usize + hint.clen as usize;
+        let len = self.0.cfg.mode.extent_ovh() as usize + hint.clen as usize;
         let start = hint.off as usize;
         let bytes = start
             .checked_add(len)
@@ -696,7 +708,7 @@ impl SegmentStore for MemStore {
             st.d.segments
                 .get(&hint.seg.raw())
                 .ok_or(Error::not_found("segment"))?;
-        let len = CryptoMode::Plain.extent_ovh() + hint.clen;
+        let len = self.0.cfg.mode.extent_ovh() + hint.clen;
         if u64::from(hint.off) + u64::from(len) > c.extents.len() as u64 {
             return Err(Error::Corrupt {
                 what: "segment",
@@ -716,6 +728,7 @@ impl SegmentStore for MemStore {
     }
 
     fn footer(&self, seg: SegId) -> Result<FooterBody> {
+        self.0.faults.point("segment.footer")?;
         self.st()?
             .d
             .segments
@@ -763,7 +776,7 @@ impl PackWrite for MemPackWriter {
 
     fn append_node(&mut self, hash: &[u8; 32], extent: &[u8]) -> Result<NodeLoc> {
         let id = ChunkId(*hash);
-        let (off, _) = self.b.append(&id, None, extent, MAX_NODE_ULEN)?;
+        let (off, _) = self.b.append(&id, None, extent, MAX_NODE_ULEN, "pack.append")?;
         Ok(NodeLoc {
             pack: self.b.id,
             off,
@@ -787,6 +800,7 @@ impl PackWrite for MemPackWriter {
 
 impl PackRead for MemStore {
     fn read_node(&self, loc: NodeLoc, out: &mut Vec<u8>) -> Result<()> {
+        self.0.faults.point("pack.read")?;
         let st = self.st()?;
         let c =
             st.d.packs
@@ -942,8 +956,8 @@ impl CheckpointStore for MemStore {
             .checkpoint
             .iter()
             .flatten()
-            .max_by_key(|s| s.slot_seq)
             .filter(|s| s.volume_uuid == self.0.cfg.uuid)
+            .max_by_key(|s| s.slot_seq)
             .cloned())
     }
 
@@ -968,8 +982,9 @@ impl CheckpointStore for MemStore {
     }
 
     fn zero(&self) -> Result<()> {
+        self.0.faults.point("checkpoint.zero.before")?;
         self.st()?.d.checkpoint = [None, None];
-        Ok(())
+        self.0.faults.point("checkpoint.zero.after")
     }
 }
 
@@ -1093,13 +1108,15 @@ impl VolumeDir for MemStore {
     }
 
     fn store_device_record(&self, rec: &DeviceRecord) -> Result<()> {
+        self.0.faults.point("device.store.before")?;
         self.st()?.d.device = Some(rec.clone());
-        Ok(())
+        self.0.faults.point("device.store.after")
     }
 
     fn clear_device_record(&self) -> Result<()> {
+        self.0.faults.point("device.clear.before")?;
         self.st()?.d.device = None;
-        Ok(())
+        self.0.faults.point("device.clear.after")
     }
 
     fn local_pins(&self) -> Result<Option<LocalPins>> {
@@ -1107,8 +1124,9 @@ impl VolumeDir for MemStore {
     }
 
     fn store_local_pins(&self, pins: &LocalPins) -> Result<()> {
+        self.0.faults.point("pins.store.before")?;
         self.st()?.d.local_pins = Some(pins.clone());
-        Ok(())
+        self.0.faults.point("pins.store.after")
     }
 
     fn ids(&self) -> Arc<dyn IdAllocator> {
@@ -1131,9 +1149,12 @@ impl VolumeDir for MemStore {
     }
 
     fn remove_leftovers(&self) -> Result<u32> {
+        self.0.faults.point("leftovers.remove.before")?;
         let mut st = self.st()?;
         let n = st.d.leftovers.len() as u32;
         st.d.leftovers.clear();
+        drop(st);
+        self.0.faults.point("leftovers.remove.after")?;
         Ok(n)
     }
 

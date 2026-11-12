@@ -17,7 +17,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
@@ -30,7 +30,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// The variant name of a request (`"VolumeList"`).
+/// The variant name of a request (`"VolumeList"`), taken from its `Debug`
+/// output: it relies on the derived `Debug` starting with the variant name.
 pub fn method_name(req: &Request) -> String {
     let dbg = format!("{req:?}");
     dbg.split(|c: char| !c.is_ascii_alphanumeric())
@@ -48,7 +49,8 @@ struct Script {
 struct Shared {
     script: Mutex<Script>,
     log: Mutex<Vec<Request>>,
-    conns: Mutex<Vec<UnixStream>>,
+    conns: Mutex<Vec<(u64, UnixStream)>>,
+    next_conn: AtomicU64,
     stop: AtomicBool,
 }
 
@@ -70,6 +72,7 @@ impl FakeCtlServer {
             script: Mutex::new(Script::default()),
             log: Mutex::new(Vec::new()),
             conns: Mutex::new(Vec::new()),
+            next_conn: AtomicU64::new(0),
             stop: AtomicBool::new(false),
         });
         let s = Arc::clone(&shared);
@@ -81,13 +84,17 @@ impl FakeCtlServer {
                         return;
                     }
                     let Ok(conn) = conn else { continue };
+                    let id = s.next_conn.fetch_add(1, Ordering::Relaxed);
                     if let Ok(clone) = conn.try_clone() {
-                        lock(&s.conns).push(clone);
+                        lock(&s.conns).push((id, clone));
                     }
                     let s2 = Arc::clone(&s);
                     let _ = std::thread::Builder::new()
                         .name("fake-ctl-conn".into())
-                        .spawn(move || serve(&s2, conn));
+                        .spawn(move || {
+                            serve(&s2, conn);
+                            lock(&s2.conns).retain(|(i, _)| *i != id);
+                        });
                 }
             })?;
         Ok(Self {
@@ -127,7 +134,7 @@ impl FakeCtlServer {
 impl Drop for FakeCtlServer {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
-        for c in lock(&self.shared.conns).drain(..) {
+        for (_, c) in lock(&self.shared.conns).drain(..) {
             let _ = c.shutdown(std::net::Shutdown::Both);
         }
         // Wake the blocking accept.

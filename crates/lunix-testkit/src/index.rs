@@ -138,6 +138,20 @@ impl MemIndex {
         lock(&self.state).image.clone()
     }
 
+    /// Plants an entry as if it had been read from a persisted run: `Hinted`,
+    /// not dirty, and **not** in any run (a reopen loses it). For the dedup
+    /// confirmation cases, where a run entry names the wrong extent.
+    pub fn insert_hinted(&self, id: ChunkId, hint: Hint) {
+        lock(&self.state).live.insert(
+            id,
+            Live {
+                hint,
+                confirm: Confirm::Hinted,
+                dirty: false,
+            },
+        );
+    }
+
     /// The fault points of this index.
     pub fn faults(&self) -> &Faults {
         &self.faults

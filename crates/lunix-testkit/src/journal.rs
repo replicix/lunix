@@ -29,9 +29,11 @@
 //!
 //! # Test controls
 //!
-//! Appends complete immediately by default. [`MemJournal::set_manual_completions`]
-//! holds completions until [`MemJournal::complete_appends`], to exercise the
-//! in-flight rules. `fail_next_append`, `fail_next_completion`,
+//! Appends complete according to a [`JournalMode`]: `Immediate` (inside
+//! `append`), `Manual` (held until [`MemJournal::complete_appends`] or
+//! [`MemJournal::complete_append_seq`], in any order) or `Mixed(seed)` (a seeded
+//! subset is held and completed from a later `poll`, in a seeded order, like an
+//! io_uring lane). M11's model test should run `Mixed`. `fail_next_append`, `fail_next_completion`,
 //! `fail_next_flush` and `set_nospace` inject failures.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -70,8 +72,23 @@ pub struct MemJournalConfig {
     /// new file and none is free.
     pub max_files: u32,
     /// Appends a lane may have unfinished (the bounded buffer pool); `Full`
-    /// beyond it. Only reachable with manual completions.
+    /// beyond it. Reachable with `Manual` and `Mixed` completions.
     pub pool_depth: u32,
+    /// When appends complete.
+    pub mode: JournalMode,
+}
+
+/// When an append's completion is delivered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JournalMode {
+    /// Before `append` returns.
+    Immediate,
+    /// Never by itself: the test calls `complete_appends` or `complete_append_seq`.
+    Manual,
+    /// Each append is completed at once or held; held appends complete from
+    /// `poll` (each with probability one half per poll, in a seeded order, the
+    /// lane's wake fd re-signalled while any is held).
+    Mixed(u64),
 }
 
 impl Default for MemJournalConfig {
@@ -81,6 +98,7 @@ impl Default for MemJournalConfig {
             file_bytes: 2 << 20,
             max_files: 64,
             pool_depth: 64,
+            mode: JournalMode::Immediate,
         }
     }
 }
@@ -180,7 +198,7 @@ struct LaneState {
     cur: u32,
     opened: bool,
     outstanding: Option<(u64, u32, u64)>,
-    pending_complete: VecDeque<(u64, u32, u64)>,
+    pending_complete: Vec<(u64, u32, u64)>,
     completions: VecDeque<JournalCompletion>,
     wake: Option<WakeFd>,
     accepted_max: u64,
@@ -196,7 +214,11 @@ struct State {
     poisoned: Option<u64>,
     pending: VecDeque<(u64, FlushDone)>,
     closed: bool,
-    manual: bool,
+    mode: JournalMode,
+    rng: u64,
+    recovered: bool,
+    max_cut: u64,
+    reclaims: u64,
     fail_flush: bool,
     nospace: bool,
     retire_from: Option<u64>,
@@ -216,6 +238,30 @@ fn poisoned_err() -> Error {
 }
 
 impl State {
+    fn rand(&mut self) -> u64 {
+        self.rng = self.rng.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.rng;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    /// Delivers the completion of a held append of lane `idx`.
+    fn finish_append(&mut self, idx: usize, (seq, ordinal, off): (u64, u32, u64)) {
+        let l = &mut self.lanes[idx];
+        if let Some(r) = l.files.get_mut(&ordinal).and_then(|f| f.recs.get_mut(&off)) {
+            r.completed = true;
+        }
+        l.completions.push_back(JournalCompletion::Append {
+            write_seq: WriteSeq(seq),
+            status: IoStatus::ok(0),
+        });
+        if let Some(w) = &l.wake {
+            w.signal();
+        }
+        self.in_flight.remove(&seq);
+    }
+
     fn poison(&mut self, seq: u64) {
         self.poisoned = Some(self.poisoned.map_or(seq, |p| p.min(seq)));
     }
@@ -319,7 +365,7 @@ impl MemJournal {
                     cur,
                     opened: false,
                     outstanding: None,
-                    pending_complete: VecDeque::new(),
+                    pending_complete: Vec::new(),
                     completions: VecDeque::new(),
                     wake: None,
                     accepted_max: 0,
@@ -337,7 +383,14 @@ impl MemJournal {
                 poisoned: None,
                 pending: VecDeque::new(),
                 closed: false,
-                manual: false,
+                mode: cfg.mode,
+                rng: match cfg.mode {
+                    JournalMode::Mixed(s) => s,
+                    _ => 0,
+                },
+                recovered: false,
+                max_cut: 0,
+                reclaims: 0,
                 fail_flush: false,
                 nospace: false,
                 retire_from: None,
@@ -360,34 +413,24 @@ impl MemJournal {
         lock(&self.inner.state).cfg
     }
 
-    /// Holds append completions until [`complete_appends`](Self::complete_appends).
-    pub fn set_manual_completions(&self, manual: bool) {
-        lock(&self.inner.state).manual = manual;
+    /// Changes when appends complete, for appends made from now on.
+    pub fn set_completion_mode(&self, mode: JournalMode) {
+        let mut st = lock(&self.inner.state);
+        st.mode = mode;
+        if let JournalMode::Mixed(seed) = mode {
+            st.rng = seed;
+        }
     }
 
     /// Completes up to `n` held appends of `lane`, oldest first; returns how
     /// many were completed.
     pub fn complete_appends(&self, lane: LaneId, n: usize) -> usize {
         let mut st = lock(&self.inner.state);
+        let idx = usize::from(lane.0);
         let mut done = 0;
-        for _ in 0..n {
-            let Some(l) = st.lanes.get_mut(usize::from(lane.0)) else {
-                break;
-            };
-            let Some((seq, ordinal, off)) = l.pending_complete.pop_front() else {
-                break;
-            };
-            if let Some(r) = l.files.get_mut(&ordinal).and_then(|f| f.recs.get_mut(&off)) {
-                r.completed = true;
-            }
-            l.completions.push_back(JournalCompletion::Append {
-                write_seq: WriteSeq(seq),
-                status: IoStatus::ok(0),
-            });
-            if let Some(w) = &l.wake {
-                w.signal();
-            }
-            st.in_flight.remove(&seq);
+        while done < n && idx < st.lanes.len() && !st.lanes[idx].pending_complete.is_empty() {
+            let e = st.lanes[idx].pending_complete.remove(0);
+            st.finish_append(idx, e);
             done += 1;
         }
         drop(st);
@@ -395,7 +438,33 @@ impl MemJournal {
         done
     }
 
-    /// Appends of `lane` accepted but not yet completed (manual mode).
+    /// Completes the held append with sequence number `seq` on `lane`, whatever
+    /// its position (out-of-order completion). Returns whether it was held.
+    pub fn complete_append_seq(&self, lane: LaneId, seq: WriteSeq) -> bool {
+        let mut st = lock(&self.inner.state);
+        let idx = usize::from(lane.0);
+        let found = st.lanes.get(idx).and_then(|l| {
+            l.pending_complete
+                .iter()
+                .position(|e| e.0 == seq.0)
+        });
+        let Some(i) = found else {
+            return false;
+        };
+        let e = st.lanes[idx].pending_complete.remove(i);
+        st.finish_append(idx, e);
+        drop(st);
+        self.inner.cv.notify_all();
+        true
+    }
+
+    /// How many times `reclaim` succeeded (M11's order tests: reclaim only
+    /// after the commit covering the files is durable).
+    pub fn reclaim_calls(&self) -> u64 {
+        lock(&self.inner.state).reclaims
+    }
+
+    /// Appends of `lane` accepted but not yet completed (`Manual` and `Mixed`).
     pub fn held_appends(&self, lane: LaneId) -> usize {
         lock(&self.inner.state)
             .lanes
@@ -553,10 +622,14 @@ fn coordinator(inner: &Inner) {
             st.poison(lowest);
             Err(Error::Io(std::io::Error::other("fdatasync failed")))
         } else {
+            let poisoned = st.poisoned;
             for l in &mut st.lanes {
                 for f in l.files.values_mut() {
                     for r in f.recs.values_mut().filter(|r| r.completed) {
-                        r.durable = true;
+                        // Nothing at or above the failed number is promised.
+                        if poisoned.is_none_or(|p| r.seq < p) {
+                            r.durable = true;
+                        }
                     }
                 }
             }
@@ -580,6 +653,9 @@ impl Journal for MemJournal {
         let idx = usize::from(lane.0);
         if idx >= st.lanes.len() {
             return Err(Error::invalid("no such lane"));
+        }
+        if !st.recovered {
+            return Err(Error::invalid("open_lane before recover"));
         }
         if st.lanes[idx].opened {
             return Err(Error::invalid("lane already open"));
@@ -715,6 +791,7 @@ impl Journal for MemJournal {
         st.next_seq = expected;
         st.last_issued = expected - 1;
         st.retire_from = Some(expected);
+        st.recovered = true;
         Ok(Recovered {
             records,
             next_seq: WriteSeq(expected),
@@ -725,8 +802,9 @@ impl Journal for MemJournal {
     }
 
     fn tail_after(&self, cut: WriteSeq) -> Result<JournalTail> {
-        let st = lock(&self.inner.state);
+        let mut st = lock(&self.inner.state);
         st.live()?;
+        st.max_cut = st.max_cut.max(cut.0);
         let lane_ordinals = st
             .lanes
             .iter()
@@ -746,6 +824,18 @@ impl Journal for MemJournal {
         if upto.lane_ordinals.len() != st.lanes.len() {
             return Err(Error::invalid("tail has the wrong lane count"));
         }
+        // Never a file that holds a record above the highest cut asked about.
+        let max_cut = st.max_cut;
+        for (l, &limit) in st.lanes.iter().zip(&upto.lane_ordinals) {
+            let limit = limit.min(l.cur);
+            let live_above = l.files.range(..limit).any(|(_, f)| {
+                f.recs.values().any(|r| !r.torn && r.seq > max_cut)
+            });
+            if live_above {
+                return Err(Error::invalid("tail would drop a record above the last cut"));
+            }
+        }
+        st.reclaims += 1;
         let mut report = ReclaimReport::default();
         for (l, &limit) in st.lanes.iter_mut().zip(&upto.lane_ordinals) {
             let limit = limit.min(l.cur);
@@ -902,8 +992,12 @@ impl JournalLane for MemLane {
             self.inner.cv.notify_all();
             return Err(e);
         }
-        let manual = st.manual;
-        let completes_now = injected.is_none() && !manual;
+        let completes_now = injected.is_none()
+            && match st.mode {
+                JournalMode::Immediate => true,
+                JournalMode::Manual => false,
+                JournalMode::Mixed(_) => st.rand() % 2 == 0,
+            };
         let rec = Rec {
             seq,
             kind: parts.kind,
@@ -941,7 +1035,13 @@ impl JournalLane for MemLane {
                 }
                 st.in_flight.remove(&seq);
             } else {
-                lane.pending_complete.push_back((seq, ordinal, off));
+                lane.pending_complete.push((seq, ordinal, off));
+                if matches!(st.mode, JournalMode::Mixed(_)) {
+                    // Wake the queue so a later `poll` gets to complete it.
+                    if let Some(w) = &st.lanes[idx].wake {
+                        w.signal();
+                    }
+                }
             }
         }
         drop(st);
@@ -979,6 +1079,26 @@ impl JournalLane for MemLane {
     fn poll(&mut self, out: &mut Vec<JournalCompletion>) {
         let mut st = lock(&self.inner.state);
         let idx = self.idx();
+        if matches!(st.mode, JournalMode::Mixed(_)) && !st.lanes[idx].pending_complete.is_empty() {
+            let mut held = std::mem::take(&mut st.lanes[idx].pending_complete);
+            for i in (1..held.len()).rev() {
+                let j = (st.rand() % (i as u64 + 1)) as usize;
+                held.swap(i, j);
+            }
+            for e in held {
+                if st.rand() % 2 == 0 {
+                    st.finish_append(idx, e);
+                } else {
+                    st.lanes[idx].pending_complete.push(e);
+                }
+            }
+            if !st.lanes[idx].pending_complete.is_empty() {
+                if let Some(w) = &st.lanes[idx].wake {
+                    w.signal();
+                }
+            }
+            self.inner.cv.notify_all();
+        }
         out.extend(st.lanes[idx].completions.drain(..));
     }
 
@@ -987,8 +1107,10 @@ impl JournalLane for MemLane {
         let l = &st.lanes[self.idx()];
         WriteSeq(
             l.pending_complete
-                .front()
-                .map_or(l.accepted_max, |&(s, _, _)| s - 1),
+                .iter()
+                .map(|e| e.0 - 1)
+                .min()
+                .unwrap_or(l.accepted_max),
         )
     }
 }

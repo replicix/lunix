@@ -46,7 +46,7 @@ pub use block::{
 pub use ctl::FakeCtlServer;
 pub use faults::{Fault, Faults};
 pub use index::{IndexImage, MemIndex};
-pub use journal::{CrashModel, JournalImage, MemJournal, MemJournalConfig};
+pub use journal::{CrashModel, JournalImage, JournalMode, MemJournal, MemJournalConfig};
 pub use map::FlatMap;
 pub use oracle::{Applied, DeviceOracle, LogOp, OracleLog};
 pub use overlay::{coalesce, FlatOverlay};

@@ -184,12 +184,16 @@ impl MemBlockEngine {
 }
 
 impl EngineState {
-    fn coin(&mut self) -> bool {
+    fn next_rand(&mut self) -> u64 {
         self.rng = self.rng.wrapping_add(0x9e37_79b9_7f4a_7c15);
         let mut z = self.rng;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        (z ^ (z >> 31)) & 1 == 1
+        z ^ (z >> 31)
+    }
+
+    fn coin(&mut self) -> bool {
+        self.next_rand() & 1 == 1
     }
 
     fn read_into(&self, offset: u64, out: &mut [u8]) {
@@ -244,6 +248,7 @@ impl BlockEngine for MemBlockEngine {
         let wake = WakeFd::new()?;
         Ok(Box::new(MemQueue {
             engine: Arc::clone(&self.0),
+            queue: cfg.queue.0,
             max_io: cfg.max_io_buf_bytes,
             wake,
             ready: Vec::new(),
@@ -290,6 +295,8 @@ impl BlockEngine for MemBlockEngine {
 }
 
 struct Ready {
+    /// Polls this entry has already survived.
+    age: u8,
     tag: Tag,
     status: IoStatus,
     read: Option<Vec<u8>>,
@@ -297,6 +304,7 @@ struct Ready {
 
 struct MemQueue {
     engine: Arc<EngineShared>,
+    queue: u16,
     max_io: u32,
     wake: WakeFd,
     ready: Vec<Ready>,
@@ -386,6 +394,7 @@ impl QueueHandler for MemQueue {
         let (status, read) = self.execute(&req, buf);
         if self.defer() {
             self.ready.push(Ready {
+                age: 0,
                 tag: req.tag,
                 status,
                 read,
@@ -401,7 +410,33 @@ impl QueueHandler for MemQueue {
 
     fn poll(&mut self, done: &mut dyn Completer) {
         self.wake.drain();
-        let ready = std::mem::take(&mut self.ready);
+        let mut ready = std::mem::take(&mut self.ready);
+        let mixed = matches!(lock(&self.engine.st).mode, CompletionMode::Mixed(_));
+        if mixed {
+            // A seeded subset waits one more poll (never longer), and the
+            // rest completes in a seeded order.
+            let mut st = lock(&self.engine.st);
+            for i in (1..ready.len()).rev() {
+                let j = (st.next_rand() % (i as u64 + 1)) as usize;
+                ready.swap(i, j);
+            }
+            let mut keep = Vec::new();
+            let mut now = Vec::new();
+            for mut r in ready {
+                if r.age == 0 && st.coin() {
+                    r.age = 1;
+                    keep.push(r);
+                } else {
+                    now.push(r);
+                }
+            }
+            drop(st);
+            if !keep.is_empty() {
+                self.wake.signal();
+            }
+            self.ready = keep;
+            ready = now;
+        }
         lock(&self.engine.st).counters.deferred += ready.len() as u64;
         for r in ready {
             if let (true, Some(data)) = (r.status.is_ok(), &r.read) {
@@ -499,4 +534,12 @@ pub fn run_request(
         handler.poll(completer);
     }
     panic!("request {req:?} never completed");
+}
+
+impl Drop for MemQueue {
+    fn drop(&mut self) {
+        // The queue's handler is gone: a rebuilt handler (in-process recovery)
+        // may be requested again.
+        lock(&self.engine.st).taken.remove(&self.queue);
+    }
 }

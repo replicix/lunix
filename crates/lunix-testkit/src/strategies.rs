@@ -37,7 +37,10 @@ pub struct IoSpec {
 impl IoSpec {
     /// True when the engine must accept the request on a device of
     /// `dev_bytes`: 4 KiB aligned offset and length, inside the device.
-    /// Anything else must complete with `EINVAL`.
+    /// Anything else must complete with `EINVAL`. The engine's
+    /// `max_io_buf_bytes` is not considered: the strategies never produce more
+    /// than [`MAX_IO_BYTES`] for a read or write, which every test's buffer
+    /// size must cover.
     pub fn is_valid(&self, dev_bytes: u64) -> bool {
         if self.op == IoOp::Flush {
             return true;
