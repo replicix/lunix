@@ -68,8 +68,14 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Destage:** the off-path pipeline that turns overlay data into stored
   chunks: zero → hash → dedup → compress → encrypt → pack.
 - **Chunk:** a fixed-size, aligned unit of the device (default 64 KiB).
-  Its id is the (keyed) BLAKE3 hash of its plaintext. An all-zero chunk
-  is a **hole** and is never stored.
+  Its id is the BLAKE3 hash of its plaintext, keyed with the addressing key
+  in `encrypted` and `integrity` mode and unkeyed in `plain` mode. An
+  all-zero chunk is a **hole** and is never stored.
+- **Addressing key:** the BLAKE3 key of the chunk id (and, separately, of
+  map-node ids when encrypted). Derived from the KMK in `encrypted` mode and
+  from the integrity key in `integrity` mode, by purpose. Keying closes the
+  `id_len = 16` collision search, because nobody without the key can compute
+  an id (ADR-6).
 - **Extent:** one stored chunk inside a segment: header, compressed and
   optionally encrypted payload, tag.
 - **Tag:** the 16 bytes that end every extent. It is the AEAD tag on an
@@ -82,17 +88,28 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **Crypto mode:** the volume's protection level, fixed in the descriptor
   at creation (ADR-11). `encrypted`: AEAD. `integrity` (the default): an
   HMAC on every commit, keyed tags and an integrity key in the keyring.
-  `plain`: unkeyed BLAKE3 checksums and tags, no key material; it detects
-  corruption only and protects against nobody who can write the bucket.
+  `plain`: unkeyed BLAKE3 checksums, ids and tags, no key material; it
+  detects corruption only and protects against nobody who can write the
+  bucket.
   `lunix volume create` takes `--encrypt`, `--integrity` or `--plain`.
 - **Integrity key:** the key that an `integrity` volume's keyring slots
-  wrap. It keys the commit and lease HMACs and the extent tags. A local
+  wrap. It keys the commit and lease HMACs, the extent tags, and (through
+  the addressing key derived from it) the chunk ids. A local
   volume gets a key-file slot by default (`integrity.key` beside the
   volume); `--passphrase` adds a passphrase slot.
 - **Keyring:** `families/<id>/keyring`, the one mutable key object of a
   family. It holds the key slots that wrap the KMK (or, for an `integrity`
   family, the integrity key; a `plain` family has no slots). It is written by CAS on the authority, copied
   to mirrors, and carries `keyring_seq` in a MAC'd body (ADR-11).
+- **Rollback floor:** `{max_commit_seq, tip_hash}` in `state/pins` version
+  2, the highest verified tip this host has seen. It is raise-only and
+  written after every verified attach and every durable FULL commit. Attach
+  refuses a lower tip as `Rollback` and a different hash at the same height
+  as `Fork`. Phase 5 adds the maximum over mirrors and a Kubernetes floor
+  (ADR-31). A host with no floor cannot detect rollback.
+- **Scan:** a read of an extent with no id expectation (fsck, rebuild, GC
+  liveness). It must set `verify_id`. Every data read in the engine, by
+  contrast, passes the leaf's `id_prefix` (rule R1, DESIGN §6).
 - **KMK fingerprint:** a value derived from the KMK by purpose. The
   orchestrator supplies it at attach, and a volume with a different KMK is
   refused. The CLI pins it locally on first attach instead (ADR-11).

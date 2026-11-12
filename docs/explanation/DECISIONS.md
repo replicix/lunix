@@ -5,7 +5,7 @@ context is in [DESIGN.md](DESIGN.md), and the evidence is in the dated
 notes under [research/](research/). New decisions, and changes of mind,
 are appended here.
 
-**Status: all ADRs (1-30) are accepted** by the maintainer
+**Status: all ADRs (1-28, 30, 31) are accepted** by the maintainer
 (2026-11-12). Phase 0 closed the same day; each gated ADR carries a dated
 **Gate outcome** block, and the numbers are in
 [the baseline](../../bench/BASELINE.md). Acceptance keeps the follow-ups
@@ -22,11 +22,18 @@ the gates named:
   (ADR-29) is opened.
 - **ADR-29** is a reserved number for that staging ADR, not yet a
   decision.
+- **ADR-31:** the v1 rollback anchor is a local floor; the mirror,
+  Kubernetes and notary parts follow in phase 5 and later.
 
 **Amended 2026-11-12 (phase 1 review).** The maintainer accepted the
 decisions of the review of the phase 1 plan. Each affected ADR below has
 an "Amended 2026-11-12 (phase 1 review)" block: ADR-4, 6, 7, 8, 9, 11, 14,
 16, 19, 24, 26 and 30. [DESIGN.md](DESIGN.md) follows them.
+
+**Amended 2026-11-12 (M2 security review).** ADR-6, ADR-9 and ADR-11
+carry a second block for the maintainer's tamper-resistance decisions (keyed
+chunk ids in `integrity` mode, OS randomness, rules R1-R4, the hostile
+keyring cost policy), and ADR-31 records the rollback anchor.
 
 **Terminology.** Two sequence numbers exist. `write_seq` numbers writes
 and cuts (the `seq` of ADR-3, 4, 10, 26, 27 and 28, and `cut_seq`).
@@ -334,10 +341,27 @@ a forged or wrong entry naming another valid extent would make a new chunk
 never be stored. An unconfirmed hit is a miss. A hit from the in-process
 table built from verified footers needs no confirmation.
 
+**Amended 2026-11-12 (maintainer decision, M2 security review): keyed ids
+in `integrity` mode.** The chunk id is BLAKE3 keyed with an addressing key
+in `encrypted` mode (derived from the KMK) and now also in `integrity` mode
+(derived from the integrity key, by its own purpose id, distinct from the
+extent-tag and HMAC keys). Only `plain` mode stays unkeyed. Reason: with
+unkeyed ids and `id_len = 16`, a guest that finds two chunks with equal
+16-byte prefixes (a 2^64 birthday search over its own data) plus a bucket
+writer could swap them on a local read, because local reads do not
+recompute the id. Without the key no one can compute an id, so that search
+has no oracle. Cost: none per I/O (keyed BLAKE3 runs at the unkeyed
+speed). Consequences: dedup stays within the family and now also requires
+the key; the map's leaf `id_prefix` is the prefix of the keyed id; M2
+implements it, and map node hashes are unchanged (unkeyed in `integrity`
+mode, authenticated by the HMAC'd commit). The format freeze carries one
+new purpose id (see ADR-11). Rules R1 and R2 of ADR-11 still apply: the id
+check is what binds an extent to its place.
+
 **Decision:**
-- `chunk_id = blake3(plaintext)`. When the volume family is encrypted it
-  is `blake3::keyed_hash(addressing_key, plaintext)`; this is
-  Constellation's ADR-10 scheme.
+- `chunk_id = blake3(plaintext)`. When the volume family is `encrypted` or
+  `integrity` it is `blake3::keyed_hash(addressing_key, plaintext)`; this
+  is Constellation's ADR-10 scheme.
 - All-zero chunks are found with an OR-accumulate SIMD scan, measured at
   100+ GB/s. They become **holes** in the map and are never hashed or
   stored.
@@ -537,6 +561,11 @@ hint falls back to the chunk index (ADR-14).
   parent.created_at)`, not a chain validity rule. Mount and `fsck` never
   reject on it (`fsck` warns). `epoch`, `commit_seq` and `chain_floor`
   remain reader rules.
+- **Rollback floor (ADR-31).** Attach compares the verified tip with the
+  host's floor `{max_commit_seq, tip_hash}` and refuses a lower tip
+  (`Rollback`) or a different hash at the same height (`Fork`). The lease
+  is opened only through `open_lease_fresh(bytes, max(chain epoch,
+  pins.max_epoch))`.
 - **Object ids** (segments, map packs, index runs) are never reused. After
   the open-time orphan sweep the next id is 1 + the maximum of the
   checkpoint's `id_high`, the highest id the chain names and the highest id
@@ -670,6 +699,57 @@ volume modes.** The descriptor's crypto mode is one of:
 - Index runs stay checksummed and unauthenticated in every mode, made safe
   by the dedup confirmation of ADR-6.
 
+**Amended 2026-11-12 (M2 security review and maintainer decisions)**
+([review](../plans/v1/wip/01-p1-m2-review.md)):
+- **F3, randomness wording.** Salts and nonces come from the operating
+  system through `getrandom(2)` on every call, never from a userspace DRBG.
+  This covers the extent salt, the metadata and slot nonces, the Argon2id
+  salt and generated root keys. Reason: AWS-LC's `RAND_bytes` (behind
+  `aws_lc_rs::rand::fill`) is a per-thread CTR-DRBG reseeded from the OS
+  only every 4096 generate calls, and it detects a VM snapshot restore only
+  through SysGenID, which mainline Linux lacks, so a restored snapshot would
+  replay up to 4096 salts per thread (the F1b case). The kernel CRNG is
+  reseeded on VM fork by vmgenid since Linux 5.18, below the ublk floor.
+  Mitigation A (`chunk_id`, codec, level and `clen` in `info`) bounds the
+  impact, but the rule stands. "The salt never comes from a buffered RNG
+  pool" above reads "never from a userspace DRBG".
+- **Keyed chunk ids in `integrity` mode (maintainer).** See ADR-6. The
+  addressing key is derived from the integrity key with a purpose id of its
+  own; `plain` stays unkeyed. The keyring and the descriptor are
+  unchanged. It adds one purpose to the key-purpose table, which is a
+  frozen format item (re-sign, below).
+- **Rules R1-R4 are normative** (DESIGN §6, §7, §8.4, §10.1, §15). The
+  keyed tag of an `integrity` volume covers extent bytes only, so kind and
+  location are unbound and an `open` with no id expectation accepts any
+  valid extent of the family. No format change is needed, provided:
+  - **R1** every data read passes the leaf `id_prefix` (or the full id) in
+    `OpenExpect`, with the chunk size, and fails on a mismatch; a read
+    without an expectation is a scan and sets `verify_id`.
+  - **R2** the map recomputes each node's hash against the parent's
+    `child_hash` (the commit's root for the root) and the header
+    `chunk_id`, and requires codec 0.
+  - **R3** footers are used only after `MetaCodec::open` succeeds, and
+    `seg_hash` is checked whenever the region is read whole.
+  - **R4** attach refuses a tip below the local floor (ADR-31) and opens
+    the lease through `open_lease_fresh`.
+  With keyed data ids and unkeyed node hashes, a node can never pass as data
+  or the reverse in `integrity` mode without a preimage.
+- **Rollback anchor.** Decided in ADR-31. The rollback paragraph under
+  "Integrity" below is closed by it.
+- **Hostile keyring cost policy.** The read bounds (1 GiB, t 10, p 16, 32
+  slots) are the format's. The daemon adds a policy ceiling: a maximum
+  Argon2id memory per slot (default 256 MiB) and a total budget over the
+  slots tried, tries the slot that unlocked the last attach first, and wipes
+  the Argon2id blocks after use. A slot over the ceiling is skipped and
+  reported.
+- **Not done: a per-kind tag key.** Binding `kind` into the tag (a
+  purpose-table change) would add defence in depth for the price of
+  re-signing the freeze; the reviewer did not recommend it for v1.
+- **Freeze note.** `state/pins` version 2 (ADR-31) and the new
+  addressing-key purpose id are amendments to frozen items. Each needs the
+  maintainer's re-sign of `FREEZE.md` (items 11 and 14) and a golden update
+  before the phase 1 format freeze is final.
+
 **Gate outcome (phase 0, 2026-11-12):** the crypto review (P0.8) is done
 and found the salted per-extent key, constant nonce and AES-256-GCM
 construction sound: the amended nonce rule held in every modelled case
@@ -741,9 +821,10 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
     id_len ‖ chunk_id ‖ salt`. The FIPS profile uses HKDF-SHA-256 Expand
     over the same `info`.
   - The `salt` is a fresh random 192-bit value drawn **inside the seal
-    function on every call**. No retry, re-encode or compaction path may
-    carry one over: the extent builder has no salt setter, re-encoding
-    always re-seals, and the salt never comes from a buffered RNG pool.
+    function on every call**, from `getrandom(2)`. No retry, re-encode or
+    compaction path may carry one over: the extent builder has no salt
+    setter, re-encoding always re-seals, and the salt never comes from a
+    userspace DRBG (amendment of 2026-11-12, M2 review).
   - The cipher is AES-256-GCM with a fixed all-zero nonce, because every
     key encrypts exactly one payload. It runs through `aws-lc-rs`; ring
     measured 11 GB/s per core on the first host. The FIPS profile cannot
@@ -886,7 +967,8 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
   2026-11-12), and every commit is covered so that a bucket writer cannot
   forge a DELTA or CONFIG between two FULLs.
 - Rollback to an older valid prefix of the chain needs an anchor outside
-  the bucket; see the open questions in DESIGN.md.
+  the bucket: the local floor of ADR-31 (v1), the mirror maximum and a
+  Kubernetes floor (phase 5). Without a floor it cannot be detected.
 
 **Rejected:**
 - *Per-chunk random-nonce XChaCha20-Poly1305.* That is Constellation's
@@ -2080,3 +2162,80 @@ ships):**
 - **Amends:** ADR-12 (dictionaries are no longer simply deferred; the
   read path and the command are planned) and ADR-11 (`dicts/` joins the
   sealed-object table).
+
+## ADR-31: The rollback anchor: a local floor in v1, mirrors and an orchestrator floor in phase 5
+
+**Status: accepted (2026-11-12, maintainer: adopt the M2 review's
+recommendation).** It closes DESIGN §22.1 and amends ADR-9 and ADR-11.
+
+**Context:** a bucket writer cannot forge a commit, splice two chains or
+replay a lease (ADR-9, ADR-11 F5), but it can serve an old, fully valid
+prefix of the chain. Nothing inside the bucket tells that prefix from the
+current one. `state/pins` already holds `max_keyring_seq` and `max_epoch`,
+and every attach writes an EPOCH commit, so a host that attached before
+detects a rollback to before its last attach through `max_epoch`. It does
+not detect commits hidden from the last session (same epoch), and it
+detects nothing on a host that never attached. The checkpoint's
+`last_commit_seq` is a hint that is discarded when above the tip (D17); it
+is not an anchor.
+
+**Decision:**
+- **v1 (mandatory): a local floor.** `state/pins` becomes version 2 and
+  gains `{max_commit_seq, tip_hash}`, where `tip_hash` is the BLAKE3 of the
+  stored bytes of the commit at `max_commit_seq` (the `parent_hash`
+  convention).
+  - It is raise-only. It is written after every verified attach (after the
+    attach's own EPOCH commit) and after every FULL commit is durable (step
+    C6 of the commit protocol), never before: a floor above the durable tip
+    would refuse an honest volume after a crash.
+  - At attach, after `verify_chain`, a tip with `commit_seq <
+    max_commit_seq` is refused as `Rollback`, and a tip with `commit_seq ==
+    max_commit_seq` and a different hash as `Fork`. This is rule R4 of
+    ADR-11, together with `open_lease_fresh(bytes, max(chain epoch,
+    pins.max_epoch))`.
+  - Only offline `fsck --repair --truncate-tip` and an explicit,
+    audit-logged operator reset lower it. A DR steal from a lagging mirror
+    (ADR-24) is the case for the reset.
+  - The file is local and never uploaded. Cost: one small local write per
+    FULL.
+- **Phase 5 (several backends): the maximum over InSync mirrors.** An
+  authority whose tip is below an InSync mirror's tip is refused (a mirror
+  is a byte-identical copy that may have seen a later commit).
+- **Phase 5 (Kubernetes): a raise-only floor** `{commit_seq, tip_hash}` in
+  the orchestrator's status, written once per FULL, so a pod that moves to a
+  host with no local floor still has one.
+- **Documented later upgrade: a notary bucket.** A write-only bucket in
+  another account holds a signed or MAC'd `{seq, tip_hash, epoch}` per FULL.
+  It defeats an attacker holding only the data bucket's credentials, at the
+  price of one PUT per FULL and new infrastructure.
+
+**What it does not protect (the docs say so):**
+- A host with no floor (first attach, an ephemeral client with no
+  orchestrator floor) cannot detect rollback. This is ADR-11 F7's "by
+  construction" case, restated for history.
+- A purely local volume cannot be protected from anyone who can write its
+  local disk: that person also holds `integrity.key` and `state/pins` and can
+  rewrite both. Integrity mode defends the bucket copy. For a stolen or
+  modified local disk the honest claim is corruption detection and crash
+  safety, and encrypted mode with a passphrase slot resists a reader of the
+  disk, not a writer who also has the key file.
+- An attacker holding the credentials of every backend and the host is out
+  of the model.
+
+**Rejected:**
+- *The checkpoint as an anchor.* It is a hint, discarded when above the tip.
+- *A KMS counter.* A KMS has no monotonic counter.
+- *A bucket-side floor object.* The attacker who rolls the chain back
+  rolls that object back too.
+- *Deferring all anchors to phase 5.* It would leave v1 with no detection at
+  all for a bucket-writer attack that costs nothing to defend against on a
+  host that has attached before.
+
+**Consequences:**
+- **Format freeze.** `state/pins` version 2 and the new addressing-key
+  purpose id (ADR-6, ADR-11) amend frozen items; each needs the maintainer's
+  re-sign of `FREEZE.md` and a golden update.
+- New attach errors `Rollback` and `Fork` in the control API and the CLI;
+  `lunix status` shows the floor.
+- The rollback floor and `chain_floor` (retention) are unrelated: GC
+  deleting old commits never lowers the rollback floor.
