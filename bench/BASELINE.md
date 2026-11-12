@@ -205,7 +205,7 @@ buckets.
 | 16, 17 | P0.3 | accepted (gate), amended | [ublk-recovery](ublk-recovery/RESULTS.md) |
 | 17, 20 | P0.4 | grow works; daemon validates sizes | [ublk-recovery](ublk-recovery/RESULTS.md) |
 | 4 | P0.5 | accepted (gate): group commit | [journal-bench](journal-bench/RESULTS.md) |
-| 5, 14 | P0.6 | not run | [tracesim](tracesim/RESULTS.md) |
+| 5, 14 | P0.6 | run on MSR Cambridge; ADR-5 points to 16 KiB (default decided after phase 1), ADR-14 not accepted | [tracesim](tracesim/RESULTS.md) |
 | 8 | P0.7 | amended (gate) | [radixmap](radixmap/RESULTS.md) |
 | 11 | P0.8 | partial; amendment awaiting a decision | [crypto-kat](crypto-kat/RESULTS.md) |
 | 19 | P0.9 | executed outside the spike plan | (none) |
@@ -224,7 +224,7 @@ buckets.
 - **Loop-backed file systems** (P0.5) add a layer: the loop images pay
   2-13 ms per flush, the real-disk directory about 3 µs. The loop rows say
   more about ordering than about absolute latency. One run per journal cell.
-- **No trace subset.** P0.6 has no data at all.
+- **One trace family.** P0.6 used MSR Cambridge only (27 of 36 volumes, 2007 enterprise servers).
 - **Provider vantage point.** AWS was measured from a client in the same
   region and from a remote workstation; OVH only from the remote
   workstation, on a Wi-Fi link that bounds large objects. Cell counts are
@@ -236,8 +236,8 @@ buckets.
 
 ## Not run
 
-- P0.6: chunk-size and cache-policy simulation (ADR-5, ADR-14). No trace
-  could be obtained without a licence acceptance.
+- P0.6: Alibaba and Tencent CBS traces; the libCacheSim cross-check;
+  segment-granular eviction.
 - P0.10: Cloudflare R2, GCS, Backblaze B2, Scaleway, Wasabi, Hetzner,
   Tigris, DigitalOcean Spaces, Ceph RGW, S3 Express One Zone (no
   credentials); PUT latency per size with 8 parallel streams; a shaped
@@ -266,7 +266,7 @@ CI reuse these.
 | P0.3 negative controls | `sudo CONTROL=noreissue PHASES="immediate:3:0" ./run-crash-loop.sh` and `sudo CONTROL=fault PHASES="immediate:2:0" ./run-crash-loop.sh` |
 | P0.12 | `cd spikes/ublk-recovery && sudo ./run-ramsink.sh && sudo ./run-lost-keeper.sh` (keeper: `keeper/keeper.py`) |
 | P0.5 | `cd spikes/journal-bench && cargo build --release && sudo ./run-journal.sh && python3 analyze.py out/results.jsonl` |
-| P0.6 | `cd spikes/tracesim && cargo build --release -j 4 && ./run.sh /var/tmp/lunix-traces out_dir` (needs traces) |
+| P0.6 | `cd spikes/tracesim && cargo build --release -j 4 && ./run-msr.sh /var/tmp/lunix-traces/msr out_dir 2` (needs the MSR traces) |
 | P0.7 | `cd spikes/radixmap && cargo test --release && bash run.sh && python3 summarize.py out` |
 | P0.8 | `cd spikes/crypto-kat && ./run.sh` |
 | P0.10 | `cd spikes/s3probe && cargo build --release`, export `LUNIX_PROBE_<NAME>_*`, then `./target/release/s3probe --out out --providers AWS`; MinIO: `./run-minio.sh`; multipart: `s3probe mpu --out DIR --providers AWS` |

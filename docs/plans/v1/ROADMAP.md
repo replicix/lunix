@@ -76,6 +76,9 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - Dedup and compression ratios are reported.
 - Perf meets the §20 targets for local hits and writes, or the
   shortfall is explained.
+- The default chunk size is decided (ADR-5): fio, a database (pgbench)
+  and a VM-image workload at 16 KiB and 64 KiB, comparing dedup and
+  compression ratio, map size, CPU per GiB and partial-chunk RMW.
 
 ## Phase 2: One S3 backend (authority), async mode
 
