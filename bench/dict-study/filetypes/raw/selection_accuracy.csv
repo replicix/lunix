@@ -1,0 +1,31 @@
+strategy,test_set,files,accuracy_pct
+cas0,new-ecosystem,44638,98.49
+cas0,project-disjoint folds,242221,99.3
+cas1,new-ecosystem,44638,76.36
+cas1,project-disjoint folds,242221,80.75
+cas2,new-ecosystem,44638,4.57
+cas2,project-disjoint folds,242221,5.05
+cas2b0,new-ecosystem,44638,77.49
+cas2b0,project-disjoint folds,242221,81.86
+cas2b1,new-ecosystem,44638,76.36
+cas2b1,project-disjoint folds,242221,80.75
+cas2b2,new-ecosystem,44638,75.95
+cas2b2,project-disjoint folds,242221,80.35
+ext0,new-ecosystem,44638,99.74
+ext0,project-disjoint folds,242221,99.79
+ext1,new-ecosystem,44638,0.0
+ext1,project-disjoint folds,242221,0.0
+ext2,new-ecosystem,44638,1.63
+ext2,project-disjoint folds,242221,1.73
+magic,new-ecosystem,44638,30.81
+magic,project-disjoint folds,242221,43.31
+magic_cal,new-ecosystem,44638,31.43
+magic_cal,project-disjoint folds,242221,46.49
+nb,new-ecosystem,44638,76.36
+nb,project-disjoint folds,242221,80.75
+nbx0,new-ecosystem,44638,79.09
+nbx0,project-disjoint folds,242221,83.27
+nbx1,new-ecosystem,44638,76.23
+nbx1,project-disjoint folds,242221,80.72
+nbx2,new-ecosystem,44638,76.28
+nbx2,project-disjoint folds,242221,80.51
