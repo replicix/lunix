@@ -1,0 +1,7 @@
+# lunix-format golden file 04-segment-trailer.bin (64 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f04_segment
+00000000  70 11 01 00 00 00 00 00 64 00 00 00 84 03 00 00
+00000010  ef cd ab 00 00 03 00 00 01 01 00 00 00 00 00 00
+00000020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000030  00 00 00 00 00 00 00 00 69 69 db d2 4c 58 53 54

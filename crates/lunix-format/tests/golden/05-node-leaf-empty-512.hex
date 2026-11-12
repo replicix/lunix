@@ -1,0 +1,5 @@
+# lunix-format golden file 05-node-leaf-empty-512.bin (25 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f05_node
+00000000  00 00 02 01 00 00 00 00 00 00 00 00 00 00 00 00
+00000010  00 00 00 00 00 00 00 00 00
