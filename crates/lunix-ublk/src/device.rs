@@ -30,7 +30,7 @@ use lunix_iface::block::{BlockEngine, ResizeHook};
 use crate::config::{DataPath, UblkConfig};
 use crate::ctl::{ControlPlane, DevInfo, RingControl};
 use crate::error::{Result, UblkError};
-use crate::features::{flag, Features};
+use crate::features::flag;
 use crate::identity::{current_boot_id, make_record};
 use crate::queue::{
     fatal_device, queue_thread, Ended, QueueArgs, QueueCounters, QueueSnapshot, Ready, StartGate,
@@ -70,6 +70,17 @@ impl ResizeHook for ResizeBridge {
         session::update_size(&*self.0.ctl, self.0.dev_id, &self.0.size, new_size_bytes)
             .map_err(|e| lunix_iface::Error::Io(std::io::Error::other(e.to_string())))
     }
+}
+
+/// What `UblkDevice::start` needs once the device exists in the kernel.
+struct StartPlan {
+    ctl: Arc<dyn ControlPlane>,
+    engine: Arc<dyn BlockEngine>,
+    cfg: UblkConfig,
+    info: DevInfo,
+    kernel_bytes: u64,
+    boot_id: [u8; 16],
+    recovering: bool,
 }
 
 /// How to bring the device up.
@@ -254,16 +265,16 @@ impl UblkDevice {
         } else {
             DataPath::Copy
         };
-        match Self::start(
-            ctl.clone(),
+        let plan = StartPlan {
+            ctl: Arc::clone(&ctl),
             engine,
             cfg,
-            features,
             info,
             kernel_bytes,
             boot_id,
             recovering,
-        ) {
+        };
+        match Self::start(plan) {
             Ok(d) => Ok(d),
             Err((e, delete_fresh)) => {
                 if delete_fresh {
@@ -277,17 +288,16 @@ impl UblkDevice {
 
     /// Builds the queues and starts the device. The error carries whether the
     /// device is a fresh one that never started and can be deleted again.
-    #[allow(clippy::too_many_arguments)]
-    fn start(
-        ctl: Arc<dyn ControlPlane>,
-        engine: Arc<dyn BlockEngine>,
-        cfg: UblkConfig,
-        _features: Features,
-        info: DevInfo,
-        kernel_bytes: u64,
-        boot_id: [u8; 16],
-        recovering: bool,
-    ) -> std::result::Result<Self, (UblkError, bool)> {
+    fn start(plan: StartPlan) -> std::result::Result<Self, (UblkError, bool)> {
+        let StartPlan {
+            ctl,
+            engine,
+            cfg,
+            info,
+            kernel_bytes,
+            boot_id,
+            recovering,
+        } = plan;
         let fresh = !recovering;
         let fail = |e: UblkError| (e, fresh);
         let t = cfg.timeouts;
@@ -512,26 +522,35 @@ impl UblkDevice {
     /// `QUIESCE_DEV`, then the engine's final commit; the caller may then
     /// exit through [`Quiesced::exit`]. No stop command is ever sent.
     ///
-    /// The driver waits up to `timeout` for in-flight requests; queue threads
-    /// keep completing them meanwhile. On success no request is delivered any
-    /// more and none is in flight (checked; a violation aborts).
+    /// The driver is satisfied once every queue has an idle command left to
+    /// notify the server with; requests the engine still holds are **not**
+    /// reissued, they are completed by the queue threads, which keep running.
+    /// Every queue ends once all its commands have come back, and this call
+    /// waits for that (`Timeouts::drain`) before it asks the engine for its
+    /// final commit: nothing exits with started requests in flight (W2) and
+    /// the kernel has seen every commit.
     ///
     /// **A timeout is not harmless**: the driver marks the device canceling
     /// before it waits and does not undo that, so after
-    /// [`UblkError::QuiesceTimeout`] the device refuses new I/O and its queues
-    /// wind down. Retry, or call [`UblkDevice::crash_for_recovery`].
+    /// [`UblkError::QuiesceTimeout`] or [`UblkError::DrainTimeout`] the device
+    /// refuses new I/O and its queues wind down. Call this again (a repeated
+    /// `QUIESCE_DEV` is accepted), or [`UblkDevice::crash_for_recovery`].
     ///
     /// # Errors
-    /// [`UblkError::QuiesceTimeout`] or the command's error.
+    /// [`UblkError::QuiesceTimeout`], [`UblkError::DrainTimeout`] or the
+    /// command's error.
     pub fn quiesce(&self, timeout: Duration) -> Result<Quiesced> {
         self.check_serving()?;
         session::quiesce(&*self.shared.ctl, self.shared.dev_id, timeout)?;
-        // The kernel saw every request committed, and our counters run ahead
-        // of the kernel by construction; anything else is a bug (W2).
+        let drain = self.shared.cfg.timeouts.drain;
+        if !self.ended.wait_for(self.counters.len(), drain) {
+            return Err(UblkError::DrainTimeout { after: drain });
+        }
+        // Queue threads end only with nothing in flight; anything else is a bug.
         let left = self.in_flight();
         if left != 0 {
             fatal_device(&format!(
-                "{left} request(s) in flight after a successful QUIESCE_DEV"
+                "{left} request(s) in flight after the queues ended"
             ));
         }
         let engine_error = self.engine.quiesce().err();

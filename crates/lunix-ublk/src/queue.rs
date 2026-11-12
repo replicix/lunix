@@ -2,8 +2,8 @@
 //!
 //! The thread builds its engine [`QueueHandler`] and its `UblkQueue`, waits at
 //! a gate until every queue is ready, submits the `FETCH` commands, arms a
-//! `POLL_ADD` on the handler's wake fd and runs libublk's `wait_and_handle_io`.
-//! A request becomes an [`IoRequest`] for `on_request`; the wake fd's
+//! `POLL_ADD` on the handler's wake fd and runs its own loop over libublk's
+//! `flush_and_wake_io_tasks`. A request becomes an [`IoRequest`] for `on_request`; the wake fd's
 //! completion calls `poll`. Both paths complete through [`Comp`], so a tag is
 //! committed only from this thread (libublk 0.4.8, `lunix_iface::block`
 //! threading rule). There is no `run_target()`.
@@ -31,10 +31,10 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use io_uring::{opcode, types};
+use io_uring::{cqueue, opcode, types};
 use libublk::helpers::IoBuf;
 use libublk::io::{UblkDev, UblkIOCtx, UblkQueue};
-use libublk::{sys, BufDesc, BufDescList, UblkIORes};
+use libublk::{sys, BufDesc, BufDescList, UblkIORes, UblkUringData};
 use lunix_iface::block::{
     BlockEngine, Completer, IoOp, IoRequest, IoStatus, QueueConfig, QueueHandler, QueueId, Tag,
 };
@@ -321,9 +321,25 @@ fn run_queue(a: QueueArgs) {
         wake_fd,
     };
     lp.arm(&queue);
-    queue.wait_and_handle_io(|q, tag, io| lp.on_cqe(q, tag, io));
+    // Our own loop instead of libublk's `wait_and_handle_io`, which ends as
+    // soon as the kernel has aborted the idle FETCH commands, even while the
+    // engine still holds started requests (it assumes handlers complete at
+    // once). We end only when the queue is down AND nothing is in flight (W2).
+    loop {
+        let r = queue.flush_and_wake_io_tasks(|ud, cqe, _last| lp.on_cqe(&queue, ud, cqe), 1);
+        match r {
+            Ok(_) => {}
+            Err(libublk::UblkError::QueueIsDown) => {
+                if a.counters.in_flight() == 0 {
+                    break;
+                }
+                lp.wait_for_engine(&queue);
+            }
+            Err(e) => fatal(qid, &format!("queue loop error: {e}")),
+        }
+    }
 
-    // The loop ended: the device must be stopping and nothing may be in flight.
+    // The queue is down and nothing is in flight.
     if !queue.is_stopping() {
         fatal(qid, "the queue loop ended while the device is not stopping");
     }
@@ -379,25 +395,52 @@ impl Loop {
         }
     }
 
-    fn on_cqe(&mut self, q: &UblkQueue<'_>, tag: u16, io: &UblkIOCtx<'_>) {
-        if !io.is_tgt_io() {
-            return self.on_request(q, tag);
+    fn on_cqe(&mut self, q: &UblkQueue<'_>, user_data: u64, cqe: &cqueue::Entry) {
+        let Ok(tag) = u16::try_from(UblkIOCtx::user_data_to_tag(user_data)) else {
+            fatal(self.c.qid, "a completion with a tag above 65535");
+        };
+        let res = cqe.result();
+        if user_data & (UblkUringData::Target as u64) != 0 {
+            return self.on_wake(q, tag, res);
         }
+        if res == sys::UBLK_IO_RES_OK as i32 {
+            self.on_request(q, tag);
+        } else if res != sys::UBLK_IO_RES_ABORT && !q.is_stopping() {
+            fatal(
+                self.c.qid,
+                &format!("the driver answered a command with {res}"),
+            );
+        }
+        // ABORT (or anything while stopping): the queue is winding down.
+    }
+
+    fn on_wake(&mut self, q: &UblkQueue<'_>, tag: u16, res: i32) {
         if tag != WAKE_TAG {
             fatal(self.c.qid, "unexpected target completion");
         }
-        if io.result() < 0 {
+        if res < 0 {
             if q.is_stopping() {
                 return; // the ring is going away
             }
-            fatal(
-                self.c.qid,
-                &format!("wake poll failed with {}", io.result()),
-            );
+            fatal(self.c.qid, &format!("wake poll failed with {res}"));
         }
         let Loop { handler, c, .. } = self;
         handler.poll(&mut Comp { q, c: &mut *c });
         self.arm(q);
+    }
+
+    /// The queue is down but the engine still holds requests: wait for its
+    /// wake fd (bounded, so the loop re-checks) and let it complete them.
+    fn wait_for_engine(&mut self, q: &UblkQueue<'_>) {
+        let mut p = libc::pollfd {
+            fd: self.wake_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one valid pollfd; the fd lives as long as the handler.
+        unsafe { libc::poll(&mut p, 1, 50) };
+        let Loop { handler, c, .. } = self;
+        handler.poll(&mut Comp { q, c: &mut *c });
     }
 
     fn on_request(&mut self, q: &UblkQueue<'_>, tag: u16) {
