@@ -12,11 +12,16 @@ workspace = true
 
 [features]
 # Compiled out unless on; only the lunixd crashpoints build enables it.
-crashpoints = []
+crashpoints = ["dep:inventory"]
 
 [dependencies]
 lunix-format.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-inventory.workspace = true
+zeroize.workspace = true
+rustix.workspace = true
+inventory = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
