@@ -1,7 +1,7 @@
 //! [`LocalVolume`]: the volume directory, its process lock, the object-id
 //! allocator and the open-time orphan sweep.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -15,14 +15,16 @@ use lunix_format::segment::ContainerKind;
 use lunix_format::volume::VolumeDescriptor;
 use lunix_format::{ObjId, VolumeUuid};
 use lunix_iface::crypto::MetaCodec;
-use lunix_iface::store::{IdAllocator, Leftover, SweepReport, SweepRequest, VolumeDir};
+use lunix_iface::store::{
+    CheckpointStore, IdAllocator, Leftover, SweepReport, SweepRequest, VolumeDir,
+};
 use lunix_iface::{Error, Result};
 use replicix_platform_lite::{open_lock_file, FileLock, FlockLock, LockGuard};
 
 use crate::container::Container;
 use crate::fsops::{
-    io_err, io_or_missing, list_hex_ids, publish, read_dir_names, unlink_durable, FsOps, Publish,
-    RealFs, STATE_POINTS,
+    io_err, io_or_missing, list_hex_ids, publish, read_capped, read_dir_names, unlink_durable,
+    FsOps, Publish, RealFs, STATE_POINTS,
 };
 
 /// Target size of a segment: the writer reports full from here on (DESIGN §6).
@@ -62,7 +64,9 @@ pub struct StoreOptions {
     pub allow_tmpfs: bool,
     /// Segment target size in bytes.
     pub segment_target: u64,
-    /// Sealed containers kept open for `locate` and `read_extent`.
+    /// How many sealed containers the cache keeps open. A bound on the cache,
+    /// not on descriptors: an `ExtentLocation` keeps its descriptor alive past
+    /// eviction and delete.
     pub max_open_files: usize,
 }
 
@@ -85,15 +89,18 @@ impl IdAllocator for IdCounter {
     fn allocate(&self) -> Result<ObjId> {
         let mut cur = self.0.load(Ordering::SeqCst);
         loop {
-            let exhausted = Error::Refused {
-                why: "object id counter exhausted",
-            };
             let next = if cur == 0 {
                 ObjId::new(0, 1)
             } else {
-                ObjId::from_raw(cur).and_then(ObjId::next)
+                ObjId::from_raw(cur)
+                    .map_err(|_| Error::Refused {
+                        why: "an observed object id is not a valid id",
+                    })?
+                    .next()
             }
-            .map_err(|_| exhausted)?;
+            .map_err(|_| Error::Refused {
+                why: "object id counter exhausted",
+            })?;
             match self
                 .0
                 .compare_exchange(cur, next.raw(), Ordering::SeqCst, Ordering::SeqCst)
@@ -160,7 +167,11 @@ pub(crate) struct Inner {
     pub(crate) segment_target: u64,
     pub(crate) max_open_files: usize,
     pub(crate) cache: Mutex<ContainerCache>,
-    warnings: Mutex<Vec<String>>,
+    warnings: Mutex<Warnings>,
+    /// Serialises replace-style writes (one shared temp name per file).
+    pub(crate) replace_lock: Mutex<()>,
+    /// Raw ids of containers being written; their `.open` files are not leftovers.
+    pub(crate) open_writers: Mutex<HashSet<u64>>,
     // Held for the life of the volume; dropping the last handle releases it.
     _lock: LockGuard,
 }
@@ -171,12 +182,39 @@ impl Inner {
     }
 
     pub(crate) fn warn(&self, msg: impl Into<String>) {
-        lock(&self.warnings).push(msg.into());
+        let mut w = lock(&self.warnings);
+        if w.items.len() >= MAX_WARNINGS {
+            w.items.pop_front();
+            w.dropped += 1;
+        }
+        w.items.push_back(msg.into());
+    }
+
+    /// True for `<id>.open` files that a live writer of this process owns.
+    pub(crate) fn is_live_writer_file(&self, rel: &str) -> bool {
+        let Some((sub, name)) = rel.split_once('/') else {
+            return false;
+        };
+        if sub != "segments" && sub != "map" {
+            return false;
+        }
+        name.strip_suffix(".open")
+            .and_then(crate::fsops::parse_hex16)
+            .is_some_and(|raw| lock(&self.open_writers).contains(&raw))
     }
 
     pub(crate) fn cache(&self) -> MutexGuard<'_, ContainerCache> {
         lock(&self.cache)
     }
+}
+
+/// Warnings kept for the daemon; older ones are counted, not kept.
+const MAX_WARNINGS: usize = 64;
+
+#[derive(Default)]
+struct Warnings {
+    items: VecDeque<String>,
+    dropped: u64,
 }
 
 /// A poisoned mutex only means a panic elsewhere; the data is plain state.
@@ -215,7 +253,18 @@ impl fmt::Debug for LocalVolume {
 /// # Errors
 /// `NotFound` when the directory has no `volume`; `Io`.
 pub fn read_volume_file(dir: &Path) -> Result<Vec<u8>> {
-    fs::read(dir.join(lpath::volume())).map_err(|e| io_or_missing(e, "volume"))
+    read_capped(&dir.join(lpath::volume()), MAX_VOLUME_FILE, "volume")
+}
+
+/// A descriptor is 120 bytes plus at most 255 lineage entries of about 1 KiB.
+const MAX_VOLUME_FILE: u64 = 1 << 20;
+
+/// The pid the holder of `dir`'s `LOCK` wrote into it, for an operator who got
+/// `Busy`. `None` when unknown (the file is empty or unreadable). The pid may
+/// be stale if the holder died; the flock, not this text, is the lock.
+pub fn lock_holder_pid(dir: &Path) -> Option<u32> {
+    let text = read_capped(&dir.join(lpath::lock()), 64, "LOCK").ok()?;
+    std::str::from_utf8(&text).ok()?.trim().parse().ok()
 }
 
 fn statfs_magic(dir: &Path) -> io::Result<u64> {
@@ -262,12 +311,6 @@ fn take_lock(dir: &Path) -> Result<LockGuard> {
     Ok(guard)
 }
 
-fn fsync_dir_of(fs_ops: &dyn FsOps, path: &Path) {
-    if let Some(parent) = path.parent() {
-        let _ = fs_ops.fsync_dir(parent);
-    }
-}
-
 impl LocalVolume {
     /// Creates a new volume directory: the layout, `volume.json`, then the
     /// `volume` descriptor last, so a crash leaves either no volume or a whole
@@ -291,8 +334,15 @@ impl LocalVolume {
             return Err(Error::invalid("descriptor mode differs from the codec's"));
         }
         let json_text = json.to_json_pretty()?;
+        // Refuse tmpfs before creating anything: judge the nearest directory
+        // that exists, then re-read the type of the new one for btrfs.
+        let existing = dir
+            .ancestors()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| Path::new("."));
+        check_fs(existing, opts.allow_tmpfs)?;
         fs::create_dir_all(dir).map_err(io_err)?;
-        let magic = check_fs(dir, opts.allow_tmpfs)?;
+        let magic = check_fs(dir, true)?;
         let guard = take_lock(dir)?;
         if dir.join(lpath::volume()).exists() {
             return Err(Error::AlreadyExists { what: "volume" });
@@ -319,7 +369,15 @@ impl LocalVolume {
             &STATE_POINTS,
         )?;
         this.inner.fs.fsync_dir(dir).map_err(io_err)?;
-        fsync_dir_of(&*this.inner.fs, dir);
+        // The volume directory's own entry must be durable before `volume`.
+        if let Some(parent) = dir.parent() {
+            let parent = if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            };
+            this.inner.fs.fsync_dir(parent).map_err(io_err)?;
+        }
         publish(
             &this.inner,
             dir,
@@ -353,8 +411,15 @@ impl LocalVolume {
             return Err(Error::invalid("descriptor mode differs from the codec's"));
         }
         let this = Self::assemble(dir, desc.volume_uuid, meta, &opts, guard);
+        // Inputs of the id rule that live here: the files on disk and the
+        // checkpoint hint. The caller adds the highest id its commits name.
         let highest = this.highest_id_on_disk()?;
         this.inner.ids.observe(highest);
+        if let Ok(Some(slot)) = this.load() {
+            if ObjId::from_raw(slot.id_high).is_ok() {
+                this.inner.ids.observe(slot.id_high);
+            }
+        }
         Ok(this)
     }
 
@@ -377,7 +442,9 @@ impl LocalVolume {
                 segment_target: opts.segment_target,
                 max_open_files: opts.max_open_files,
                 cache: Mutex::new(ContainerCache::default()),
-                warnings: Mutex::new(Vec::new()),
+                warnings: Mutex::new(Warnings::default()),
+                replace_lock: Mutex::new(()),
+                open_writers: Mutex::new(HashSet::new()),
                 _lock: guard,
             }),
         }
@@ -386,28 +453,57 @@ impl LocalVolume {
     /// Warnings the store raised since the last call (an ignored checkpoint, a
     /// NOCOW failure). The daemon logs them; the store has no logger of its own.
     pub fn take_warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *lock(&self.inner.warnings))
+        let mut w = lock(&self.inner.warnings);
+        let mut out = Vec::with_capacity(w.items.len() + 1);
+        if w.dropped > 0 {
+            out.push(format!("{} earlier warnings were dropped", w.dropped));
+            w.dropped = 0;
+        }
+        out.extend(w.items.drain(..));
+        out
     }
 
     /// The highest object id of any segment, pack or index-run file present,
     /// sealed or not (`.seg`, `.open`, `.tmp` all count: an id is never reused).
+    /// Only the file names the layout defines are read; anything else is
+    /// reported as a warning and ignored, so a stray name cannot poison the
+    /// allocator.
     fn highest_id_on_disk(&self) -> Result<u64> {
         let mut highest = 0u64;
-        for sub in ["segments", "map", "index"] {
+        for (sub, suffixes, extra) in [
+            ("segments", &[".seg", ".open", ".tmp"][..], &[][..]),
+            ("map", &["", ".open", ".tmp"][..], &[][..]),
+            (
+                "index",
+                &["", ".tmp"][..],
+                &["manifest", "manifest.tmp"][..],
+            ),
+        ] {
             for (name, _) in read_dir_names(&self.inner.path(sub)).map_err(io_err)? {
-                if let Some(v) = name.get(..16).and_then(crate::fsops::parse_hex16) {
-                    highest = highest.max(v);
+                if extra.contains(&name.as_str()) {
+                    continue;
+                }
+                let id = suffixes
+                    .iter()
+                    .filter_map(|sfx| name.strip_suffix(sfx))
+                    .find_map(crate::fsops::parse_hex16)
+                    .filter(|raw| ObjId::from_raw(*raw).is_ok());
+                match id {
+                    Some(raw) => highest = highest.max(raw),
+                    None => self.inner.warn(format!(
+                        "unexpected file {sub}/{name} ignored by the id scan"
+                    )),
                 }
             }
         }
         Ok(highest)
     }
 
-    fn read_state_file(&self, rel: &str) -> Result<Option<Vec<u8>>> {
-        match fs::read(self.inner.path(rel)) {
+    fn read_state_file(&self, rel: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        match read_capped(&self.inner.path(rel), max, "state file") {
             Ok(b) => Ok(Some(b)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(io_err(e)),
+            Err(e) if e.kind() == lunix_iface::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
@@ -441,7 +537,9 @@ impl LocalVolume {
                     if rel != "cache" {
                         stack.push((entry.path(), format!("{rel}/")));
                     }
-                } else if name.ends_with(".tmp") || name.ends_with(".open") {
+                } else if (name.ends_with(".tmp") || name.ends_with(".open"))
+                    && !self.inner.is_live_writer_file(&rel)
+                {
                     out.push(Leftover {
                         name: rel,
                         size_bytes: meta.len(),
@@ -480,7 +578,10 @@ impl VolumeDir for LocalVolume {
 
     fn volume_json(&self) -> Result<VolumeJson> {
         let bytes = self
-            .read_state_file(&lpath::volume_json())?
+            .read_state_file(
+                &lpath::volume_json(),
+                lunix_format::local::MAX_JSON_LEN as u64,
+            )?
             .ok_or_else(|| Error::not_found("volume.json"))?;
         let text = std::str::from_utf8(&bytes).map_err(|_| Error::Corrupt {
             what: "volume.json",
@@ -495,7 +596,7 @@ impl VolumeDir for LocalVolume {
     }
 
     fn device_record(&self) -> Result<Option<DeviceRecord>> {
-        match self.read_state_file(&lpath::state_device())? {
+        match self.read_state_file(&lpath::state_device(), 4096)? {
             Some(b) => Ok(Some(DeviceRecord::decode(&b)?)),
             None => Ok(None),
         }
@@ -512,7 +613,7 @@ impl VolumeDir for LocalVolume {
     }
 
     fn local_pins(&self) -> Result<Option<LocalPins>> {
-        match self.read_state_file(&lpath::state_pins())? {
+        match self.read_state_file(&lpath::state_pins(), 4096)? {
             Some(b) => Ok(Some(LocalPins::decode(&b)?)),
             None => Ok(None),
         }
@@ -559,6 +660,12 @@ impl VolumeDir for LocalVolume {
     }
 
     fn sweep_orphans(&self, req: &SweepRequest<'_>) -> Result<SweepReport> {
+        let bad = |id: &ObjId| id.raw() > req.high_water_mark;
+        if req.named_segments.iter().any(bad) || req.named_packs.iter().any(bad) {
+            return Err(Error::invalid(
+                "a named id is above high_water_mark: the mark was computed wrongly",
+            ));
+        }
         let mut report = SweepReport {
             highest_id_before: self.highest_id_on_disk()?,
             ..SweepReport::default()

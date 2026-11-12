@@ -2,7 +2,6 @@
 //! `gc/<pass>`).
 
 use std::fs;
-use std::io;
 use std::path::Path;
 
 use lunix_format::gcfile::{Condemned, GcPassBody};
@@ -13,8 +12,8 @@ use lunix_iface::store::{GcStateStore, PinKind, PinRoot, PinSource};
 use lunix_iface::{Error, Result};
 
 use crate::fsops::{
-    io_err, io_or_missing, list_hex_ids, publish, read_dir_names, Publish, EVIDENCE_POINTS,
-    STATE_POINTS,
+    io_err, io_or_missing, list_hex_ids, publish, read_capped, read_dir_names, Publish,
+    EVIDENCE_POINTS, STATE_POINTS,
 };
 use crate::volume::LocalVolume;
 
@@ -111,10 +110,22 @@ impl PinSource for LocalVolume {
 impl GcStateStore for LocalVolume {
     fn load_condemned(&self) -> Result<Option<Condemned>> {
         let path = self.inner.path(&lpath::state_gc_condemned());
-        match fs::read(&path) {
+        // It is a hint: absent, oversized or undecodable all mean "re-mark".
+        match read_capped(
+            &path,
+            u64::from(lunix_format::gcfile::CONDEMNED_MAX_BODY) + 64,
+            "condemned list",
+        ) {
             Ok(bytes) => Ok(Condemned::decode(&bytes).ok()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(io_err(e)),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    lunix_iface::ErrorKind::NotFound | lunix_iface::ErrorKind::Corrupt
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(e),
         }
     }
 

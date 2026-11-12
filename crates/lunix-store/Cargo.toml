@@ -10,6 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiles the crash points in (tests only; like lunixd's feature, never on a
+# normal build). The crash sweep runs with `cargo test -p lunix-store --features crashpoints`.
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
@@ -25,7 +30,3 @@ libc.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 lunix-testkit.workspace = true
-# The crash-sweep tests re-run the test binary with LUNIX_CRASH_AT set, which needs the
-# registry compiled in. A dev-dependency edge is outside the normal/build tree that
-# tools/check-features.sh inspects.
-lunix-iface = { workspace = true, features = ["crashpoints"] }

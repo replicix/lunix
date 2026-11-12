@@ -1,7 +1,6 @@
 //! `state/checkpoint`: the two-slot hint, and the guard on its journal tails.
 
-use std::fs::{self, OpenOptions};
-use std::io;
+use std::fs::OpenOptions;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 
 use lunix_format::local::{CheckpointFile, CheckpointSlot, CKP_FILE_LEN, CKP_SLOT_LEN};
@@ -10,7 +9,8 @@ use lunix_format::CommitSeq;
 use lunix_iface::store::{CheckpointStore, CommitStore};
 use lunix_iface::{Error, Result};
 
-use crate::fsops::{io_err, publish, Publish, STATE_POINTS};
+use crate::fsops::{io_err, publish, read_capped, Publish, STATE_POINTS};
+use crate::volume::lock;
 use crate::volume::LocalVolume;
 
 /// A checkpoint slot plus the verdict of the tail guard.
@@ -35,10 +35,19 @@ pub fn tails_usable(slot: &CheckpointSlot, tip: Option<CommitSeq>) -> bool {
 
 impl LocalVolume {
     fn read_checkpoint_file(&self) -> Result<Option<Vec<u8>>> {
-        match fs::read(self.inner.path(&lpath::state_checkpoint())) {
+        match read_capped(
+            &self.inner.path(&lpath::state_checkpoint()),
+            CKP_FILE_LEN as u64,
+            "checkpoint",
+        ) {
             Ok(b) => Ok(Some(b)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(io_err(e)),
+            Err(e) if e.kind() == lunix_iface::ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == lunix_iface::ErrorKind::Corrupt => {
+                self.inner
+                    .warn("checkpoint ignored: longer than a checkpoint");
+                Ok(None)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -105,6 +114,8 @@ impl CheckpointStore for LocalVolume {
         if slot.volume_uuid != self.inner.uuid {
             return Err(Error::invalid("checkpoint is for another volume"));
         }
+        // Two callers would compute the same slot and interleave their writes.
+        let _serial = lock(&self.inner.replace_lock);
         let current = self.read_checkpoint()?;
         let (next_slot, newest_seq) = match &current {
             Some((f, _)) => (

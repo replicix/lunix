@@ -203,6 +203,9 @@ pub(crate) fn publish(
 ) -> Result<(), Error> {
     let tmp = dir.join(format!("{name}.tmp"));
     let dest = dir.join(name);
+    // Replace-style writes share the temp name `<name>.tmp`; two callers on one
+    // file would truncate each other's temp and tear the destination.
+    let _serial = (how == Publish::Replace).then(|| crate::volume::lock(&inner.replace_lock));
     let result = publish_inner(inner, dir, &tmp, &dest, bytes, how, pts);
     if result.is_err() {
         // Best effort: a leftover temp is deleted by the open-time sweep anyway.
@@ -259,6 +262,21 @@ pub(crate) fn unlink_durable(inner: &Inner, path: &Path) -> Result<bool, Error> 
     inner.fs.fsync_dir(parent).map_err(io_err)?;
     lunix_iface::crashpoint!("store.delete.after_dirsync");
     Ok(removed)
+}
+
+/// Reads a whole small file after checking its size against `max`, so a
+/// forged or runaway file is refused before anything is allocated.
+pub(crate) fn read_capped(path: &Path, max: u64, what: &'static str) -> Result<Vec<u8>, Error> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| io_or_missing(e, what))?
+        .len();
+    if len > max {
+        return Err(Error::Corrupt {
+            what,
+            detail: "file longer than any valid one",
+        });
+    }
+    std::fs::read(path).map_err(|e| io_or_missing(e, what))
 }
 
 /// Reads exactly `buf.len()` bytes at `offset` from an open fd.

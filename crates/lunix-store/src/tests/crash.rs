@@ -5,7 +5,9 @@
 //! The child is the test `child_process`, which does nothing unless the
 //! environment names a directory and an operation.
 
+#[cfg(feature = "crashpoints")]
 use std::collections::BTreeSet;
+#[cfg(feature = "crashpoints")]
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -17,6 +19,7 @@ use lunix_iface::store::{
     CheckpointStore, CommitStore, GcStateStore, PackRead, PackStore, PinSource, SegmentStore,
     SweepRequest, VolumeDir,
 };
+#[cfg(feature = "crashpoints")]
 use lunix_iface::ErrorKind;
 
 use super::{cid, create, data_extent, node_extent, open, tempdir, test_opts, UUID};
@@ -244,6 +247,7 @@ pub(crate) fn spawn_child(dir: &Path, op: &str, crash_at: Option<&str>) -> Child
     if let Some(p) = crash_at {
         cmd.env("LUNIX_CRASH_AT", p);
     }
+    let _g = super::write_guard();
     cmd.spawn().expect("spawn the child")
 }
 
@@ -264,6 +268,7 @@ fn assert_consistent(vol: &LocalVolume) {
     vol.roots().expect("pins");
 }
 
+#[cfg(feature = "crashpoints")]
 fn check(op: &str, point: &str, vol: &LocalVolume) {
     let step = point.rsplit('.').next().expect("step");
     // Create-style steps: the rename is what makes the new state visible.
@@ -389,6 +394,7 @@ fn check(op: &str, point: &str, vol: &LocalVolume) {
     assert!(w.id().raw() > high, "{ctx}: id reused");
 }
 
+#[cfg(feature = "crashpoints")]
 #[test]
 fn a_kill_at_every_durable_step_leaves_the_old_state_or_the_new_one() {
     for (op, points) in table() {
@@ -414,6 +420,7 @@ fn a_kill_at_every_durable_step_leaves_the_old_state_or_the_new_one() {
     }
 }
 
+#[cfg(feature = "crashpoints")]
 #[test]
 fn the_sweep_table_covers_every_registered_store_crash_point() {
     let covered: BTreeSet<String> = table().into_iter().flat_map(|(_, p)| p).collect();

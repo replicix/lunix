@@ -165,6 +165,7 @@ fn create_open_and_the_small_state_files_round_trip() {
 fn create_refuses_an_existing_volume_and_open_refuses_a_missing_one() {
     let dir = tempdir();
     drop(plain(dir.path()));
+    let _g = super::read_guard();
     let again = LocalVolume::create(
         dir.path(),
         &super::descriptor(MODE, 16 * 1024),
@@ -208,6 +209,7 @@ fn a_volume_on_tmpfs_is_refused_unless_allowed() {
         allow_tmpfs: false,
         ..test_opts()
     };
+    let _g = super::read_guard();
     let err = LocalVolume::create(
         dir.path(),
         &super::descriptor(MODE, 16 * 1024),
@@ -487,31 +489,40 @@ fn evidence_objects_are_sealed_whole_and_named_by_pass() {
 // ------------------------------------------------------- leftovers and sweep
 
 #[test]
-fn leftovers_are_listed_and_removed() {
+fn leftovers_are_listed_and_removed_but_a_live_writer_keeps_its_file() {
     let dir = tempdir();
     let vol = plain(dir.path());
-    let w = vol.open_segment().expect("writer");
+    let mut w = vol.open_segment().expect("writer");
+    let id = cid(1);
+    w.append_extent(&id, None, &data_extent(MODE, 16 * 1024, &id, 100))
+        .expect("append");
     std::fs::write(
         dir.path().join("state/commits/00000000000000aa.tmp"),
         b"half",
     )
     .expect("tmp");
     std::fs::write(dir.path().join("cache/slab.tmp"), b"cache is not ours").expect("tmp");
+    // What a crashed process left, under an id this process does not write.
+    std::fs::write(dir.path().join("segments/00000000000000ff.open"), b"x").expect("open");
     let names: Vec<_> = vol
         .leftovers()
         .expect("list")
         .into_iter()
         .map(|l| l.name)
         .collect();
-    assert_eq!(names.len(), 2, "{names:?}");
-    assert!(names
-        .iter()
-        .any(|n| n.starts_with("segments/") && n.ends_with(".open")));
-    assert!(names.contains(&"state/commits/00000000000000aa.tmp".to_owned()));
-    std::mem::forget(w); // keep its .open file for the removal below
+    assert_eq!(
+        names,
+        vec![
+            "segments/00000000000000ff.open".to_owned(),
+            "state/commits/00000000000000aa.tmp".to_owned()
+        ],
+        "the live writer's own file is not a leftover"
+    );
     assert_eq!(vol.remove_leftovers().expect("remove"), 2);
     assert!(vol.leftovers().expect("list").is_empty());
     assert!(dir.path().join("cache/slab.tmp").exists());
+    w.seal(None)
+        .expect("the writer's file survived the removal");
 }
 
 #[test]
@@ -698,4 +709,181 @@ fn recording_fs_is_only_a_wrapper() {
     let vol = create(dir.path(), MODE, 16 * 1024, opts);
     seal_one(&vol, 1);
     assert!(!fs.take().is_empty());
+}
+
+// --------------------------------------------------- review follow-ups
+
+#[test]
+fn replace_writes_from_two_threads_never_tear_the_file() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let rec = |dev_id| lunix_format::local::DeviceRecord {
+        nr_queues: 1,
+        queue_depth: 8,
+        dev_id,
+        max_io_buf_bytes: 1 << 20,
+        boot_id: [1; 16],
+        volume_uuid: VolumeUuid(UUID),
+        dev_sectors: 8,
+        flags: 0,
+    };
+    std::thread::scope(|s| {
+        for t in 0..2u32 {
+            let vol = vol.clone();
+            s.spawn(move || {
+                for i in 0..200 {
+                    vol.store_device_record(&rec(t * 1000 + i)).expect("store");
+                    vol.store_condemned(&Condemned {
+                        body_ver: 1,
+                        body: vec![t as u8; 64],
+                    })
+                    .expect("condemned");
+                    vol.store(&slot(0, 0)).expect("checkpoint");
+                    let got = vol.device_record().expect("never torn").expect("present");
+                    assert!(got.dev_id % 1000 < 200);
+                }
+            });
+        }
+    });
+    assert!(vol.load_condemned().expect("load").is_some());
+    assert!(vol.load().expect("load").is_some());
+    assert!(vol.leftovers().expect("left").is_empty());
+}
+
+#[test]
+fn a_stray_name_does_not_poison_the_id_scan() {
+    let dir = tempdir();
+    drop(plain(dir.path()));
+    std::fs::write(dir.path().join("segments/0000000000000000.seg"), b"x").expect("zero id");
+    std::fs::write(dir.path().join("segments/zzzz.seg"), b"x").expect("junk");
+    std::fs::write(dir.path().join("index/manifest"), b"x").expect("manifest");
+    std::fs::write(dir.path().join("map/0000000000000007"), b"x").expect("pack");
+    let vol = open(dir.path(), MODE, test_opts()).expect("open");
+    assert_eq!(vol.ids().high_water(), 7);
+    let warnings = vol.take_warnings();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    // A bad observed value is reported as such, not as exhaustion.
+    vol.ids().observe(0xff << 40);
+    let e = vol.ids().allocate().expect_err("invalid");
+    assert!(e.to_string().contains("not a valid id"), "{e}");
+}
+
+#[test]
+fn open_observes_the_checkpoint_id_high() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    vol.store(&slot(50, 0)).expect("store"); // id_high = 500
+    drop(vol);
+    let vol = open(dir.path(), MODE, test_opts()).expect("open");
+    assert_eq!(vol.ids().high_water(), 500);
+}
+
+#[test]
+fn the_sweep_refuses_a_mark_below_a_named_id() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let s = seal_one(&vol, 1);
+    let named: HashSet<_> = [s].into_iter().collect();
+    let e = vol
+        .sweep_orphans(&SweepRequest {
+            high_water_mark: s.raw() - 1,
+            named_segments: &named,
+            named_packs: &HashSet::new(),
+        })
+        .expect_err("inconsistent");
+    assert_eq!(e.kind(), ErrorKind::Invalid);
+    assert_eq!(SegmentStore::list(&vol).expect("list").len(), 1);
+}
+
+#[test]
+fn a_refused_create_on_tmpfs_creates_nothing() {
+    let shm = std::path::Path::new("/dev/shm");
+    if !rustix::fs::statfs(shm).is_ok_and(|s| s.f_type as u64 == 0x0102_1994) {
+        eprintln!("SKIP: /dev/shm is not a tmpfs on this host");
+        return;
+    }
+    let base = tempfile::tempdir_in(shm).expect("tmpfs dir");
+    let target = base.path().join("a/b");
+    let strict = StoreOptions {
+        allow_tmpfs: false,
+        ..test_opts()
+    };
+    let _g = super::read_guard();
+    let err = LocalVolume::create(
+        &target,
+        &super::descriptor(MODE, 16 * 1024),
+        &json(&target),
+        TestCodec::new(MODE, UUID),
+        strict,
+    )
+    .expect_err("tmpfs");
+    assert_eq!(err.kind(), ErrorKind::Refused);
+    assert!(!base.path().join("a").exists(), "nothing was created");
+}
+
+#[test]
+fn a_cached_container_of_the_wrong_kind_is_not_returned() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let seg = seal_one(&vol, 1);
+    let hint = lunix_format::Hint {
+        seg,
+        off: 0,
+        clen: 100,
+    };
+    let mut out = Vec::new();
+    vol.read_extent(&hint, &mut out).expect("warms the cache");
+    let loc = lunix_format::node::NodeLoc {
+        pack: seg,
+        off: 0,
+        len: 168,
+    };
+    let e = lunix_iface::store::PackRead::read_node(&vol, loc, &mut out).expect_err("wrong kind");
+    assert!(matches!(e.kind(), ErrorKind::Corrupt | ErrorKind::NotFound));
+}
+
+#[test]
+fn warnings_are_capped_and_counted() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    std::fs::write(dir.path().join("state/checkpoint"), b"short").expect("junk");
+    for _ in 0..200 {
+        assert_eq!(vol.load().expect("load"), None);
+    }
+    let w = vol.take_warnings();
+    assert_eq!(w.len(), 65, "64 kept plus the dropped-count line");
+    assert!(w[0].contains("136 earlier warnings"), "{}", w[0]);
+    assert!(vol.take_warnings().is_empty());
+}
+
+#[test]
+fn oversized_state_files_are_refused_before_they_are_read() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let big = vec![b' '; (2 << 20) + 1];
+    std::fs::write(dir.path().join("volume.json"), &big).expect("write");
+    assert_eq!(
+        vol.volume_json().expect_err("big").kind(),
+        ErrorKind::Corrupt
+    );
+    std::fs::write(dir.path().join("state/device"), vec![0u8; 5000]).expect("write");
+    assert_eq!(
+        vol.device_record().expect_err("big").kind(),
+        ErrorKind::Corrupt
+    );
+    std::fs::write(dir.path().join("state/checkpoint"), vec![0u8; 100_000]).expect("write");
+    assert_eq!(vol.load().expect("hint"), None);
+    std::fs::write(dir.path().join("volume"), big).expect("write");
+    assert_eq!(
+        crate::read_volume_file(dir.path()).expect_err("big").kind(),
+        ErrorKind::Corrupt
+    );
+}
+
+#[test]
+fn the_lock_file_names_the_holder() {
+    let dir = tempdir();
+    let _vol = plain(dir.path());
+    assert_eq!(crate::lock_holder_pid(dir.path()), Some(std::process::id()));
+    assert_eq!(crate::lock_holder_pid(&dir.path().join("nope")), None);
 }

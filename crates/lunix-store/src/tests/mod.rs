@@ -80,6 +80,7 @@ pub(crate) fn json(dir: &Path) -> VolumeJson {
 }
 
 pub(crate) fn create(dir: &Path, mode: CryptoMode, chunk: u32, opts: StoreOptions) -> LocalVolume {
+    let _g = read_guard();
     LocalVolume::create(
         dir,
         &descriptor(mode, chunk),
@@ -90,35 +91,30 @@ pub(crate) fn create(dir: &Path, mode: CryptoMode, chunk: u32, opts: StoreOption
     .expect("create volume")
 }
 
-pub(crate) fn try_open(
-    dir: &Path,
-    mode: CryptoMode,
-    opts: StoreOptions,
-) -> lunix_iface::Result<LocalVolume> {
-    LocalVolume::open(dir, TestCodec::new(mode, UUID), opts)
+/// Tests that spawn a child take this for writing around `spawn`; tests that
+/// lock a volume take it for reading. A child between `fork` and `exec` holds a
+/// copy of every flock'd descriptor, so without this a volume could look `Busy`
+/// for a moment. (Real code never forks while holding a volume.)
+static FORK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+pub(crate) fn read_guard() -> std::sync::RwLockReadGuard<'static, ()> {
+    FORK.read().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Opens, retrying while `Busy` for a few seconds: a test in this process may
-/// be between `fork` and `exec` of a child, and that child briefly holds a copy
-/// of every open descriptor, flock included.
+pub(crate) fn write_guard() -> std::sync::RwLockWriteGuard<'static, ()> {
+    FORK.write().unwrap_or_else(|p| p.into_inner())
+}
+
 pub(crate) fn open(
     dir: &Path,
     mode: CryptoMode,
     opts: StoreOptions,
 ) -> lunix_iface::Result<LocalVolume> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        match try_open(dir, mode, opts.clone()) {
-            Err(e)
-                if e.kind() == lunix_iface::ErrorKind::Busy
-                    && std::time::Instant::now() < deadline =>
-            {
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            other => return other,
-        }
-    }
+    let _g = read_guard();
+    LocalVolume::open(dir, TestCodec::new(mode, UUID), opts)
 }
+
+pub(crate) use open as try_open;
 
 /// Payload bytes that depend on `(id, len)`.
 pub(crate) fn payload(id: &ChunkId, len: usize) -> Vec<u8> {

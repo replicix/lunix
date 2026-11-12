@@ -11,8 +11,8 @@ use std::sync::Arc;
 use lunix_format::node::NodeLoc;
 use lunix_format::paths;
 use lunix_format::segment::{
-    decode_footer_frame, footer_frame, ContainerKind, FooterBody, FooterEntry, FrameCompression,
-    Trailer, MAX_CONTAINER_LEN, MAX_DATA_ULEN, MAX_NODE_ULEN, TRAILER_LEN,
+    decode_footer_frame, footer_body_cap, footer_frame, ContainerKind, FooterBody, FooterEntry,
+    FrameCompression, Trailer, MAX_CONTAINER_LEN, MAX_DATA_ULEN, MAX_NODE_ULEN, TRAILER_LEN,
 };
 use lunix_format::{ChunkId, Codec, Hint, ObjId, ObjectKind, WriteSeq};
 use lunix_iface::journal::WriteSeqRange;
@@ -31,10 +31,6 @@ const MAX_EXTENT_REGION: u64 = MAX_CONTAINER_LEN / 2;
 
 /// Writes are buffered up to this many bytes before they reach the file.
 const WRITE_BUFFER: usize = 1 << 20;
-
-/// A footer envelope can never be longer than this (it is bounded by the file
-/// size too; this stops a forged trailer from asking for an absurd read).
-const MAX_FOOTER_LEN: u64 = 128 << 20;
 
 /// A sealed container open for reading: the descriptor and the validated
 /// trailer.
@@ -86,6 +82,9 @@ impl Inner {
     /// size and the id in its name. Cached.
     pub(crate) fn open_container(&self, kind: ContainerKind, id: ObjId) -> Result<Arc<Container>> {
         if let Some(c) = self.cache().get(id) {
+            if c.kind != kind {
+                return Err(corrupt(Self::kind_what(kind), "id belongs to another kind"));
+            }
             return Ok(c);
         }
         let what = Self::kind_what(kind);
@@ -166,7 +165,9 @@ impl Inner {
     /// The authenticated, cross-checked footer of a sealed container.
     pub(crate) fn container_footer(&self, c: &Container) -> Result<FooterBody> {
         let what = Self::kind_what(c.kind);
-        if u64::from(c.trailer.footer_len) > MAX_FOOTER_LEN {
+        // The envelope holds a zstd frame of a body of at most `cap` bytes.
+        let cap = footer_body_cap(c.trailer.footer_off)? as u64;
+        if u64::from(c.trailer.footer_len) > cap + cap / 128 + 1024 {
             return Err(corrupt(what, "footer longer than the limit"));
         }
         let mut env = vec![0u8; c.trailer.footer_len as usize];
@@ -273,6 +274,7 @@ impl ContainerWriter {
             .mode(0o644)
             .open(path)
             .map_err(io_err)?;
+        crate::volume::lock(&inner.open_writers).insert(id.raw());
         Ok(Self {
             inner,
             kind,
@@ -431,6 +433,7 @@ impl ContainerWriter {
 
 impl Drop for ContainerWriter {
     fn drop(&mut self) {
+        crate::volume::lock(&self.inner.open_writers).remove(&self.id.raw());
         if !self.sealed {
             self.file = None;
             let _ = std::fs::remove_file(self.inner.open_path(self.kind, self.id));
