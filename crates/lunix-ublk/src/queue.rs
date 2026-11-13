@@ -288,6 +288,15 @@ fn pin_to(cpu: usize) -> bool {
     rustix::thread::sched_setaffinity(None, &set).is_ok()
 }
 
+/// A flush in drain mode may find the queue already down (`QueueIsDown`);
+/// any other error means a commit may not have been submitted.
+fn drain_flush(qid: u16, r: std::result::Result<i32, libublk::UblkError>) {
+    match r {
+        Ok(_) | Err(libublk::UblkError::QueueIsDown) => {}
+        Err(e) => fatal(qid, &format!("submitting the drain commits: {e}")),
+    }
+}
+
 /// A request as the kernel describes it, after validation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Decoded {
@@ -405,10 +414,16 @@ fn run_queue(a: QueueArgs) {
         if lp.c.down {
             // Drain: no blocking wait in libublk any more. Reap what is there
             // and submit our commits; leave when nothing is in flight.
-            let _ = queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0);
+            drain_flush(
+                qid,
+                queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0),
+            );
             if a.counters.in_flight() == 0 {
                 // One more submit for the commits of the last completions.
-                let _ = queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0);
+                drain_flush(
+                    qid,
+                    queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0),
+                );
                 break;
             }
             lp.wait_for_engine(&queue);
@@ -486,8 +501,18 @@ impl Loop {
         if user_data & (UblkUringData::Target as u64) != 0 {
             return match UblkIOCtx::user_data_to_op(user_data) {
                 DRAIN_OP => {
-                    // The answer to one of our own commits (the fetch part is
-                    // cancelled or parked: nothing to do either way).
+                    // The answer to one of our own commits. A successful commit
+                    // makes no completion until its re-fetch half is cancelled
+                    // (`ABORT`, or `ECANCELED` at the ring's teardown); any
+                    // other answer means the driver rejected the commit and
+                    // the request was not completed: a silent reissue, which
+                    // the drain claims not to do.
+                    if res != sys::UBLK_IO_RES_ABORT && res != -libc::ECANCELED {
+                        fatal(
+                            self.c.qid,
+                            &format!("the driver rejected a drain commit of tag {tag}: {res}"),
+                        );
+                    }
                     self.c.counters.drain_cqes.fetch_add(1, Ordering::Relaxed);
                 }
                 POLL_OP => self.on_poll(q, tag, res),

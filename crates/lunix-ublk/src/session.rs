@@ -183,18 +183,35 @@ pub fn begin_recovery(
     if record.boot_id != boot_id_now {
         return Err(refuse(IdentityMismatch::BootId));
     }
-    let view = read_view(ctl, dev_id)?;
-    check_identity(
-        record,
-        &cfg.volume,
-        &view,
-        boot_id_now,
-        engine_bytes,
-        server_alive,
-    )
-    .map_err(refuse)?;
-
     let t = cfg.timeouts;
+    // A LIVE device whose server still runs is a transient state (the driver
+    // quiesces the device moments after its server died; the old process may
+    // not be reaped yet), not an identity refusal: wait for it like for
+    // `EBUSY` and end with `Busy`, never with `Identity` (whose documented
+    // reaction is to add a new device and orphan this one).
+    let waited = Instant::now();
+    let _view = loop {
+        let view = read_view(ctl, dev_id)?;
+        match check_identity(
+            record,
+            &cfg.volume,
+            &view,
+            boot_id_now,
+            engine_bytes,
+            server_alive,
+        ) {
+            Ok(()) => break view,
+            Err(IdentityMismatch::LiveServer { .. }) => {
+                if waited.elapsed() >= t.recovery_wait {
+                    return Err(UblkError::Busy {
+                        what: "the device (it is live and its server still runs)",
+                    });
+                }
+                std::thread::sleep(t.recovery_retry);
+            }
+            Err(why) => return Err(refuse(why)),
+        }
+    };
     let started = Instant::now();
     loop {
         match ctl.start_user_recovery(dev_id) {
@@ -764,22 +781,35 @@ mod tests {
     }
 
     #[test]
-    fn a_live_device_with_a_running_server_is_not_recovered() {
+    fn a_live_device_with_a_running_server_is_busy_not_an_identity_refusal() {
         let c = cfg();
         let (fake, rec) = quiesced(&c, GIB16, HOST);
         fake.0.lock().unwrap().dev.as_mut().unwrap().state = STATE_LIVE;
         let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|pid| pid == 4242).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                UblkError::Identity {
-                    why: IdentityMismatch::LiveServer { pid: 4242 },
-                    ..
-                }
-            ),
-            "{err}"
-        );
-        assert!(touched(&fake.log()).is_empty());
+        assert!(matches!(err, UblkError::Busy { .. }), "{err}");
+        assert!(touched(&fake.log()).is_empty(), "{:?}", fake.log());
+    }
+
+    #[test]
+    fn a_server_that_dies_while_we_wait_lets_the_recovery_go_on() {
+        use std::cell::Cell;
+        let c = cfg();
+        let (fake, rec) = quiesced(&c, GIB16, HOST);
+        {
+            // The old server died; the driver has not yet quiesced the device.
+            let mut s = fake.0.lock().unwrap();
+            s.dev.as_mut().unwrap().state = STATE_LIVE;
+            s.ebusy_left = 1;
+        }
+        let polls = Cell::new(0u32);
+        let alive = |pid: i32| {
+            polls.set(polls.get() + 1);
+            pid == 4242 && polls.get() <= 3
+        };
+        let view = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &alive).unwrap();
+        assert_eq!(view.info.state, STATE_QUIESCED);
+        assert!(polls.get() > 3, "the server was polled until it was gone");
+        assert!(!fake.log().contains(&"SET_PARAMS"));
     }
 
     #[test]

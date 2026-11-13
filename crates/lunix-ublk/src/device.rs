@@ -34,10 +34,17 @@
 //!   [`UblkDevice::delete_by_id`] (`force` only for a device without a server).
 //! * Process setup: [`crate::harden_process`] first (mount namespace, mlock,
 //!   no core dumps).
+//! * **A crash between `persist` and `START_DEV`** leaves a DEAD device that
+//!   carries this volume's tag and was never started. The next start gets
+//!   `Identity { State { 0 } }` from `recover` and adds a new device; the old
+//!   one stays until reboot. M12 should call
+//!   `delete_by_id(recorded_id, .., false)` on it (a DEAD device is not LIVE,
+//!   so the delete is neither refused nor a stop).
 //! * libublk prints `device reload json failed` once per attach (its control
 //!   constructor); it is harmless.
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -53,7 +60,7 @@ use crate::config::{DataPath, UblkConfig};
 use crate::ctl::{ControlPlane, DevInfo, RingControl, STATE_LIVE};
 use crate::error::{Result, UblkError};
 use crate::features::flag;
-use crate::identity::{current_boot_id, make_record, process_alive};
+use crate::identity::{current_boot_id, make_record, other_process_alive};
 use crate::queue::{
     fatal_device, queue_thread, Ended, QueueArgs, QueueCounters, QueueSnapshot, Ready, StartGate,
 };
@@ -92,9 +99,27 @@ struct ResizeBridge(Arc<Shared>);
 
 impl ResizeHook for ResizeBridge {
     fn resized(&self, new_size_bytes: u64) -> lunix_iface::Result<()> {
+        // Only a serving device is told about a grow: after a detach or a
+        // quiesce the id may belong to another device by the time the engine
+        // grows.
+        if *lock(&self.0.life) != Lifecycle::Serving {
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "the device is no longer serving; UPDATE_SIZE not sent",
+            )));
+        }
         let _g = lock(&self.0.resize_lock);
         session::update_size(&*self.0.ctl, self.0.dev_id, &self.0.size, new_size_bytes)
             .map_err(|e| lunix_iface::Error::Io(std::io::Error::other(e.to_string())))
+    }
+}
+
+/// The hook of an engine whose device is gone (detached, or never started):
+/// nothing is sent, so a later `engine.grow` cannot reach a reused device id.
+struct DetachedHook;
+
+impl ResizeHook for DetachedHook {
+    fn resized(&self, _new_size_bytes: u64) -> lunix_iface::Result<()> {
+        Ok(())
     }
 }
 
@@ -169,6 +194,8 @@ pub struct UblkDevice {
     /// One per queue: signalled to take the queue down (drain) without
     /// waiting for an `ABORT` that a fully busy queue never gets.
     stops: Vec<WakeFd>,
+    /// An engine quiesce is running (or timed out and may still run).
+    engine_quiescing: Arc<AtomicBool>,
 }
 
 impl fmt::Debug for UblkDevice {
@@ -209,12 +236,27 @@ fn build_libublk_dev(info: DevInfo, size_bytes: u64) -> Result<UblkDev> {
 
 /// The engine's final commit, bounded by a watchdog. The outer error is the
 /// timeout, the inner option the engine's own failure.
+///
+/// `running` is set while a call is in progress, also after its watchdog
+/// fired: a retry then reports instead of calling `engine.quiesce()` a second
+/// time while the first may still run.
 fn engine_quiesce(
     engine: &Arc<dyn BlockEngine>,
+    running: &Arc<AtomicBool>,
     bound: Duration,
 ) -> Result<Option<lunix_iface::Error>> {
-    let e = Arc::clone(engine);
-    Ok(run_with_timeout("engine quiesce", bound, move || e.quiesce())?.err())
+    if running.swap(true, Ordering::AcqRel) {
+        return Err(UblkError::State(
+            "an earlier engine quiesce is still running",
+        ));
+    }
+    let (e, r) = (Arc::clone(engine), Arc::clone(running));
+    let out = run_with_timeout("engine quiesce", bound, move || {
+        let res = e.quiesce();
+        r.store(false, Ordering::Release);
+        res
+    })?;
+    Ok(out.err())
 }
 
 impl UblkDevice {
@@ -355,7 +397,7 @@ impl UblkDevice {
                     &cfg,
                     boot_id,
                     engine_bytes,
-                    &process_alive,
+                    &other_process_alive,
                 )?;
                 (view.info, view.dev_sectors << 9, true)
             }
@@ -544,6 +586,7 @@ impl UblkDevice {
             ctl.start_dev(info.dev_id, pid)
         };
         if let Err(e) = started {
+            engine.set_on_resize(Arc::new(DetachedHook));
             // A timeout leaves the command pending in the kernel: touch
             // nothing. Any other error means the device did not start: take
             // the queues down, close the char device, and for a fresh device
@@ -566,6 +609,7 @@ impl UblkDevice {
             ended,
             counters,
             stops,
+            engine_quiescing: Arc::new(AtomicBool::new(false)),
         };
         // A grow that was durable in the engine but not yet in the kernel when
         // the old daemon died: catch the device up. A failure here is a
@@ -716,8 +760,12 @@ impl UblkDevice {
         }
         let t = self.shared.cfg.timeouts;
         let sent = session::quiesce(&*self.shared.ctl, self.shared.dev_id, timeout);
-        if matches!(sent, Ok(()) | Err(UblkError::QuiesceTimeout)) {
-            // The driver marked the device canceling.
+        if matches!(
+            sent,
+            Ok(()) | Err(UblkError::QuiesceTimeout | UblkError::Timeout { .. })
+        ) {
+            // The driver marked the device canceling, or the command is still
+            // pending and will.
             *lock(&self.shared.life) = Lifecycle::Quiescing;
         }
         sent?;
@@ -742,7 +790,7 @@ impl UblkDevice {
                 "{left} request(s) in flight after the queues ended"
             ));
         }
-        let engine_error = engine_quiesce(&self.engine, t.engine)?;
+        let engine_error = engine_quiesce(&self.engine, &self.engine_quiescing, t.engine)?;
         Ok(Quiesced { engine_error })
     }
 
@@ -819,11 +867,12 @@ impl UblkDevice {
                 "{left} request(s) in flight after the queues ended"
             ));
         }
-        let engine_error = engine_quiesce(&self.engine, t.engine)?;
+        let engine_error = engine_quiesce(&self.engine, &self.engine_quiescing, t.engine)?;
         // Close /dev/ublkcN: DEL_DEV waits for the last reference.
         drop(lock(&self.libublk_dev).take());
         self.shared.ctl.del_dev(self.shared.dev_id)?;
         *lock(&self.shared.life) = Lifecycle::Deleted;
+        self.engine.set_on_resize(Arc::new(DetachedHook));
         engine_error.map_or(Ok(()), |e| Err(UblkError::from(e)))
     }
 }
