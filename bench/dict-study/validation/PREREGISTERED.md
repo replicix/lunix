@@ -33,9 +33,9 @@ with a naive Bayes classifier over the first 4 KiB and the 64 KiB size rule.
 - **Ingest targets**: Lunix 5 GB/s per node (research note 2026-11-11 §6.5); Constellation has no documented figure, **assumed 1 GB/s
   per node** (recorded as an assumption). `ΔCores = max(0, ΔCPU) × target`.
 - **Net saving**: `N = LB - λ · ΔCores`, with **λ = 0.1 pp per extra core at the ingest target**. Justification: a core is 1/16 of the
-  study's node class; at current cloud prices one core-year (about 350 USD) buys about 0.3 pp of a year's storage of the data that
-  core compresses at 5 GB/s (157 PB·month at 0.023 USD/GB·month), so the money rate is under 0.01 pp per core. λ = 0.1 is 10× that,
-  deliberately conservative because the compress stage is the ingest bottleneck (4-12 cores of 16 already). A dictionary that costs
+  study's node class, and λ is deliberately conservative because the compress stage is the ingest bottleneck (4-12 cores of 16
+  already). No storage or compute prices enter the rule: they depend on the backend and many other factors (amended 2026-11-13,
+  wording only; λ and every threshold are unchanged). A dictionary that costs
   one extra core per node loses 0.1 pp; the 34 % slowdown the file-type study saw on 16-64 KiB objects at zstd:3 (1.26 CPU-s/GB) would
   cost 6.3 cores at 5 GB/s and 0.63 pp. **Hard cap, independent of λ:** an arm whose compress or decompress throughput on its
   population is below 0.8× the comparator's is a NO-GO for that decision regardless of N (the read path is latency, not a budget line).
