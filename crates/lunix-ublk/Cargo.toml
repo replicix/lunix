@@ -10,6 +10,15 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiled out unless on (see lunix_iface::crashpoint): `ublk.after_fetch` and
+# `ublk.before_commit`. The root harness builds the test daemon with it.
+crashpoints = ["lunix-iface/crashpoints"]
+
+[[bin]]
+name = "lunix-ublk-testd"
+path = "src/bin/lunix-ublk-testd/main.rs"
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
