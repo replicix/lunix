@@ -14,7 +14,7 @@ while read -r name back; do
   case "$back" in "$LUNIX_SPIKE_DIR"/*) report "$name" "loop device (backing under scratch)";; esac
 done < <(losetup -l -n -O NAME,BACK-FILE 2>/dev/null)
 while read -r mp; do report "$mp" "mount"; done < <(awk -v d="$LUNIX_SPIKE_DIR/" 'index($2,d)==1{print $2}' /proc/mounts)
-for p in $(pgrep -x -d' ' 'fio|ublk-spike|ublk-datapath|ublk-recovery|journal-bench' 2>/dev/null); do
+for p in $(pgrep -x -d' ' 'fio|ublk-spike|ublk-datapath|ublk-recovery|journal-bench|lunix-ublk-test.*' 2>/dev/null); do
   c=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)
   case "$c" in *ublk*|*nullb*|*loop*|*"$LUNIX_SPIKE_DIR"*|*journal-bench*) echo "LEFTOVER: process $p ${c:0:120}"; bad=1;; esac
 done
