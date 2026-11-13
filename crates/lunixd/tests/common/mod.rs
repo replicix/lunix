@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -268,6 +268,16 @@ impl Daemon {
 
     /// One call on a fresh connection.
     pub fn call(&mut self, req: Request) -> Outcome {
+        let t0 = Instant::now();
+        let what = format!("{req:?}").chars().take(40).collect::<String>();
+        let out = self.call_inner(req);
+        if std::env::var_os("LUNIXD_TEST_TIMING").is_some() {
+            eprintln!("call {what} took {:?}", t0.elapsed());
+        }
+        out
+    }
+
+    fn call_inner(&mut self, req: Request) -> Outcome {
         self.next_id += 1;
         let frame = RequestFrame::new(self.next_id, req);
         let payload = to_payload(&frame).unwrap();
@@ -284,9 +294,11 @@ impl Daemon {
         let mut s = UnixStream::connect(&self.socket).expect("connect");
         s.write_all(bytes).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-        let mut out = Vec::new();
-        let _ = s.read_to_end(&mut out);
-        out
+        // One reply frame (the server keeps the connection open after a
+        // recoverable error).
+        read_frame(&mut s, MAX_FRAME)
+            .map(|z| z.to_vec())
+            .unwrap_or_default()
     }
 
     /// Waits for the child to exit and returns its code.

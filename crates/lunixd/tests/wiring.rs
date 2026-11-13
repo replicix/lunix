@@ -118,7 +118,7 @@ fn roundtrip(mode: CryptoMode, cs: u32) {
     let dup = pattern(1, cs as usize);
     assert!(d.write(40 * cs64, &dup, false).is_ok());
     model[(40 * cs64) as usize..(41 * cs64) as usize].copy_from_slice(&dup);
-    assert!(d.op(IoOp::WriteZeroes, 2 * cs64, cs as u32).is_ok());
+    assert!(d.op(IoOp::WriteZeroes, 2 * cs64, cs).is_ok());
     model[(2 * cs64) as usize..(3 * cs64) as usize].fill(0);
     assert!(d.flush().is_ok());
     s.engine.commit_now(false).expect("commit");
