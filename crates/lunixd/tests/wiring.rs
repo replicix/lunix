@@ -667,7 +667,10 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
         .expect("a torn tail is crash residue: refuse opens");
     let rep = s.engine.recovery_report();
     assert_eq!(rep.damaged.len(), 1, "{rep:?}");
-    assert_eq!(rep.damaged[0].next_seq, None, "nothing valid after the tail");
+    assert_eq!(
+        rep.damaged[0].next_seq, None,
+        "nothing valid after the tail"
+    );
     assert!(rep.ignored_after_gap.is_none(), "{rep:?}");
     assert!(
         cap.lines
@@ -680,7 +683,11 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(&d.read(0, 4096), &marks[0]);
     assert_eq!(&d.read(64 << 10, 4096), &marks[1]);
-    assert_eq!(d.read(2 * (64 << 10), 4096), vec![0u8; 4096], "the torn write is gone");
+    assert_eq!(
+        d.read(2 * (64 << 10), 4096),
+        vec![0u8; 4096],
+        "the torn write is gone"
+    );
 }
 
 /// The other side of the decision: damage followed by a valid record in the
@@ -699,5 +706,8 @@ fn damage_followed_by_a_valid_record_is_refused() {
         Err(StackError::JournalDamage) => {}
         other => panic!("mid-journal damage must be refused: {other:?}"),
     }
-    assert!(journal_bytes(&v.voldir) == before, "refuse touched the journal");
+    assert!(
+        journal_bytes(&v.voldir) == before,
+        "refuse touched the journal"
+    );
 }
