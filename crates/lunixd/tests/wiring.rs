@@ -472,3 +472,36 @@ fn fanout_256_volume_round_trips() {
         assert_eq!(d.read(ci * (16 << 10), 16 << 10), pattern(ci, 16 << 10));
     }
 }
+
+/// `lunixd check` (the store self-check standing in for `lunix fsck` until
+/// M14): clean after a commit, and a flipped byte inside a stored extent is
+/// reported.
+#[test]
+fn check_is_clean_and_finds_a_damaged_extent() {
+    let Some(t) = scratch("chk") else { return };
+    let mode = CryptoMode::Integrity;
+    let v = create(t.path(), mode, 64 << 10);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    let mut model = vec![0u8; SIZE as usize];
+    fill(&mut d, 64 << 10, 0, 8, 7, &mut model);
+    assert!(d.flush().is_ok());
+    close(s, d);
+    let cred = AttachCredential::default();
+    let r = lunixd::check::check_volume(&v.voldir, &cred).unwrap();
+    assert!(r.is_clean(), "{r:?}");
+    assert!(r.extents >= 8 && r.segments >= 1 && r.packs >= 1, "{r:?}");
+    // Damage one byte in the middle of the first segment.
+    let seg = std::fs::read_dir(v.voldir.join("segments"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "seg"))
+        .unwrap();
+    let mut b = std::fs::read(&seg).unwrap();
+    let mid = b.len() / 3;
+    b[mid] ^= 0x40;
+    std::fs::write(&seg, &b).unwrap();
+    let r = lunixd::check::check_volume(&v.voldir, &cred).unwrap();
+    assert!(!r.is_clean(), "damage found: {r:?}");
+}

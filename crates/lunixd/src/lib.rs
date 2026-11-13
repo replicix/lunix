@@ -10,6 +10,7 @@
 //! | [`daemon`] | the volumes and the control-call handlers |
 //! | [`server`] | the control socket and the signals |
 //! | [`audit`], [`log`] | the audit log and the stderr subscriber |
+//! | [`check`] | `lunixd check`, the offline store self-check (stand-in for `lunix fsck` until M14) |
 //!
 //! # Threads
 //!
@@ -21,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod check;
 pub mod config;
 pub mod daemon;
 pub mod device;

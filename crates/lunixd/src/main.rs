@@ -4,6 +4,7 @@
 //! lunixd [--config PATH]          serve (default config /etc/lunix/lunixd.toml)
 //! lunixd --list-crashpoints       print the crash points of this build
 //! lunixd ctl --socket PATH JSON   send one raw control request, print the reply
+//! lunixd check --dir VOLDIR       offline store self-check of a detached volume
 //! ```
 //!
 //! `ctl` is a minimal client for scripts and tests until `lunix` (M13a) is
@@ -50,6 +51,16 @@ enum Cmd {
         socket: PathBuf,
         /// The request, as JSON.
         request: String,
+    },
+    /// Offline self-check of a detached volume (stand-in for `lunix fsck`).
+    Check {
+        /// The volume directory (`<dir>/<uuid>`).
+        #[arg(long)]
+        dir: PathBuf,
+        /// A key file (encrypted volumes, or integrity volumes without
+        /// their own `integrity.key`).
+        #[arg(long)]
+        key_file: Option<PathBuf>,
     },
 }
 
@@ -120,6 +131,39 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     match &cli.cmd {
+        Some(Cmd::Check { dir, key_file }) => {
+            StderrLog::install(tracing::Level::WARN);
+            let cred = lunixd::stack::AttachCredential {
+                key_file: key_file.clone(),
+                ..Default::default()
+            };
+            match lunixd::check::check_volume(dir, &cred) {
+                Ok(r) => {
+                    println!(
+                        "check: tip {} commits {} segments {} packs {} extents {} problems {}",
+                        r.tip,
+                        r.commits,
+                        r.segments,
+                        r.packs,
+                        r.extents,
+                        r.problems.len()
+                    );
+                    for p in &r.problems {
+                        println!("problem: {p}");
+                    }
+                    if r.is_clean() {
+                        println!("check: clean");
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(4)
+                    }
+                }
+                Err(e) => {
+                    eprintln!("lunixd check: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Some(Cmd::Ctl { socket, request }) => match ctl(socket, request) {
             Ok(code) => ExitCode::from(code),
             Err(e) => {
