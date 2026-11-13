@@ -62,4 +62,11 @@ Details of F:
     register io_uring buffers at once.
   - The same test passes alone with `--test-threads 1` (4 passed, 300 s).
   - Nothing in the journal changed. This is the host, not the branch.
-- **Third run:** `RUST_TEST_THREADS=4` (the plan's own cap), result in the M12a report.
+- **Third run:** `RUST_TEST_THREADS=4` (the plan's own cap). The same ENOMEM, this time in
+  `crash_recovery_prefix_lanes_3_4`.
+- **Fourth run** at `f8d48e1` with `RUST_TEST_THREADS=1`: `ci: all green`, 1 354 tests passed, 0 failed
+  (ownership skipped).
+- `p1/m12a` on top of this branch is also green (1 394 tests).
+- **For the lead:** the M12a report proposes one engine change that this branch does not contain. With it,
+  `on_journal_damage = refuse` would refuse only when valid records follow the damage, because today a torn last
+  batch keeps a crashed volume offline.
