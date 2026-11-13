@@ -98,7 +98,9 @@ A **volume** is a thin block device of a given size. Its data path is:
 - **Device creation:** `ADD_DEV` with the flags of ADR-17, then
   `SET_PARAMS`, then `START_DEV`. `nr_hw_queues` is 4-16 (default:
   `min(8, cpus/4)`) and QD is 128. There is one pinned thread per queue.
-  Buffers are preallocated and mlocked; each is `max_io_buf_bytes` (a
+  The device record (`state/device`) is written between `SET_PARAMS` and
+  `START_DEV`; a device that was added and never started is DEAD and
+  harmless. Buffers are preallocated and mlocked; each is `max_io_buf_bytes` (a
   per-volume attach option, default 1 MiB, minimum 256 KiB), so a volume
   pins `queues × 128 × max_io_buf_bytes` in copy mode. The daemon runs with
   `PR_SET_IO_FLUSHER` and in its own mount namespace (libublk issue #50).
@@ -130,29 +132,53 @@ A **volume** is a thin block device of a given size. Its data path is:
   cannot have ordered another write after one it has not seen
   acknowledged. The driver retains the parameters, so recovery sends no
   `SET_PARAMS`.
-- **Device identity:** ublk has no owner tag on a device, and device ids
-  are reused after a reboot. The daemon therefore records the device in
-  `state/device` (device id, `boot_id`, queue count and depth, size,
-  flags) and recovers a device only if all of these hold:
-  1. `GET_DEV_INFO` on the recorded id succeeds and the state is QUIESCED
-     or recovering;
-  2. the queue count, depth, flags and `dev_sectors` equal the recorded
-     values;
-  3. `boot_id` equals the current boot.
+- **Device identity:** ublk has no owner concept, and device ids are
+  reused after a reboot. The daemon therefore stores a volume tag in
+  `ublksrv_flags` at `ADD_DEV` and records the device in `state/device`
+  (device id, `boot_id`, queue count and depth, buffer size, size, flags)
+  and recovers a device only if all of these hold:
+  1. `GET_DEV_INFO` on the recorded id succeeds and the state is QUIESCED,
+     or LIVE with no living server process;
+  2. the queue count, depth, buffer size and flags equal the recorded
+     values, and `ublksrv_flags` equals the volume's tag;
+  3. `record.dev_sectors <= dev_sectors <=` the engine's size (a grow makes
+     the engine durable, then the kernel, then the record; a crash between
+     any two leaves them in this order);
+  4. `boot_id` equals the current boot.
 
-  A failed check is an error that leaves the device alone. The daemon
-  then adds a new device (attach) and never touches the stale one.
+  The whole check runs again after `START_USER_RECOVERY`. A failed check
+  is an error that leaves the device alone. The daemon then adds a new
+  device (attach) and never touches the stale one. A LIVE device with a
+  living server is a transient state after a server's death: it should be
+  `Busy` after the recovery wait, not an identity refusal (M10 review
+  R1, open until fixed).
 - **Fail-I/O:** a per-volume `on_hang` watchdog can switch a wedged
   device to fail-I/O. A device in fail-I/O cannot be recovered; the
   policy is to delete it and remount. `FAIL_IO` and `REISSUE` cannot be
   combined.
-- **Planned upgrade:** `QUIESCE_DEV`, then the daemon exits *without*
-  `STOP_DEV` (libublk's `run_target()` issues it and deadlocks the
-  kernel), then the new binary recovers the device.
-- **Detach:** `detach` uses `TRY_STOP_DEV`, which fails with EBUSY while
-  the device is mounted. The daemon never stops a device, and never
-  exits, while started requests are not being completed. `DEL_DEV` with
-  a mounted file system blocks until the file system is unmounted.
+- **Planned upgrade:** `QUIESCE_DEV` returns once every queue has an idle
+  command; requests the server already holds stay with it. The daemon
+  completes and commits those with commands of its own (libublk would
+  drop them), waits until its queue threads have ended with nothing in
+  flight, runs the engine's final commit, then exits; no `STOP_DEV`, no
+  `DEL_DEV` (libublk's `run_target()` issues `STOP_DEV` and deadlocks the
+  kernel). The kernel has seen every commit, so the successor has nothing
+  to replay; it recovers the device. A request the daemon cannot commit is
+  left for `REISSUE` (only after `abort()`). A failed `QUIESCE_DEV`
+  (`EBUSY`, `EINTR`) is not a no-op: the device stays canceling, new I/O
+  is requeued and not served. The caller retries the quiesce or aborts
+  (recovered by `REISSUE`); it never detaches or deletes the device in
+  this state.
+- **Detach:** `detach` uses `TRY_STOP_DEV`, which answers `EBUSY` while
+  the block device has any opener: a mount, an open file descriptor, or
+  udev's probe just after the device appeared (detach of a new device
+  retries for a bounded time). The daemon never stops a device, and never
+  exits, while started requests are not being completed; the one
+  sanctioned exception is `abort()` (recoverable like `kill -9`).
+  `DEL_DEV` with a mounted file system blocks until the file system is
+  unmounted, and `DEL_DEV` of a LIVE device is a `STOP_DEV`: it is sent
+  only after a successful `TRY_STOP_DEV`, or by another process for a
+  device without a server.
 
 ### 3.1 Operations
 
@@ -332,33 +358,58 @@ Recovery is idempotent: a crash during it is another recovery.
 
 1. Take `LOCK`; read and verify `volume`; unlock the keys; run the attach
    check (ADR-11).
-2. Read the tip commit and verify the last chain link (`fsck` verifies the
-   chain from the tip down to `chain_floor`). There is no automatic
-   fallback: a tip that does not authenticate is a typed mount error, and
-   the repair is offline, `lunix fsck --repair --truncate-tip`, which moves
-   the damaged object aside, makes the previous commit the tip and zeroes
-   both checkpoint slots (the checkpoint describes the old tip).
-3. Open the map at the tip's `map_root`; read the checkpoint hint. Use its
-   lane tails only if its `last_commit_seq` is at most the tip's
-   `commit_seq` (§4.1).
-4. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1);
-   rebuild the overlay from the records; set the next `write_seq`.
-5. **Delete orphans.** Delete unsealed (`*.open`) and temporary files.
+2. Read the tip commit, authenticate it, require a FULL, and verify the
+   chain from the tip down to `chain_floor` (the floor commit's parent may
+   be absent). There is no automatic fallback: a tip that does not
+   authenticate is a typed mount error, and the repair is offline,
+   `lunix fsck --repair --truncate-tip`, which moves the damaged object
+   aside, makes the previous commit the tip and zeroes both checkpoint
+   slots (the checkpoint describes the old tip).
+3. **Rule R4 before any change.** Compare the verified tip with the local
+   floor in `state/pins` (`Rollback`, `Fork`; ADR-31). Nothing is written
+   before this check passes.
+4. **Delete orphans.** Delete unsealed (`*.open`) and temporary files.
    Delete every sealed segment and map pack whose id is above the highest
    id the chain names, and that no commit names. This is safe, because
    ids are never reused and the journal still holds the data (reclaim
-   happens only after the commit is durable). It must run before step 6,
+   happens only after the commit is durable). It must run before step 5,
    or a dedup hit could point the map at a segment that no commit lists,
    and a later GC would delete live data. `fsck` reports such files as
    `orphan` only if the volume was closed cleanly.
+   - **Why the sweep never deletes a referenced segment.** Every segment
+     the tip's map references has an id below the tip's root pack id:
+     the segments of a cut are allocated before the cut's map pack, and a
+     compaction output segment is allocated after it but is named only by
+     the cut that applies its re-hints. The high-water mark includes the
+     tip's `map_root.pack`, so the mark is never below a referenced
+     segment.
    - **Object id allocator.** Ids of segments, map packs and index runs
      are never reused (§6). After the sweep the next id is 1 + the maximum
      of the checkpoint's `id_high`, the highest id named by the chain and
      the highest id present on disk **before** the sweep. A truncated tip
      or a sweep that deleted the top ids therefore cannot make the
-     allocator hand out an id that a stale index entry still holds.
-6. **Catch up the chunk index** (`index.catch_up`) from the footers of the
+     allocator hand out an id that a stale index entry still holds. The
+     `id_high` of a checkpoint from beyond the tip is used too: it only
+     raises the allocator.
+5. **Catch up the chunk index** (`index.catch_up`) from the footers of the
    segments the chain names that no named index run covers (§8.2).
+6. Open the map at the tip's `map_root` (the commit's `size` is passed to
+   `open`). Read the checkpoint hint; use its lane tails only if its
+   `last_commit_seq` is at most the tip's `commit_seq` (§4.1), otherwise
+   ignore the hint.
+7. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1).
+   `ignored_after_gap` and `damaged` are logged before any lane is opened,
+   and `on_journal_damage = refuse` stops the open here with a typed error
+   (the stale-tail wipe, §4.1, has not run yet). Rebuild the overlay from
+   the records and set the next `write_seq`.
+8. Raise the local floor to the tip when it is absent or lower, and
+   charge the space ledger with the bytes found. Lanes are opened after
+   this, by the queue handlers, so the wipe follows the log line.
+
+The sweep must precede the index catch-up and the opening of the map; its
+position relative to the journal recovery is free. R4 must precede every
+write. Recovery writes only the sweep and the floor raise, so a crash
+during it is another recovery.
 
 ## 5. Destage pipeline
 
@@ -619,7 +670,8 @@ trailer = footer offset + length + magic
   - The interior nodes are about 1.6 MiB per TiB and always stay
     resident.
   - Modified leaves are held in a mutable copy-on-write overlay keyed by
-    leaf index. A decoded dirty leaf costs 24 KiB, twice its sealed size,
+    leaf index. A decoded dirty leaf costs 32 KiB at fanout 512, almost three times
+    its sealed size,
     so the overlay has a cap, counted in dirty leaves, that forces a
     seal (ADR-8).
 - **Seal (on a FULL commit):**
@@ -745,16 +797,22 @@ a FULL's own segments is persisted afterwards and named by the next FULL.
 **Local commit order.** A local FULL commit is made in this durable order;
 each step has a crash point:
 1. Pick `c`, wait for in-flight writes, cut the overlay (§8.1).
-2. Destage the cut. Extents go to the open segment, the map is updated in
-   memory, and index inserts are held back.
-3. Seal the open segments: footer, trailer, `fdatasync`, rename, directory
-   `fsync`.
+2. Destage the cut. Extents go to segments and **every segment is sealed**
+   (footer, trailer, `fdatasync`, rename, directory `fsync`) **before the
+   map transaction commits in memory**, so no reader can reach an unsealed
+   segment through the map between this step and the commit. Index
+   inserts are held back. A failed cut deletes the segments it sealed.
+3. Fix the commit's `new_segments` and true up the space ledger to the
+   real size of the sealed segments (the seal itself happened in step 2).
 4. Seal the map into a pack: `fdatasync`, rename, directory `fsync`.
 5. Build and seal the FULL commit and write it: temporary file,
    `fdatasync`, rename, directory `fsync`. **This is the durability point
    of the cut.**
-6. Write the checkpoint hint.
-7. Persist the index run for the sealed segments.
+6. Write the checkpoint hint and raise the rollback floor (ADR-31).
+7. Insert the cut's extents into the chunk index, only now that the
+   commit naming their segments is durable, and persist the run for the
+   sealed segments. A failed cut therefore never leaves the index
+   pointing at an orphan.
 8. Reclaim the journal up to the cut, release the overlay and update the
    space ledger.
 
@@ -1272,7 +1330,9 @@ mirrors (phase 5).
 
 - **Validation:** the driver accepts any size, including one that is not
   a multiple of the 4096-byte block and a shrink under a mounted file
-  system. The daemon validates every size before `UPDATE_SIZE`.
+  system. The daemon validates every size before `UPDATE_SIZE`, and
+  sends it only to a device that has a disk (state not DEAD): older
+  drivers dereference a null disk.
 - **Grow:** CAS the new size into the next commit, then `UPDATE_SIZE`
   (`set_capacity_and_notify`), then the file system's grow (CSI
   `NodeExpandVolume` or the user). Measured online on ext4, xfs and

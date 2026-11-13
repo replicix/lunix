@@ -461,6 +461,14 @@ pub trait Journal: Send + Sync {
     /// Call before any lane is opened; it also sets the counter behind
     /// `last_issued` and the next sequence number to `next_seq`.
     ///
+    /// `recover` itself never writes and returns `Invalid` once a lane is
+    /// open. Records beyond the stop point stay on disk until the first
+    /// [`open_lane`](Self::open_lane) or [`reclaim`](Self::reclaim) after
+    /// `recover`, which durably invalidates them (zeroes each lane's tail)
+    /// before any append. **That wipe is irreversible**: a caller that must
+    /// preserve those records (`fsck`) calls neither. `floor` must be at
+    /// least every cut whose tail was reclaimed.
+    ///
     /// # Errors
     /// `Io` only.
     fn recover(&self, hint: Option<&CheckpointSlot>, floor: WriteSeq) -> Result<Recovered>;

@@ -189,11 +189,16 @@ independent review; no milestone has run.
      QUIESCED). libublk's `run_target()` sends `STOP_DEV` when queue
      threads end and deadlocked the kernel thread; it is not used on any
      path.
+   - **W1a.** `DEL_DEV` of a LIVE device is a `STOP_DEV`. It is sent only
+     after a successful `TRY_STOP_DEV`, or by another process for a device
+     without a server. Never by the serving process as a fallback
+     (`delete_by_id` refuses a LIVE device unless forced).
    - **W2.** Never stop a device and never exit while started requests are
      not being completed. A fatal internal error in a queue thread calls
      `std::process::abort()` (equivalent to `kill -9`, which phase 0
      proved recoverable through `USER_RECOVERY_REISSUE`), never a graceful
-     exit path.
+     exit path. `abort()` is the single sanctioned exit with started
+     requests (ADR-16).
    - **W3.** Bounded test I/O: every fio run has `--runtime` or `--io_size`,
      every memory ring in a test is larger than the I/O volume written
      before a flush, and no test writes more than its scratch budget.
@@ -1336,6 +1341,20 @@ README and report):**
   is exactly a `write_seq`-prefix, contains every record whose `write_seq` ≤ the last
   completed flush, contains no record with a bad CRC, and the next `write_seq`
   is correct.
+- **Stale older record in a reused file (M1.B2b review, minor 13).** The
+  testkit's `MemJournal` models absence, not stale content, so it cannot
+  show this case and M3's own tests must. A real journal reuses
+  preallocated ring files; after a crash a *dropped* record's slot holds
+  the *older* bytes of the previous pass, which can look like a valid
+  record with a lower `write_seq` than its neighbours. The file `gen` (and
+  `off`, CRC and the contiguity rule) must make recovery reject it. Records
+  at or above `next_seq` that remain after a gap must be invalidated by
+  the journal before the first append that reuses their numbers (the
+  stale-tail wipe at the first `open_lane` or `reclaim` after `recover`,
+  DESIGN §4.1); `recover` after a lane was opened is `Invalid`.
+- **Oracle log ordering.** `OracleLog::first_match` needs the log in
+  `write_seq` order; with several queues, a harness (M11's and M12's model
+  tests) logs at `try_reserve` time, not at submission.
 - **Ring wrap with a lost checkpoint** recovers the same prefix (stale
   records of the previous pass are discarded by the floor and the gap
   rule); a zeroed file or a corrupted record mid-ring **above the floor**
@@ -1426,10 +1445,16 @@ its own node and leaf byte formats; this milestone uses `lunix-format`'s.
 2. Leaf codec `rb16` via `lunix-format`; point lookup without a full
    decode; a decoded tier for hot leaves; an in-memory node cache bounded
    by `map_cache_max` (default 256 MiB), interior nodes always resident.
+   `fastleaf.rs`, the private point-lookup reader for `rb16` leaves that
+   meets the 250 ns gate, is accepted (M5 decision 2); an equivalent fast
+   path in `lunix_format::node` would allow deleting it. `open` takes the
+   commit's `size` (`chunk_count`); the engine passes it.
 3. Mutable copy-on-write overlay of dirty leaves keyed by leaf index; a cap
    counted in dirty leaves (default 20 000, configurable) after which
    `MapTxn::set` returns `MapFull` so the engine seals; document the memory
-   cost (24 KiB decoded against 11.4 KiB sealed).
+   cost (32 KiB decoded against 11.4 KiB sealed: a decoded leaf is 32 KiB
+   at fanout 512 because `Entry` is 64 bytes, so the default cap of 20 000
+   dirty leaves is 640 MiB; M5 report, decision 3).
 4. `seal`: serialise dirty leaves, recompute hashes up the paths, write
    the new nodes into one pack through `PackWrite`, return the root. The
    node hash covers child hashes and level only, never locations (ADR-8
@@ -1490,6 +1515,12 @@ its own node and leaf byte formats; this milestone uses `lunix-format`'s.
   traversal of two roots with `walk_nodes_skipping` visits only the
   symmetric difference.
 
+**Note for M14 and M17:** `walk_nodes_skipping` skips by node hash, and two
+roots can hold the same node content at two locations (different packs), so
+skipping can hide the second location. **Pack liveness must use a full
+`walk_nodes` of each live root**; the skipping variants are for diffs and
+for leaf marking only.
+
 **Not to touch:** the spike directories.
 
 ---
@@ -1515,6 +1546,11 @@ run format in M1.
    commit chain; never "newer than the manifest", which would ingest
    orphans, N2) that the manifest does not cover and insert their entries;
    drop manifest entries pointing at segments the store does not have.
+   **Open iface item (M6 report, request 2):** `SegmentFooters::segment_footer`
+   is the only existence probe, so `catch_up` decodes the footer of every
+   segment the index points into just to learn that it exists. A cheap
+   `exists(seg)` on the trait would avoid it. It is not needed for
+   correctness (startup cost only) and the trait is not changed yet.
 4. **Dedup confirmation (D17).** Index runs are checksummed, not
    authenticated. `get_for_dedup` marks each hit with its source: a hit
    from the in-process table built from verified footers is `Verified`; a
@@ -1606,7 +1642,12 @@ order lives). **Review:** recommended, durable order.
    rename, directory fsync; `tip()`, `get`, `list`), `CheckpointStore`
    (double slot, checksummed; a bad or stale checkpoint is ignored with a
    warning, since it is only a hint), `state/device` and `state/pins`
-   atomic writes.
+   atomic writes. `state/pins` is read and written as `LocalPinsFile`
+   (version 2), never through `LocalPins` alone, which drops the rollback
+   floor: `lunix-store` switches to `LocalPinsFile` before the floor is
+   raised (ADR-31). `VolumeDir::rollback_floor` and `raise_rollback_floor`
+   carry the floor (raise-only; an equal `max_commit_seq` with another
+   `tip_hash` is refused as well).
 6. Orphan sweep at open: delete `*.tmp`, `*.open`, and **every sealed
    segment and map pack whose id is above the tip commit's high-water mark
    (the highest id named by any retained commit) and that no retained
@@ -1757,8 +1798,11 @@ numbers); `docs/explanation/research/2026-11-11-data-path-hash-compress-encrypt.
       (worker queue deeper than a threshold) degrade to LZ4, then raw;
    6. seal through `ExtentCodec` (a fresh salt per call, by construction);
    7. append to the open segment, which `SegmentStore` rolls at 16 MiB;
-   8. map update through `MapTxn`; index insert is **deferred** to the
-      caller after the segment is sealed.
+      **every segment is sealed before the map transaction commits**, so
+      the map never names an unsealed segment;
+   8. map update through `MapTxn`; index inserts are **returned** and the
+      caller makes them only after the commit naming the segments is
+      durable (M11 C8). A failed cut deletes the segments it sealed.
 2. **Worker pool:** bounded OS threads (default `max(2, cpus/2)`, configurable), a
    bounded job queue, results returned in order; no tokio. Jobs are
    per-chunk batches of 16 chunks or 1 MiB, whichever is smaller, so small
@@ -1841,30 +1885,64 @@ and the scripts `run-crash-loop.sh`, `run-features.sh`, `run-resize.sh`,
    (`discard_granularity` 4096, large `max_discard_sectors` and
    `max_write_zeroes_sectors`). `nr_hw_queues` default `min(8, cpus/4)`
    (range 1-16), depth 128. `max_io_buf_bytes` is a per-volume attach option
-   (default 1 MiB, minimum 256 KiB, D14); `max_sectors` follows it.
+   (default 1 MiB, minimum 256 KiB, D14); `max_sectors` follows it. The
+   device record is written between `SET_PARAMS` and `START_DEV`
+   (`add_persisting`); a device that was added and never started is DEAD
+   and harmless. A volume tag is stored in `ublksrv_flags` at `ADD_DEV`
+   (step 5).
 4. **Queue threads:** one pinned thread per queue (CPU list from the
    caller), `mlockall`, `prctl(PR_SET_IO_FLUSHER)`, `unshare(CLONE_NEWNS)`
    for the daemon (libublk issue 50), preallocated buffers. Each thread
    builds its `QueueHandler`, translates ublk requests into `IoRequest`,
    and completes through the eventfd-woken `poll`. No `run_target()`.
-   Started-request counter per queue.
+   Started-request counter per queue. libublk 0.4.8 assumes handlers
+   complete at once: after the first `ABORT` it queues no commit and ends
+   its loop, and a completion in the same batch as the first `ABORT` keeps
+   its in-flight count above zero for ever. The layer keeps its own
+   queue-down flag (set by an `ABORT`, or by the control side after
+   `QUIESCE_DEV` or `TRY_STOP_DEV`: a queue whose tags are all held gets no
+   `ABORT`), commits held requests itself and never blocks in libublk once
+   down (ADR-18).
 5. **Recovery:** on start, `GET_DEV_INFO` of the recorded device id;
-   validate the identity (state QUIESCED or recovering, queue count, depth,
-   flags and `dev_sectors` equal the recorded values; `boot_id` equal), then
-   `START_USER_RECOVERY` retrying every 100 ms on `EBUSY` up to 30 s,
-   re-fetch, `END_USER_RECOVERY`; **no `SET_PARAMS`**. A failed identity
-   check is an error that leaves the device alone.
-6. **QUIESCE:** `quiesce_and_exit(timeout)` sends `QUIESCE_DEV` and, on
-   success only, exits the process (all queue threads end without any
-   `STOP_DEV`). On timeout it returns an error and the daemon keeps
-   serving. Never `STOP_DEV` anywhere; never exit with started requests
-   (W1, W2); a fatal error in a queue thread calls `abort()`.
+   validate the identity, then `START_USER_RECOVERY` retrying every 100 ms
+   on `EBUSY` up to 30 s, re-fetch, `END_USER_RECOVERY`; **no
+   `SET_PARAMS`**. ublk has no owner concept; the daemon stores a volume
+   tag in `ublksrv_flags` and checks it. A device is recovered only if the
+   boot id and volume equal the record's, the state is QUIESCED, or LIVE
+   with no living server, the volume tag, queue count, depth, buffer size
+   and flags match, and `record.dev_sectors <= dev_sectors <=` the engine's
+   size (a grow makes the engine durable, then the kernel, then the
+   record; a crash between any two leaves them in this order). The
+   recovered device is re-checked after `START_USER_RECOVERY`. A failed
+   identity check is an error that leaves the device alone. A LIVE device
+   with a living server should be `Busy` after the recovery wait, not an
+   identity refusal (M10 re-review R1, still open).
+6. **QUIESCE:** `quiesce_and_exit(timeout)` sends `QUIESCE_DEV`, which
+   returns once every queue has an idle command; requests the server
+   already holds stay with it. The daemon completes and commits those with
+   commands of its own (libublk would drop them), waits until its queue
+   threads have ended with nothing in flight, runs the engine's final
+   commit, then exits; no `STOP_DEV`, no `DEL_DEV`. The kernel has seen
+   every commit, so the successor has nothing to replay. A request the
+   daemon cannot commit is left for `REISSUE` (only by `abort()`). On
+   timeout (`EBUSY`/`EINTR`) the device stays canceling: new I/O is
+   requeued, not served. The caller retries `quiesce` or calls
+   `crash_for_recovery()` (abort, recovered by `REISSUE`); it never
+   detaches or deletes the device in this state (the device is latched
+   `Quiescing`). Never `STOP_DEV` anywhere; never exit with started
+   requests except by `abort()` (W1, W2); a fatal error in a queue thread
+   calls `abort()`.
 7. **Detach:** `try_stop(timeout)`: `TRY_STOP_DEV` (EBUSY ⇒ typed `Busy`,
    the device stays), then drain, then `DEL_DEV` from a helper thread with
-   a 60 s watchdog (W5).
+   a 60 s watchdog (W5). `TRY_STOP_DEV` answers `EBUSY` while the block
+   device has any opener: a mount, an open file descriptor, or udev's
+   probe just after the device appeared. Detach of a new device retries
+   for a bounded time.
 8. **Resize:** `grow(new_bytes)` validates (multiple of 4096, ≥ current,
    ≤ configured maximum) before `UPDATE_SIZE`; shrink and unaligned sizes
-   are rejected without touching the kernel (ADR-20).
+   are rejected without touching the kernel (ADR-20). `UPDATE_SIZE` is sent
+   only to a device that has a disk (state not DEAD); older drivers
+   dereference a null disk.
 9. **`lunix-ublk-testd`**: a test daemon with a file-backed `BlockEngine`
    (`O_DIRECT` backing file, WRITE ⇒ `pwrite`, READ ⇒ `pread`, FLUSH ⇒
    `fdatasync`, FUA ⇒ `RWF_DSYNC`, as in the spike) with subcommands `run`,
@@ -1975,10 +2053,14 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
    - C1 pick `c` = current `write_seq`; wait until every write with `write_seq ≤ c`
      has reached the journal (in-flight only; new writes are not stalled);
    - C2 `overlay.cut(c)`;
-   - C3 destage the cut (M9): extents appended to the open segment, map
-     updated in memory, index inserts held back;
-   - C4 seal the open segment(s): footer, trailer, `fdatasync`, rename,
-     directory fsync;
+   - C3 destage the cut (M9): extents appended to segments, **every
+     segment sealed** (footer, trailer, `fdatasync`, rename, directory
+     fsync) **before the map transaction commits in memory**, so no reader
+     can reach an unsealed segment between C3 and C4; index inserts held
+     back. A failed cut deletes the segments it sealed;
+   - C4 fix `new_segments` (including the output segments of applied
+     `moved` records) and true up the ledger to the real size of the
+     segments already sealed in C3 (crash point `engine.c4.named`);
    - C5 `map.seal` into a map pack: `fdatasync`, rename, directory fsync;
    - C6 build the FULL commit (`commit_seq = parent_seq + 1` (D5; not the
      `write_seq`), `epoch` 0, `parent_seq`, `parent_hash`, `cut_seq = c`, `size`,
@@ -1995,8 +2077,11 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
      an atomic raise-only write, only after C6 is durable, so the floor is
      never above the durable tip; a crash before it leaves a lower floor,
      which is safe);
-   - C8 persist the index run for the sealed segments (named by the **next**
-     FULL, D3; a commit never names a run that is not yet durable);
+   - C8 insert the cut's extents into the index (only now: the commit
+     naming their segments is durable, so a failed cut never leaves dedup
+     pointing at an orphan) and persist the index run for the sealed
+     segments (named by the **next** FULL, D3; a commit never names a run
+     that is not yet durable);
    - C9 `journal.reclaim(tail)` and `overlay.release(cut)`; update the
      space ledger by the walk-through of M1.B1.
    - C10 if no cut is pending and the in-memory map root equals the new
@@ -2007,36 +2092,46 @@ ADR-3, 4, 9, 10, 14, 20; the traits of M1.B.
    A crash before C6 completes leaves the previous commit as the tip; the
    new segments and pack are orphans handled at open. The journal is never
    reclaimed before C6 is durable.
-6. **Startup recovery** (`Engine::open`): take the lock; read and verify
-   `volume`; unlock keys (the caller passes `Keys`); `check_attach`; read
-   the tip commit and verify the last link (the chain down to
-   `chain_floor` at fsck); **no automatic fallback**: a tip that does not
+6. **Startup recovery** (`Engine::open`), in this order (DESIGN §4.4): take
+   the lock; read and verify `volume`; unlock keys (the caller passes
+   `Keys`); `check_attach`; read the tip commit, require a FULL and verify
+   the chain from the tip down to `chain_floor` (the floor commit's parent
+   may be absent); **no automatic fallback**: a tip that does not
    authenticate is a typed mount error, because falling back to the
    previous commit would reuse the create-only name `commits/<tip>` and lose
    journal records already reclaimed; the repair is offline, `lunix fsck
-   --repair --truncate-tip` (M14); **R4:** compare the verified tip with
-   the floor in `state/pins` (all three modes): `commit_seq` below
-   `max_commit_seq` is `Rollback { floor, tip }`, the same `commit_seq`
-   with another hash is `Fork`, both typed mount errors; a first attach
-   (no floor) succeeds, sets the floor and logs that rollback of earlier
-   history cannot be detected on this host; after a successful open and
-   whenever an EPOCH commit is written, raise the floor to the tip; where a
-   lease exists (a backend volume, phase 2; a local volume has none) open it
-   only through `open_lease_fresh(bytes, max(chain epoch, pins.max_epoch))`;
-   the checkpoint's `last_commit_seq` is never an anchor; open the
-   map at `map_root`; read the checkpoint hint (discard it if its
-   `last_commit_seq` is above the tip's `commit_seq`, D17); `Journal::recover(hint, floor = the tip FULL's cut_seq)`; rebuild
-   the overlay from the records it returns; set the next `write_seq`; **orphan
-   sweep first** (delete every sealed segment and map pack above the tip's
+   --repair --truncate-tip` (M14); **R4 before any change:** compare the
+   verified tip with the floor in `state/pins` (all three modes):
+   `commit_seq` below `max_commit_seq` is `Rollback { floor, tip }`, the
+   same `commit_seq` with another hash is `Fork`, both typed mount errors; a
+   first attach (no floor) succeeds, sets the floor and logs that rollback
+   of earlier history cannot be detected on this host; where a lease exists
+   (a backend volume, phase 2; a local volume has none) open it only
+   through `open_lease_fresh(bytes, max(chain epoch, pins.max_epoch))`; the
+   checkpoint's `last_commit_seq` is never an anchor; then the **orphan
+   sweep** (delete every sealed segment and map pack above the tip's
    high-water mark that no retained commit names, N2; before deleting,
    record the highest id on disk, and set the `ObjId` allocator to 1 + the
    maximum of the checkpoint's `id_high`, the highest id the chain names
-   and that on-disk maximum, so a swept id is never reissued, D17); then
-   `index.catch_up(segment ids named by the chain, ...)`; resume a pending
-   GC state from `state/gc/`; only then accept I/O. The chain is verified
-   from the tip down to `chain_floor` (the floor commit's parent may be
-   absent).
-   Recovery is idempotent (a crash during recovery is another recovery).
+   and that on-disk maximum, so a swept id is never reissued, D17). The
+   sweep is safe because the tip's root pack id bounds every referenced
+   segment: segments of a cut are allocated before its map pack, and
+   compaction output is named only by the cut that applies its re-hints, so
+   the high-water mark (which includes `map_root.pack`) is never below a
+   referenced segment. Then `index.catch_up(segment ids named by the
+   chain, ...)`; open the map at `map_root` with the commit's `size` (the
+   engine passes `size` to `open`); read the checkpoint hint (discard it if
+   its `last_commit_seq` is above the tip's `commit_seq`, D17);
+   `Journal::recover(hint, floor = the tip FULL's cut_seq)`; `ignored_after_gap`
+   and `damaged` are logged before any lane opens, and `on_journal_damage =
+   refuse` returns a typed error before the wipe; rebuild the overlay from
+   the records it returns; set the next `write_seq`; raise the floor to the
+   tip when it is absent or lower (after a successful open, and whenever an
+   EPOCH commit is written); resume a pending GC state from `state/gc/`;
+   only then accept I/O. The position of the journal recovery relative to
+   the sweep is free; the sweep must precede `catch_up` and the map open,
+   and R4 must precede every write. Recovery is idempotent (a crash during
+   recovery is another recovery).
 7. **Resize (grow only):** validate; write a FULL commit with the new size
    and `map.grow`; then call the `on_resize` hook (the ublk layer issues
    `UPDATE_SIZE`). Shrink returns `Unsupported` in phase 1.
@@ -2255,6 +2350,129 @@ untouched.
 
 ---
 
+## M12 inputs from the M9-M11 reviews
+
+Collected on 2026-11-13 from the M9, M10 and M11 reports and their review
+and re-review sections. Items marked *decided* are settled in the review or
+by the lead; the others are open for M12 or the maintainer. Nothing here
+changes a milestone gate on its own; M12 lists in its report what it took
+and what it left.
+
+**From the M9 re-review (the destage adapter, R1-R7):**
+
+- **R1 (decided: classify once).** The adapter copies `DestageError::class`
+  into the engine's `Retry` with an exhaustive `match` (an
+  `impl From<ErrorClass> for Retry`), never calls `Retry::classify` on
+  `error` again (M9 samples `dirty_leaf_count()` after the failure,
+  `SimpleDestager` before the call; two copies of the table drift), and a
+  test covers every `ErrorKind`.
+- **R2 (open).** A failed delete of a failed cut's segments is silent in
+  M9's error arm (`if let Ok(n) = deps.segments.delete(..)`), and
+  `Partial::segments` does not say which ids were not deleted. Return the
+  undeleted segment ids (or count them) so the adapter logs them and keeps
+  the ledger charge; the file sits outside the ledger until GC otherwise.
+- **R3 (decided).** `freed_bytes` has no consumer and its rustdoc misleads:
+  nothing was charged beyond the C2 bound, which the coordinator releases
+  whole on failure. Treat it as informational; the adapter must not release
+  it a second time.
+- **R4 (open).** `AfterMapSeal` means "seal, then retry the same cut" in M9
+  and `CutFail::Smaller` (a lower `write_seq`) in the engine. If the map is
+  at its cap, `begin_update` fails whatever the cut size, so "smaller"
+  cannot converge. Harmless today (every commit's C5 seals the map and a
+  commit that fails after C3 stops the engine, so a cut never starts with
+  dirty leaves); say so in one sentence of the adapter's rustdoc, or make
+  the coordinator seal on this class.
+- **R5, R6, R8 (nits).** The lean-volume test does not pin `verify_id`;
+  `dedup_rejected` now also counts a `Verified` hit with an absurd `clen`
+  (fix its doc in `stats.rs`); the store trait still says `delete` is "GC
+  only" although M9 and the engine's stand-in call it for their own
+  unnamed segments (widen the sentence in `lunix-iface`).
+- **R7 (open, maintainer).** `DestageCtx` has no `pressure` carrier. The
+  adapter derives it from `Journal::fill()` per call. **The thresholds
+  (fill to `Lz4` or `Raw`) are undecided**; with `Pressure::None` only cuts
+  above 4 GiB degrade.
+- **The adapter mapping (M11 report, request 3).** M12 adapts M9's
+  `destage_cut(&OverlayCut, &DestageDeps)` to the engine's `Destager`:
+  the cut is borrowed (the engine keeps it for `Overlay::release`);
+  `DestagedSegment.sealed` maps to `DestageOutcome::segments` (all sealed
+  before the map transaction commits); `DestagedSegment.entries` flattened
+  map to `index_inserts` (inserted only after C6 is durable); `DestageStats`
+  map to the counters in the order hash, dedup, compress, seal, append;
+  `extent_auth_failures` is carried (M9 does its own base reads; reads
+  through `ctx.reader` are counted by the engine); `DestageCtx::reader` and
+  `::writes` go unused. M9's "cut too large" (`CutTooLarge`) and
+  `AfterMapSeal` both come through as the retry-smaller path; M9's per-chunk
+  pre-probe of the map is kept (the engine's `SimpleDestager` has none).
+
+**From the M10 review and re-review (the ublk layer):**
+
+- **What M12 must call.** `harden_process` first; `UblkDevice::add_persisting`
+  for the first start (with the record writer, run between `SET_PARAMS` and
+  `START_DEV`); `UblkDevice::recover` for later starts (on
+  `UblkError::Identity` add a new device); `record()` after every grow;
+  `quiesce_and_exit` for an upgrade; `detach` for a stop (retry on `Busy`
+  for a bounded time). Handle `UblkError::Device { dev_id, .. }` (record
+  the id; another process deletes the device with `delete_by_id(.., true)`
+  once the daemon is gone) and `warnings()`. libublk prints `device reload
+  json failed` once per attach; it is harmless (a line for the operator
+  notes). Persisting the record after an engine-initiated grow through the
+  resize hook is the daemon's job. Handlers are dropped only after a drain.
+- **R4 (open).** A crash between `persist` and `START_DEV` leaves a DEAD
+  device nothing deletes. The next start gets `Identity { State { 0 } }` and
+  adds a new device, as documented; the old one stays until reboot. It is
+  the layer's own device (the tag matches): either `recover` reports a
+  distinct "never started" refusal and deletes it, or M12 calls
+  `delete_by_id(id, .., false)` on it.
+- **Also open in the M10 re-review (not in the brief):** R1, a LIVE device
+  with a living server is reported as an identity refusal instead of `Busy`
+  after the recovery wait (fix before M12 uses `recover`); R2, the result of
+  a drain commit is never looked at; R3, the resize hook outlives the
+  device (`ResizeBridge` must refuse unless the lifecycle is `Serving`);
+  R5, `quiesce()` does not latch `Quiescing` when `QUIESCE_DEV` hits its
+  watchdog. The drop-one-FUA control cannot trip by construction (R6); the
+  M10 gate line "with the drop-last-write toggle, verify fails" holds for
+  the mounted cells as "drop-all", and a raw-device `DeviceOracle` negative
+  control is the sensitive one. Durability of FUA/FLUSH against volatile
+  state belongs to M15.
+
+**From the M11 re-review (the engine):**
+
+- **Minor 7 (open).** `bound_cut` ignores `map.dirty_leaf_count()`, which
+  after a failed cut holds the re-hinted leaves; a persistent `MapFull` can
+  then stall commits (unreachable with defaults). Fix: bound by
+  `cap - dirty_leaf_count()` (at least 1), and run one empty cut when
+  `Smaller` arrives at `c <= prev + 1` with dirty leaves present.
+- **Minor 8 (open).** `EngineConfig::from_volume_json` hard-codes
+  `map_fanout: 512`; M12 must set it from the descriptor (better: a
+  constructor argument next to `chunk_size` and `id_len`).
+- **Minor 9 (document).** `Queue::drop` poisons the volume when numbers are
+  still in flight; M10 and M12 document and keep "drain before drop".
+- **Journal-reclaim after open.** `fill()` overstates the ring after a crash
+  between C6 and C9 until the first commit; M12 may call `commit_now(false)`
+  once after open for an exact ledger.
+- **Journal damage logging.** The engine logs one `warn!` with the `Debug`
+  of the ranges (bounds included); M12's gate test accepts it or asks for
+  one line per range.
+- **The floor store.** The engine keeps its own `RollbackFloorStore`; M12
+  provides a blanket implementation over `VolumeDir::rollback_floor` and
+  `raise_rollback_floor` so the engine never depends on the iface change.
+- **`Moved` carries the chunk number (accepted for later).** `Moved` should
+  carry `ci: ChunkNo` so the engine calls `rehint(ci, old, new)` directly;
+  today it walks the tip's leaves at every cut that applies moves. If the
+  lead prefers not to touch `lunix-iface`, M17 can hand the engine
+  `Vec<(ChunkNo, Moved)>` through `GcProgress`.
+- **`GcControl` wiring.** Not implemented in the engine. M12 implements
+  `run_pass`/`run_urgent` as requests the coordinator services at C10 (or
+  from `tick` when idle) under the same preconditions as `gc_step`: a small
+  `Engine::run_gc(req)` that takes the coordinator mutex, because an urgent
+  pass must also run without a dirty overlay.
+- **R1 over the encrypted codec.** The testkit has no encrypted codec, so
+  the R1 gate cases (swap, older extent, damaged tag, wrong offset, stale
+  hint) run in M12 over `lunix-crypto`, together with the lease part of R4
+  where a lease exists.
+
+---
+
 ## M13 — `lunix-cli`
 
 Two work items so the wave 1 part never links crates that do not exist yet.
@@ -2394,7 +2612,9 @@ routine. **Review:** recommended. **Reads:** DESIGN §4, §6, §7, §11
    skip records between the new and the old cut, D17), and reports the
    journal records that the older floor can no longer cover, and **lowers the
    rollback floor to the new tip** (the only automatic lowering, offline and
-   reported). `--repair --reset-floor` is the explicit operator reset (for
+   reported). Records between the new tip's cut and the damaged tip's cut
+   that C9 had already reclaimed are gone, so `--truncate-tip` loses those
+   writes; this is expected for an offline repair and the how-to says so. `--repair --reset-floor` is the explicit operator reset (for
    example a DR steal from a lagging mirror, phase 5): it sets the floor to
    the current verified tip, prints the old and new values, and is never
    implied by another flag.
