@@ -617,21 +617,16 @@ fn more_queues_than_lanes_on_an_existing_volume() {
     }
 }
 
-/// Review "needs a run" 6: `on_journal_damage = refuse` after a crash whose
-/// last record is torn (its data fails the CRC, nothing valid follows).
-///
-/// **Finding (reported, not changed here):** the journal reports such a tail
-/// as a damaged range (`next_seq` is `None`), and the engine refuses on any
-/// damaged range, so `refuse` keeps a volume offline after an ordinary crash
-/// with a torn last batch. This test pins today's behaviour: `refuse`
-/// answers `JournalDamage` and leaves the journal for fsck; `wipe` opens with
-/// every record before the tail. The proposed engine change (refuse only when
-/// valid records follow the damage) is in the M12a report.
-#[test]
-fn a_torn_last_record_under_refuse_and_wipe() {
-    let Some(t) = scratch("torn") else { return };
+/// Review "needs a run" 6 and the lead's decision of 2026-11-13: a crash
+/// whose last record of a lane is torn (its data fails the CRC, nothing valid
+/// follows) is crash residue. `on_journal_damage = refuse` opens, the torn
+/// record is reported (`next_seq: None`) and wiped, and every record before
+/// it is there. (A flushed record cannot be torn by a crash: it is durable
+/// before its acknowledgement; this test damages one by hand to stand in for
+/// an unflushed batch.)
+fn torn_tail_volume(t: &Path) -> (CreatedVolume, Vec<Vec<u8>>) {
     let mode = CryptoMode::Plain;
-    let v = create(t.path(), mode, 64 << 10);
+    let v = create(t, mode, 64 << 10);
     let s = open(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     let marks: Vec<Vec<u8>> = (0..3).map(|i| pattern(2000 + i, 4096)).collect();
@@ -641,39 +636,68 @@ fn a_torn_last_record_under_refuse_and_wipe() {
     }
     drop(d);
     drop(s);
+    (v, marks)
+}
+
+/// Flips a data byte of the record whose data starts with `mark`.
+fn damage_record(voldir: &Path, mark: &[u8]) {
     let mut hit = false;
-    for e in std::fs::read_dir(v.voldir.join("journal"))
-        .unwrap()
-        .flatten()
-    {
+    for e in std::fs::read_dir(voldir.join("journal")).unwrap().flatten() {
         let mut b = std::fs::read(e.path()).unwrap();
-        if let Some(pos) = b.windows(64).position(|w| w == &marks[2][..64]) {
+        if let Some(pos) = b.windows(64).position(|w| w == &mark[..64]) {
             b[pos + 100] ^= 0xff;
             std::fs::write(e.path(), &b).unwrap();
             hit = true;
         }
     }
-    assert!(hit);
+    assert!(hit, "the record was found in the journal");
+}
+
+#[test]
+fn a_torn_last_record_is_crash_residue_under_refuse() {
+    let Some(t) = scratch("torn") else { return };
+    let mode = CryptoMode::Plain;
+    let (v, marks) = torn_tail_volume(t.path());
+    damage_record(&v.voldir, &marks[2]);
+    let mut p = params(&v, mode);
+    p.on_journal_damage = OnJournalDamage::Refuse;
+    let cap = Arc::new(Capture::default());
+    let sub = CaptureSub(Arc::clone(&cap));
+    let s = tracing::subscriber::with_default(sub, || open_volume(p))
+        .expect("a torn tail is crash residue: refuse opens");
+    let rep = s.engine.recovery_report();
+    assert_eq!(rep.damaged.len(), 1, "{rep:?}");
+    assert_eq!(rep.damaged[0].next_seq, None, "nothing valid after the tail");
+    assert!(rep.ignored_after_gap.is_none(), "{rep:?}");
+    assert!(
+        cap.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("torn last record")),
+        "the torn tail is logged"
+    );
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    assert_eq!(&d.read(0, 4096), &marks[0]);
+    assert_eq!(&d.read(64 << 10, 4096), &marks[1]);
+    assert_eq!(d.read(2 * (64 << 10), 4096), vec![0u8; 4096], "the torn write is gone");
+}
+
+/// The other side of the decision: damage followed by a valid record in the
+/// same lane is mid-journal damage, refused under `refuse` with the journal
+/// untouched.
+#[test]
+fn damage_followed_by_a_valid_record_is_refused() {
+    let Some(t) = scratch("midd") else { return };
+    let mode = CryptoMode::Plain;
+    let (v, marks) = torn_tail_volume(t.path());
+    damage_record(&v.voldir, &marks[1]);
     let before = journal_bytes(&v.voldir);
     let mut p = params(&v, mode);
     p.on_journal_damage = OnJournalDamage::Refuse;
     match open_volume(p) {
         Err(StackError::JournalDamage) => {}
-        other => panic!("today a torn tail is damage under refuse: {other:?}"),
+        other => panic!("mid-journal damage must be refused: {other:?}"),
     }
-    assert!(
-        journal_bytes(&v.voldir) == before,
-        "refuse touched the journal"
-    );
-    let s = open(&v, mode);
-    let rep = s.engine.recovery_report();
-    assert_eq!(rep.damaged.len(), 1, "{rep:?}");
-    assert_eq!(
-        rep.damaged[0].next_seq, None,
-        "nothing valid after the tail"
-    );
-    assert!(rep.ignored_after_gap.is_none(), "{rep:?}");
-    let mut d = Driver::new(&s.engine, 2, 1 << 20);
-    assert_eq!(&d.read(0, 4096), &marks[0]);
-    assert_eq!(&d.read(64 << 10, 4096), &marks[1]);
+    assert!(journal_bytes(&v.voldir) == before, "refuse touched the journal");
 }
