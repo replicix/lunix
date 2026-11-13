@@ -67,6 +67,10 @@ Details of F:
 - **Fourth run** at `f8d48e1` with `RUST_TEST_THREADS=1`: `ci: all green`, 1 354 tests passed, 0 failed
   (ownership skipped).
 - `p1/m12a` on top of this branch is also green (1 394 tests).
-- **For the lead:** the M12a report proposes one engine change that this branch does not contain. With it,
-  `on_journal_damage = refuse` would refuse only when valid records follow the damage, because today a torn last
-  batch keeps a crashed volume offline.
+- **Lead decision of 2026-11-13, now on this branch (`0eace35`):** `on_journal_damage = refuse` refuses only
+  mid-journal damage, that is a damaged range with a later valid record in its lane, or `ignored_after_gap`.
+  - A torn last record of a lane is crash residue, logged at warn and wiped. The reason: a flushed or FUA record is
+    durable before its acknowledgement, so a crash cannot tear it.
+  - The change is in `recover.rs` (`refuse_worthy`, with a unit test) and the `OnJournalDamage::Refuse` rustdoc.
+  - The docs say the same in ADR-4, DESIGN §4.1 and §4.4 step 7, and the plan's M12 paragraph.
+- **CI at `0eace35`:** `ci: all green`, 1 356 tests passed, 0 failed.
