@@ -166,6 +166,11 @@ impl Driver {
         self.wait(t).0
     }
 
+    pub fn read_status(&mut self, off: u64, len: u32) -> (IoStatus, Vec<u8>) {
+        let t = self.submit(0, IoOp::Read, false, off, len, &[]);
+        self.wait(t)
+    }
+
     pub fn read(&mut self, off: u64, len: u32) -> Vec<u8> {
         let t = self.submit(0, IoOp::Read, false, off, len, &[]);
         let (s, d) = self.wait(t);

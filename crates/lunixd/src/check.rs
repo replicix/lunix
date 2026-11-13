@@ -51,7 +51,11 @@ impl CheckReport {
 struct Packs(LocalVolume);
 
 impl NodeSource for Packs {
-    fn load_node(&self, loc: lunix_format::node::NodeLoc, out: &mut Vec<u8>) -> lunix_iface::Result<()> {
+    fn load_node(
+        &self,
+        loc: lunix_format::node::NodeLoc,
+        out: &mut Vec<u8>,
+    ) -> lunix_iface::Result<()> {
         self.0.read_node(loc, out)
     }
 }
@@ -75,11 +79,13 @@ pub fn check_volume(voldir: &Path, cred: &AttachCredential) -> Result<CheckRepor
     let tip_commit = match meta.open_commit(tip, &CommitStore::get(&store, tip)?) {
         Ok(Commit::Full(f)) => f,
         Ok(_) => {
-            r.problems.push(format!("tip {} is not a FULL commit", tip.0));
+            r.problems
+                .push(format!("tip {} is not a FULL commit", tip.0));
             return Ok(r);
         }
         Err(e) => {
-            r.problems.push(format!("tip {} does not authenticate: {e}", tip.0));
+            r.problems
+                .push(format!("tip {} does not authenticate: {e}", tip.0));
             return Ok(r);
         }
     };
