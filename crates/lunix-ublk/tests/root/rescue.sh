@@ -15,6 +15,15 @@ DEVID=$(python3 -I -c 'import struct,sys;print(struct.unpack_from("<I",open(sys.
 DEV=/dev/ublkb$DEVID
 grep -qxF "$DEV" "$CREATED_DEVICES" || { echo "refusing: $DEV is not recorded as created by this harness"; exit 2; }
 start_daemon recover || exit 1
-for i in $(seq 1 600); do pgrep -f "fio jobs.fio" >/dev/null || break; sleep 1; done
-pgrep -f "fio jobs.fio" >/dev/null && wedged "fio still running 10 min after the daemon came back"
+# Stop the load (time_based fio would run to its runtime): only processes whose cwd is the mount of this run.
+for p in /proc/[0-9]*; do
+  c=$(readlink "$p/cwd" 2>/dev/null) || continue
+  case "$c" in "$MNT"|"$MNT"/*) kill -TERM "${p#/proc/}" 2>/dev/null;; esac
+done
+for i in $(seq 1 120); do
+  busy=0
+  for p in /proc/[0-9]*; do c=$(readlink "$p/cwd" 2>/dev/null) || continue; case "$c" in "$MNT"|"$MNT"/*) busy=1;; esac; done
+  [ $busy = 0 ] && break; sleep 1
+done
+[ $busy = 0 ] || wedged "load processes still use $MNT 2 min after SIGTERM"
 exit 0

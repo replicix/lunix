@@ -102,7 +102,8 @@ run_phase() { # name count delay
       for i in $(seq 1 3000); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.1; done
       kill -0 "$DPID" 2>/dev/null && { aborted="daemon did not hit $CRASH_AT in 300 s at cycle $cyc"; break; }
       tk=$(now_ns); wait "$DPID" 2>/dev/null
-      CRASH_AT="$CRASH_POINT:$((4000 + RANDOM % 4000))"
+      # only a daemon that is meant to crash gets a crash point: none after the last cycle
+      if [ "$cyc" -lt "$count" ]; then CRASH_AT="$CRASH_POINT:$((4000 + RANDOM % 4000))"; else CRASH_AT=""; fi
     else
       sleep "$iv"
       [ -n "$FIO_PID" ] && ! kill -0 "$FIO_PID" 2>/dev/null && { aborted="fio ended early at cycle $cyc"; break; }

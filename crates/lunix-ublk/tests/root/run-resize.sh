@@ -43,7 +43,7 @@ fio_load() { # name
      --runtime=600 --cpus_allowed="$FIO_CPUS" --output-format=json --output="$OUT/$1.json" > "$OUT/$1.out" 2>&1) &
   FIO_PID=$!
 }
-fio_done() { wait "$FIO_PID"; FIO_RC=$?; FIO_PID=""; FIO_ERR=$(jq -c '[.jobs[].total_err]' "$OUT/$1.json" 2>/dev/null || echo n/a); }
+fio_done() { wait "$FIO_PID"; FIO_RC=$?; FIO_PID=""; FIO_ERR=$(jq -c '[.jobs[].error]' "$OUT/$1.json" 2>/dev/null || echo n/a); }
 grow_fs() {
   case "$1" in
     ext4) resize2fs "$DEV" 2>&1 | tail -1;;
