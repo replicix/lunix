@@ -2209,7 +2209,23 @@ is not an anchor.
     would refuse an honest volume after a crash.
   - At attach, after `verify_chain`, a tip with `commit_seq <
     max_commit_seq` is refused as `Rollback`, and a tip with `commit_seq ==
-    max_commit_seq` and a different hash as `Fork`. This is rule R4 of
+    max_commit_seq` and a different hash as `Fork`.
+  - **The fork window (maintainer, 2026-11-13, after the M12a review).** A
+    tip above the floor must descend from the floor's commit: the chain is
+    walked from the tip back to height `max_commit_seq` (every link
+    authenticated, also below `chain_floor`) and must arrive at a commit
+    whose hash is `tip_hash`, else `Fork`. With `retain_last = 2` the
+    retained chain alone covers only one commit above the floor, so without
+    the walk a copy that diverged two or more commits before the tip would
+    attach and raise the floor. When the walk cannot be completed (a link
+    deleted or damaged), the attach is refused as `ForkUnverifiable` until an
+    operator overrides it with an explicit, audited attach flag. GC keeps
+    every commit object at or above the floor's height while a floor exists
+    (plan M17 rule 6).
+  - The floor is recorded at volume creation, with the genesis commit, so a
+    volume's first attach on the host that made it is not a "first attach".
+  - A rejected `state/pins` (bad length, version or checksum) is an error,
+    never read as "no floor". This is rule R4 of
     ADR-11, together with `open_lease_fresh(bytes, max(chain epoch,
     pins.max_epoch))`.
   - Only offline `fsck --repair --truncate-tip` and an explicit,
@@ -2254,7 +2270,8 @@ is not an anchor.
 - **Format freeze.** `state/pins` version 2 and the new addressing-key
   purpose id (ADR-6, ADR-11) amend frozen items; each needs the maintainer's
   re-sign of `FREEZE.md` and a golden update.
-- New attach errors `Rollback` and `Fork` in the control API and the CLI;
-  `lunix status` shows the floor.
+- New attach errors `Rollback`, `Fork` and `ForkUnverifiable` in the
+  control API and the CLI, and the audited override; `lunix status` shows
+  the floor, also for a detached volume.
 - The rollback floor and `chain_floor` (retention) are unrelated: GC
   deleting old commits never lowers the rollback floor.

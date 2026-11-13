@@ -187,6 +187,9 @@ fn rollback_floor_r4() {
     let (tip, _) = r.engine.tip();
     let f = (*lock(&v.floor.floor)).expect("floor");
     assert_eq!(f.max_commit_seq, tip, "C7 raised the floor to the tip");
+    let hash1 = v
+        .codec
+        .object_hash(&CommitStore::get(&r.store, CommitSeq(1)).unwrap());
     let p = r.stop();
     v.absorb(p, 1);
     // Tip below the floor: Rollback.
@@ -207,10 +210,20 @@ fn rollback_floor_r4() {
         v.open().map(|_| ()).map_err(|e| e.0),
         Err(OpenError::Fork { .. })
     ));
-    // Below the tip: opens and raises it.
+    // Below the tip, another commit at its height on the path (ADR-31,
+    // 2026-11-13): Fork, also when the floor is below the tip's chain_floor.
     *lock(&v.floor.floor) = Some(RollbackFloor {
         max_commit_seq: CommitSeq(1),
         tip_hash: [1; 32],
+    });
+    match v.open().map(|_| ()).map_err(|e| e.0) {
+        Err(OpenError::Fork { tip: at }) => assert_eq!(at, CommitSeq(1)),
+        other => panic!("expected Fork at the floor's height, got {other:?}"),
+    }
+    // Below the tip, the recorded commit on the path: opens and raises it.
+    *lock(&v.floor.floor) = Some(RollbackFloor {
+        max_commit_seq: CommitSeq(1),
+        tip_hash: hash1,
     });
     let r = v.open().map_err(|e| e.0).expect("open above the floor");
     assert!(!r.engine.recovery_report().first_attach);
@@ -623,4 +636,44 @@ fn a_map_full_cut_is_retried_smaller_and_leaves_no_segment_behind() {
     }
     assert_eq!(r.read(0, 0, cs as u32).1, pattern(1, cs as usize));
     assert_eq!(r.read(0, 600 * cs, cs as u32).1, pattern(2, cs as usize));
+}
+
+#[test]
+fn an_unwalkable_chain_back_to_the_floor_is_refused_unless_overridden() {
+    let mut v = vol(16 << 10);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for i in 0..4u64 {
+        assert!(r.write(0, i * 4096, &pattern(i, 4096), false).is_ok());
+        r.engine.commit_now(false).expect("commit");
+    }
+    let hash1 = v
+        .codec
+        .object_hash(&CommitStore::get(&r.store, CommitSeq(1)).unwrap());
+    let (tip, _) = r.engine.tip();
+    // Commit 1 is below the tip's chain_floor: a GC may have deleted it.
+    CommitStore::delete(&r.store, CommitSeq(1), CommitSeq(tip.0 - 1)).expect("delete");
+    let p = r.stop();
+    v.absorb(p, 1);
+    *lock(&v.floor.floor) = Some(RollbackFloor {
+        max_commit_seq: CommitSeq(1),
+        tip_hash: hash1,
+    });
+    match v.open().map(|_| ()).map_err(|e| e.0) {
+        Err(OpenError::ForkUnverifiable { floor, tip: t, .. }) => {
+            assert_eq!((floor, t), (CommitSeq(1), tip));
+        }
+        other => panic!("expected ForkUnverifiable, got {other:?}"),
+    }
+    assert_eq!(
+        (*lock(&v.floor.floor)).expect("floor").max_commit_seq,
+        CommitSeq(1),
+        "a refusal raises nothing"
+    );
+    fn allow(c: &mut lunix_engine::EngineConfig) {
+        c.allow_unverifiable_fork = true;
+    }
+    v.tweak = allow;
+    let r = v.open().map_err(|e| e.0).expect("the operator override opens");
+    assert_eq!((*lock(&v.floor.floor)).expect("floor").max_commit_seq, tip);
+    drop(r.stop());
 }

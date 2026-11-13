@@ -103,6 +103,49 @@ impl SegmentFooters for Footers<'_> {
     }
 }
 
+/// R4 for a tip above the floor (ADR-31, maintainer decision of 2026-11-13):
+/// the chain from the tip back to the floor's height must pass through the
+/// commit the floor recorded. The links down to `chain_floor` are already
+/// verified; below it the walk continues over commits that may still exist
+/// (GC keeps them while a floor needs them, M17). A missing or unverifiable
+/// link is `ForkUnverifiable`, unless the operator override is set.
+fn check_floor_on_path(
+    cfg: &EngineConfig,
+    d: &EngineDeps,
+    tip_seq: CommitSeq,
+    f: &RollbackFloor,
+    volume_hash: &[u8; 32],
+) -> std::result::Result<(), OpenError> {
+    let walked = d
+        .commit_codec
+        .verify_chain(&*d.commits, tip_seq, f.max_commit_seq, volume_hash)
+        .and_then(|_| d.commits.get(f.max_commit_seq));
+    match walked {
+        Ok(bytes) => {
+            if d.commit_codec.object_hash(&bytes) != f.tip_hash {
+                return Err(OpenError::Fork {
+                    tip: f.max_commit_seq,
+                });
+            }
+            Ok(())
+        }
+        Err(source) if cfg.allow_unverifiable_fork => {
+            tracing::warn!(
+                floor = f.max_commit_seq.0,
+                tip = tip_seq.0,
+                error = %source,
+                "operator override: the chain back to the rollback floor cannot be walked; opening anyway"
+            );
+            Ok(())
+        }
+        Err(source) => Err(OpenError::ForkUnverifiable {
+            floor: f.max_commit_seq,
+            tip: tip_seq,
+            source,
+        }),
+    }
+}
+
 pub(crate) fn recover(
     cfg: &EngineConfig,
     d: &EngineDeps,
@@ -149,6 +192,9 @@ pub(crate) fn recover(
         }
         if tip_seq == f.max_commit_seq && f.tip_hash != tip_hash {
             return Err(OpenError::Fork { tip: tip_seq });
+        }
+        if tip_seq > f.max_commit_seq {
+            check_floor_on_path(cfg, d, tip_seq, f, &volume_hash)?;
         }
     }
 

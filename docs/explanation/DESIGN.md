@@ -366,8 +366,15 @@ Recovery is idempotent: a crash during it is another recovery.
    aside, makes the previous commit the tip and zeroes both checkpoint
    slots (the checkpoint describes the old tip).
 3. **Rule R4 before any change.** Compare the verified tip with the local
-   floor in `state/pins` (`Rollback`, `Fork`; ADR-31). Nothing is written
-   before this check passes.
+   floor in `state/pins` (`Rollback`, `Fork`, `ForkUnverifiable`; ADR-31).
+   Nothing that a commit references is written before this check passes.
+   Two housekeeping writes come before it, because the journal and the
+   index are opened as components before `Engine::open`: the journal open
+   creates missing ring files of new lanes (zero-filled, holding nothing)
+   and removes interrupted `*.j.tmp` files, and the index open removes its
+   own `*.tmp` files. Neither touches a record or a run; existing ring files
+   are only read, so a refused volume (and one held for `fsck` by
+   `on_journal_damage = refuse`) keeps every byte it had.
 4. **Delete orphans.** Delete unsealed (`*.open`) and temporary files.
    Delete every sealed segment and map pack whose id is above the highest
    id the chain names, and that no commit names. This is safe, because
@@ -893,7 +900,13 @@ never reclaimed before step 5 is durable.
    - **R4, the rollback floor (normative).** After the chain verifies,
      compare the tip with the local floor in `state/pins` (§15, ADR-31): a
      tip with `commit_seq` below `max_commit_seq` is refused as `Rollback`,
-     and a tip at that height whose hash differs from `tip_hash` as `Fork`.
+     a tip at that height whose hash differs from `tip_hash` as `Fork`, and
+     a tip above it must reach, walking its chain back to height
+     `max_commit_seq`, the commit whose hash is `tip_hash`, else `Fork`; a
+     walk that cannot be completed (a commit below `chain_floor` missing or
+     not authenticating) is refused as `ForkUnverifiable` until an explicit,
+     audited operator override (maintainer, 2026-11-13). GC keeps every
+     commit at or above the floor's height while a floor exists (§8.7).
      The checkpoint's `last_commit_seq` is a hint (discarded when above the
      tip) and is never an anchor. A host with no floor (first attach,
      ephemeral client) cannot detect rollback.
@@ -989,6 +1002,9 @@ never reclaimed before step 5 is durable.
 - **Chain floor:**
   - Each FULL records `chain_floor`, the lowest retained `commit_seq`
     (in phase 1, the older of the last `N` FULLs; default `N` = 2).
+  - Commit objects at or above the rollback floor's height (`state/pins`,
+    §15) are kept while that floor exists, also below `chain_floor`: an
+    attach walks the chain back to the floor (§8.4).
   - Commit objects below `chain_floor` that are not pinned may be
     deleted. Mount and tip discovery never look below it.
   - EPOCH, CONFIG and TRANSFER commits are kept while a TRANSFER pointer
@@ -1411,11 +1427,16 @@ mirrors (phase 5).
   - **Rollback anchor (ADR-31).** An older but fully valid chain cannot be
     told from the current one by anything in the bucket, so v1 keeps a
     **local floor** `{max_commit_seq, tip_hash}` in `state/pins` version 2.
-    It is raise-only and is written after every verified attach (the EPOCH
-    commit of the attach included) and after every FULL commit is durable,
-    never before. At attach a tip below `max_commit_seq` is refused as
-    `Rollback`, and a different hash at the same height as `Fork` (an
-    abandoned branch, ADR-24). Offline `fsck --repair --truncate-tip` and an
+    It is raise-only and is written at volume creation (genesis), after every
+    verified attach (the EPOCH commit of the attach included) and after every
+    FULL commit is durable, never before. At attach a tip below
+    `max_commit_seq` is refused as `Rollback`, and a different hash at the
+    same height as `Fork` (an abandoned branch, ADR-24). A tip above the
+    floor must lead back to it: the chain is walked from the tip to height
+    `max_commit_seq` and must arrive at `tip_hash` (else `Fork`); when the
+    walk cannot be completed the attach is refused as `ForkUnverifiable`
+    until an audited operator override. A rejected `state/pins` is an
+    error, never "no floor". Offline `fsck --repair --truncate-tip` and an
     explicit operator reset are the only things that lower it.
     - Phase 5 adds the maximum tip over the InSync mirrors (an authority
       tip below a mirror's is refused) and, for Kubernetes, a raise-only

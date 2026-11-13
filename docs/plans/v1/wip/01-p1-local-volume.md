@@ -164,8 +164,10 @@ independent review; no milestone has run.
      before **every** `mkfs`, which refuses unless the file system keeps at
      least `LUNIX_MIN_FREE_GIB` (default 120) free afterwards; (b) deletes
      the volume and recreates it between cells by default; (c) sets
-     `journal_max` explicitly (256 MiB for M18b, 512 MiB for M15, 1 GiB
-     for M16; the 2 GiB default is for production); (d) runs under an outer
+     `journal_max` explicitly, at least queues × 128 MiB (a lane needs two
+     64 MiB ring files): 256 MiB for M18b (at most 2 queues), 512 MiB for
+     M15 (at most 4 queues), 1 GiB for M16 (8 queues); the 2 GiB default is
+     for production (16 queues); (d) runs under an outer
      `timeout -k` that signals the script, never a daemon (W8); (e) records the disk it used in its report.
    Delete large files at the end of a session (keep `raw/` results).
 4. **Root and ublk tests are serialised across the whole project.** Only
@@ -1279,7 +1281,10 @@ README and report):**
   covers every write acknowledged before the group formed; any append
   failure poisons the journal as stated above.
 - **Ring size** `journal_max` (default 2 GiB per volume, minimum 256 MiB,
-  split evenly across lanes). A lane with no free file returns `Full` and
+  split evenly across lanes; a lane needs two 64 MiB files, so
+  `journal_max >= queues × 128 MiB`: the 256 MiB minimum takes at most 2
+  queues, and `volume create` and `attach` refuse a smaller ring with a
+  message naming the rule). A lane with no free file returns `Full` and
   the engine parks the write until reclaim.
 - Records are written with `io_uring` (`io-uring` crate, registered files
   and fixed buffers), batched per submission; the lane is single-threaded
@@ -2350,8 +2355,12 @@ untouched.
 - Idle daemon CPU ≤ 1 % of one core; resident memory with one idle 1 TiB
   volume at **4 queues** (the host default `min(8, cpus/4)`) ≤ mlocked
   queue buffers + 150 MiB (4 × 128 × 1 MiB = 512 MiB of buffers, so
-  ≤ 662 MiB); the report states the buffer figure separately, and the
-  measurement at 8 queues for information.
+  ≤ 662 MiB), **measured after a workload** (maintainer, 2026-11-13: the
+  smoke and crash cells, then the volume idle; the daemon trims its heap
+  once a volume has been idle for a short while, off the queue threads);
+  the report states the buffer figure separately, the journal's locked
+  batch buffers (lanes × 8 × (1 MiB + 4 KiB)) and a fresh-daemon reading
+  for information, and the measurement at 8 queues for information.
 
 ---
 
@@ -2778,7 +2787,14 @@ in Spec gaps (N6-N9).
    are condemned only after the FULL that **recorded** the new
    `chain_floor` is durable (C6), so a crash never leaves a tip whose floor
    is missing. The floor commit's parent may be absent; mount and fsck
-   verify the chain from the tip down to `chain_floor` only. An index run
+   verify the chain from the tip down to `chain_floor` only. **Keep the
+   chain back to the rollback floor** (ADR-31, maintainer decision of
+   2026-11-13): while `state/pins` records a floor, no commit object with
+   `commit_seq >= max_commit_seq` of that floor is condemned, also below
+   `chain_floor`, because an attach whose tip is above the floor walks the
+   chain back to it and refuses (`ForkUnverifiable`) when a link is missing.
+   M17.A tests it (a pass with the floor below `chain_floor` keeps those
+   commits). An index run
    is live while the current manifest or any retained FULL's `index_packs[]`
    names it.
 7. **Orphans.** Sealed segments and packs that nothing references (crash

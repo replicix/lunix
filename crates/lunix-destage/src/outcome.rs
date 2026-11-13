@@ -95,7 +95,13 @@ pub struct Partial {
     /// returning; this is the list of what it deleted (or tried to). A crash
     /// during the cut leaves them instead, for the open-time sweep or GC.
     pub segments: Vec<DestagedSegment>,
-    /// Bytes the deletions freed (give them back to the ledger).
+    /// Of those, the segments whose delete failed: they stay on disk, outside
+    /// the space ledger, until the open-time sweep (only above the high-water
+    /// mark) or GC removes them (M9 re-review R2).
+    pub undeleted: Vec<lunix_format::SegId>,
+    /// Bytes the deletions freed. Informational: nothing beyond the
+    /// coordinator's C2 bound was charged, and the coordinator releases that
+    /// bound whole on failure (M9 re-review R3); do not release this again.
     pub freed_bytes: u64,
     /// Counters up to the failure.
     pub stats: DestageStats,
@@ -105,6 +111,7 @@ impl fmt::Debug for Partial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Partial")
             .field("segments", &self.segments)
+            .field("undeleted", &self.undeleted)
             .field("freed_bytes", &self.freed_bytes)
             .field("stats", &self.stats)
             .finish()

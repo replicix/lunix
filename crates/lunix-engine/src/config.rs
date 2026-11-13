@@ -61,6 +61,10 @@ pub struct EngineConfig {
     pub gc_budget: Option<GcBudget>,
     /// GC settings handed to the collector.
     pub gc_params: Option<lunix_iface::gc::GcParams>,
+    /// Operator override (ADR-31, decision of 2026-11-13): open although the
+    /// chain from the tip back to the rollback floor cannot be walked
+    /// (`OpenError::ForkUnverifiable`). The caller audits it.
+    pub allow_unverifiable_fork: bool,
 }
 
 impl EngineConfig {
@@ -91,6 +95,7 @@ impl EngineConfig {
             inflight_timeout: Duration::from_secs(60),
             gc_budget: None,
             gc_params: None,
+            allow_unverifiable_fork: false,
         }
     }
 

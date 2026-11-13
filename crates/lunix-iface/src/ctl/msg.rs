@@ -190,6 +190,23 @@ pub struct Credential {
     /// The KMK fingerprint the client expects, 32 lowercase hex digits.
     #[serde(default)]
     pub fingerprint: Option<String>,
+    /// The mode the caller expects the volume to have (ADR-11 F7: the request
+    /// decides the mode). Absent with key material means `encrypted`;
+    /// `integrity` declares an integrity credential. `plain` with key material
+    /// is refused by `validate`.
+    #[serde(default)]
+    pub mode: Option<VolumeMode>,
+}
+
+/// What an attach does about journal damage found at recovery (DESIGN §4.4
+/// step 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JournalDamagePolicy {
+    /// Log the damage and let the first lane open wipe it.
+    Wipe,
+    /// Refuse to attach (code `journal_damage`), leaving the journal for `fsck`.
+    Refuse,
 }
 
 /// `attach`.
@@ -213,6 +230,14 @@ pub struct Attach {
     /// Unlock material.
     #[serde(default)]
     pub credential: Option<Credential>,
+    /// Journal damage policy of this attach; the daemon's configured default
+    /// when absent.
+    #[serde(default)]
+    pub on_journal_damage: Option<JournalDamagePolicy>,
+    /// Operator override of `fork_unverifiable` (ADR-31): attach although the
+    /// chain from the tip back to the floor cannot be walked. Audited.
+    #[serde(default)]
+    pub allow_unverifiable_fork: bool,
 }
 
 /// `resize`.
@@ -258,6 +283,8 @@ pub struct GcRequest {
 
 fn valid_name(s: &str) -> bool {
     !s.is_empty()
+        && s != "."
+        && s != ".."
         && s.len() <= MAX_NAME
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
@@ -377,6 +404,10 @@ impl Credential {
         if self.key_file.as_deref().is_some_and(|p| !valid_path(p)) {
             return Err(RequestInvalid("key_file"));
         }
+        let key_material = self.passphrase.is_some() || self.key_file.is_some();
+        if key_material && self.mode == Some(VolumeMode::Plain) {
+            return Err(RequestInvalid("plain volumes take no key material"));
+        }
         if let Some(f) = &self.fingerprint {
             let ok = f.len() == 32 && f.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
             if !ok {
@@ -399,6 +430,16 @@ pub enum ErrorCode {
     Downgrade,
     /// The unlock key does not match the volume (exit 6).
     WrongKmk,
+    /// R4: the tip is below this host's rollback floor (exit 6).
+    Rollback,
+    /// R4: the chain from the tip does not pass through the commit the floor
+    /// recorded (exit 6).
+    Fork,
+    /// R4: the chain from the tip back to the floor cannot be walked (commits
+    /// missing); an operator override attaches anyway (exit 6).
+    ForkUnverifiable,
+    /// Journal damage found and the attach asked to refuse: run `fsck` (exit 7).
+    JournalDamage,
     /// No space (exit 5).
     NoSpace,
     /// The request is invalid (exit 2).
@@ -414,13 +455,19 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// The `lunix` process exit code for this error: 3 busy, 4 not found, 5 no
-    /// space, 6 downgrade or wrong key, 2 usage, 1 anything else.
+    /// space, 6 downgrade, wrong key, rollback or fork, 7 journal damage, 2
+    /// usage, 1 anything else.
     pub fn exit_code(self) -> u8 {
         match self {
             Self::Busy => 3,
             Self::NotFound => 4,
             Self::NoSpace => 5,
-            Self::Downgrade | Self::WrongKmk => 6,
+            Self::Downgrade
+            | Self::WrongKmk
+            | Self::Rollback
+            | Self::Fork
+            | Self::ForkUnverifiable => 6,
+            Self::JournalDamage => 7,
             Self::Invalid => 2,
             Self::Io | Self::Internal | Self::Unknown => 1,
         }
@@ -557,7 +604,8 @@ pub struct VolumeSummary {
     pub uuid: String,
     /// The volume directory.
     pub dir: String,
-    /// Size in bytes.
+    /// Size in bytes; 0 when unknown (a detached encrypted volume's size is
+    /// sealed in its commits).
     pub size_bytes: u64,
     /// The mode.
     pub mode: VolumeMode,
@@ -650,6 +698,19 @@ pub struct Attached {
     pub depth: u16,
     /// True when an existing device was recovered instead of added.
     pub recovered: bool,
+    /// No rollback floor existed on this host: a rollback of history before
+    /// this attach cannot be detected (ADR-31). The floor is recorded now.
+    #[serde(default)]
+    pub first_attach: bool,
+}
+
+/// The rollback floor of `state/pins` (ADR-31) as the socket reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RollbackFloorView {
+    /// The highest verified tip this host recorded.
+    pub max_commit_seq: u64,
+    /// BLAKE3-256 of that commit's stored bytes, 64 lowercase hex digits.
+    pub tip_hash: String,
 }
 
 /// `volume_status`.
@@ -661,7 +722,8 @@ pub struct VolumeStatusBody {
     pub uuid: String,
     /// State.
     pub state: VolumeState,
-    /// Size in bytes.
+    /// Size in bytes; 0 when unknown (a detached encrypted volume's size is
+    /// sealed in its commits).
     pub size_bytes: u64,
     /// Chunk size.
     pub chunk_size: u32,
@@ -689,4 +751,8 @@ pub struct VolumeStatusBody {
     /// Chunk bytes over stored bytes (finite) or absent.
     #[serde(default)]
     pub compression_ratio: Option<f64>,
+    /// The rollback floor this host recorded, attached or not; absent when
+    /// none was ever recorded.
+    #[serde(default)]
+    pub rollback_floor: Option<RollbackFloorView>,
 }
