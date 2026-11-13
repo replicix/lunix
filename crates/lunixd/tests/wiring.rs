@@ -562,3 +562,118 @@ fn check_is_clean_and_finds_a_damaged_extent() {
     let r = lunixd::check::check_volume(&v.voldir, &cred).unwrap();
     assert!(!r.is_clean(), "damage found: {r:?}");
 }
+
+/// Review "needs a run" 5: more queues than lanes on an existing volume. A
+/// volume used with 2 queues, closed, then opened with 4 at the same
+/// `journal_max`: the new lanes get their files, the data is all there.
+#[test]
+fn more_queues_than_lanes_on_an_existing_volume() {
+    let Some(t) = scratch("lanes") else { return };
+    let tweak = |j: &mut lunix_format::local::VolumeJson| j.journal_max = 512 << 20;
+    let v = create_volume(&CreateParams {
+        name: "l",
+        parent: t.path(),
+        size_bytes: SIZE,
+        chunk_size: 64 << 10,
+        mode: CryptoMode::Plain,
+        policy: CodecPolicy::Lz4,
+        level: 0,
+        id_len: IdLen::Sixteen,
+        map_fanout: 512,
+        key_file: None,
+        passphrase: None,
+        argon2: Argon2Cost::DEFAULT,
+        json: Some(&tweak),
+    })
+    .unwrap();
+    let s = open(&v, CryptoMode::Plain);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    for i in 0..4u64 {
+        assert!(d
+            .write_on(i as usize, i * (64 << 10), &pattern(i, 64 << 10))
+            .is_ok());
+    }
+    assert!(d.flush().is_ok());
+    drop(d);
+    drop(s); // crash: the records stay in lanes 0 and 1
+    let mut p = params(&v, CryptoMode::Plain);
+    p.queues = 4;
+    let s = open_volume(p).expect("open with 4 queues");
+    assert!(s.engine.recovery_report().replayed >= 4);
+    let mut d = Driver::new(&s.engine, 4, 1 << 20);
+    for i in 0..4u64 {
+        assert_eq!(d.read(i * (64 << 10), 64 << 10), pattern(i, 64 << 10));
+    }
+    // 8 queues do not fit a 512 MiB ring (queues x 128 MiB).
+    drop(d);
+    s.engine.quiesce().unwrap();
+    drop(s);
+    let mut p = params(&v, CryptoMode::Plain);
+    p.queues = 8;
+    match open_volume(p) {
+        Err(StackError::Invalid(m)) => assert!(m.contains("128 MiB"), "{m}"),
+        Err(e) => panic!("expected the ring-size refusal, got {e:?}"),
+        Ok(_) => panic!("8 queues cannot fit a 512 MiB ring"),
+    }
+}
+
+/// Review "needs a run" 6: `on_journal_damage = refuse` after a crash whose
+/// last record is torn (its data fails the CRC, nothing valid follows).
+///
+/// **Finding (reported, not changed here):** the journal reports such a tail
+/// as a damaged range (`next_seq` is `None`), and the engine refuses on any
+/// damaged range, so `refuse` keeps a volume offline after an ordinary crash
+/// with a torn last batch. This test pins today's behaviour: `refuse`
+/// answers `JournalDamage` and leaves the journal for fsck; `wipe` opens with
+/// every record before the tail. The proposed engine change (refuse only when
+/// valid records follow the damage) is in the M12a report.
+#[test]
+fn a_torn_last_record_under_refuse_and_wipe() {
+    let Some(t) = scratch("torn") else { return };
+    let mode = CryptoMode::Plain;
+    let v = create(t.path(), mode, 64 << 10);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    let marks: Vec<Vec<u8>> = (0..3).map(|i| pattern(2000 + i, 4096)).collect();
+    for (i, m) in marks.iter().enumerate() {
+        assert!(d.write_on(0, (i as u64) * (64 << 10), m).is_ok());
+        assert!(d.flush().is_ok());
+    }
+    drop(d);
+    drop(s);
+    let mut hit = false;
+    for e in std::fs::read_dir(v.voldir.join("journal"))
+        .unwrap()
+        .flatten()
+    {
+        let mut b = std::fs::read(e.path()).unwrap();
+        if let Some(pos) = b.windows(64).position(|w| w == &marks[2][..64]) {
+            b[pos + 100] ^= 0xff;
+            std::fs::write(e.path(), &b).unwrap();
+            hit = true;
+        }
+    }
+    assert!(hit);
+    let before = journal_bytes(&v.voldir);
+    let mut p = params(&v, mode);
+    p.on_journal_damage = OnJournalDamage::Refuse;
+    match open_volume(p) {
+        Err(StackError::JournalDamage) => {}
+        other => panic!("today a torn tail is damage under refuse: {other:?}"),
+    }
+    assert!(
+        journal_bytes(&v.voldir) == before,
+        "refuse touched the journal"
+    );
+    let s = open(&v, mode);
+    let rep = s.engine.recovery_report();
+    assert_eq!(rep.damaged.len(), 1, "{rep:?}");
+    assert_eq!(
+        rep.damaged[0].next_seq, None,
+        "nothing valid after the tail"
+    );
+    assert!(rep.ignored_after_gap.is_none(), "{rep:?}");
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    assert_eq!(&d.read(0, 4096), &marks[0]);
+    assert_eq!(&d.read(64 << 10, 4096), &marks[1]);
+}
