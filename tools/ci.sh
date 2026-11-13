@@ -44,6 +44,14 @@ step "lunix-journal with crashpoints: clippy and kill tests (lead, M3)"
 cargo clippy -j "$jobs" -p lunix-journal --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-journal --features crashpoints --test crashpoints
 
+step "lunix-destage with crashpoints: clippy and tests (lead, M9)"
+cargo clippy -j "$jobs" -p lunix-destage --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-destage --features crashpoints
+
+step "lunix-engine with crashpoints: clippy and tests (lead, M11)"
+cargo clippy -j "$jobs" -p lunix-engine --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-engine --features crashpoints
+
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 

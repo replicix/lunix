@@ -173,7 +173,11 @@ pub trait SegmentStore: Send + Sync {
     fn list(&self) -> Result<Vec<SegmentInfo>>;
 
     /// Deletes a sealed segment (unlink, directory fsync) and returns the bytes
-    /// freed; a missing segment frees 0 (deletes are idempotent). GC only.
+    /// freed; a missing segment frees 0 (deletes are idempotent). Callers: GC,
+    /// the orphan sweep at open, and destage, which deletes the segments it
+    /// sealed for a cut that failed before any durable object named them.
+    /// Never delete a segment that a durable commit, the index or a pending
+    /// re-hint names.
     fn delete(&self, seg: SegId) -> Result<u64>;
 }
 
