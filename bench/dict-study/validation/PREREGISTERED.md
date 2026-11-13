@@ -318,3 +318,25 @@ applies.
    appendix** (hosts by category, versions, seeds, hashes, the one analysis command, actual compute and disk, `raw/` inventory).
 8. **Figures** (SVG under `figures/`): saving by arm per corpus (Q1), per-class saving (Q1), `pv` against shipped per volume (Q2), the
    sweep (Q2), saving by chunk size for database files (Q3), compress CPU against saving for every arm (all).
+
+## Amendment A1 (2026-11-13, maintainer ruling before any follow-up data): D2 on database images
+
+The independent review of the first analysis found the D2 comparator ambiguous for the cap and ΔCores, and three measurements
+missing. The maintainer ruled the following **before** any of the follow-up data below existed. It replaces deviation 22 of the
+first analysis and fixes D2 for both families; no threshold changes.
+
+1. **Comparator.** Built-in sets did not pass (D1 NO-GO), so the realistic alternative to a per-volume dictionary is the plain
+   counterfactual. For D2, `S`, `LB`, `N`, ΔCPU, ΔCores and the 0.8× hard cap (compress and decompress) are all taken against the
+   **counterfactual of §1.1** (the best plain level, behind the probe, that passes the cap), per volume and chunk size.
+2. **Timing per volume.** The cap and ΔCPU of every database image come from that image's own timing (volume-wide, block-stratified
+   1 GiB sample of all its unique non-hole chunks, quiet host, §3 method), at 16 and 64 KiB, for the plain levels needed to fix the
+   counterfactual (at least zstd-1, zstd-2, zstd-3), `pv@1`, `pv@3`, `pv-cover@1` and `pv-cover@3`. No stand-in cell decides.
+3. **COVER.** `pv-cover` is trained (same 1 % sample, same size) and measured on all 15 database images at both sizes. Per §3, if
+   `pv-cover` beats `pv` by more than 1 pp (median over the 15 images at 16 KiB), the database family's D2 is judged on `pv-cover`;
+   otherwise on `pv`. The raw-device family keeps its first-analysis verdict (0 of 4 in every reading).
+4. **Sizes.** The 16 KiB vote decides. The 64 KiB vote is reported as confirmatory; if it does not also reach 8 of 15, the verdict is
+   recorded as "GO at 16 KiB only" and the summary states what that means for the product.
+5. **D5.** The per-object Constellation pass (`select(name, head, len)` + dictionary at zstd:3 against zstd:3, and the oracle) is
+   measured on the four file corpora, so that the decision table carries D5; the hard cap still applies regardless of `N`.
+6. **Intervals.** 1 MiB blocks remain the pre-registered resampling unit and decide; the 16 MiB-block intervals are printed next to
+   them in every table, because neighbouring 1 MiB blocks are measurably dependent.
