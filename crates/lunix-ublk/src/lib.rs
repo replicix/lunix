@@ -22,16 +22,26 @@
 //!   libublk's `run_target()` (which sends one when its queue threads end,
 //!   and deadlocked the kernel after a quiesce) is not used. A unit test
 //!   scans the sources for either.
-//! * After [`UblkDevice::quiesce`] the daemon exits ([`Quiesced::exit`]).
+//! * After [`UblkDevice::quiesce`] the daemon exits ([`Quiesced::exit`]), but
+//!   only after a true drain: requests the engine still holds are committed
+//!   by the layer's own `COMMIT_AND_FETCH_REQ` (libublk would drop them) and
+//!   the queue threads end with nothing in flight. A failed quiesce leaves the
+//!   device canceling; the device is then latched `Quiescing`.
 //! * Detach is `TRY_STOP_DEV` ([`UblkDevice::detach`]); it is `Busy` while
-//!   the device is mounted.
+//!   the block device has any opener (a mount, an open descriptor, udev's probe).
+//! * `DEL_DEV` of a LIVE device is a stop: [`UblkDevice::delete_by_id`] refuses
+//!   it unless forced, and only another process may force it.
 //! * A fatal error in a queue thread, a panic, or a request completed twice
 //!   calls `std::process::abort()` (like `kill -9`, recoverable with
-//!   `REISSUE`). Nothing exits with started requests in flight.
-//! * Every control command has a watchdog (30 s, `DEL_DEV` 60 s); a timeout
-//!   is reported and nothing is killed or retried.
+//!   `REISSUE`), with core dumps off. The only other way out of a queue loop
+//!   is "down and nothing in flight".
+//! * Every control command has a watchdog (30 s, `DEL_DEV` 60 s) and runs on a
+//!   helper thread with all signals blocked; a timeout is reported and nothing
+//!   is killed or retried.
 //! * `BATCH_IO` is never used; the copy path is the default and `USER_COPY`
 //!   is opt-in.
+//! * Identity ([`check_identity`]): the volume tag in `ublksrv_flags`, geometry,
+//!   and `record size <= device size <= engine size`.
 
 pub mod config;
 pub mod ctl;
