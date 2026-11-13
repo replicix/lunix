@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use lunix_format::gcfile::Condemned;
-use lunix_format::local::{CheckpointSlot, LocalPins, Pin};
+use lunix_format::local::{CheckpointSlot, LocalPins, LocalPinsFile, Pin, RollbackFloor};
 use lunix_format::pins::{Consistency, HoldPin, ReaderPin, SnapshotPin};
 use lunix_format::{paths, CommitSeq, CryptoMode, FamilyId, ObjectKind, TimeMs, VolumeUuid};
 use lunix_iface::crypto::MetaCodec;
@@ -159,6 +159,109 @@ fn create_open_and_the_small_state_files_round_trip() {
     };
     vol.store_local_pins(&pins).expect("pins");
     assert_eq!(vol.local_pins().expect("pins"), Some(pins));
+}
+
+fn floor(seq: u64, h: u8) -> RollbackFloor {
+    RollbackFloor {
+        max_commit_seq: CommitSeq(seq),
+        tip_hash: [h; 32],
+    }
+}
+
+fn read_pins(dir: &std::path::Path) -> LocalPinsFile {
+    let bytes = std::fs::read(dir.join("state/pins")).expect("read state/pins");
+    LocalPinsFile::decode(&bytes).expect("decode state/pins")
+}
+
+#[test]
+fn the_rollback_floor_is_raise_only_and_refuses_a_fork() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    assert_eq!(vol.rollback_floor().expect("none"), None);
+    vol.raise_rollback_floor(&floor(5, 1)).expect("first");
+    vol.raise_rollback_floor(&floor(5, 1))
+        .expect("equal is a no-op");
+
+    let lower = vol.raise_rollback_floor(&floor(4, 1)).expect_err("lower");
+    assert_eq!(lower.kind(), ErrorKind::Refused);
+    let fork = vol.raise_rollback_floor(&floor(5, 2)).expect_err("fork");
+    assert_eq!(fork.kind(), ErrorKind::Refused);
+    assert_eq!(vol.rollback_floor().expect("floor"), Some(floor(5, 1)));
+    assert_eq!(
+        read_pins(dir.path()).floor,
+        Some(floor(5, 1)),
+        "on disk too"
+    );
+
+    vol.raise_rollback_floor(&floor(6, 3)).expect("raise");
+    drop(vol);
+    let vol = open(dir.path(), MODE, test_opts()).expect("reopen");
+    assert_eq!(vol.rollback_floor().expect("floor"), Some(floor(6, 3)));
+}
+
+#[test]
+fn raising_the_floor_creates_the_pins_with_the_volumes_identity() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    assert_eq!(vol.local_pins().expect("none"), None);
+    vol.raise_rollback_floor(&floor(1, 7)).expect("raise");
+    let pins = vol.local_pins().expect("pins").expect("created");
+    assert_eq!(pins.volume_uuid, VolumeUuid(UUID));
+    assert_eq!(
+        (pins.max_keyring_seq, pins.max_epoch, pins.pin),
+        (0, 0, None)
+    );
+    assert_eq!(read_pins(dir.path()).floor, Some(floor(1, 7)));
+}
+
+#[test]
+fn storing_the_pins_keeps_the_floor_and_the_floor_keeps_the_pins() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let mut pins = LocalPins {
+        volume_uuid: VolumeUuid(UUID),
+        family_id: FamilyId([9; 16]),
+        max_keyring_seq: 3,
+        max_epoch: 1,
+        pin: Some(Pin {
+            mode: CryptoMode::Integrity,
+            fingerprint: [5; 16],
+        }),
+    };
+    vol.store_local_pins(&pins).expect("pins");
+    vol.raise_rollback_floor(&floor(9, 4)).expect("raise");
+    assert_eq!(vol.local_pins().expect("pins"), Some(pins.clone()));
+
+    pins.max_keyring_seq = 4;
+    vol.store_local_pins(&pins).expect("replace the pins");
+    assert_eq!(vol.local_pins().expect("pins"), Some(pins));
+    assert_eq!(
+        vol.rollback_floor().expect("floor"),
+        Some(floor(9, 4)),
+        "replacing the pins never drops the floor"
+    );
+}
+
+#[test]
+fn an_unreadable_pins_file_is_an_error_not_an_empty_floor() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    vol.raise_rollback_floor(&floor(2, 2)).expect("raise");
+    let path = dir.path().join("state/pins");
+    let mut bytes = std::fs::read(&path).expect("read");
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&path, &bytes).expect("damage");
+    assert!(vol.rollback_floor().is_err());
+    assert!(vol.raise_rollback_floor(&floor(3, 3)).is_err());
+    let pins = LocalPins {
+        volume_uuid: VolumeUuid(UUID),
+        family_id: FamilyId([9; 16]),
+        max_keyring_seq: 0,
+        max_epoch: 0,
+        pin: None,
+    };
+    assert!(vol.store_local_pins(&pins).is_err());
 }
 
 #[test]

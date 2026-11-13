@@ -51,9 +51,15 @@ pub enum IoOp {
     Write,
     /// Make every earlier completed write durable.
     Flush,
-    /// Deallocate the range (reads as zeros afterwards).
+    /// Deallocate the range (reads as zeros afterwards). The `UBLK_IO_F_*`
+    /// modifiers of a discard are not conveyed (see [`IoOp::WriteZeroes`]).
     Discard,
-    /// Zero the range.
+    /// Zero the range. `UBLK_IO_F_NOUNMAP` and FUA on a WRITE_ZEROES are not
+    /// conveyed by the ublk layer today: [`IoRequest`] has no field for them.
+    /// That is fine for a log-structured engine, which always records a hole
+    /// and never keeps the blocks allocated; an engine that must honour
+    /// `NOUNMAP` or make a zeroing durable on its own needs a field added
+    /// first.
     WriteZeroes,
 }
 

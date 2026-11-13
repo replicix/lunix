@@ -29,12 +29,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lunix_format::gcfile::Condemned;
-use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, VolumeJson};
+use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, RollbackFloor, VolumeJson};
 use lunix_format::node::NodeLoc;
 use lunix_format::segment::FooterBody;
 use lunix_format::{ChunkId, CommitSeq, Hint, ObjId, PackId, SegId, TimeMs, VolumeUuid};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::journal::WriteSeqRange;
 
 /// Allocates object ids (segments, map packs, index runs share one counter,
@@ -432,8 +432,44 @@ pub trait VolumeDir: Send + Sync {
     /// `state/pins`; `None` when absent.
     fn local_pins(&self) -> Result<Option<LocalPins>>;
 
-    /// Writes `state/pins` atomically.
+    /// Writes `state/pins` atomically. The rollback floor already recorded
+    /// (see [`rollback_floor`](Self::rollback_floor)) is kept: `LocalPins`
+    /// does not carry it, and replacing the pins never lowers it.
     fn store_local_pins(&self, pins: &LocalPins) -> Result<()>;
+
+    /// The rollback floor `{max_commit_seq, tip_hash}` of `state/pins`
+    /// version 2 (ADR-31, rule R4); `None` when no floor was ever recorded,
+    /// when `state/pins` is absent, and for a version 1 file. The default is
+    /// `None` for implementations that predate the floor.
+    ///
+    /// # Errors
+    /// `Io`, `Corrupt` for an unreadable `state/pins`.
+    fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
+        Ok(None)
+    }
+
+    /// Raises the rollback floor, keeping the rest of `state/pins`. The new
+    /// floor is durable (temporary file, `fdatasync`, rename, directory
+    /// `fsync`) when this returns `Ok`. When `state/pins` is absent it is
+    /// created with zero monotonic floors and no pin.
+    ///
+    /// The floor is raise-only. A `floor` equal to the recorded one is a
+    /// no-op. A lower `max_commit_seq` is refused, and so is an **equal**
+    /// `max_commit_seq` with a different `tip_hash`, so that a buggy caller
+    /// cannot turn a floor into a fork. Only offline
+    /// `fsck --repair --truncate-tip` and an explicit operator reset lower
+    /// it, and they do not use this method.
+    ///
+    /// # Errors
+    /// `Refused` for a lower `max_commit_seq` or an equal one with another
+    /// hash (nothing changes); `Io`; `Unsupported` for implementations that
+    /// predate the floor (the default).
+    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
+        let _ = floor;
+        Err(Error::Unsupported {
+            what: "rollback floor",
+        })
+    }
 
     /// The shared object-id allocator.
     fn ids(&self) -> Arc<dyn IdAllocator>;
