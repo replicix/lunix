@@ -98,8 +98,11 @@ impl Drop for Dev {
         drop(self.fd.take());
         if std::thread::panicking() {
             // A failed test must not leave a device without a daemon: detach
-            // (udev may hold the device for a moment), and if that does not
-            // work delete the device this test created (nothing is mounted).
+            // (udev may hold the device for a moment). If that does not work,
+            // `DEL_DEV` from this process would be a `STOP_DEV` by the
+            // serving process (the phase 0 deadlock), so the process aborts:
+            // the device goes QUIESCED and the script's sweep deletes it from
+            // another process.
             let end = Instant::now() + Duration::from_secs(10);
             loop {
                 match self.dev.detach() {
@@ -109,17 +112,12 @@ impl Drop for Dev {
                     }
                     Err(e) => {
                         eprintln!(
-                            "cleanup: detach of {} failed: {e}; deleting it",
+                            "cleanup: detach of {} failed: {e}; aborting for the sweep",
                             self.dev.bdev_path()
                         );
-                        break;
+                        std::process::abort();
                     }
                 }
-            }
-            if let Err(e) =
-                UblkDevice::delete_by_id(self.dev.dev_id(), lunix_ublk::Timeouts::default())
-            {
-                eprintln!("cleanup: DEL_DEV of {} failed: {e}", self.dev.bdev_path());
             }
         }
     }
@@ -263,8 +261,34 @@ fn gen_op(rng: &mut Rng, base: u64, region: u64, seed: u64) -> IoSpec {
     }
 }
 
+/// What a workload generated, by kind.
+#[derive(Clone, Copy, Default, Debug)]
+struct Generated {
+    reads: u64,
+    writes: u64,
+    fua: u64,
+    flushes: u64,
+    discards: u64,
+    zeroes: u64,
+}
+
+impl Generated {
+    fn add(&mut self, io: &IoSpec) {
+        match io.op {
+            IoOp::Read => self.reads += 1,
+            IoOp::Write => {
+                self.writes += 1;
+                self.fua += u64::from(io.fua);
+            }
+            IoOp::Flush => self.flushes += 1,
+            IoOp::Discard => self.discards += 1,
+            IoOp::WriteZeroes => self.zeroes += 1,
+        }
+    }
+}
+
 /// `threads` threads, each with a private region and oracle, `ops` requests each.
-fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) {
+fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) -> Generated {
     let mut handles = Vec::new();
     for t in 0..threads {
         let f = d.open();
@@ -272,6 +296,7 @@ fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) {
             let mut rng = Rng(seed ^ (t + 1).wrapping_mul(0x1234_5678_9abc_def1));
             let mut oracle = DeviceOracle::new(region);
             let mut buf = Aligned::new(1 << 20);
+            let mut gen = Generated::default();
             let base = t * region;
             for i in 0..ops {
                 let seed_i = rng.0 ^ i as u64;
@@ -281,6 +306,7 @@ fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) {
                     ..io
                 };
                 let got = on_device(&f, &io, &mut buf);
+                gen.add(&io);
                 // The oracle works on region-local offsets.
                 io.offset_bytes = local.offset_bytes;
                 match oracle.apply(&io) {
@@ -312,11 +338,20 @@ fn run_workload(d: &Dev, threads: u64, region: u64, ops: usize, seed: u64) {
                 );
                 at += n;
             }
+            gen
         }));
     }
+    let mut total = Generated::default();
     for h in handles {
-        h.join().expect("workload thread");
+        let g = h.join().expect("workload thread");
+        total.reads += g.reads;
+        total.writes += g.writes;
+        total.fua += g.fua;
+        total.flushes += g.flushes;
+        total.discards += g.discards;
+        total.zeroes += g.zeroes;
     }
+    total
 }
 
 /// Counters are updated after the commit is queued, so a caller can see the
@@ -357,12 +392,47 @@ fn wait_gone(path: &str) -> bool {
 fn full_cycle(queues: u16, mode: CompletionMode, path: DataPath) {
     let d = attach(32 * MIB, queues, mode, path, 64 * MIB);
     assert_eq!(size_of_fd(d.fd.as_ref().unwrap()), 32 * MIB);
-    run_workload(&d, 4, 8 * MIB, 600, 0xe2e0 + u64::from(queues));
+    let gen = run_workload(&d, 4, 8 * MIB, 600, 0xe2e0 + u64::from(queues));
     // The engine saw exactly what the oracle says: compare the whole device once more through the engine.
     let snap = d.engine.snapshot();
     assert_eq!(snap.len() as u64, 32 * MIB);
     settle(&d.dev);
-    let counters = d.dev.queue_counters();
+    // What the guest sent is what the layer decoded and what the engine saw:
+    // FUA is not dropped, FLUSH, DISCARD and WRITE_ZEROES are not mixed up.
+    let layer = d.dev.queue_counters();
+    let sum = |f: fn(&lunix_ublk::QueueSnapshot) -> u64| layer.iter().map(f).sum::<u64>();
+    assert!(
+        gen.fua > 0 && gen.flushes > 0 && gen.discards > 0 && gen.zeroes > 0,
+        "{gen:?}"
+    );
+    // The block layer may split or add requests, never lose them.
+    assert!(sum(|c| c.fua_writes) >= gen.fua, "fua: {gen:?} {layer:?}");
+    assert!(
+        sum(|c| c.flushes) >= gen.flushes,
+        "flush: {gen:?} {layer:?}"
+    );
+    assert!(
+        sum(|c| c.discards) >= gen.discards,
+        "discard: {gen:?} {layer:?}"
+    );
+    assert!(
+        sum(|c| c.write_zeroes) >= gen.zeroes,
+        "zeroes: {gen:?} {layer:?}"
+    );
+    assert!(sum(|c| c.writes) >= gen.writes && sum(|c| c.reads) >= gen.reads);
+    assert_eq!(sum(|c| c.rejected), 0);
+    let eng = d.engine.counters();
+    let st = d.engine.stats();
+    assert_eq!(
+        eng.fua_writes,
+        sum(|c| c.fua_writes),
+        "the engine saw every FUA the layer decoded"
+    );
+    assert_eq!(st.ops_flush, sum(|c| c.flushes));
+    assert_eq!(st.ops_discard, sum(|c| c.discards));
+    assert_eq!(st.ops_write_zeroes, sum(|c| c.write_zeroes));
+    assert_eq!(eng.einval, 0);
+    let counters = layer;
     let started: u64 = counters.iter().map(|c| c.started).sum();
     let completed: u64 = counters.iter().map(|c| c.completed).sum();
     assert_eq!(started, completed, "every started request was completed");

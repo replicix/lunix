@@ -16,6 +16,10 @@ pub struct Harden {
     /// left as the host has it, so an `umount` elsewhere reaches this
     /// namespace too.
     pub private_mount_ns: bool,
+    /// `RLIMIT_CORE` 0 and `PR_SET_DUMPABLE` 0: a core dump of a process with
+    /// locked buffers keeps `/dev/ublkcN` open for long, so `abort()` (the
+    /// recovery path) must not dump.
+    pub no_core_dumps: bool,
 }
 
 impl Default for Harden {
@@ -24,6 +28,7 @@ impl Default for Harden {
             mlock: true,
             io_flusher: true,
             private_mount_ns: true,
+            no_core_dumps: true,
         }
     }
 }
@@ -38,6 +43,18 @@ pub fn harden_process(h: Harden) -> Result<()> {
     if h.private_mount_ns {
         // SAFETY: unshare with a constant flag.
         if unsafe { libc::unshare(libc::CLONE_NEWNS) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
+    if h.no_core_dumps {
+        let zero = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: setrlimit reads one initialised `rlimit`; prctl takes integers.
+        if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &zero) } != 0
+            || unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0
+        {
             return Err(std::io::Error::last_os_error().into());
         }
     }
@@ -67,6 +84,7 @@ mod tests {
             mlock: false,
             io_flusher: false,
             private_mount_ns: false,
+            no_core_dumps: false,
         };
         harden_process(none).unwrap();
     }
@@ -74,6 +92,6 @@ mod tests {
     #[test]
     fn the_default_selects_everything() {
         let d = Harden::default();
-        assert!(d.mlock && d.io_flusher && d.private_mount_ns);
+        assert!(d.mlock && d.io_flusher && d.private_mount_ns && d.no_core_dumps);
     }
 }

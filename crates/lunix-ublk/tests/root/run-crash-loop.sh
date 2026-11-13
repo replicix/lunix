@@ -16,12 +16,14 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 IMG="$LUNIX_SPIKE_DIR/rec.img"; MNT="$LUNIX_SPIKE_DIR/mnt/rec"; STATE="$LUNIX_SPIKE_DIR/state/loop"
 need_safe "$IMG"; need_safe "$MNT"; need_safe "$STATE"
 need_clean_start "$OUT"
+script_cap "${SCRIPT_CAP:-3000}"   # the script's own cap (W8); the wrapper timeout is larger
 load_ublk
 rm -rf "$STATE"; mkdir -p "$STATE" "$MNT"; rm -f "$IMG"
 add_cleanup 'teardown >> "$OUT/teardown.log" 2>&1'
 DARGS=()
 [ "$USER_COPY" = 1 ] && DARGS+=(--user-copy)
 [ "$CONTROL" = noreissue ] && DARGS+=(--no-reissue)
+[ -n "${WORKERS:-}" ] && DARGS+=(--workers "$WORKERS")   # WORKERS=0: the engine completes inline (like the M11 engine)
 MKFS_GIB=$IMG_GIB
 df_guard "$LUNIX_SPIKE_DIR" "$IMG_GIB" || exit 2
 MAX_GIB=$IMG_GIB
@@ -57,7 +59,8 @@ JOB
 # handover N: QUIESCE (the daemon exits), with the kernel timeout QUIESCE_MS; a timeout is retried once, then
 # the kill -9 fallback (recoverable like any crash) is taken and counted.
 handover() {
-  local old=$DPID qrc i
+  local old=$DPID qrc i t0 t1
+  t0=$(now_ns)
   tdc quiesce --timeout-ms "$QUIESCE_MS" > "$OUT/quiesce.last.txt" 2>&1; qrc=$?
   if [ "$qrc" != 0 ] && kill -0 "$old" 2>/dev/null; then
     echo "quiesce attempt failed ($(cat "$OUT/quiesce.last.txt")); retrying once" | tee -a "$OUT/notes.txt"
@@ -70,6 +73,12 @@ handover() {
   for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
   kill -0 "$old" 2>/dev/null && wedged "daemon $old did not exit within 30 s of QUIESCE; stopped, nothing killed"
   wait "$old"; local xrc=$?
+  t1=$(now_ns)
+  # true drain: the kernel has no started request left when the daemon exits, and the exit is quick
+  local ki; ki=$(sed -n 's/.*kernel_inflight=\([0-9,]*\).*/\1/p' "$OUT/quiesce.last.txt" | head -1)
+  echo "$(( (t1 - t0) / 1000000 )),$ki,$(sed -n 's/.*drain_commits=\([0-9]*\).*/\1/p' "$OUT/quiesce.last.txt" | head -1)" >> "$OUT/handover.csv"
+  [ "$ki" = "0,0" ] || { echo "handover: kernel_inflight=$ki" | tee -a "$OUT/notes.txt"; NOTES="$NOTES;kernel-inflight-$ki"; }
+  [ $(( (t1 - t0) / 1000000 )) -lt 8000 ] || { echo "handover took $(( (t1 - t0) / 1000000 )) ms" | tee -a "$OUT/notes.txt"; NOTES="$NOTES;slow-handover"; }
   [ "$xrc" = 0 ] || { echo "quiesce exit code $xrc" | tee -a "$OUT/notes.txt"; NOTES="$NOTES;quiesce-exit-$xrc"; }
 }
 
@@ -108,6 +117,8 @@ run_phase() { # name count delay
       sleep "$iv"
       [ -n "$FIO_PID" ] && ! kill -0 "$FIO_PID" 2>/dev/null && { aborted="fio ended early at cycle $cyc"; break; }
       if [ "$CONTROL" = fault ]; then tdc cmd fault on >/dev/null 2>&1; sleep 0.5; fi
+      # one acknowledged FUA write is dropped, then the daemon dies (sensitivity of the harness to a single lost write)
+      if [ "$CONTROL" = dropfua ]; then tdc cmd fault drop-fua-one >/dev/null 2>&1; sleep 2; fi
       tk=$(now_ns)
       if [ "$KILL_MODE" = quiesce ]; then
         handover

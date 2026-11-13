@@ -12,6 +12,17 @@ use std::time::Duration;
 
 use crate::error::{Result, UblkError};
 
+/// Blocks every signal on the calling thread.
+pub(crate) fn block_all_signals() {
+    // SAFETY: `sigfillset` and `pthread_sigmask` get a valid, initialised set
+    // and a null old-set pointer.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&mut set);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+    }
+}
+
 /// Runs `f` on a helper thread named after `what` and waits at most `timeout`.
 ///
 /// # Errors
@@ -27,6 +38,9 @@ where
     std::thread::Builder::new()
         .name(format!("ublk-ctl-{what}"))
         .spawn(move || {
+            // No signal may interrupt a control command half way (the kernel
+            // can finish it later and write into its buffer).
+            block_all_signals();
             // The receiver may be gone after a timeout; the value is dropped.
             let _ = tx.send(f());
         })?;

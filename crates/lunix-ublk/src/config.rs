@@ -65,6 +65,8 @@ pub struct Timeouts {
     pub recovery_retry: Duration,
     /// Total time spent retrying `START_USER_RECOVERY`.
     pub recovery_wait: Duration,
+    /// The engine's final commit at quiesce and detach.
+    pub engine: Duration,
 }
 
 impl Default for Timeouts {
@@ -76,6 +78,7 @@ impl Default for Timeouts {
             startup: Duration::from_secs(30),
             recovery_retry: Duration::from_millis(100),
             recovery_wait: Duration::from_secs(30),
+            engine: Duration::from_secs(120),
         }
     }
 }
@@ -111,12 +114,14 @@ pub struct UblkConfig {
 }
 
 impl UblkConfig {
-    /// Defaults for `volume`: 4 queues, depth 128, 1 MiB buffers, 64 KiB
+    /// Defaults for `volume`: `min(8, cpus / 4)` queues, depth 128, 1 MiB buffers, 64 KiB
     /// chunks, copy path.
     pub fn new(volume: VolumeUuid) -> Self {
         Self {
             volume,
-            queues: 4,
+            queues: Self::default_queues(
+                std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get),
+            ),
             depth: DEFAULT_DEPTH,
             max_io_buf_bytes: DEFAULT_IO_BUF_BYTES,
             chunk_bytes: 64 << 10,

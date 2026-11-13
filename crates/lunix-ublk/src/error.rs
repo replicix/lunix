@@ -14,12 +14,8 @@ pub struct Errno(pub i32);
 
 impl fmt::Display for Errno {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} (errno {})",
-            io::Error::from_raw_os_error(self.0),
-            self.0
-        )
+        // `io::Error` already prints "... (os error N)".
+        write!(f, "{}", io::Error::from_raw_os_error(self.0))
     }
 }
 
@@ -119,6 +115,20 @@ pub enum UblkError {
         /// The rule.
         why: SizeError,
     },
+    /// The operation is not allowed in the device's current lifecycle state
+    /// (stopping, quiescing, deleted) or in the kernel's device state.
+    #[error("{0}")]
+    State(&'static str),
+    /// An error that happened after the kernel device `dev_id` existed. The
+    /// id is here so that a caller that dies on the error can record it and
+    /// have the device deleted by another process.
+    #[error("device {dev_id}: {source}")]
+    Device {
+        /// The kernel's device id.
+        dev_id: u32,
+        /// What failed.
+        source: Box<UblkError>,
+    },
     /// The configuration is not acceptable.
     #[error("invalid configuration: {0}")]
     Config(&'static str),
@@ -149,7 +159,24 @@ impl UblkError {
     pub fn errno(&self) -> Option<i32> {
         match self {
             Self::Ctl { errno, .. } => Some(errno.0),
+            Self::Device { source, .. } => source.errno(),
             _ => None,
+        }
+    }
+
+    /// The device id of a [`UblkError::Device`], if this is one.
+    pub fn dev_id(&self) -> Option<u32> {
+        match self {
+            Self::Device { dev_id, .. } => Some(*dev_id),
+            _ => None,
+        }
+    }
+
+    /// The error without its [`UblkError::Device`] wrapper.
+    pub fn root(&self) -> &UblkError {
+        match self {
+            Self::Device { source, .. } => source.root(),
+            other => other,
         }
     }
 }

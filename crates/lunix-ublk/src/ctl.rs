@@ -57,6 +57,9 @@ pub const STATE_FAIL_IO: u16 = 3;
 const CTRL_CMD_SIZE: u32 = 32;
 const DIR_R: u32 = 2;
 const DIR_RW: u32 = 3;
+/// The original `GET_DEV_INFO` (0x02), for kernels without `GET_DEV_INFO2`.
+const LEGACY_GET_DEV_INFO: u32 =
+    (DIR_R << 30) | (CTRL_CMD_SIZE << 16) | ((b'u' as u32) << 8) | 0x02;
 
 /// A control command the layer sends. There is no `STOP_DEV` (see the module
 /// documentation).
@@ -251,6 +254,19 @@ impl RingControl {
         data0: u64,
         watchdog: Duration,
     ) -> Result<(i32, T)> {
+        self.exec_buf_code(op, op.opcode(), dev_id, data, data0, watchdog)
+    }
+
+    /// [`Self::exec_buf`] with an explicit opcode (the legacy `GET_DEV_INFO`).
+    fn exec_buf_code<T: Send + 'static>(
+        &self,
+        op: CtlOp,
+        code: u32,
+        dev_id: u32,
+        data: T,
+        data0: u64,
+        watchdog: Duration,
+    ) -> Result<(i32, T)> {
         let hook = self.hook.clone();
         let out = run_with_timeout(op.name(), watchdog, move || {
             if let Some(h) = &hook {
@@ -258,11 +274,18 @@ impl RingControl {
             }
             let ptr = Box::into_raw(Box::new(data));
             let len = u16::try_from(std::mem::size_of::<T>()).unwrap_or(u16::MAX);
-            let res = raw_cmd(op, dev_id, ptr as u64, len, data0);
-            // SAFETY: `ptr` came from `Box::into_raw` above and the command
-            // has returned, so the kernel no longer uses the buffer.
-            let boxed = unsafe { Box::from_raw(ptr) };
-            res.map(|r| (r, *boxed))
+            match raw_cmd(code, dev_id, ptr as u64, len, data0) {
+                Ok(r) => {
+                    // SAFETY: `ptr` came from `Box::into_raw` above and the
+                    // completion was reaped, so the kernel is done with it.
+                    let boxed = unsafe { Box::from_raw(ptr) };
+                    Ok((r, *boxed))
+                }
+                // After a submit the command may still be pending in the
+                // kernel's io-wq and write into the buffer later: on any
+                // error the box is leaked on purpose.
+                Err(e) => Err(e),
+            }
         })?;
         Ok(out?)
     }
@@ -274,7 +297,7 @@ impl RingControl {
             if let Some(h) = &hook {
                 h(op);
             }
-            raw_cmd(op, dev_id, 0, 0, data0)
+            raw_cmd(op.opcode(), dev_id, 0, 0, data0)
         })?;
         Ok(out?)
     }
@@ -292,8 +315,10 @@ impl RingControl {
 }
 
 /// Submits one `URING_CMD` and waits for its completion. Returns the raw
-/// result (negative errno on failure).
-fn raw_cmd(op: CtlOp, dev_id: u32, addr: u64, len: u16, data0: u64) -> std::io::Result<i32> {
+/// result (negative errno on failure). `EINTR` while waiting re-enters the
+/// wait (the command is not submitted again); any other error is returned with
+/// the command possibly still pending, so callers must not free its buffer.
+fn raw_cmd(code: u32, dev_id: u32, addr: u64, len: u16, data0: u64) -> std::io::Result<i32> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -305,16 +330,21 @@ fn raw_cmd(op: CtlOp, dev_id: u32, addr: u64, len: u16, data0: u64) -> std::io::
     raw[6..8].copy_from_slice(&len.to_le_bytes());
     raw[8..16].copy_from_slice(&addr.to_le_bytes());
     raw[16..24].copy_from_slice(&data0.to_le_bytes());
-    let sqe = opcode::UringCmd80::new(types::Fd(file.as_raw_fd()), op.opcode())
+    let sqe = opcode::UringCmd80::new(types::Fd(file.as_raw_fd()), code)
         .cmd(raw)
         .build()
         .user_data(1);
-    // SAFETY: `addr` and `len` describe memory owned by the caller until this
-    // function returns (or, after a watchdog timeout, by the helper thread that
-    // called it, which keeps it alive).
+    // SAFETY: `addr` and `len` describe memory owned by the caller until the
+    // completion is reaped; on any error the caller leaks it (see above).
     unsafe { ring.submission().push(&sqe) }
         .map_err(|_| std::io::Error::other("control submission queue full"))?;
-    ring.submit_and_wait(1)?;
+    loop {
+        match ring.submit_and_wait(1) {
+            Ok(_) => break,
+            Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
+            Err(e) => return Err(e),
+        }
+    }
     let cqe = ring
         .completion()
         .next()
@@ -344,19 +374,14 @@ impl ControlPlane for RingControl {
             return Ok(out);
         }
         // Kernels without GET_DEV_INFO2 know only the original command (0x02).
-        let hook = self.hook.clone();
-        let w = self.watchdog(op);
-        let (legacy, out) = run_with_timeout("GET_DEV_INFO", w, move || {
-            if let Some(h) = &hook {
-                h(op);
-            }
-            let ptr = Box::into_raw(Box::new(DevInfo::default()));
-            let len = u16::try_from(std::mem::size_of::<DevInfo>()).unwrap_or(u16::MAX);
-            let res = raw_cmd_nr(0x02, DIR_R, dev_id, ptr as u64, len, 0);
-            // SAFETY: as in `exec_buf`.
-            let boxed = unsafe { Box::from_raw(ptr) };
-            res.map(|r| (r, *boxed))
-        })??;
+        let (legacy, out) = self.exec_buf_code(
+            op,
+            LEGACY_GET_DEV_INFO,
+            dev_id,
+            DevInfo::default(),
+            0,
+            self.watchdog(op),
+        )?;
         if legacy >= 0 {
             Ok(out)
         } else {
@@ -433,43 +458,6 @@ impl ControlPlane for RingControl {
     }
 }
 
-/// `raw_cmd` for a command number that is not a [`CtlOp`] (the legacy
-/// `GET_DEV_INFO`).
-fn raw_cmd_nr(
-    nr: u32,
-    dir: u32,
-    dev_id: u32,
-    addr: u64,
-    len: u16,
-    data0: u64,
-) -> std::io::Result<i32> {
-    let code = (dir << 30) | (CTRL_CMD_SIZE << 16) | (u32::from(b'u') << 8) | nr;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(CONTROL_PATH)?;
-    let mut ring = IoUring::<squeue::Entry128, cqueue::Entry>::builder().build(2)?;
-    let mut raw = [0u8; 80];
-    raw[0..4].copy_from_slice(&dev_id.to_le_bytes());
-    raw[4..6].copy_from_slice(&0xffff_u16.to_le_bytes());
-    raw[6..8].copy_from_slice(&len.to_le_bytes());
-    raw[8..16].copy_from_slice(&addr.to_le_bytes());
-    raw[16..24].copy_from_slice(&data0.to_le_bytes());
-    let sqe = opcode::UringCmd80::new(types::Fd(file.as_raw_fd()), code)
-        .cmd(raw)
-        .build()
-        .user_data(1);
-    // SAFETY: see `raw_cmd`.
-    unsafe { ring.submission().push(&sqe) }
-        .map_err(|_| std::io::Error::other("control submission queue full"))?;
-    ring.submit_and_wait(1)?;
-    let cqe = ring
-        .completion()
-        .next()
-        .ok_or_else(|| std::io::Error::other("control command left no completion"))?;
-    Ok(cqe.result())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,8 +490,7 @@ mod tests {
 
     #[test]
     fn the_legacy_get_dev_info_code_is_the_header_one() {
-        let code = (DIR_R << 30) | (CTRL_CMD_SIZE << 16) | (u32::from(b'u') << 8) | 0x02;
-        assert_eq!(code, sys::UBLK_U_CMD_GET_DEV_INFO);
+        assert_eq!(LEGACY_GET_DEV_INFO, sys::UBLK_U_CMD_GET_DEV_INFO);
     }
 
     #[test]

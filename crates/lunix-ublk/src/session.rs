@@ -8,7 +8,7 @@ use crate::config::{build_params, DataPath, RecoveryPolicy, UblkConfig, BLOCK_BY
 use crate::ctl::{ControlPlane, DevInfo, STATE_DEAD, STATE_QUIESCED};
 use crate::error::{Errno, Result, SizeError, UblkError};
 use crate::features::Features;
-use crate::identity::{check_identity, IdentityMismatch, KernelView};
+use crate::identity::{check_identity, volume_tag, IdentityMismatch, KernelView};
 use lunix_format::local::DeviceRecord;
 
 const EBUSY: i32 = 16;
@@ -116,6 +116,8 @@ pub fn add_device(
         dev_id: cfg.dev_id.unwrap_or(u32::MAX),
         ublksrv_pid: i32::try_from(std::process::id()).unwrap_or(0),
         flags,
+        // The driver keeps this field as given: the volume's tag (identity).
+        ublksrv_flags: volume_tag(&cfg.volume),
         ..Default::default()
     };
     let added = ctl.add_dev(want)?;
@@ -124,7 +126,14 @@ pub fn add_device(
         let _ = ctl.del_dev(added.dev_id);
         return Err(e);
     }
-    ctl.dev_info(added.dev_id)
+    match ctl.dev_info(added.dev_id) {
+        Ok(info) => Ok(info),
+        Err(e) => {
+            // Added, never started: deleting cannot block.
+            let _ = ctl.del_dev(added.dev_id);
+            Err(e)
+        }
+    }
 }
 
 /// What the kernel reports about `dev_id`.
@@ -166,6 +175,7 @@ pub fn begin_recovery(
     cfg: &UblkConfig,
     boot_id_now: [u8; 16],
     engine_bytes: u64,
+    server_alive: &dyn Fn(i32) -> bool,
 ) -> Result<KernelView> {
     let dev_id = record.dev_id;
     let refuse = |why| UblkError::Identity { dev_id, why };
@@ -174,7 +184,15 @@ pub fn begin_recovery(
         return Err(refuse(IdentityMismatch::BootId));
     }
     let view = read_view(ctl, dev_id)?;
-    check_identity(record, &cfg.volume, &view, boot_id_now, engine_bytes).map_err(refuse)?;
+    check_identity(
+        record,
+        &cfg.volume,
+        &view,
+        boot_id_now,
+        engine_bytes,
+        server_alive,
+    )
+    .map_err(refuse)?;
 
     let t = cfg.timeouts;
     let started = Instant::now();
@@ -192,18 +210,24 @@ pub fn begin_recovery(
             Err(e) => return Err(e),
         }
     }
+    // Re-fetch and run the whole check again on what the kernel says now:
+    // the device must be QUIESCED (recovery has begun) and still be the
+    // recorded one.
     let after = read_view(ctl, dev_id)?;
     if after.info.state != STATE_QUIESCED {
         return Err(refuse(IdentityMismatch::State {
             state: after.info.state,
         }));
     }
-    if after.dev_sectors != view.dev_sectors {
-        return Err(refuse(IdentityMismatch::DevSectors {
-            recorded: view.dev_sectors,
-            actual: after.dev_sectors,
-        }));
-    }
+    check_identity(
+        record,
+        &cfg.volume,
+        &after,
+        boot_id_now,
+        engine_bytes,
+        server_alive,
+    )
+    .map_err(refuse)?;
     Ok(after)
 }
 
@@ -231,6 +255,8 @@ pub fn update_size(
         });
     }
     ctl.update_size(dev_id, new_bytes >> 9)?;
+    // A crash here leaves the kernel ahead of the record: recovery accepts it.
+    lunix_iface::crashpoint!("ublk.after_update_size");
     guard.set(new_bytes);
     Ok(())
 }
@@ -452,6 +478,8 @@ pub(crate) mod fake {
             dev_id: 5,
             state: STATE_QUIESCED,
             flags: 0x6745a,
+            ublksrv_flags: volume_tag(&cfg.volume),
+            ublksrv_pid: 4242,
             ..Default::default()
         };
         let params = build_params(cfg, size).unwrap();
@@ -536,7 +564,7 @@ mod tests {
     #[test]
     fn recovery_sends_no_set_params_and_re_fetches() {
         let (fake, rec) = quiesced(&cfg(), GIB16, HOST);
-        let view = begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16).unwrap();
+        let view = begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16, &|_| false).unwrap();
         assert_eq!(view.info.state, STATE_QUIESCED);
         assert_eq!(
             fake.log(),
@@ -560,7 +588,7 @@ mod tests {
             s.dev.as_mut().unwrap().state = STATE_LIVE;
             s.ebusy_left = 3;
         }
-        begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16).unwrap();
+        begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16, &|_| false).unwrap();
         let starts = fake
             .log()
             .iter()
@@ -573,7 +601,7 @@ mod tests {
     fn a_device_that_stays_busy_is_reported_not_forced() {
         let (fake, rec) = quiesced(&cfg(), GIB16, HOST);
         fake.0.lock().unwrap().dev.as_mut().unwrap().state = STATE_LIVE;
-        let err = begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &cfg(), BOOT, GIB16, &|_| false).unwrap_err();
         assert!(matches!(err, UblkError::Busy { .. }), "{err}");
         assert!(!fake.log().contains(&"DEL_DEV"));
         assert!(!fake.log().contains(&"SET_PARAMS"));
@@ -582,7 +610,7 @@ mod tests {
     #[test]
     fn a_stale_boot_id_is_refused_without_touching_the_kernel() {
         let (fake, rec) = quiesced(&cfg(), GIB16, HOST);
-        let err = begin_recovery(&fake, &rec, &cfg(), [9; 16], GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &cfg(), [9; 16], GIB16, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -602,7 +630,7 @@ mod tests {
         // The record says 8 queues; the device has 4.
         let (fake, mut rec) = quiesced(&c, GIB16, HOST);
         rec.nr_queues = 8;
-        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -618,7 +646,7 @@ mod tests {
         // The record says 32 GiB; the device is 16 GiB.
         let (fake, mut rec) = quiesced(&c, GIB16, HOST);
         rec.dev_sectors = (32u64 << 30) >> 9;
-        let err = begin_recovery(&fake, &rec, &c, BOOT, 32 << 30).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &c, BOOT, 32 << 30, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -634,7 +662,7 @@ mod tests {
         // The device is gone.
         let (fake, mut rec) = quiesced(&c, GIB16, HOST);
         rec.dev_id = 99;
-        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -651,7 +679,7 @@ mod tests {
         let (fake, rec) = quiesced(&c, GIB16, HOST);
         let mut other = c.clone();
         other.volume = VolumeUuid([5; 16]);
-        let err = begin_recovery(&fake, &rec, &other, BOOT, GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &other, BOOT, GIB16, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -670,7 +698,7 @@ mod tests {
         let c = cfg();
         let (fake, rec) = quiesced(&c, GIB16, HOST);
         fake.0.lock().unwrap().dev.as_mut().unwrap().state = crate::ctl::STATE_FAIL_IO;
-        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16).unwrap_err();
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|_| false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -682,6 +710,95 @@ mod tests {
             "{err}"
         );
         assert!(touched(&fake.log()).is_empty());
+    }
+
+    #[test]
+    fn a_crash_between_update_size_and_the_record_write_still_recovers() {
+        // The grow was durable in the engine and in the kernel; the record on
+        // disk is the old one. The engine is the authority for the size.
+        let c = cfg();
+        let (fake, rec) = quiesced(&c, GIB16, HOST);
+        {
+            let mut s = fake.0.lock().unwrap();
+            s.params.basic.dev_sectors = (32u64 << 30) >> 9;
+        }
+        let view = begin_recovery(&fake, &rec, &c, BOOT, 32 << 30, &|_| false).unwrap();
+        assert_eq!(view.dev_sectors, (32u64 << 30) >> 9);
+        assert!(!fake.log().contains(&"SET_PARAMS"));
+        // An engine that is still at the old size would be smaller than the device.
+        let (fake, rec) = quiesced(&c, GIB16, HOST);
+        fake.0.lock().unwrap().params.basic.dev_sectors = (32u64 << 30) >> 9;
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|_| false).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UblkError::Identity {
+                    why: IdentityMismatch::EngineSmaller { .. },
+                    ..
+                }
+            ),
+            "{err}"
+        );
+        assert!(touched(&fake.log()).is_empty());
+    }
+
+    #[test]
+    fn a_record_of_equal_geometry_pointed_at_another_volumes_device_is_refused() {
+        let c = cfg();
+        let (fake, rec) = quiesced(&c, GIB16, HOST);
+        // The kernel device belongs to a volume with the same geometry.
+        fake.0.lock().unwrap().dev.as_mut().unwrap().ublksrv_flags =
+            volume_tag(&VolumeUuid([77; 16]));
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|_| false).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UblkError::Identity {
+                    why: IdentityMismatch::VolumeTag { .. },
+                    ..
+                }
+            ),
+            "{err}"
+        );
+        assert!(touched(&fake.log()).is_empty(), "{:?}", fake.log());
+    }
+
+    #[test]
+    fn a_live_device_with_a_running_server_is_not_recovered() {
+        let c = cfg();
+        let (fake, rec) = quiesced(&c, GIB16, HOST);
+        fake.0.lock().unwrap().dev.as_mut().unwrap().state = STATE_LIVE;
+        let err = begin_recovery(&fake, &rec, &c, BOOT, GIB16, &|pid| pid == 4242).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UblkError::Identity {
+                    why: IdentityMismatch::LiveServer { pid: 4242 },
+                    ..
+                }
+            ),
+            "{err}"
+        );
+        assert!(touched(&fake.log()).is_empty());
+    }
+
+    #[test]
+    fn a_failed_read_back_after_add_deletes_the_new_device() {
+        let fake = Fake::new(HOST);
+        fake.fail(CtlOp::GetDevInfo, 5);
+        let features = probe(&fake).unwrap();
+        let err = add_device(&fake, features, &cfg(), GIB16).unwrap_err();
+        assert_eq!(err.errno(), Some(5));
+        assert_eq!(fake.log().last(), Some(&"DEL_DEV"));
+    }
+
+    #[test]
+    fn a_new_device_carries_the_volume_tag() {
+        let fake = Fake::new(HOST);
+        let features = probe(&fake).unwrap();
+        let c = cfg();
+        let info = add_device(&fake, features, &c, GIB16).unwrap();
+        assert_eq!(info.ublksrv_flags, volume_tag(&c.volume));
     }
 
     #[test]

@@ -10,6 +10,7 @@ require_root; need_root_tests
 : "${TEST_BIN:?TEST_BIN is not set}" "${OUT:=$LUNIX_SPIKE_DIR/out-e2e}"
 rm -rf "$OUT"; mkdir -p "$OUT"
 bash "$here/../../../../spikes/common/ublk-leftovers.sh" > "$OUT/leftovers-start.txt" || { cat "$OUT/leftovers-start.txt"; echo "not clean at start"; exit 2; }
+: > "$CREATED_DEVICES"   # only devices recorded by this run are swept
 lsmod | grep -q '^ublk_drv ' || { modprobe ublk_drv && add_cleanup 'rmmod ublk_drv'; }
 # Whatever happens, devices this run created and recorded must not outlive it without a daemon:
 # the sweep deletes the recorded ones that still exist (nothing is mounted in these tests).
@@ -17,7 +18,7 @@ sweep() {
   trap - EXIT INT TERM
   local d
   for d in $(grep -o '/dev/ublkb[0-9]*' "$CREATED_DEVICES" 2>/dev/null | sort -u); do
-    [ -b "$d" ] && [ -n "${TESTD:-}" ] && { echo "sweep: deleting $d"; timeout -k 5 75 "$TESTD" del --id "${d#/dev/ublkb}"; }
+    [ -b "$d" ] && [ -n "${TESTD:-}" ] && { echo "sweep: deleting $d"; timeout -k 5 75 "$TESTD" del --id "${d#/dev/ublkb}" --force; }
   done
   true
 }

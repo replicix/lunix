@@ -16,7 +16,7 @@ use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::collections::HashSet;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -113,6 +113,9 @@ struct Inner {
     hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     taken: Mutex<HashSet<u16>>,
     drop_writes: AtomicBool,
+    /// One-shot fault: 0 off, 1 drop the next write, 2 drop the next FUA write.
+    drop_once: AtomicU8,
+    /// Worker threads per queue; 0 completes inline on the queue thread.
     workers: usize,
     counts: Counts,
 }
@@ -130,7 +133,8 @@ impl FileEngine {
             hook: Mutex::new(None),
             taken: Mutex::new(HashSet::new()),
             drop_writes: AtomicBool::new(false),
-            workers: workers.max(1),
+            drop_once: AtomicU8::new(0),
+            workers,
             counts: Counts::default(),
         }))
     }
@@ -138,6 +142,12 @@ impl FileEngine {
     /// Turns the acknowledge-but-drop fault on or off.
     pub fn set_drop_writes(&self, on: bool) {
         self.0.drop_writes.store(on, Ordering::SeqCst);
+    }
+
+    /// Arms a one-shot fault: `1` drops the next write, `2` the next FUA
+    /// write (acknowledged, never written), `0` disarms.
+    pub fn set_drop_once(&self, mode: u8) {
+        self.0.drop_once.store(mode, Ordering::SeqCst);
     }
 
     /// Whether the fault is on.
@@ -229,7 +239,13 @@ impl Inner {
                 c.writes.fetch_add(1, Ordering::Relaxed);
                 c.bytes_written
                     .fetch_add(u64::from(job.len), Ordering::Relaxed);
-                let status = if self.drop_writes.load(Ordering::SeqCst) {
+                let cur = self.drop_once.load(Ordering::SeqCst);
+                let once = (cur == 1 || (cur == 2 && job.fua))
+                    && self
+                        .drop_once
+                        .compare_exchange(cur, 0, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok();
+                let status = if once || self.drop_writes.load(Ordering::SeqCst) {
                     c.dropped_writes.fetch_add(1, Ordering::Relaxed);
                     IoStatus::ok(job.len)
                 } else {
@@ -301,6 +317,7 @@ struct FileQueue {
     max_io: u32,
     wake: WakeFd,
     tx: Option<Sender<Job>>,
+    inline: bool,
     done: Arc<Mutex<Vec<Done>>>,
     workers: Vec<std::thread::JoinHandle<()>>,
 }
@@ -345,6 +362,7 @@ impl BlockEngine for FileEngine {
             max_io: cfg.max_io_buf_bytes,
             wake,
             tx: Some(tx),
+            inline: self.0.workers == 0,
             done,
             workers,
         }))
@@ -424,6 +442,23 @@ impl QueueHandler for FileQueue {
             }
         }
         let data = (req.op == IoOp::Write).then(|| AlignedBuf::from_slice(buf));
+        if self.inline {
+            // Completes inside `on_request`, like the M11 engine does.
+            let job = Job {
+                tag: req.tag,
+                op: req.op,
+                fua: req.fua,
+                offset: req.offset_bytes,
+                len: req.len,
+                data,
+            };
+            let d = self.inner.run(job);
+            if let (true, Some(read)) = (d.status.is_ok(), &d.read) {
+                buf[..read.len].copy_from_slice(read.as_slice());
+            }
+            done.complete(d.tag, d.status);
+            return;
+        }
         let job = Job {
             tag: req.tag,
             op: req.op,

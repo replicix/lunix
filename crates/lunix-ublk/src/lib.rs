@@ -49,10 +49,12 @@ pub use config::{
     DEFAULT_IO_BUF_BYTES, MIN_IO_BUF_BYTES,
 };
 pub use ctl::{ControlPlane, CtlOp, DevInfo, Params, RingControl};
-pub use device::{Quiesced, UblkDevice};
+pub use device::{Persist, Quiesced, UblkDevice};
 pub use error::{Errno, Result, SizeError, UblkError};
 pub use features::{check_flag_rules, flag, Features, KERNEL_FLOOR};
 pub use harden::{harden_process, Harden};
-pub use identity::{check_identity, current_boot_id, IdentityMismatch, KernelView};
+pub use identity::{
+    check_identity, current_boot_id, process_alive, volume_tag, IdentityMismatch, KernelView,
+};
 pub use queue::{fatal, QueueCounters, QueueSnapshot};
 pub use session::{SizeChange, SizeGuard};

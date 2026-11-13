@@ -11,6 +11,7 @@ MAX_GIB=64
 IMG="$LUNIX_SPIKE_DIR/rz.img"; MNT="$LUNIX_SPIKE_DIR/mnt/rz"; STATE="$LUNIX_SPIKE_DIR/state/rz"
 need_safe "$IMG"; need_safe "$MNT"; need_safe "$STATE"
 need_clean_start "$OUT"
+script_cap "${SCRIPT_CAP:-3000}"   # the script's own cap (W8); the wrapper timeout is larger
 load_ublk
 mkdir -p "$MNT"
 add_cleanup 'teardown >> "$OUT/teardown.log" 2>&1'

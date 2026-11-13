@@ -50,14 +50,23 @@ use lunix_ublk::{
     UblkConfig, UblkDevice, UblkError,
 };
 
-const VOLUME: VolumeUuid = VolumeUuid(*b"lunix-ublk-testd");
-const BOOL_FLAGS: [&str; 7] = [
+/// The test volume; `--volume-seed N` makes another one (same geometry).
+fn volume(seed: u64) -> VolumeUuid {
+    let mut b = *b"lunix-ublk-testd";
+    for (i, byte) in seed.to_le_bytes().iter().enumerate() {
+        b[i] ^= byte;
+    }
+    VolumeUuid(b)
+}
+const BOOL_FLAGS: &[&str] = &[
     "user-copy",
     "no-reissue",
     "drop-writes",
     "no-unshare",
     "no-mlock",
     "recover",
+    "force",
+    "fail-start",
     "help",
 ];
 
@@ -138,6 +147,8 @@ enum Cmd {
     Detach(Reply),
     Counters(Reply),
     Fault(Option<bool>, Reply),
+    /// A one-shot fault: 1 drops the next write, 2 the next FUA write.
+    FaultOnce(u8, Reply),
     StuckCtl(u64, Reply),
     Info(Reply),
     QueuesEnded,
@@ -239,6 +250,7 @@ enum Req {
     Detach,
     Counters,
     Fault(bool),
+    FaultOnce(u8),
     StuckCtl(u64),
     Info,
 }
@@ -251,6 +263,8 @@ fn parse_req(words: &[&str]) -> Option<Req> {
         ["counters"] => Some(Req::Counters),
         ["fault", "on"] => Some(Req::Fault(true)),
         ["fault", "off"] => Some(Req::Fault(false)),
+        ["fault", "drop-one"] => Some(Req::FaultOnce(1)),
+        ["fault", "drop-fua-one"] => Some(Req::FaultOnce(2)),
         ["stuck-ctl", ms] => ms.parse().ok().map(Req::StuckCtl),
         ["info"] => Some(Req::Info),
         _ => None,
@@ -269,6 +283,7 @@ impl Req {
             Req::Detach => Cmd::Detach(reply),
             Req::Counters => Cmd::Counters(reply),
             Req::Fault(on) => Cmd::Fault(Some(on), reply),
+            Req::FaultOnce(m) => Cmd::FaultOnce(m, reply),
             Req::StuckCtl(ms) => Cmd::StuckCtl(ms, reply),
             Req::Info => Cmd::Info(reply),
         }
@@ -308,11 +323,20 @@ fn spawn_socket_thread(path: PathBuf, tx: Sender<Cmd>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// The kernel's count of started, uncompleted requests of the device
+/// (`/sys/block/ublkbN/inflight`: "reads writes").
+fn kernel_inflight(dev_id: u32) -> String {
+    std::fs::read_to_string(format!("/sys/block/ublkb{dev_id}/inflight")).map_or_else(
+        |e| format!("err:{e}"),
+        |t| t.split_whitespace().collect::<Vec<_>>().join(","),
+    )
+}
+
 fn counters_line(dev: &UblkDevice, eng: &FileEngine) -> String {
     let q = dev.queue_counters();
     let sum = |f: fn(&lunix_ublk::QueueSnapshot) -> u64| q.iter().map(f).sum::<u64>();
     format!(
-        "COUNTERS reads={} writes={} fua_writes={} flushes={} discards={} write_zeroes={} rejected={} started={} completed={} in_flight={} dropped_writes={} size={}",
+        "COUNTERS reads={} writes={} fua_writes={} flushes={} discards={} write_zeroes={} rejected={} started={} completed={} in_flight={} dropped_writes={} drain_commits={} drain_cqes={} size={}",
         sum(|s| s.reads),
         sum(|s| s.writes),
         sum(|s| s.fua_writes),
@@ -324,6 +348,8 @@ fn counters_line(dev: &UblkDevice, eng: &FileEngine) -> String {
         sum(|s| s.completed),
         dev.in_flight(),
         eng.dropped_writes(),
+        sum(|s| s.drain_commits),
+        sum(|s| s.drain_cqes),
         dev.size_bytes()
     )
 }
@@ -360,14 +386,15 @@ fn run(a: &Args, recover: bool) -> Result<(), String> {
         mlock: !a.flag("no-mlock"),
         io_flusher: true,
         private_mount_ns: !a.flag("no-unshare"),
+        no_core_dumps: true,
     })
     .map_err(|e| format!("hardening the process: {e}"))?;
 
     let (file, size) = open_backing(a.req("backing")?, a.num("create-gib", 0u64)?)?;
-    let eng = FileEngine::new(file, size, a.num("workers", 4usize)?);
+    let eng = FileEngine::new(file, size, a.num("workers", 4usize)?); // 0: complete inline
     eng.set_drop_writes(a.flag("drop-writes"));
 
-    let mut cfg = UblkConfig::new(VOLUME);
+    let mut cfg = UblkConfig::new(volume(a.num("volume-seed", 0u64)?));
     cfg.queues = a.num("queues", 4u16)?;
     cfg.depth = a.num("depth", 128u16)?;
     cfg.max_io_buf_bytes = a.num("buf-bytes", 1u32 << 20)?;
@@ -398,8 +425,41 @@ fn run(a: &Args, recover: bool) -> Result<(), String> {
             Err(e) => return Err(format!("recover: {e}")),
         }
     } else {
-        UblkDevice::add(engine, cfg).map_err(|e| format!("add: {e}"))?
+        // The record is written between SET_PARAMS and START_DEV, and the id is
+        // printed before the start so that a harness can record the device
+        // even if the start never finishes.
+        let rec_dir = dir.clone();
+        let persist: lunix_ublk::Persist = Box::new(move |rec| {
+            println!("ADDED id={}", rec.dev_id);
+            let _ = std::io::stdout().flush();
+            write_record(&rec_dir, rec).map_err(|e| UblkError::Io(std::io::Error::other(e)))
+        });
+        let ctl: Arc<dyn ControlPlane> = if a.flag("fail-start") {
+            // Test hook: the START_DEV helper thread panics, which the layer
+            // sees as a failed command and answers by releasing the queues
+            // and deleting the never-started device.
+            let hook: CtlHook = Arc::new(|op| {
+                if op == CtlOp::StartDev {
+                    panic!("fail-start test hook");
+                }
+            });
+            Arc::new(RingControl::new(cfg.timeouts).with_hook(hook))
+        } else {
+            Arc::new(RingControl::new(cfg.timeouts))
+        };
+        match UblkDevice::add_with(ctl, engine, cfg, Some(persist)) {
+            Ok(d) => d,
+            Err(e) => {
+                if let Some(id) = e.dev_id() {
+                    println!("ERRDEV id={id}");
+                }
+                return Err(format!("add: {e}"));
+            }
+        }
     };
+    for w in device.warnings() {
+        println!("WARNING {w}");
+    }
     write_record(&dir, &device.record())?;
     std::fs::write(dir.join("pid"), std::process::id().to_string()).map_err(|e| e.to_string())?;
 
@@ -438,11 +498,17 @@ fn run(a: &Args, recover: bool) -> Result<(), String> {
                 println!("FAULT drop_writes={on}");
                 r.send(&format!("OK drop_writes={on}"));
             }
+            Cmd::FaultOnce(m, r) => {
+                eng.set_drop_once(m);
+                println!("FAULT drop_once={m}");
+                r.send(&format!("OK drop_once={m}"));
+            }
             Cmd::Info(r) => r.send(&format!(
-                "OK id={} size={} flags={:#x} queues={} depth={}",
+                "OK id={} size={} flags={:#x} tag={:#x} queues={} depth={}",
                 device.dev_id(),
                 device.size_bytes(),
                 device.info().flags,
+                device.info().ublksrv_flags,
                 device.info().nr_hw_queues,
                 device.info().queue_depth
             )),
@@ -490,10 +556,20 @@ fn run(a: &Args, recover: bool) -> Result<(), String> {
                 for n in 1..=attempts {
                     match device.quiesce(Duration::from_millis(timeout_ms)) {
                         Ok(q) => {
+                            let drained: u64 = device
+                                .queue_counters()
+                                .iter()
+                                .map(|c| c.drain_commits)
+                                .sum();
+                            let kernel = kernel_inflight(device.dev_id());
                             reply.send(&format!(
-                                "OK quiesced engine_error={}",
+                                "OK quiesced engine_error={} drain_commits={drained} kernel_inflight={kernel}",
                                 q.engine_error().is_some()
                             ));
+                            println!(
+                                "QUIESCE drain_commits={drained} kernel_inflight={kernel} ms={}",
+                                t0.elapsed().as_millis()
+                            );
                             println!("QUIESCE ok attempt={n} ms={}", t0.elapsed().as_millis());
                             let _ = std::io::stdout().flush();
                             // No stop command, ever: the exit closes the cdev.
@@ -565,7 +641,7 @@ fn info(id: u32) -> Result<(), String> {
     let i = ctl.dev_info(id).map_err(|e| e.to_string())?;
     let p = ctl.params(id).map_err(|e| e.to_string())?;
     println!(
-        "DEVINFO id={} state={}{} queues={} depth={} max_io_buf={} flags={:#x}",
+        "DEVINFO id={} state={}{} queues={} depth={} max_io_buf={} flags={:#x} tag={:#x}",
         i.dev_id,
         i.state,
         if i.state == STATE_QUIESCED {
@@ -576,7 +652,8 @@ fn info(id: u32) -> Result<(), String> {
         i.nr_hw_queues,
         i.queue_depth,
         i.max_io_buf_bytes,
-        i.flags
+        i.flags,
+        i.ublksrv_flags
     );
     println!(
         "PARAMS types={:#x} attrs={:#x} lbs_shift={} pbs_shift={} io_min_shift={} io_opt_shift={} max_sectors={} dev_sectors={} discard_granularity={} max_discard_sectors={}",
@@ -625,7 +702,7 @@ fn real_main() -> Result<(), String> {
                 del: Duration::from_secs(a.num("del-timeout-s", 60u64)?),
                 ..Timeouts::default()
             };
-            match UblkDevice::delete_by_id(id, t) {
+            match UblkDevice::delete_by_id(id, t, a.flag("force")) {
                 Ok(()) => {
                     println!("DEL_DEV result=0");
                     Ok(())

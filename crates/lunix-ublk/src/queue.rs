@@ -10,13 +10,23 @@
 //!
 //! # Rules kept here
 //!
-//! * **W2.** A started request that is never completed is a bug the layer
-//!   turns into `abort()`: a tag completed twice, an unknown tag, a commit
-//!   libublk refuses, a panic, a queue loop that ends while the device is
-//!   not stopping, and a loop that ends with started requests left all call
-//!   [`fatal`], which is `std::process::abort()` (equivalent to `kill -9`,
-//!   which phase 0 proved recoverable with `USER_RECOVERY_REISSUE`). Nothing on
-//!   this thread exits gracefully with work in flight.
+//! * **W2.** A fatal error in a queue thread (a tag completed twice, an
+//!   unknown tag, a commit that cannot be queued, a panic, an unexpected
+//!   answer of the driver) calls [`fatal`], which is `std::process::abort()`
+//!   (equivalent to `kill -9`, which phase 0 proved recoverable with
+//!   `USER_RECOVERY_REISSUE`). The only way out of the loop is the layer's
+//!   own exit condition: the queue is **down** (the driver answered a command
+//!   with `ABORT`, or a stop was requested) **and** every started request has
+//!   been committed.
+//! * **libublk is not trusted for that.** After the first `ABORT` libublk
+//!   0.4.8 queues no commit at all and ends its loop although the engine still
+//!   holds requests, and a completion in the same batch as the first `ABORT`
+//!   keeps its own in-flight count above zero for ever. So the layer keeps its
+//!   own `down` flag (set mid-batch, on the first `ABORT`), commits held
+//!   requests itself after that with a `COMMIT_AND_FETCH_REQ` of its own (the
+//!   driver accepts the commit; its re-fetch part is cancelled when the ring is
+//!   torn down), and never blocks in libublk's wait once down. The kernel
+//!   therefore sees every commit and the successor has nothing to replay.
 //! * Errors before the gate are reported to the attaching thread and are not
 //!   fatal: nothing was fetched, so no request can be started.
 //! * The wake race: the `POLL_ADD` is level triggered and re-armed after
@@ -31,20 +41,27 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use io_uring::{cqueue, opcode, types};
+use io_uring::{cqueue, opcode, squeue, types};
 use libublk::helpers::IoBuf;
 use libublk::io::{UblkDev, UblkIOCtx, UblkQueue};
 use libublk::{sys, BufDesc, BufDescList, UblkIORes, UblkUringData};
 use lunix_iface::block::{
     BlockEngine, Completer, IoOp, IoRequest, IoStatus, QueueConfig, QueueHandler, QueueId, Tag,
 };
+use lunix_iface::wake::WakeFd;
 
 const EINVAL: i32 = 22;
 const EIO: i32 = 5;
 
-/// `tag` of the target-I/O user data that marks the wake-fd poll. Real tags
-/// are below the queue depth (at most 4096).
+/// `tag` of the target-I/O user data that marks the engine wake-fd poll. Real
+/// tags are below the queue depth (at most 4096).
 const WAKE_TAG: u16 = u16::MAX;
+/// `tag` of the poll on the layer's own stop fd.
+const STOP_TAG: u16 = u16::MAX - 1;
+/// Operation byte of the poll user data (`WAKE_TAG`, `STOP_TAG`).
+const POLL_OP: u32 = 0xfe;
+/// Operation byte of the layer's own commit commands.
+const DRAIN_OP: u32 = 0xfd;
 
 /// Counters of one queue, readable from any thread.
 #[derive(Debug, Default)]
@@ -58,6 +75,8 @@ pub struct QueueCounters {
     discards: AtomicU64,
     write_zeroes: AtomicU64,
     rejected: AtomicU64,
+    drain_commits: AtomicU64,
+    drain_cqes: AtomicU64,
 }
 
 /// A copy of [`QueueCounters`].
@@ -82,6 +101,11 @@ pub struct QueueSnapshot {
     /// Requests the layer itself failed with `EINVAL` (unknown operation,
     /// length above the tag buffer).
     pub rejected: u64,
+    /// Requests committed by the layer's own command after the queue went
+    /// down (the held requests of a quiesce or stop).
+    pub drain_commits: u64,
+    /// Completions the driver returned for those commits.
+    pub drain_cqes: u64,
 }
 
 impl QueueCounters {
@@ -104,6 +128,8 @@ impl QueueCounters {
             discards: l(&self.discards),
             write_zeroes: l(&self.write_zeroes),
             rejected: l(&self.rejected),
+            drain_commits: l(&self.drain_commits),
+            drain_cqes: l(&self.drain_cqes),
         }
     }
 }
@@ -114,13 +140,26 @@ pub fn fatal(queue: u16, why: &str) -> ! {
     eprintln!(
         "lunix-ublk: fatal error in queue {queue}: {why}; aborting (recoverable like kill -9)"
     );
+    abort_without_core()
+}
+
+/// `abort()` with core dumps off: a dump of a process with locked buffers
+/// keeps `/dev/ublkcN` open for long and the successor's recovery wait could
+/// expire.
+fn abort_without_core() -> ! {
+    let zero = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: setrlimit reads one initialised `rlimit`.
+    unsafe { libc::setrlimit(libc::RLIMIT_CORE, &zero) };
     std::process::abort()
 }
 
 /// [`fatal`] for the control side of the device.
 pub(crate) fn fatal_device(why: &str) -> ! {
     eprintln!("lunix-ublk: fatal error: {why}; aborting (recoverable like kill -9)");
-    std::process::abort()
+    abort_without_core()
 }
 
 /// The decision all queue threads wait for before they fetch.
@@ -215,6 +254,8 @@ pub(crate) struct QueueArgs {
     pub gate: Arc<StartGate>,
     pub ready: Sender<Ready>,
     pub ended: Arc<Ended>,
+    /// Signalled to take a queue that was never started down (release).
+    pub stop: WakeFd,
 }
 
 /// The entry point of a queue thread. A panic aborts the process.
@@ -223,16 +264,6 @@ pub(crate) fn queue_thread(args: QueueArgs) {
     let r = catch_unwind(AssertUnwindSafe(|| run_queue(args)));
     if r.is_err() {
         fatal(qid, "panic in a queue thread");
-    }
-}
-
-fn block_all_signals() {
-    // SAFETY: `sigfillset` and `pthread_sigmask` get a valid, initialised set
-    // and a null old-set pointer.
-    unsafe {
-        let mut set: libc::sigset_t = std::mem::zeroed();
-        libc::sigfillset(&mut set);
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
     }
 }
 
@@ -257,10 +288,56 @@ fn pin_to(cpu: usize) -> bool {
     rustix::thread::sched_setaffinity(None, &set).is_ok()
 }
 
+/// A request as the kernel describes it, after validation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Decoded {
+    /// Hand it to the engine.
+    Request {
+        op: IoOp,
+        fua: bool,
+        offset: u64,
+        len: u32,
+    },
+    /// Fail it with `EINVAL` without involving the engine: an operation the
+    /// layer does not know, a length that does not fit `u32`, or more data
+    /// than a tag buffer holds.
+    Reject,
+}
+
+/// Decodes `ublksrv_io_desc` fields. FUA counts for WRITE only.
+pub(crate) fn decode_request(
+    op_flags: u32,
+    start_sector: u64,
+    nr_sectors: u32,
+    buf_bytes: usize,
+) -> Decoded {
+    let op = match op_flags & 0xff {
+        sys::UBLK_IO_OP_READ => IoOp::Read,
+        sys::UBLK_IO_OP_WRITE => IoOp::Write,
+        sys::UBLK_IO_OP_FLUSH => IoOp::Flush,
+        sys::UBLK_IO_OP_DISCARD => IoOp::Discard,
+        sys::UBLK_IO_OP_WRITE_ZEROES => IoOp::WriteZeroes,
+        _ => return Decoded::Reject,
+    };
+    let len64 = u64::from(nr_sectors) << 9;
+    let Ok(len) = u32::try_from(len64) else {
+        return Decoded::Reject;
+    };
+    if matches!(op, IoOp::Read | IoOp::Write) && len64 > buf_bytes as u64 {
+        return Decoded::Reject;
+    }
+    Decoded::Request {
+        op,
+        fua: op == IoOp::Write && op_flags & sys::UBLK_IO_F_FUA != 0,
+        offset: start_sector.saturating_mul(512),
+        len,
+    }
+}
+
 fn run_queue(a: QueueArgs) {
     let _end = EndGuard(Arc::clone(&a.ended));
     let qid = a.qid;
-    block_all_signals();
+    crate::watchdog::block_all_signals();
     if let Some(cpu) = a.cpu {
         if !pin_to(cpu) {
             eprintln!("lunix-ublk: queue {qid}: cannot pin to cpu {cpu}; running unpinned");
@@ -306,6 +383,7 @@ fn run_queue(a: QueueArgs) {
     };
     let queue = fetch.unwrap_or_else(|e| fatal(qid, &format!("submitting FETCH: {e}")));
     let wake_fd = handler.wake_fd().as_raw_fd();
+    let stop_fd = a.stop.raw_fd();
     let cdev_fd = a.dev.tgt.fds[0];
     let mut lp = Loop {
         handler,
@@ -317,37 +395,39 @@ fn run_queue(a: QueueArgs) {
             cdev_fd,
             meta: vec![Meta::Idle; usize::from(a.depth)],
             counters: Arc::clone(&a.counters),
+            down: false,
         },
         wake_fd,
     };
-    lp.arm(&queue);
-    // Our own loop instead of libublk's `wait_and_handle_io`, which ends as
-    // soon as the kernel has aborted the idle FETCH commands, even while the
-    // engine still holds started requests (it assumes handlers complete at
-    // once). We end only when the queue is down AND nothing is in flight (W2).
+    lp.arm(&queue, WAKE_TAG, wake_fd);
+    lp.arm(&queue, STOP_TAG, stop_fd);
     loop {
+        if lp.c.down {
+            // Drain: no blocking wait in libublk any more. Reap what is there
+            // and submit our commits; leave when nothing is in flight.
+            let _ = queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0);
+            if a.counters.in_flight() == 0 {
+                // One more submit for the commits of the last completions.
+                let _ = queue.flush_and_wake_io_tasks(|ud, cqe, _| lp.on_cqe(&queue, ud, cqe), 0);
+                break;
+            }
+            lp.wait_for_engine(&queue);
+            continue;
+        }
         let r = queue.flush_and_wake_io_tasks(|ud, cqe, _last| lp.on_cqe(&queue, ud, cqe), 1);
         match r {
             Ok(_) => {}
-            Err(libublk::UblkError::QueueIsDown) => {
-                if a.counters.in_flight() == 0 {
-                    break;
-                }
-                lp.wait_for_engine(&queue);
-            }
+            // libublk saw every command answered with ABORT.
+            Err(libublk::UblkError::QueueIsDown) => lp.c.down = true,
             Err(e) => fatal(qid, &format!("queue loop error: {e}")),
         }
     }
 
-    // The queue is down and nothing is in flight.
-    if !queue.is_stopping() {
-        fatal(qid, "the queue loop ended while the device is not stopping");
-    }
     let left = a.counters.in_flight();
     if left != 0 {
         fatal(
             qid,
-            &format!("the queue ended with {left} started request(s) uncompleted"),
+            &format!("the queue ended with {left} started request(s) uncommitted"),
         );
     }
     drop(lp);
@@ -370,6 +450,9 @@ struct CompState {
     cdev_fd: RawFd,
     meta: Vec<Meta>,
     counters: Arc<QueueCounters>,
+    /// The queue is down: the driver answered a command with `ABORT`, or a
+    /// stop was requested. From here on commits are the layer's own.
+    down: bool,
 }
 
 struct Loop {
@@ -385,13 +468,13 @@ struct Comp<'a, 'q> {
 }
 
 impl Loop {
-    fn arm(&self, q: &UblkQueue<'_>) {
-        let ud = UblkIOCtx::build_user_data(WAKE_TAG, 0xfe, 0, true);
-        let sqe = opcode::PollAdd::new(types::Fd(self.wake_fd), libc::POLLIN as u32)
+    fn arm(&self, q: &UblkQueue<'_>, tag: u16, fd: RawFd) {
+        let ud = UblkIOCtx::build_user_data(tag, POLL_OP, 0, true);
+        let sqe = opcode::PollAdd::new(types::Fd(fd), libc::POLLIN as u32)
             .build()
             .user_data(ud);
         if let Err(e) = q.ublk_submit_sqe_sync(sqe) {
-            fatal(self.c.qid, &format!("arming the wake poll: {e}"));
+            fatal(self.c.qid, &format!("arming a poll: {e}"));
         }
     }
 
@@ -401,32 +484,49 @@ impl Loop {
         };
         let res = cqe.result();
         if user_data & (UblkUringData::Target as u64) != 0 {
-            return self.on_wake(q, tag, res);
+            return match UblkIOCtx::user_data_to_op(user_data) {
+                DRAIN_OP => {
+                    // The answer to one of our own commits (the fetch part is
+                    // cancelled or parked: nothing to do either way).
+                    self.c.counters.drain_cqes.fetch_add(1, Ordering::Relaxed);
+                }
+                POLL_OP => self.on_poll(q, tag, res),
+                _ => fatal(self.c.qid, "unexpected target completion"),
+            };
         }
         if res == sys::UBLK_IO_RES_OK as i32 {
             self.on_request(q, tag);
-        } else if res != sys::UBLK_IO_RES_ABORT && !q.is_stopping() {
+        } else if res == sys::UBLK_IO_RES_ABORT {
+            // Set mid-batch: a completion later in this very batch must
+            // already take the drain path.
+            self.c.down = true;
+        } else if !self.c.down {
             fatal(
                 self.c.qid,
                 &format!("the driver answered a command with {res}"),
             );
         }
-        // ABORT (or anything while stopping): the queue is winding down.
     }
 
-    fn on_wake(&mut self, q: &UblkQueue<'_>, tag: u16, res: i32) {
-        if tag != WAKE_TAG {
-            fatal(self.c.qid, "unexpected target completion");
-        }
+    fn on_poll(&mut self, q: &UblkQueue<'_>, tag: u16, res: i32) {
         if res < 0 {
-            if q.is_stopping() {
+            if self.c.down {
                 return; // the ring is going away
             }
-            fatal(self.c.qid, &format!("wake poll failed with {res}"));
+            fatal(self.c.qid, &format!("a poll failed with {res}"));
         }
-        let Loop { handler, c, .. } = self;
-        handler.poll(&mut Comp { q, c: &mut *c });
-        self.arm(q);
+        match tag {
+            WAKE_TAG => {
+                let Loop { handler, c, .. } = self;
+                handler.poll(&mut Comp { q, c: &mut *c });
+                self.arm(q, WAKE_TAG, self.wake_fd);
+            }
+            STOP_TAG => {
+                // A stop was requested (a device that never started).
+                self.c.down = true;
+            }
+            _ => fatal(self.c.qid, "unexpected poll completion"),
+        }
     }
 
     /// The queue is down but the engine still holds requests: wait for its
@@ -453,29 +553,14 @@ impl Loop {
         lunix_iface::crashpoint!("ublk.after_fetch");
 
         let iod = q.get_iod(tag);
-        let op_raw = iod.op_flags & 0xff;
-        let offset = iod.start_sector.saturating_mul(512);
-        let len64 = u64::from(iod.nr_sectors) << 9;
-        let op = match op_raw {
-            sys::UBLK_IO_OP_READ => Some(IoOp::Read),
-            sys::UBLK_IO_OP_WRITE => Some(IoOp::Write),
-            sys::UBLK_IO_OP_FLUSH => Some(IoOp::Flush),
-            sys::UBLK_IO_OP_DISCARD => Some(IoOp::Discard),
-            sys::UBLK_IO_OP_WRITE_ZEROES => Some(IoOp::WriteZeroes),
-            _ => None,
-        };
-        let fua = op == Some(IoOp::Write) && iod.op_flags & sys::UBLK_IO_F_FUA != 0;
-        let decoded = match (op, u32::try_from(len64)) {
-            (Some(op), Ok(len))
-                if !matches!(op, IoOp::Read | IoOp::Write) || len64 <= c.buf_bytes as u64 =>
-            {
-                Some((op, len))
-            }
-            _ => None,
-        };
-        let Some((op, len)) = decoded else {
-            // Unknown operation or a length above the tag buffer: reject
-            // without involving the engine, and commit `EINVAL`.
+        let decoded = decode_request(iod.op_flags, iod.start_sector, iod.nr_sectors, c.buf_bytes);
+        let Decoded::Request {
+            op,
+            fua,
+            offset,
+            len,
+        } = decoded
+        else {
             c.counters.rejected.fetch_add(1, Ordering::Relaxed);
             c.meta[t] = Meta::Started {
                 op: IoOp::Flush,
@@ -522,6 +607,40 @@ impl Loop {
     }
 }
 
+impl Comp<'_, '_> {
+    /// Commits a request after the queue went down: libublk would drop it
+    /// silently, so the layer queues `COMMIT_AND_FETCH_REQ` itself. The
+    /// re-fetch half is never waited for (the ring's teardown cancels it).
+    fn drain_commit(&mut self, tag: u16, res: i32) {
+        let t = usize::from(tag);
+        let addr = if self.c.user_copy {
+            0
+        } else {
+            self.c.ptrs[t] as u64
+        };
+        let mut cmd = [0u8; 16]; // struct ublksrv_io_cmd
+        cmd[0..2].copy_from_slice(&self.c.qid.to_le_bytes());
+        cmd[2..4].copy_from_slice(&tag.to_le_bytes());
+        cmd[4..8].copy_from_slice(&res.to_le_bytes());
+        cmd[8..16].copy_from_slice(&addr.to_le_bytes());
+        let sqe = opcode::UringCmd16::new(types::Fixed(0), sys::UBLK_U_IO_COMMIT_AND_FETCH_REQ)
+            .cmd(cmd)
+            .build()
+            .flags(squeue::Flags::FIXED_FILE)
+            .user_data(UblkIOCtx::build_user_data(tag, DRAIN_OP, 0, true));
+        if let Err(e) = self.q.ublk_submit_sqe_sync(sqe) {
+            fatal(
+                self.c.qid,
+                &format!("queueing the drain commit of tag {tag}: {e}"),
+            );
+        }
+        self.c
+            .counters
+            .drain_commits
+            .fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 impl Completer for Comp<'_, '_> {
     fn complete(&mut self, tag: Tag, status: IoStatus) {
         let qid = self.c.qid;
@@ -549,26 +668,41 @@ impl Completer for Comp<'_, '_> {
                 res = IoStatus::err(EIO).raw();
             }
         }
-        let committed = if self.c.user_copy {
-            self.q
-                .complete_io_cmd_unified(tag.0, BufDesc::Slice(&[]), Ok(UblkIORes::Result(res)))
+        if self.c.down {
+            self.drain_commit(tag.0, res);
         } else {
-            // SAFETY: the buffer is `buf_bytes` long and owned by this thread.
-            let slice: &[u8] =
-                unsafe { std::slice::from_raw_parts(self.c.ptrs[t], self.c.buf_bytes) };
-            self.q
-                .complete_io_cmd_unified(tag.0, BufDesc::Slice(slice), Ok(UblkIORes::Result(res)))
-        };
-        if let Err(e) = committed {
-            fatal(qid, &format!("committing tag {}: {e}", tag.0));
+            let committed = if self.c.user_copy {
+                self.q.complete_io_cmd_unified(
+                    tag.0,
+                    BufDesc::Slice(&[]),
+                    Ok(UblkIORes::Result(res)),
+                )
+            } else {
+                // SAFETY: the buffer is `buf_bytes` long and owned by this thread.
+                let slice: &[u8] =
+                    unsafe { std::slice::from_raw_parts(self.c.ptrs[t], self.c.buf_bytes) };
+                self.q.complete_io_cmd_unified(
+                    tag.0,
+                    BufDesc::Slice(slice),
+                    Ok(UblkIORes::Result(res)),
+                )
+            };
+            if let Err(e) = committed {
+                fatal(qid, &format!("committing tag {}: {e}", tag.0));
+            }
         }
         self.c.counters.completed.fetch_add(1, Ordering::AcqRel);
     }
 
     fn tag_buf(&mut self, tag: Tag) -> &mut [u8] {
-        let Some(ptr) = self.c.ptrs.get(usize::from(tag.0)).copied() else {
+        let t = usize::from(tag.0);
+        let Some(ptr) = self.c.ptrs.get(t).copied() else {
             fatal(self.c.qid, "tag_buf of an unknown tag");
         };
+        debug_assert!(
+            matches!(self.c.meta.get(t), Some(Meta::Started { .. })),
+            "tag_buf of a tag that is not started"
+        );
         // SAFETY: a buffer of `buf_bytes` bytes owned by this thread; the
         // returned borrow is tied to `&mut self`, so one tag buffer is
         // borrowed at a time through the completer.
@@ -660,9 +794,91 @@ mod tests {
     }
 
     #[test]
-    fn the_wake_user_data_is_a_target_io_with_the_reserved_tag() {
-        let ud = UblkIOCtx::build_user_data(WAKE_TAG, 0xfe, 0, true);
-        assert_eq!(UblkIOCtx::user_data_to_tag(ud), u32::from(WAKE_TAG));
-        assert!(ud & (1 << 63) != 0);
+    fn the_poll_user_data_is_a_target_io_with_a_reserved_tag() {
+        for tag in [WAKE_TAG, STOP_TAG] {
+            let ud = UblkIOCtx::build_user_data(tag, POLL_OP, 0, true);
+            assert_eq!(UblkIOCtx::user_data_to_tag(ud), u32::from(tag));
+            assert_eq!(UblkIOCtx::user_data_to_op(ud), POLL_OP);
+            assert!(ud & (UblkUringData::Target as u64) != 0);
+        }
+        assert_ne!(WAKE_TAG, STOP_TAG);
+        // The layer's own commits are target I/O too, so libublk does not
+        // count them as driver commands.
+        let ud = UblkIOCtx::build_user_data(7, DRAIN_OP, 0, true);
+        assert_eq!(UblkIOCtx::user_data_to_op(ud), DRAIN_OP);
+        assert!(ud & (UblkUringData::Target as u64) != 0);
+        assert_ne!(DRAIN_OP, POLL_OP);
+    }
+
+    fn req(op: u32, flags: u32, start: u64, sectors: u32) -> Decoded {
+        decode_request(op | flags, start, sectors, 1 << 20)
+    }
+
+    #[test]
+    fn requests_decode_to_the_engine_operations() {
+        let r = |op| match req(op, 0, 8, 16) {
+            Decoded::Request {
+                op, offset, len, ..
+            } => (op, offset, len),
+            Decoded::Reject => panic!("rejected"),
+        };
+        assert_eq!(r(sys::UBLK_IO_OP_READ), (IoOp::Read, 4096, 8192));
+        assert_eq!(r(sys::UBLK_IO_OP_WRITE), (IoOp::Write, 4096, 8192));
+        assert_eq!(r(sys::UBLK_IO_OP_FLUSH).0, IoOp::Flush);
+        assert_eq!(r(sys::UBLK_IO_OP_DISCARD).0, IoOp::Discard);
+        assert_eq!(r(sys::UBLK_IO_OP_WRITE_ZEROES).0, IoOp::WriteZeroes);
+    }
+
+    #[test]
+    fn fua_counts_for_writes_only() {
+        let fua = |op| match req(op, sys::UBLK_IO_F_FUA, 0, 8) {
+            Decoded::Request { fua, .. } => fua,
+            Decoded::Reject => panic!("rejected"),
+        };
+        assert!(fua(sys::UBLK_IO_OP_WRITE));
+        assert!(!fua(sys::UBLK_IO_OP_READ));
+        assert!(!fua(sys::UBLK_IO_OP_FLUSH));
+        assert!(!fua(sys::UBLK_IO_OP_WRITE_ZEROES));
+        assert!(matches!(
+            req(sys::UBLK_IO_OP_WRITE, 0, 0, 8),
+            Decoded::Request { fua: false, .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_operations_and_oversize_data_are_rejected() {
+        assert_eq!(req(sys::UBLK_IO_OP_WRITE_SAME, 0, 0, 8), Decoded::Reject);
+        assert_eq!(req(sys::UBLK_IO_OP_ZONE_APPEND, 0, 0, 8), Decoded::Reject);
+        // 1 MiB + 512 B of data does not fit a 1 MiB tag buffer.
+        assert_eq!(
+            req(sys::UBLK_IO_OP_READ, 0, 0, (1 << 11) + 1),
+            Decoded::Reject
+        );
+        assert_eq!(
+            req(sys::UBLK_IO_OP_WRITE, 0, 0, (1 << 11) + 1),
+            Decoded::Reject
+        );
+        assert!(matches!(
+            req(sys::UBLK_IO_OP_WRITE, 0, 0, 1 << 11),
+            Decoded::Request { .. }
+        ));
+        // Discards are not limited by the tag buffer (they carry no data) but
+        // by what fits `u32`.
+        assert!(matches!(
+            req(sys::UBLK_IO_OP_DISCARD, 0, 0, crate::config::MAX_DISCARD_SECTORS),
+            Decoded::Request { len, .. } if i64::from(len) <= i64::from(i32::MAX)
+        ));
+        assert_eq!(
+            req(sys::UBLK_IO_OP_DISCARD, 0, 0, u32::MAX),
+            Decoded::Reject
+        );
+    }
+
+    #[test]
+    fn a_huge_start_sector_saturates_instead_of_wrapping() {
+        match req(sys::UBLK_IO_OP_READ, 0, u64::MAX, 8) {
+            Decoded::Request { offset, .. } => assert_eq!(offset, u64::MAX),
+            Decoded::Reject => panic!("rejected"),
+        }
     }
 }

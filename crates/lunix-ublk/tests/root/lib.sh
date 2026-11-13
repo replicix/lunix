@@ -53,3 +53,11 @@ df_guard() {
   echo "df_guard: ok ($avail GiB free, $2 GiB wanted)"
 }
 need_root_tests() { [ "${LUNIX_ROOT_TESTS:-}" = 1 ] || skip "LUNIX_ROOT_TESTS=1 is not set (run through tools/remote.sh root)"; }
+
+# script_cap SECONDS: the script's own cap (W8 asks for one next to the wrapper's). When it fires the
+# script gets TERM, whose trap runs the teardown (recover, unmount, detach, delete).
+script_cap() {
+  ( sleep "$1"; echo "script cap of $1 s reached: sending TERM to the script" >&2; kill -TERM $$ ) &
+  CAP_PID=$!
+  add_cleanup 'kill $CAP_PID 2>/dev/null'
+}

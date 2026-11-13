@@ -19,20 +19,30 @@ wedged() { # message: report, stop the whole run, no retry (W9)
   exit 9
 }
 
+# register_from_log LOG: record a device the daemon announced (ADDED / ERRDEV) before it was READY, so that a
+# failed start never leaves an unrecorded device.
+register_from_log() {
+  local id
+  for id in $(sed -n 's/^\(ADDED\|ERRDEV\) id=\([0-9]*\).*/\2/p' "$1" | sort -u); do
+    grep -qxF "/dev/ublkb$id" "$CREATED_DEVICES" || { register_device "/dev/ublkb$id"; register_device "/dev/ublkc$id"; }
+  done
+}
+
 # start_daemon MODE [testd args...]: MODE is run or recover; sets DPID DEV DEVID DLOG
 start_daemon() {
   local mode=$1; shift
   _dn=$((_dn + 1)); DLOG="$OUT/daemon.$_dn.log"
-  env ${CRASH_AT:+LUNIX_CRASH_AT=$CRASH_AT} taskset -c "$DAEMON_CPUS" "$TESTD" "$mode" --state "$STATE" --backing "$IMG" --queues "$QUEUES" --depth "$DEPTH" \
+  env -u LUNIX_CRASH_AT ${CRASH_AT:+LUNIX_CRASH_AT=$CRASH_AT} taskset -c "$DAEMON_CPUS" "$TESTD" "$mode" --state "$STATE" --backing "$IMG" --queues "$QUEUES" --depth "$DEPTH" \
       --cpus "$DAEMON_CPUS" ${MAX_GIB:+--max-gib $MAX_GIB} "$@" > "$DLOG" 2>&1 &
   DPID=$!
   local i
   for i in $(seq 1 1200); do
     grep -q '^READY' "$DLOG" && break
     grep -q '^REFUSED' "$DLOG" && { echo "daemon refused:"; cat "$DLOG"; return 3; }
-    kill -0 "$DPID" 2>/dev/null || { echo "daemon died during start:"; tail -5 "$DLOG"; return 9; }
+    kill -0 "$DPID" 2>/dev/null || { register_from_log "$DLOG"; echo "daemon died during start:"; tail -5 "$DLOG"; return 9; }
     sleep 0.05
   done
+  register_from_log "$DLOG"
   grep -q '^READY' "$DLOG" || wedged "daemon $DPID not ready after 60 s"
   DEVID=$(sed -n 's/^READY id=\([0-9]*\) .*/\1/p' "$DLOG")
   DEV=/dev/ublkb$DEVID
@@ -54,7 +64,16 @@ stop_daemon_clean() {
   fi
   DPID=""
 }
-del_dev() { [ -n "$DEVID" ] && [ -e "/dev/ublkb$DEVID" ] && timeout -k 5 75 "$TESTD" del --id "$DEVID" >/dev/null 2>&1; true; }
+# del_dev: DEL_DEV of a LIVE device is a STOP_DEV, so it is only sent for a device whose daemon is gone (--force),
+# never while the daemon of this run is alive.
+del_dev() {
+  [ -n "$DEVID" ] && [ -e "/dev/ublkb$DEVID" ] || return 0
+  if [ -n "$DPID" ] && kill -0 "$DPID" 2>/dev/null; then
+    echo "del_dev: the daemon $DPID is alive; not deleting $DEV (DEL_DEV of a live device is a stop)" >&2
+    return 1
+  fi
+  timeout -k 5 75 "$TESTD" del --id "$DEVID" --force >/dev/null 2>&1
+}
 td() { timeout -k 5 100 "$TESTD" "$@"; }       # client commands against the running daemon
 tdc() { td "$1" --state "$STATE" "${@:2}"; }
 
@@ -79,6 +98,23 @@ check_fs() { # fs dev  (unmounted); prints the exit code
   esac
 }
 
+# Extra daemons of a multi-device cell: "pid:id" pairs.
+EXTRAS=""
+track_extra() { EXTRAS="$EXTRAS $1:$2"; }
+untrack_extra() { EXTRAS=" $(echo "$EXTRAS" | sed "s/ $1:$2//")"; }
+extras_teardown() {
+  local e pid id i
+  for e in $EXTRAS; do
+    pid=${e%%:*}; id=${e##*:}
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null
+      for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+      kill -0 "$pid" 2>/dev/null && { echo "teardown: extra daemon $pid did not exit; device $id left" >&2; continue; }
+    fi
+    [ -e "/dev/ublkb$id" ] && timeout -k 5 75 "$TESTD" del --id "$id" --force >/dev/null 2>&1
+  done
+}
+
 # teardown: the only exit path. Order: load, serving daemon, unmount, detach, delete.
 teardown() {
   trap - EXIT INT TERM
@@ -100,8 +136,12 @@ teardown() {
   if [ -n "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
     timeout -k 5 90 umount "$MNT" || { echo "teardown: umount of $MNT failed or timed out; stopping here (nothing else touched)" >&2; return 1; }
   fi
-  stop_daemon_clean
-  del_dev
+  if stop_daemon_clean; then
+    del_dev
+  else
+    echo "teardown: the daemon is still alive after the stop; the device is not deleted (stop of a live device)" >&2
+  fi
+  extras_teardown
   [ -n "$IMG" ] && rm -f "$IMG"
   return 0
 }
@@ -109,5 +149,6 @@ teardown() {
 # need_clean_start OUT: leftovers must be clean at the start
 need_clean_start() {
   bash "$here/../../../../spikes/common/ublk-leftovers.sh" > "$1/leftovers-start.txt" || { cat "$1/leftovers-start.txt"; echo "not clean at start"; exit 2; }
+  : > "$CREATED_DEVICES"   # ids are reused: only devices recorded by this run count
 }
 load_ublk() { lsmod | grep -q '^ublk_drv ' || { modprobe ublk_drv && add_cleanup 'rmmod ublk_drv'; }; }

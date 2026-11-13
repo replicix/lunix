@@ -14,6 +14,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 MAX_GIB=4
 STATE="$LUNIX_SPIKE_DIR/state/raw"; IMG="$LUNIX_SPIKE_DIR/raw.img"; need_safe "$IMG"; need_safe "$STATE"
 need_clean_start "$OUT"
+script_cap "${SCRIPT_CAP:-3000}"   # the script's own cap (W8); the wrapper timeout is larger
 load_ublk
 rm -rf "$STATE"; mkdir -p "$STATE"; rm -f "$IMG"
 add_cleanup 'teardown >> "$OUT/teardown.log" 2>&1'
@@ -39,7 +40,7 @@ fio_raw_bg() { # name runtime [extra fio args]  (time_based: bounded by --runtim
 }
 fio_wait() { # name -> sets FIO_RC, prints errors
   wait "$FIO_PID"; FIO_RC=$?; FIO_PID=""
-  FIO_ERR=$(jq -c '[.jobs[].total_err]' "$OUT/$1.json" 2>/dev/null || echo n/a)
+  FIO_ERR=$(jq -c '[.jobs[].error]' "$OUT/$1.json" 2>/dev/null || echo n/a)
 }
 fio_verify_once() { # name [extra]: bounded write + verify (io_size, no time_based; 64 MiB because the shared host disk is slow)
   local name=$1; shift
@@ -87,24 +88,45 @@ done
 fio_wait rawkill
 [ "$FIO_RC" = 0 ]; expect "fio rc 0 after $KILL_CYCLES kill -9 cycles, errors $FIO_ERR" $?
 
-say ""; say "## QUIESCE handover under raw load x$QUIESCE_CYCLES (daemon exits, no stop command)"
-fio_raw_bg rawquiesce $((QUIESCE_CYCLES * 12 + 40))
-sleep 5
-for c in $(seq 1 "$QUIESCE_CYCLES"); do
-  old=$DPID
-  tdc quiesce --timeout-ms 8000 > "$OUT/quiesce.$c.txt" 2>&1; qrc=$?
-  for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
-  if kill -0 "$old" 2>/dev/null; then wedged "daemon $old did not exit within 30 s of QUIESCE (cycle $c); stopped, nothing killed"; fi
-  wait "$old"; xrc=$?
-  [ "$qrc" = 0 ] && [ "$xrc" = 0 ]; expect "cycle $c: quiesce rc $qrc, daemon exit code $xrc" $?
-  state=$(td info --id "$DEVID" | sed -n 's/.*state=\([0-9]*\).*/\1/p' | head -1)
-  say "- cycle $c: device state after exit: $state (2 = QUIESCED)"
-  start_daemon recover || { fail "recovery $c failed"; break; }
-  say "- cycle $c: recovered in $(daemon_ms) ms"
-  sleep 6
-done
-fio_wait rawquiesce
-[ "$FIO_RC" = 0 ]; expect "fio rc 0 after $QUIESCE_CYCLES handovers, errors $FIO_ERR" $?
+# qcycles LABEL N [recover args...]: N QUIESCE handovers under raw fio. The true drain is checked on every
+# cycle: the kernel has no started request left when the daemon exits (sysfs inflight read by the daemon
+# right after the drain), the exit code is 0, and the handover is quick (no 20 s stall).
+qcycles() {
+  local label=$1 n=$2; shift 2
+  fio_raw_bg "raw$label" $((n * 14 + 40))
+  sleep 5
+  local c old t0 t1 ms ki dc
+  for c in $(seq 1 "$n"); do
+    old=$DPID
+    t0=$(now_ns)
+    tdc quiesce --timeout-ms 8000 > "$OUT/quiesce.$label.$c.txt" 2>&1; qrc=$?
+    for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$old" 2>/dev/null; then wedged "daemon $old did not exit within 30 s of QUIESCE (cycle $c); stopped, nothing killed"; fi
+    wait "$old"; xrc=$?
+    t1=$(now_ns); ms=$(( (t1 - t0) / 1000000 ))
+    ki=$(sed -n 's/.*kernel_inflight=\([0-9,]*\).*/\1/p' "$OUT/quiesce.$label.$c.txt" | head -1)
+    dc=$(sed -n 's/.*drain_commits=\([0-9]*\).*/\1/p' "$OUT/quiesce.$label.$c.txt" | head -1)
+    [ "$qrc" = 0 ] && [ "$xrc" = 0 ] && [ "$ki" = "0,0" ] && [ "$ms" -lt 8000 ]
+    expect "$label cycle $c: quiesce rc $qrc, exit code $xrc, kernel inflight $ki, drain commits $dc, $ms ms" $?
+    state=$(td info --id "$DEVID" | sed -n 's/.*state=\([0-9]*\).*/\1/p' | head -1)
+    say "  device state after exit: $state (2 = QUIESCED)"
+    start_daemon recover "$@" || { fail "recovery $c failed"; break; }
+    say "  recovered in $(daemon_ms) ms"
+    sleep 6
+  done
+  fio_wait "raw$label"
+  [ "$FIO_RC" = 0 ]; expect "$label: fio rc 0 after $n handovers, errors $FIO_ERR" $?
+}
+
+say ""; say "## QUIESCE handover under raw load x$QUIESCE_CYCLES (worker-pool engine; daemon exits, no stop command)"
+qcycles quiesce "$QUIESCE_CYCLES"
+say ""; say "## QUIESCE handover with an inline-completion engine (--workers 0, like the M11 engine) x$QUIESCE_CYCLES"
+# move the device onto the inline engine through one more handover, then cycle
+tdc quiesce --timeout-ms 8000 > "$OUT/quiesce.switch.txt" 2>&1; old=$DPID
+for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+wait "$old"
+start_daemon recover --workers 0 || { fail "start with the inline engine failed"; exit 1; }
+qcycles inline "$QUIESCE_CYCLES" --workers 0
 grep -q 'STOP' "$OUT"/daemon.*.log; [ $? -ne 0 ]; expect "no daemon log mentions a stop command" $?
 
 say ""; say "## watchdog: a deliberately stuck control call"
