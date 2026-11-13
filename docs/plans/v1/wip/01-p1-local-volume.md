@@ -2252,7 +2252,11 @@ device smoke test.
 first `open_lane` of a recovered volume, log `ignored_after_gap` and every
 `damaged` range with seq bounds; honour the mount option
 `on_journal_damage = wipe | refuse` (default `wipe`; `refuse` keeps the
-volume offline for `fsck`). Gate: a test with a damaged record above the
+volume offline for `fsck` when the damage is mid-journal, that is a damaged
+range with a later valid record in its lane or records beyond the first gap;
+a torn last record of a lane is crash residue, logged at warn and wiped,
+because a flushed or FUA record is durable before its acknowledgement; lead,
+2026-11-13). Gate: a test with a damaged record above the
 floor shows the log line before the wipe, and `refuse` leaves the journal
 untouched.
 

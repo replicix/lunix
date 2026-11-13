@@ -205,6 +205,17 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   the floor, merges them and stops at the first gap. The checkpoint only
   says which files may be skipped. There is no mid-ring corruption error
   and no flush marker; `fsck` warns about valid records beyond the gap.
+- **What `on_journal_damage = refuse` refuses (lead, 2026-11-13, after the
+  M12a review).** Only mid-journal damage: a damaged range with a later
+  valid record in its lane, or valid records beyond the first gap. A torn
+  **last** record of a lane with nothing valid after it is crash residue:
+  it cannot be a write acknowledged as durable, because a FLUSH or FUA
+  completes only after the group flush that covers it (`fdatasync` of the
+  lane file) has finished, so every such record is on stable storage before
+  its acknowledgement and a crash cannot tear it. What a torn tail can hold
+  is a write never flushed, which block semantics allow to lose. It is
+  logged at warn and wiped; refusing it would keep every volume offline
+  after an ordinary crash.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes

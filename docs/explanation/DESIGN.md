@@ -301,7 +301,14 @@ journal):
        **before** the first `open_lane`, and a mount option chooses
        `on_journal_damage = wipe` (default, availability first) or `refuse`
        (the volume stays offline for `fsck`, which reads but never opens a
-       lane). A clean restart writes nothing to the journal.
+       lane). `refuse` applies to mid-journal damage only: a damaged range
+       with a later valid record in its lane, or valid records beyond the
+       first gap. A torn last record of a lane with nothing valid after it
+       is the residue of a crash during an unflushed batch and is logged and
+       wiped: a record acknowledged by a FLUSH or FUA is durable (`fdatasync`
+       of its lane file in the group flush) before the acknowledgement, so a
+       crash cannot tear it (ADR-4). A clean restart writes nothing to the
+       journal.
   3. Merge the lanes by `write_seq` and accept records in contiguous
      order. This global contiguity, not file position, decides what is
      kept, so resync is safe: a damaged record at or below the floor costs
@@ -407,7 +414,9 @@ Recovery is idempotent: a crash during it is another recovery.
 7. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1).
    `ignored_after_gap` and `damaged` are logged before any lane is opened,
    and `on_journal_damage = refuse` stops the open here with a typed error
-   (the stale-tail wipe, §4.1, has not run yet). Rebuild the overlay from
+   when the damage is mid-journal (a later valid record in the lane, or
+   records beyond the gap); a torn last record of a lane is crash residue,
+   logged and wiped (§4.1). The stale-tail wipe has not run yet. Rebuild the overlay from
    the records and set the next `write_seq`.
 8. Raise the local floor to the tip when it is absent or lower, and
    charge the space ledger with the bytes found. Lanes are opened after
