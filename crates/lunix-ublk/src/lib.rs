@@ -64,7 +64,8 @@ pub use error::{Errno, Result, SizeError, UblkError};
 pub use features::{check_flag_rules, flag, Features, KERNEL_FLOOR};
 pub use harden::{harden_process, Harden};
 pub use identity::{
-    check_identity, current_boot_id, process_alive, volume_tag, IdentityMismatch, KernelView,
+    check_identity, current_boot_id, other_process_alive, process_alive, volume_tag,
+    IdentityMismatch, KernelView,
 };
 pub use queue::{fatal, QueueCounters, QueueSnapshot};
 pub use session::{SizeChange, SizeGuard};

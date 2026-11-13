@@ -211,6 +211,13 @@ pub fn process_alive(pid: i32) -> bool {
     !matches!(state, Some('Z' | 'X') | None)
 }
 
+/// [`process_alive`] for the server pid of a device: the caller's own pid is
+/// not "another server" (an exec-in-place upgrade keeps the pid the old
+/// instance registered).
+pub fn other_process_alive(pid: i32) -> bool {
+    pid != i32::try_from(std::process::id()).unwrap_or(0) && process_alive(pid)
+}
+
 /// Checks that the device the kernel reports is the recorded one:
 ///
 /// * same boot and same volume;
@@ -478,6 +485,13 @@ mod tests {
             check(&rec, &k, 8 << 30),
             Err(IdentityMismatch::EngineSmaller { .. })
         ));
+    }
+
+    #[test]
+    fn the_callers_own_pid_is_not_another_server() {
+        let me = i32::try_from(std::process::id()).unwrap();
+        assert!(process_alive(me));
+        assert!(!other_process_alive(me));
     }
 
     #[test]

@@ -22,7 +22,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lunix_format::VolumeUuid;
-use lunix_iface::block::{BlockEngine, IoOp};
+use std::os::fd::BorrowedFd;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use lunix_iface::block::{
+    BlockEngine, Completer, IoOp, IoRequest, IoStatus, QueueConfig, QueueHandler, ResizeHook,
+};
+use lunix_iface::stats::EngineStats;
 use lunix_testkit::strategies::IoSpec;
 use lunix_testkit::{CompletionMode, DeviceOracle, MemBlockEngine, MemEngineConfig};
 use lunix_ublk::{DataPath, SizeError, UblkConfig, UblkDevice, UblkError};
@@ -137,6 +143,19 @@ fn register(dev_id: u32) {
 }
 
 fn attach(size: u64, queues: u16, mode: CompletionMode, path: DataPath, max: u64) -> Dev {
+    attach_wrapped(size, queues, mode, path, max, |e| Arc::new(e))
+}
+
+/// [`attach`] with the engine the device serves wrapped (a fault injector);
+/// the oracle-facing handle stays the plain `MemBlockEngine`.
+fn attach_wrapped(
+    size: u64,
+    queues: u16,
+    mode: CompletionMode,
+    path: DataPath,
+    max: u64,
+    wrap: impl FnOnce(MemBlockEngine) -> Arc<dyn BlockEngine>,
+) -> Dev {
     let mut ecfg = MemEngineConfig::new(size);
     ecfg.nr_queues = queues;
     ecfg.mode = mode;
@@ -146,7 +165,7 @@ fn attach(size: u64, queues: u16, mode: CompletionMode, path: DataPath, max: u64
     cfg.depth = 32;
     cfg.max_size_bytes = max;
     cfg.data_path = path;
-    let dev = UblkDevice::add(Arc::new(engine.clone()), cfg).expect("add the ublk device");
+    let dev = UblkDevice::add(wrap(engine.clone()), cfg).expect("add the ublk device");
     register(dev.dev_id());
     let mut d = Dev {
         fd: None,
@@ -574,6 +593,177 @@ fn the_record_describes_the_device() {
         lunix_format::local::DeviceRecord::decode(&bytes).unwrap(),
         rec
     );
+    let mut d = d;
+    drop(d.fd.take());
+    detach_when_idle(&d.dev);
+}
+
+/// A fault injector: the `nth` WRITE it sees is acknowledged and dropped (the
+/// engine never learns of it). One acknowledged write is lost, nothing else.
+struct DropNthWrite {
+    inner: MemBlockEngine,
+    nth: u64,
+    seen: Arc<AtomicU64>,
+}
+
+struct DropQueue {
+    inner: Box<dyn QueueHandler>,
+    nth: u64,
+    seen: Arc<AtomicU64>,
+}
+
+impl BlockEngine for DropNthWrite {
+    fn size_bytes(&self) -> u64 {
+        self.inner.size_bytes()
+    }
+
+    fn queue_handler(&self, cfg: &QueueConfig) -> lunix_iface::Result<Box<dyn QueueHandler>> {
+        Ok(Box::new(DropQueue {
+            inner: self.inner.queue_handler(cfg)?,
+            nth: self.nth,
+            seen: Arc::clone(&self.seen),
+        }))
+    }
+
+    fn grow(&self, new_size_bytes: u64) -> lunix_iface::Result<()> {
+        self.inner.grow(new_size_bytes)
+    }
+
+    fn set_on_resize(&self, hook: Arc<dyn ResizeHook>) {
+        self.inner.set_on_resize(hook);
+    }
+
+    fn quiesce(&self) -> lunix_iface::Result<()> {
+        self.inner.quiesce()
+    }
+
+    fn stats(&self) -> EngineStats {
+        self.inner.stats()
+    }
+}
+
+impl QueueHandler for DropQueue {
+    fn on_request(&mut self, req: IoRequest, buf: &mut [u8], done: &mut dyn Completer) {
+        if req.op == IoOp::Write && self.seen.fetch_add(1, Ordering::SeqCst) + 1 == self.nth {
+            done.complete(req.tag, IoStatus::ok(req.len)); // acknowledged, dropped
+            return;
+        }
+        self.inner.on_request(req, buf, done);
+    }
+
+    fn poll(&mut self, done: &mut dyn Completer) {
+        self.inner.poll(done);
+    }
+
+    fn wake_fd(&self) -> BorrowedFd<'_> {
+        self.inner.wake_fd()
+    }
+}
+
+fn write_spec(block: u64, seed: u64) -> IoSpec {
+    IoSpec {
+        op: IoOp::Write,
+        fua: seed.is_multiple_of(2),
+        offset_bytes: block * 4096,
+        len: 4096,
+        seed,
+    }
+}
+
+/// Non-root: the oracle sees a single acknowledged write that was dropped.
+/// The same fault injector runs behind a real device in the root test below.
+#[test]
+fn the_oracle_catches_one_dropped_acknowledged_write_without_a_device() {
+    use lunix_iface::block::{QueueId, Tag};
+    use lunix_testkit::{run_request, TestCompleter};
+
+    let size = 64 * 4096;
+    let inner = MemBlockEngine::new(MemEngineConfig::new(size));
+    let eng = DropNthWrite {
+        inner: inner.clone(),
+        nth: 5,
+        seen: Arc::new(AtomicU64::new(0)),
+    };
+    let mut q = eng
+        .queue_handler(&QueueConfig {
+            queue: QueueId(0),
+            nr_queues: 1,
+            depth: 8,
+            max_io_buf_bytes: 1 << 20,
+        })
+        .unwrap();
+    let mut c = TestCompleter::new(1 << 20);
+    let mut oracle = DeviceOracle::new(size);
+    for i in 0..10u64 {
+        let w = write_spec(i, i + 1);
+        let req = IoRequest {
+            tag: Tag(0),
+            op: w.op,
+            fua: w.fua,
+            offset_bytes: w.offset_bytes,
+            len: w.len,
+        };
+        let (st, _) = run_request(&mut *q, &mut c, req, &w.payload());
+        assert!(
+            st.is_ok(),
+            "every write is acknowledged, also the dropped one"
+        );
+        oracle.apply(&w);
+    }
+    let differing = inner
+        .snapshot()
+        .chunks(4096)
+        .zip(oracle.bytes().chunks(4096))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        differing, 1,
+        "exactly the one dropped write differs from the oracle"
+    );
+}
+
+#[test]
+#[ignore = "root: creates a real ublk device"]
+fn a_single_dropped_acknowledged_write_on_a_raw_device_is_caught_by_the_oracle() {
+    root_only!();
+    let d = attach_wrapped(
+        16 * MIB,
+        1,
+        CompletionMode::Immediate,
+        DataPath::Copy,
+        64 * MIB,
+        |e| {
+            Arc::new(DropNthWrite {
+                inner: e,
+                nth: 7,
+                seen: Arc::new(AtomicU64::new(0)),
+            })
+        },
+    );
+    let f = d.fd.as_ref().unwrap();
+    let mut buf = Aligned::new(1 << 20);
+    let mut oracle = DeviceOracle::new(16 * MIB);
+    for i in 0..12u64 {
+        let w = write_spec(i, 1000 + i);
+        on_device(f, &w, &mut buf); // every pwrite succeeds
+        oracle.apply(&w);
+    }
+    // Read everything back through the device: exactly one 4 KiB block
+    // differs from the oracle.
+    let mut bad = 0;
+    for i in 0..12u64 {
+        let r = IoSpec {
+            op: IoOp::Read,
+            fua: false,
+            offset_bytes: i * 4096,
+            len: 4096,
+            seed: 0,
+        };
+        if on_device(f, &r, &mut buf) != oracle.read(i * 4096, 4096) {
+            bad += 1;
+        }
+    }
+    assert_eq!(bad, 1, "the oracle sees the one dropped write");
     let mut d = d;
     drop(d.fd.take());
     detach_when_idle(&d.dev);
