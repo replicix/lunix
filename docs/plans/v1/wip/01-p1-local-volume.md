@@ -1915,8 +1915,9 @@ and the scripts `run-crash-loop.sh`, `run-features.sh`, `run-resize.sh`,
    record; a crash between any two leaves them in this order). The
    recovered device is re-checked after `START_USER_RECOVERY`. A failed
    identity check is an error that leaves the device alone. A LIVE device
-   with a living server should be `Busy` after the recovery wait, not an
-   identity refusal (M10 re-review R1, still open).
+   with a living server is `Busy` after the recovery wait, not an identity
+   refusal; the caller's own pid counts as not alive (exec-in-place upgrade)
+   (M10 re-review R1, fixed in the M10 follow-up).
 6. **QUIESCE:** `quiesce_and_exit(timeout)` sends `QUIESCE_DEV`, which
    returns once every queue has an idle command; requests the server
    already holds stay with it. The daemon completes and commits those with
@@ -1947,7 +1948,11 @@ and the scripts `run-crash-loop.sh`, `run-features.sh`, `run-resize.sh`,
    (`O_DIRECT` backing file, WRITE ⇒ `pwrite`, READ ⇒ `pread`, FLUSH ⇒
    `fdatasync`, FUA ⇒ `RWF_DSYNC`, as in the spike) with subcommands `run`,
    `recover`, `quiesce`, `del`, `features`, `grow`, and fault toggles for
-   the negative controls (drop the last write; disable `REISSUE`). Port the
+   the negative controls (drop writes; disable `REISSUE`). The mounted cells
+   are **drop-all** controls (a daemon kill is not a power loss, so a single
+   lost write is never read back there); single-write sensitivity comes from
+   the raw-device `DeviceOracle` control that drops one acknowledged write.
+   Durability against a crash with volatile state belongs to M15. Port the
    spike's harness scripts to `crates/lunix-ublk/tests/root/` for it,
    keeping their watchdogs.
 10. **Crash points** for the testd: `ublk.after_fetch`, `ublk.before_commit`.
@@ -2423,7 +2428,7 @@ and what it left.
   the layer's own device (the tag matches): either `recover` reports a
   distinct "never started" refusal and deletes it, or M12 calls
   `delete_by_id(id, .., false)` on it.
-- **Also open in the M10 re-review (not in the brief):** R1, a LIVE device
+- **From the M10 re-review, fixed in the M10 follow-up except R4:** R1, a LIVE device
   with a living server is reported as an identity refusal instead of `Busy`
   after the recovery wait (fix before M12 uses `recover`); R2, the result of
   a drain commit is never looked at; R3, the resize hook outlives the
