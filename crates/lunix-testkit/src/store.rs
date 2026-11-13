@@ -40,7 +40,7 @@
 //! # Fault points
 //!
 //! `segment.append`, `pack.append`, `segment.{read,footer}` and `pack.read` (read-path
-//! errors: arm `Fault::Io`), `pins.store.*`, `device.{store,clear}.*`,
+//! errors: arm `Fault::Io`), `pins.store.*`, `pins.floor.*`, `device.{store,clear}.*`,
 //! `checkpoint.zero.*`, `leftovers.remove.*`, `segment.seal.{before,after}`, `segment.delete.{before,after}`,
 //! `pack.seal.{before,after}`, `pack.delete.{before,after}`,
 //! `commit.put.{before,after}`, `commit.delete.{before,after}`,
@@ -56,7 +56,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use lunix_format::gcfile::Condemned;
-use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, VolumeJson};
+use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, RollbackFloor, VolumeJson};
 use lunix_format::node::NodeLoc;
 use lunix_format::paths::local as lpaths;
 use lunix_format::segment::{
@@ -181,6 +181,9 @@ struct Durable {
     volume_json: VolumeJson,
     device: Option<DeviceRecord>,
     local_pins: Option<LocalPins>,
+    /// The rollback floor of `state/pins` v2, kept apart from `local_pins`
+    /// as the real store keeps it in the same file but returns it separately.
+    floor: Option<RollbackFloor>,
     leftovers: Vec<LeftoverFile>,
 }
 
@@ -206,6 +209,7 @@ impl StoreImage {
                 volume_json: VolumeJson::new("memvol", "/mem"),
                 device: None,
                 local_pins: None,
+                floor: None,
                 leftovers: Vec::new(),
             },
             cfg,
@@ -1131,6 +1135,31 @@ impl VolumeDir for MemStore {
         self.0.faults.point("pins.store.before")?;
         self.st()?.d.local_pins = Some(pins.clone());
         self.0.faults.point("pins.store.after")
+    }
+
+    fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
+        Ok(self.st()?.d.floor)
+    }
+
+    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
+        self.0.faults.point("pins.floor.before")?;
+        {
+            let mut st = self.st()?;
+            if let Some(cur) = st.d.floor {
+                if floor.max_commit_seq < cur.max_commit_seq {
+                    return Err(Error::Refused {
+                        why: "the rollback floor never decreases",
+                    });
+                }
+                if floor.max_commit_seq == cur.max_commit_seq && floor.tip_hash != cur.tip_hash {
+                    return Err(Error::Refused {
+                        why: "the rollback floor is already recorded at this height with another hash",
+                    });
+                }
+            }
+            st.d.floor = Some(*floor);
+        }
+        self.0.faults.point("pins.floor.after")
     }
 
     fn ids(&self) -> Arc<dyn IdAllocator> {

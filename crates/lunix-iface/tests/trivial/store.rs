@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use lunix_format::extent::{Cch1Header, Extent};
 use lunix_format::gcfile::Condemned;
-use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, VolumeJson};
+use lunix_format::local::{CheckpointSlot, DeviceRecord, LocalPins, RollbackFloor, VolumeJson};
 use lunix_format::mode::OVH_UNENCRYPTED;
 use lunix_format::node::NodeLoc;
 use lunix_format::segment::{ContainerKind, FooterBody, FooterEntry};
@@ -50,6 +50,7 @@ struct State {
     checkpoint: Vec<CheckpointSlot>,
     condemned: Option<Condemned>,
     evidence: BTreeMap<u64, Vec<u8>>,
+    floor: Option<RollbackFloor>,
 }
 
 #[derive(Clone)]
@@ -431,6 +432,21 @@ impl VolumeDir for TStore {
         Ok(None)
     }
     fn store_local_pins(&self, _pins: &LocalPins) -> Result<()> {
+        Ok(())
+    }
+    fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
+        Ok(lock(&self.st).floor)
+    }
+    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
+        let mut st = lock(&self.st);
+        if let Some(cur) = st.floor {
+            if floor.max_commit_seq < cur.max_commit_seq
+                || (floor.max_commit_seq == cur.max_commit_seq && floor.tip_hash != cur.tip_hash)
+            {
+                return Err(Error::Refused { why: "floor" });
+            }
+        }
+        st.floor = Some(*floor);
         Ok(())
     }
     fn ids(&self) -> Arc<dyn IdAllocator> {

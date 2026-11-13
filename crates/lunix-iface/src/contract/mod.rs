@@ -217,6 +217,7 @@ macro_rules! contract_store_suite {
                     evidence_is_create_only,
                     condemned_list_round_trips,
                     sweep_deletes_only_unnamed_orphans_above_the_mark,
+                    rollback_floor_is_raise_only,
                 ]
             );
         }

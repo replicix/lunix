@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use lunix_format::local::{DeviceRecord, LocalPins, VolumeJson};
+use lunix_format::local::{DeviceRecord, LocalPins, LocalPinsFile, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
 use lunix_format::segment::ContainerKind;
 use lunix_format::volume::VolumeDescriptor;
@@ -170,6 +170,9 @@ pub(crate) struct Inner {
     warnings: Mutex<Warnings>,
     /// Serialises replace-style writes (one shared temp name per file).
     pub(crate) replace_lock: Mutex<()>,
+    /// Serialises read-modify-write of `state/pins` (the floor and the pins
+    /// share one file).
+    pins_lock: Mutex<()>,
     /// Raw ids of containers being written; their `.open` files are not leftovers.
     pub(crate) open_writers: Mutex<HashSet<u64>>,
     // Held for the life of the volume; dropping the last handle releases it.
@@ -444,6 +447,7 @@ impl LocalVolume {
                 cache: Mutex::new(ContainerCache::default()),
                 warnings: Mutex::new(Warnings::default()),
                 replace_lock: Mutex::new(()),
+                pins_lock: Mutex::new(()),
                 open_writers: Mutex::new(HashSet::new()),
                 _lock: guard,
             }),
@@ -505,6 +509,21 @@ impl LocalVolume {
             Err(e) if e.kind() == lunix_iface::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
+    /// `state/pins` as a whole (version 1 or 2); `None` when absent.
+    fn read_pins_file(&self) -> Result<Option<LocalPinsFile>> {
+        match self.read_state_file(&lpath::state_pins(), 4096)? {
+            Some(b) => Ok(Some(LocalPinsFile::decode(&b)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Replaces `state/pins` with a version 2 file. The caller holds `pins_lock`.
+    fn write_pins_file(&self, file: &LocalPinsFile) -> Result<()> {
+        let mut b = Vec::with_capacity(LocalPinsFile::LEN);
+        file.encode(&mut b)?;
+        self.replace_state_file(&lpath::state_pins(), &b)
     }
 
     fn replace_state_file(&self, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -613,16 +632,61 @@ impl VolumeDir for LocalVolume {
     }
 
     fn local_pins(&self) -> Result<Option<LocalPins>> {
-        match self.read_state_file(&lpath::state_pins(), 4096)? {
-            Some(b) => Ok(Some(LocalPins::decode(&b)?)),
-            None => Ok(None),
-        }
+        Ok(self.read_pins_file()?.map(|f| f.pins))
     }
 
     fn store_local_pins(&self, pins: &LocalPins) -> Result<()> {
-        let mut b = Vec::with_capacity(LocalPins::LEN);
-        pins.encode(&mut b)?;
-        self.replace_state_file(&lpath::state_pins(), &b)
+        let _serial = lock(&self.inner.pins_lock);
+        // An unreadable file is an error, not an empty one: replacing it would
+        // silently drop the rollback floor it may hold.
+        let floor = self.read_pins_file()?.and_then(|f| f.floor);
+        self.write_pins_file(&LocalPinsFile {
+            pins: pins.clone(),
+            floor,
+        })
+    }
+
+    fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
+        Ok(self.read_pins_file()?.and_then(|f| f.floor))
+    }
+
+    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
+        let _serial = lock(&self.inner.pins_lock);
+        let mut file = match self.read_pins_file()? {
+            Some(f) => f,
+            None => {
+                // No pins yet: the same state as an absent file (zero floors,
+                // no pin), with the identity the file needs.
+                let desc = VolumeDescriptor::decode(&read_volume_file(&self.inner.dir)?)?;
+                LocalPinsFile {
+                    pins: LocalPins {
+                        volume_uuid: self.inner.uuid,
+                        family_id: desc.family_id,
+                        max_keyring_seq: 0,
+                        max_epoch: 0,
+                        pin: None,
+                    },
+                    floor: None,
+                }
+            }
+        };
+        if let Some(cur) = file.floor {
+            if floor.max_commit_seq < cur.max_commit_seq {
+                return Err(Error::Refused {
+                    why: "the rollback floor never decreases",
+                });
+            }
+            if floor.max_commit_seq == cur.max_commit_seq {
+                if floor.tip_hash != cur.tip_hash {
+                    return Err(Error::Refused {
+                        why: "the rollback floor is already recorded at this height with another hash",
+                    });
+                }
+                return Ok(());
+            }
+        }
+        file.floor = Some(*floor);
+        self.write_pins_file(&file)
     }
 
     fn ids(&self) -> Arc<dyn IdAllocator> {

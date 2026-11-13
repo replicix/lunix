@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use lunix_format::gcfile::Condemned;
-use lunix_format::local::CheckpointSlot;
+use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{ChunkId, CommitSeq, VolumeUuid};
 
 use crate::error::ErrorKind;
@@ -283,6 +283,62 @@ pub fn condemned_list_round_trips<F: StoreFixture>(f: &mut F) {
     };
     f.gc_state().store_condemned(&newer).expect("store");
     assert_eq!(f.gc_state().load_condemned().expect("load"), Some(newer));
+}
+
+/// The rollback floor (ADR-31) is raise-only: a lower `max_commit_seq` and an
+/// equal one with another hash are `Refused` and change nothing, an equal
+/// floor is a no-op, a higher one replaces it, the floor is durable across a
+/// reopen, and replacing the pins keeps it.
+pub fn rollback_floor_is_raise_only<F: StoreFixture>(f: &mut F) {
+    let floor = |seq: u64, h: u8| RollbackFloor {
+        max_commit_seq: CommitSeq(seq),
+        tip_hash: [h; 32],
+    };
+    assert_eq!(f.volume().rollback_floor().expect("none yet"), None);
+    f.volume()
+        .raise_rollback_floor(&floor(5, 1))
+        .expect("first");
+    assert_eq!(
+        f.volume().rollback_floor().expect("read"),
+        Some(floor(5, 1))
+    );
+    f.volume()
+        .raise_rollback_floor(&floor(5, 1))
+        .expect("an equal floor is a no-op");
+
+    let lower = f
+        .volume()
+        .raise_rollback_floor(&floor(4, 1))
+        .expect_err("lower");
+    assert_eq!(lower.kind(), ErrorKind::Refused, "a lower height");
+    let fork = f
+        .volume()
+        .raise_rollback_floor(&floor(5, 2))
+        .expect_err("fork");
+    assert_eq!(fork.kind(), ErrorKind::Refused, "same height, other hash");
+    assert_eq!(
+        f.volume().rollback_floor().expect("read"),
+        Some(floor(5, 1)),
+        "a refusal changes nothing"
+    );
+
+    f.volume()
+        .raise_rollback_floor(&floor(6, 3))
+        .expect("raise");
+    f.reopen();
+    assert_eq!(
+        f.volume().rollback_floor().expect("read"),
+        Some(floor(6, 3)),
+        "durable across a reopen"
+    );
+    if let Some(pins) = f.volume().local_pins().expect("pins") {
+        f.volume().store_local_pins(&pins).expect("store pins");
+        assert_eq!(
+            f.volume().rollback_floor().expect("read"),
+            Some(floor(6, 3)),
+            "replacing the pins keeps the floor"
+        );
+    }
 }
 
 /// The sweep deletes unnamed sealed files above the mark only, reports the

@@ -1130,14 +1130,22 @@ ext4 with the corrected daemon (median stall 180 ms, one 2.0 s outlier
 while in-flight I/O drained). Evidence:
 [ublk-recovery](../../bench/ublk-recovery/RESULTS.md).
 
-- `lunix upgrade`: after `QUIESCE_DEV` succeeds the daemon exits without
-  `STOP_DEV`. libublk's `run_target()` sends `STOP_DEV` when the queue
+- `lunix upgrade`: `QUIESCE_DEV` returns once every queue has an idle
+  command; requests the server already holds stay with it. The daemon
+  completes and commits those with commands of its own, waits until its
+  queue threads have ended with nothing in flight, runs the engine's
+  final commit, then exits without `STOP_DEV`. libublk's `run_target()` sends `STOP_DEV` when the queue
   threads end; that deadlocked the kernel thread in
   `ublk_wait_tagset_rqs_idle` while the mounted file system, fio and
   jbd2 sat in D state, and only a reboot cleared it. `run_target()`
   cannot be used on this path.
 - A daemon never stops a device, and never exits, while started requests
-  are not being completed. This wedged a device twice.
+  are not being completed. This wedged a device twice. The one sanctioned
+  exception is `abort()` after a fatal internal error: it is equivalent
+  to `kill -9`, which `USER_RECOVERY_REISSUE` recovers.
+- `DEL_DEV` of a LIVE device is a `STOP_DEV`. It is sent only after a
+  successful `TRY_STOP_DEV`, or by another process for a device without a
+  server; never by the serving process as a fallback.
 - `detach` uses `TRY_STOP_DEV`: it fails with EBUSY while the device is
   mounted and succeeds after `umount`. Plain `STOP_DEV` yanks the device
   from a mounted file system, which then returns EIO.
@@ -1259,7 +1267,13 @@ and the 0.4.x pin holds. Evidence:
 - libublk 0.4.8 gaps that the daemon works around: no control flags
   beyond the basic set (ADR-17), `run_target()` issues `STOP_DEV`
   (ADR-16), and batch completions can be committed only from the queue
-  thread.
+  thread. libublk also assumes handlers complete at once: after the
+  first `ABORT` it queues no commit and ends its loop, and a completion
+  in the same batch as the first `ABORT` keeps its in-flight count above
+  zero for ever. The layer keeps its own queue-down flag (set by an
+  `ABORT`, or by the control side after `QUIESCE_DEV` or `TRY_STOP_DEV`:
+  a queue whose tags are all held gets no `ABORT`), commits held requests
+  itself and never blocks in libublk once down.
 
 **Decision:**
 - One pinned thread per ublk queue runs libublk's executor (4-16 queues,
@@ -2120,6 +2134,11 @@ ships):**
 - **Codec id 3:** zstd with a dictionary. The dictionary is named by the
   `dictID` field of the zstd frame header. Ids with the top bit set are
   built-in dictionaries; the others are the volume's trained ones.
+  **Known risk:** the zstd format specification lists dictionary ids of
+  2^31 and above as reserved for future use. libzstd does not enforce
+  this and accepts such ids when compressing and decompressing, but
+  another zstd implementation could reject them. The ids are kept (the
+  `zdicts` repository's `docs/versioning.md` carries the same note).
 - **`dicts/<id:08x>`:** a create-only object under the volume prefix
   holding a trained dictionary, sealed with its own metadata key (added
   to ADR-11's sealed-object table).
