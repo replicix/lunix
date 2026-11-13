@@ -673,7 +673,10 @@ fn an_unwalkable_chain_back_to_the_floor_is_refused_unless_overridden() {
         c.allow_unverifiable_fork = true;
     }
     v.tweak = allow;
-    let r = v.open().map_err(|e| e.0).expect("the operator override opens");
+    let r = v
+        .open()
+        .map_err(|e| e.0)
+        .expect("the operator override opens");
     assert_eq!((*lock(&v.floor.floor)).expect("floor").max_commit_seq, tip);
     drop(r.stop());
 }

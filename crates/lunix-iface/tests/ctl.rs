@@ -388,18 +388,16 @@ fn response() -> impl Strategy<Value = Response> {
             any::<bool>(),
             any::<bool>()
         )
-            .prop_map(
-                |(device, dev_id, queues, depth, recovered, first_attach)| Response::Attached(
-                    Attached {
-                        device,
-                        dev_id,
-                        queues,
-                        depth,
-                        recovered,
-                        first_attach
-                    }
-                )
-            ),
+            .prop_map(|(device, dev_id, queues, depth, recovered, first_attach)| {
+                Response::Attached(Attached {
+                    device,
+                    dev_id,
+                    queues,
+                    depth,
+                    recovered,
+                    first_attach,
+                })
+            }),
         Just(Response::Detached),
         any::<u64>().prop_map(|size_bytes| Response::Resized { size_bytes }),
         (figures(), any::<u64>(), proptest::option::of(any::<u64>())).prop_map(
@@ -726,7 +724,10 @@ fn newer_daemon_codes_and_mode_conversions() {
 #[test]
 fn the_m12_additions_default_when_absent() {
     let a: Attach = serde_json::from_value(json!({"name": "v"})).unwrap();
-    assert_eq!((a.on_journal_damage, a.allow_unverifiable_fork), (None, false));
+    assert_eq!(
+        (a.on_journal_damage, a.allow_unverifiable_fork),
+        (None, false)
+    );
     let c: Credential = serde_json::from_value(json!({"passphrase": "00"})).unwrap();
     assert_eq!(c.mode, None);
     let r: Attached = serde_json::from_value(
@@ -741,5 +742,8 @@ fn the_m12_additions_default_when_absent() {
         serde_json::to_value(ErrorCode::ForkUnverifiable).unwrap(),
         json!("fork_unverifiable")
     );
-    assert_eq!(serde_json::to_value(ErrorCode::JournalDamage).unwrap(), json!("journal_damage"));
+    assert_eq!(
+        serde_json::to_value(ErrorCode::JournalDamage).unwrap(),
+        json!("journal_damage")
+    );
 }
