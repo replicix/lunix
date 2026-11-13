@@ -117,6 +117,9 @@ struct Inner {
     drop_once: AtomicU8,
     /// Worker threads per queue; 0 completes inline on the queue thread.
     workers: usize,
+    /// Test knob: every worker job takes at least this long, so that
+    /// requests are held by the engine when a quiesce arrives.
+    io_delay: AtomicU64,
     counts: Counts,
 }
 
@@ -135,6 +138,7 @@ impl FileEngine {
             drop_writes: AtomicBool::new(false),
             drop_once: AtomicU8::new(0),
             workers,
+            io_delay: AtomicU64::new(0),
             counts: Counts::default(),
         }))
     }
@@ -142,6 +146,11 @@ impl FileEngine {
     /// Turns the acknowledge-but-drop fault on or off.
     pub fn set_drop_writes(&self, on: bool) {
         self.0.drop_writes.store(on, Ordering::SeqCst);
+    }
+
+    /// Makes every worker job take at least `ms` milliseconds.
+    pub fn set_io_delay_ms(&self, ms: u64) {
+        self.0.io_delay.store(ms, Ordering::SeqCst);
     }
 
     /// Arms a one-shot fault: `1` drops the next write, `2` the next FUA
@@ -231,6 +240,10 @@ fn errno_of(e: &std::io::Error) -> i32 {
 
 impl Inner {
     fn run(&self, job: Job) -> Done {
+        let delay = self.io_delay.load(Ordering::Relaxed);
+        if delay > 0 && self.workers > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
         let fd = self.file.as_raw_fd();
         let c = &self.counts;
         let err = |e: std::io::Error| IoStatus::err(errno_of(&e));

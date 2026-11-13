@@ -57,7 +57,15 @@ need_root_tests() { [ "${LUNIX_ROOT_TESTS:-}" = 1 ] || skip "LUNIX_ROOT_TESTS=1 
 # script_cap SECONDS: the script's own cap (W8 asks for one next to the wrapper's). When it fires the
 # script gets TERM, whose trap runs the teardown (recover, unmount, detach, delete).
 script_cap() {
-  ( sleep "$1"; echo "script cap of $1 s reached: sending TERM to the script" >&2; kill -TERM $$ ) &
+  # Detached from the caller's pipes (a sleeping child holding them would keep the ssh session of the
+  # wrapper open long after the script ended).
+  ( sleep "$1"; echo "script cap of $1 s reached: sending TERM to the script" >> "${OUT:-/tmp}/cap.log"; kill -TERM $$ ) </dev/null >/dev/null 2>&1 &
   CAP_PID=$!
-  add_cleanup 'kill $CAP_PID 2>/dev/null'
+  add_cleanup 'cap_stop'
+}
+cap_stop() {
+  kill -STOP "$CAP_PID" 2>/dev/null
+  pkill -KILL -P "$CAP_PID" 2>/dev/null
+  kill -KILL "$CAP_PID" 2>/dev/null
+  true
 }

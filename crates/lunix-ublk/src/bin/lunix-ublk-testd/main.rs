@@ -393,6 +393,7 @@ fn run(a: &Args, recover: bool) -> Result<(), String> {
     let (file, size) = open_backing(a.req("backing")?, a.num("create-gib", 0u64)?)?;
     let eng = FileEngine::new(file, size, a.num("workers", 4usize)?); // 0: complete inline
     eng.set_drop_writes(a.flag("drop-writes"));
+    eng.set_io_delay_ms(a.num("io-delay-ms", 0u64)?);
 
     let mut cfg = UblkConfig::new(volume(a.num("volume-seed", 0u64)?));
     cfg.queues = a.num("queues", 4u16)?;

@@ -23,6 +23,7 @@ add_cleanup 'teardown >> "$OUT/teardown.log" 2>&1'
 DARGS=()
 [ "$USER_COPY" = 1 ] && DARGS+=(--user-copy)
 [ "$CONTROL" = noreissue ] && DARGS+=(--no-reissue)
+[ -n "${TESTD_ARGS:-}" ] && DARGS+=($TESTD_ARGS)   # e.g. --io-delay-ms 20 to hold requests at a quiesce
 [ -n "${WORKERS:-}" ] && DARGS+=(--workers "$WORKERS")   # WORKERS=0: the engine completes inline (like the M11 engine)
 MKFS_GIB=$IMG_GIB
 df_guard "$LUNIX_SPIKE_DIR" "$IMG_GIB" || exit 2

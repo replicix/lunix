@@ -127,6 +127,19 @@ for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
 wait "$old"
 start_daemon recover --workers 0 || { fail "start with the inline engine failed"; exit 1; }
 qcycles inline "$QUIESCE_CYCLES" --workers 0
+say ""; say "## QUIESCE with requests held by the engine (--io-delay-ms 40) x$QUIESCE_CYCLES: the drain commits them"
+tdc quiesce --timeout-ms 8000 > "$OUT/quiesce.switch2.txt" 2>&1; old=$DPID
+for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+wait "$old"
+start_daemon recover --io-delay-ms 40 || { fail "start with a delaying engine failed"; exit 1; }
+qcycles held "$QUIESCE_CYCLES" --io-delay-ms 40
+held=$(cat "$OUT"/quiesce.held.*.txt | sed -n 's/.*drain_commits=\([0-9]*\).*/\1/p' | paste -sd+ | bc)
+[ "${held:-0}" -gt 0 ]; expect "requests were held at the quiesce and committed by the layer's own drain (total $held)" $?
+# back to the plain engine for the remaining cells (the delaying engine makes verify runs slow)
+tdc quiesce --timeout-ms 8000 > "$OUT/quiesce.switch3.txt" 2>&1; old=$DPID
+for i in $(seq 1 300); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
+wait "$old"
+start_daemon recover || { fail "start with the plain engine failed"; exit 1; }
 grep -q 'STOP' "$OUT"/daemon.*.log; [ $? -ne 0 ]; expect "no daemon log mentions a stop command" $?
 
 say ""; say "## watchdog: a deliberately stuck control call"

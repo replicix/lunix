@@ -166,6 +166,9 @@ pub struct UblkDevice {
     threads: Mutex<Vec<JoinHandle<()>>>,
     ended: Arc<Ended>,
     counters: Vec<Arc<QueueCounters>>,
+    /// One per queue: signalled to take the queue down (drain) without
+    /// waiting for an `ABORT` that a fully busy queue never gets.
+    stops: Vec<WakeFd>,
 }
 
 impl fmt::Debug for UblkDevice {
@@ -562,6 +565,7 @@ impl UblkDevice {
             threads: Mutex::new(handles),
             ended,
             counters,
+            stops,
         };
         // A grow that was durable in the engine but not yet in the kernel when
         // the old daemon died: catch the device up. A failure here is a
@@ -717,6 +721,12 @@ impl UblkDevice {
             *lock(&self.shared.life) = Lifecycle::Quiescing;
         }
         sent?;
+        // The driver cancels only idle commands. A queue whose every tag is
+        // held by the engine has none, never sees an `ABORT`, and would keep
+        // waiting in libublk: tell every queue it is down.
+        for s in &self.stops {
+            s.signal();
+        }
         if !self.ended.wait_for(self.counters.len(), t.drain) {
             // The driver cancels only idle commands; a second QUIESCE_DEV
             // cancels the rest.
@@ -771,6 +781,9 @@ impl UblkDevice {
         }
         session::try_stop(&*self.shared.ctl, self.shared.dev_id)?;
         *lock(&self.shared.life) = Lifecycle::Stopping;
+        for s in &self.stops {
+            s.signal();
+        }
         Ok(())
     }
 
