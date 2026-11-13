@@ -13,8 +13,8 @@
 //! 1. Read `volume`, the family keyring and `state/pins` (unlocked reads),
 //!    run `check_attach` (downgrade, wrong key, descriptor MAC).
 //! 2. Open the volume directory with the unlocked `MetaCodec` (takes `LOCK`).
-//! 3. A fork check the engine does not make (the commit at the floor's height
-//!    when the tip is above it, `on-disk-formats` §20); nothing is written.
+//! 3. The ring size against the queue count (`journal_max >= queues x 128
+//!    MiB`).
 //! 4. Open the journal (lanes = queues), overlay, index, space gate, map
 //!    opener and the M9 destage adapter, then `Engine::open`, which verifies
 //!    the chain, applies R4, sweeps orphans, catches the index up, recovers
@@ -85,6 +85,16 @@ pub enum StackError {
         /// The height compared.
         at: CommitSeq,
     },
+    /// R4 (ADR-31): the chain from the tip back to the floor cannot be walked.
+    #[error("fork unverifiable: the chain from tip {tip} back to the floor {floor} cannot be walked ({detail}); an operator may attach with allow_unverifiable_fork")]
+    ForkUnverifiable {
+        /// The floor's `max_commit_seq`.
+        floor: CommitSeq,
+        /// The tip.
+        tip: CommitSeq,
+        /// Why the walk failed.
+        detail: String,
+    },
     /// Journal damage with `on_journal_damage = refuse`; nothing was wiped.
     #[error(
         "journal damage found and on_journal_damage = refuse; the journal is untouched for fsck"
@@ -106,6 +116,11 @@ impl From<OpenError> for StackError {
         match e {
             OpenError::Rollback { floor, tip } => Self::Rollback { floor, tip },
             OpenError::Fork { tip } => Self::Fork { at: tip },
+            OpenError::ForkUnverifiable { floor, tip, source } => Self::ForkUnverifiable {
+                floor,
+                tip,
+                detail: source.to_string(),
+            },
             OpenError::JournalDamage => Self::JournalDamage,
             OpenError::Store(e) => Self::Store(e),
             other => Self::Open(other),
@@ -385,6 +400,12 @@ fn create_in(
     );
     let sealed = meta.seal_commit(&Commit::Full(genesis))?;
     store.put(CommitSeq(0), &sealed.bytes)?;
+    // The floor starts at the genesis commit (ADR-31): the first attach on
+    // the host that made the volume is not a "first attach".
+    store.raise_rollback_floor(&RollbackFloor {
+        max_commit_seq: CommitSeq(0),
+        tip_hash: sealed.hash,
+    })?;
     store.store_local_pins(&LocalPins {
         volume_uuid: uuid,
         family_id: family,
@@ -406,6 +427,9 @@ pub struct AttachCredential {
     pub key_file: Option<PathBuf>,
     /// The KMK (or integrity key) fingerprint the caller expects.
     pub fingerprint: Option<[u8; 16]>,
+    /// The mode the caller expects (ADR-11 F7). Key material without one is an
+    /// encryption credential; `integrity` declares an integrity credential.
+    pub mode: Option<CryptoMode>,
 }
 
 impl std::fmt::Debug for AttachCredential {
@@ -417,6 +441,7 @@ impl std::fmt::Debug for AttachCredential {
             )
             .field("key_file", &self.key_file)
             .field("fingerprint", &self.fingerprint.is_some())
+            .field("mode", &self.mode)
             .finish()
     }
 }
@@ -441,6 +466,8 @@ pub struct OpenParams {
     pub tweak: Option<EngineTweak>,
     /// The destage pool's worker threads (`None`: M9's default).
     pub destage_workers: Option<usize>,
+    /// Operator override of `ForkUnverifiable` (ADR-31); the caller audits it.
+    pub allow_unverifiable_fork: bool,
 }
 
 impl OpenParams {
@@ -454,6 +481,7 @@ impl OpenParams {
             on_journal_damage: OnJournalDamage::Wipe,
             tweak: None,
             destage_workers: None,
+            allow_unverifiable_fork: false,
         }
     }
 }
@@ -532,20 +560,29 @@ impl NodeSource for PackSource {
 
 /// `state/pins` read without the volume lock, before the store can be opened
 /// (the attach check needs the pin to build the `MetaCodec` the store needs).
-/// A missing or rejected file is "no pins" (on-disk-formats §20).
-fn read_pins_unlocked(voldir: &Path) -> Option<LocalPinsFile> {
-    let bytes = fsio::read_capped(&voldir.join(lpath::state_pins()), 4096).ok()??;
-    LocalPinsFile::decode(&bytes).ok()
+/// A missing file is "no pins"; a rejected one is an error (on-disk-formats
+/// §20), as the store treats it: reading it as absent would drop the floor.
+///
+/// # Errors
+/// `Corrupt` for a rejected file, or the read's error.
+pub fn read_pins_unlocked(voldir: &Path) -> Result<Option<LocalPinsFile>, StackError> {
+    match fsio::read_capped(&voldir.join(lpath::state_pins()), 4096)? {
+        None => Ok(None),
+        Some(bytes) => LocalPinsFile::decode(&bytes).map(Some).map_err(|_| {
+            StackError::Store(Error::Corrupt {
+                what: "state/pins",
+                detail: "rejected (length, version or checksum); fsck --repair rewrites it",
+            })
+        }),
+    }
 }
 
 /// Runs the attach check of ADR-11 F7 for `voldir` with `cred`.
 ///
-/// A supplied passphrase or key file is an **encryption** credential unless
-/// this host's pin records an `integrity` volume, in which case it is an
-/// integrity credential (the request must say which it expects; the control
-/// protocol has no field for it, so the pin this daemon recorded at create or
-/// first attach is the declaration). Without a credential an `integrity`
-/// volume is unlocked with its own `integrity.key` (D16).
+/// The request decides the mode (ADR-11 F7): a supplied passphrase or key
+/// file is an **encryption** credential unless the request declares
+/// `integrity` ([`AttachCredential::mode`]). Without a credential an
+/// `integrity` volume is unlocked with its own `integrity.key` (D16).
 ///
 /// # Errors
 /// [`StackError::Attach`] with the matrix's result, or a read failure.
@@ -559,10 +596,15 @@ pub fn unlock(
     } else {
         fsio::read_capped(&keyring_path(voldir, &desc.family_id), MAX_KEYRING)?
     };
-    let pins = read_pins_unlocked(voldir);
+    let pins = read_pins_unlocked(voldir)?;
     let pin = pins.as_ref().and_then(|p| p.pins.pin);
     let seen = pins.as_ref().map_or(0, |p| p.pins.max_keyring_seq);
-    let declares_integrity = pin.is_some_and(|p| p.mode == CryptoMode::Integrity);
+    let declares_integrity = cred.mode == Some(CryptoMode::Integrity);
+    if cred.mode == Some(CryptoMode::Plain)
+        && (cred.passphrase.is_some() || cred.key_file.is_some())
+    {
+        return Err(invalid("a plain volume takes no key material"));
+    }
     let own_key = voldir.join(lpath::integrity_key());
     let supplied = match (&cred.passphrase, &cred.key_file) {
         (Some(_), Some(_)) => {
@@ -588,35 +630,6 @@ pub fn unlock(
         unlock: UnlockOptions::default(),
     };
     Ok(check_attach(desc, keyring.as_deref(), &req)?)
-}
-
-/// The fork check of on-disk-formats §20 that `Engine::open` leaves out: when
-/// the tip is above the floor and the floor's height is still retained (at or
-/// above the tip's `chain_floor`), the commit there must hash to `tip_hash`.
-/// Runs before the engine opens, so a refusal writes nothing.
-fn precheck_fork(store: &LocalVolume, codec: &dyn CommitCodec) -> Result<(), StackError> {
-    let Some(floor) = store.rollback_floor()? else {
-        return Ok(());
-    };
-    let Some(tip) = CommitStore::tip(store)? else {
-        return Ok(());
-    };
-    if tip <= floor.max_commit_seq {
-        return Ok(()); // the engine's own R4 check covers these
-    }
-    let Ok(Commit::Full(t)) = codec.open_commit(tip, &CommitStore::get(store, tip)?) else {
-        return Ok(()); // the engine reports the unauthenticated tip
-    };
-    if floor.max_commit_seq < t.chain_floor {
-        return Ok(()); // gone: the check cannot be made (§20)
-    }
-    match CommitStore::get(store, floor.max_commit_seq) {
-        Ok(bytes) if codec.object_hash(&bytes) != floor.tip_hash => Err(StackError::Fork {
-            at: floor.max_commit_seq,
-        }),
-        // A missing link is the engine's broken chain.
-        _ => Ok(()),
-    }
 }
 
 /// Records the pin (first use) and the highest keyring sequence seen, keeping
@@ -666,8 +679,18 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         tracing::warn!(volume = %desc.volume_uuid, warning = %w, "store");
     }
     let json = store.volume_json()?;
-    precheck_fork(&store, &*meta)?;
     let floor_before = store.rollback_floor()?;
+    // A lane needs two 64 MiB ring files (lunix-journal): refuse a ring that
+    // cannot hold the queues before anything is created.
+    let need = u64::from(p.queues) * 2 * (64 << 20);
+    if json.journal_max < need {
+        return Err(invalid(format!(
+            "journal_max {} MiB is below queues x 128 MiB ({} queues need {} MiB); attach with fewer queues or raise journal_max",
+            json.journal_max >> 20,
+            p.queues,
+            need >> 20
+        )));
+    }
 
     let uuid = desc.volume_uuid;
     let cs = desc.chunk_size;
@@ -704,6 +727,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     // M11 re-review minor 8: the fanout comes from the descriptor.
     cfg.map_fanout = u32::from(desc.map_fanout);
     cfg.on_journal_damage = p.on_journal_damage;
+    cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     if let Some(b) = p.max_io_buf_bytes {
         cfg.max_io_buf_bytes = b;
     }

@@ -26,6 +26,9 @@
 //! | `argon2_m_kib`, `argon2_t` | 65536, 3 | Argon2id cost of new passphrase slots |
 //! | `dev_dir` | `/dev/lunix` | where the `<name>` symlinks go |
 //! | `volume_roots` | none | comma-separated directories to scan when the registry is rebuilt |
+//! | `max_locked_buffers` | 4 GiB | cap on queues × depth × `max_io_buf_bytes` of one attach |
+//! | `idle_trim_ms` | 10000 | trim the heap once every volume has been idle this long (0: never) |
+//! | `conn_idle_timeout_ms` | 60000 | close a control connection idle this long |
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -86,6 +89,12 @@ pub struct DaemonConfig {
     pub dev_dir: PathBuf,
     /// Directories scanned to rebuild the registry.
     pub volume_roots: Vec<PathBuf>,
+    /// Cap on the locked tag buffers of one attach.
+    pub max_locked_buffers: u64,
+    /// Idle time before the heap is trimmed (`None`: never).
+    pub idle_trim: Option<Duration>,
+    /// Idle control connections are closed after this.
+    pub conn_idle_timeout: Duration,
 }
 
 impl Default for DaemonConfig {
@@ -110,6 +119,9 @@ impl Default for DaemonConfig {
             argon2_t: 3,
             dev_dir: PathBuf::from("/dev/lunix"),
             volume_roots: Vec::new(),
+            max_locked_buffers: 4 << 30,
+            idle_trim: Some(Duration::from_secs(10)),
+            conn_idle_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -286,6 +298,12 @@ impl DaemonConfig {
                     .map(|p| abs(p, key))
                     .collect::<Result<_, _>>()?;
             }
+            "max_locked_buffers" => self.max_locked_buffers = n(v)?,
+            "idle_trim_ms" => {
+                let t = n(v)?;
+                self.idle_trim = (t > 0).then(|| Duration::from_millis(t));
+            }
+            "conn_idle_timeout_ms" => self.conn_idle_timeout = ms(v)?,
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())

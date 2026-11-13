@@ -195,7 +195,14 @@ pub fn scratch(tag: &str) -> Option<tempfile::TempDir> {
         .ok()?;
     let st = rustix::fs::statfs(t.path()).ok()?;
     #[allow(clippy::unnecessary_cast)]
+    // A test that cannot run must not pass silently (M12a review): on tmpfs
+    // it fails, unless LUNIXD_TESTS_ALLOW_SKIP=1 says skips are acceptable.
     if st.f_type as u64 == 0x0102_1994 {
+        assert!(
+            std::env::var_os("LUNIXD_TESTS_ALLOW_SKIP").is_some(),
+            "{} is tmpfs: the journal needs O_DIRECT; set LUNIX_SPIKE_DIR to a real file system",
+            t.path().display()
+        );
         eprintln!("SKIP: {} is tmpfs", t.path().display());
         return None;
     }
@@ -304,6 +311,29 @@ impl Daemon {
         read_frame(&mut s, MAX_FRAME)
             .map(|z| z.to_vec())
             .unwrap_or_default()
+    }
+
+    /// Waits for the child to exit and returns its status.
+    pub fn wait_status(&mut self) -> std::process::ExitStatus {
+        let mut c = self.child.take().unwrap();
+        let start = Instant::now();
+        loop {
+            if let Some(st) = c.try_wait().unwrap() {
+                return st;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(120),
+                "lunixd did not exit"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// True while the child runs.
+    pub fn alive(&mut self) -> bool {
+        self.child
+            .as_mut()
+            .is_some_and(|c| c.try_wait().unwrap().is_none())
     }
 
     /// Waits for the child to exit and returns its code.

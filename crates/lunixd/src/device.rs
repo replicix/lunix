@@ -4,9 +4,11 @@
 //! nothing: its queue handlers are built (so the journal lanes open and the
 //! stale-tail wipe happens, as with a real device) on one thread that keeps
 //! them until the device goes away. It exists for the control-plane tests
-//! that run without root (`device = "none"` in the config); a file
-//! `null-device-busy` in the volume directory makes its detach answer `Busy`,
-//! standing in for a mounted file system.
+//! that run without root (`device = "none"` in the config). Marker files in
+//! the volume directory stand in for kernel behaviour: `null-device-busy`
+//! (detach answers `Busy`, as for a mounted file system),
+//! `null-device-quiesce-fails` and `null-device-quiesce-ms` (see
+//! `NullDevice::quiesce`).
 //!
 //! # ublk rules kept here (W1, W1a, W2)
 //!
@@ -193,7 +195,7 @@ impl Device {
                 let q = d.quiesce(timeout)?;
                 Ok(q.engine_error().map(ToString::to_string))
             }
-            Self::Null(n) => Ok(n.engine.quiesce().err().map(|e| e.to_string())),
+            Self::Null(n) => n.quiesce(),
         }
     }
 }
@@ -266,6 +268,22 @@ impl NullDevice {
             stop: Mutex::new(Some(stop_tx)),
             thread: Mutex::new(Some(thread)),
         })
+    }
+
+    /// Test hooks of the shutdown tests: `null-device-quiesce-fails` makes the
+    /// quiesce fail as a `QUIESCE_DEV` timeout would (the device is then
+    /// latched quiescing, like a real one), `null-device-quiesce-ms` (a
+    /// number) makes it take that long.
+    fn quiesce(&self) -> Result<Option<String>, DeviceError> {
+        if let Ok(t) = std::fs::read_to_string(self.voldir.join("null-device-quiesce-ms")) {
+            if let Ok(ms) = t.trim().parse::<u64>() {
+                std::thread::sleep(Duration::from_millis(ms));
+            }
+        }
+        if self.voldir.join("null-device-quiesce-fails").exists() {
+            return Err(DeviceError::Ublk(UblkError::QuiesceTimeout));
+        }
+        Ok(self.engine.quiesce().err().map(|e| e.to_string()))
     }
 
     fn detach(&self) -> Result<(), DeviceError> {
@@ -389,4 +407,52 @@ pub fn start_ublk(
         device: Device::Ublk(d),
         recovered: false,
     })
+}
+
+/// What the kernel holds for a device record of this boot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RecordedDevice {
+    /// QUIESCED or LIVE with this volume's tag: recover it.
+    Recoverable,
+    /// DEAD with this volume's tag (never started, or stopped and not deleted).
+    DeadOwn,
+    /// No such device, or another volume's: the record is stale (a detach
+    /// completed, or the id was reused).
+    Gone,
+    /// The kernel could not be asked (no `ublk_drv`, an error): leave it.
+    Unknown,
+}
+
+/// Looks at the device `rec` names (read-only, `GET_DEV_INFO`).
+pub fn probe_recorded(rec: &DeviceRecord) -> RecordedDevice {
+    let ctl = RingControl::new(Timeouts::default());
+    match ctl.dev_info(rec.dev_id) {
+        Ok(i) if i.ublksrv_flags != volume_tag(&rec.volume_uuid) => RecordedDevice::Gone,
+        Ok(i) if i.state == STATE_DEAD => RecordedDevice::DeadOwn,
+        Ok(i)
+            if i.state == lunix_ublk::ctl::STATE_QUIESCED
+                || i.state == lunix_ublk::ctl::STATE_LIVE =>
+        {
+            RecordedDevice::Recoverable
+        }
+        Ok(_) => RecordedDevice::Unknown,
+        Err(UblkError::Ctl { errno, .. }) if errno.0 == libc::ENOENT || errno.0 == libc::ENODEV => {
+            RecordedDevice::Gone
+        }
+        Err(_) => RecordedDevice::Unknown,
+    }
+}
+
+/// Deletes this volume's DEAD device of `rec` (re-checked inside).
+pub fn delete_dead(rec: &DeviceRecord) {
+    delete_dead_own_device(rec, Timeouts::default());
+}
+
+/// True when the kernel has a device with this id (for the tombstone of a
+/// device left after a failed start).
+pub fn kernel_has_device(dev_id: u32) -> bool {
+    !matches!(
+        RingControl::new(Timeouts::default()).dev_info(dev_id),
+        Err(UblkError::Ctl { errno, .. }) if errno.0 == libc::ENOENT || errno.0 == libc::ENODEV
+    )
 }

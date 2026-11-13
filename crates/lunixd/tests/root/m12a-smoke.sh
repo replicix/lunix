@@ -218,10 +218,11 @@ create_big() { # name
 measure() { # name queues
   local n=$1; shift
   ctlj "{\"method\":\"attach\",\"params\":{\"name\":\"$n\",\"queues\":$1}}" > "$OUT/attach-big-$1.json" || { fail "attach $n at $1 queues: $(cat "$OUT/attach-big-$1.json")"; return; }
-  sleep 10
+  sleep 10   # settle; the CPU window below is also the idle-trim window
   local tck s1 s2 rss
   tck=$(getconf CLK_TCK)
   s1=$(awk '{print $14 + $15}' "/proc/$DPID/stat"); sleep 30; s2=$(awk '{print $14 + $15}' "/proc/$DPID/stat")
+  sleep 5
   rss=$(awk '/^VmRSS/ {print $2}' "/proc/$DPID/status")
   local q d b bufs cpu
   q=$(jq -r '.ok.queues' "$OUT/attach-big-$1.json"); d=$(jq -r '.ok.depth' "$OUT/attach-big-$1.json"); b=$((1 << 20))
@@ -231,17 +232,20 @@ measure() { # name queues
   echo "$q $bufs $((rss / 1024)) $cpu" >> "$OUT/idle.txt"
   ctl "{\"method\":\"detach\",\"params\":{\"name\":\"$n\"}}" >/dev/null || fail "detach $n"
 }
-# The idle figures are taken on a fresh daemon: the one that served the crash cell keeps the heap
-# its destage and replay grew (allocator retention), which is not the idle volume's cost. That
-# figure is printed first, for information.
+# Maintainer decision 2026-11-13: the memory gate is measured AFTER a workload, on the daemon that
+# ran the smoke and crash cells (in ONLY_IDLE mode there is none: the reading is then a fresh
+# daemon's and says so). The daemon trims its heap once every volume has been idle for
+# idle_trim_ms (default 10 s); measure() waits 40 s. A fresh-daemon reading follows for information.
 create_big big
 measure big 4
-say "- (4 queues on the daemon that ran the cells before, for information: $(tail -1 "$OUT/idle.txt"))"
-stop_lunixd || wedged "lunixd did not exit before the idle cells"
+GATE_LINE=$(tail -1 "$OUT/idle.txt")
+stop_lunixd || wedged "lunixd did not exit before the fresh-daemon reading"
 start_lunixd || exit 1
 measure big 4
+say "- (4 queues on a fresh daemon, for information: $(tail -1 "$OUT/idle.txt"))"
+echo "$GATE_LINE" >> "$OUT/idle.txt"
 read -r q bufs rss cpu < <(tail -1 "$OUT/idle.txt")
-[ "$rss" -le $((bufs + 150)) ]; expect "memory at 4 queues: $rss MiB <= buffers $bufs + 150 MiB" $?
+[ "$rss" -le $((bufs + 150)) ]; expect "memory at 4 queues after the workload: $rss MiB <= buffers $bufs + 150 MiB" $?
 awk -v c="$cpu" 'BEGIN { exit !(c <= 1.0) }'; expect "idle CPU $cpu % <= 1 %" $?
 if [ -z "${SKIP_8Q:-}" ]; then
 # 8 lanes need a larger journal (two 64 MiB files per lane): a new volume made by a daemon

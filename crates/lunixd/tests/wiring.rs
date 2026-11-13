@@ -108,9 +108,12 @@ fn roundtrip(mode: CryptoMode, cs: u32) {
     let mut model = vec![0u8; SIZE as usize];
     let upto = 64 * cs64;
 
-    // First attach: no floor yet, the volume opens at genesis.
+    // The floor was recorded at create (genesis): the first attach on this
+    // host is not a "first attach" (M12a review m12).
     let s = open(&v, mode);
-    assert!(s.floor_before.is_none(), "first attach has no floor");
+    let f0 = s.floor_before.expect("floor recorded at create");
+    assert_eq!(f0.max_commit_seq.0, 0);
+    assert!(!s.engine.recovery_report().first_attach);
     assert_eq!(s.engine.size_bytes(), SIZE);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     fill(&mut d, cs64, 0, 16, 1, &mut model);
@@ -288,13 +291,49 @@ fn rollback_and_fork(mode: CryptoMode) {
         StackError::Fork { at } => assert_eq!(at.0, 3),
         e => panic!("expected Fork below the tip, got {e:?}"),
     }
+    // Two commits past the floor: the floor's height (3) is below the tip's
+    // chain_floor (4 with retain_last 2), and the walk back still finds the
+    // other commit (ADR-31 decision of 2026-11-13; the limit the review asked
+    // to pin).
+    {
+        let s = open(&fork, mode);
+        let mut d = Driver::new(&s.engine, 2, 1 << 20);
+        assert_eq!(one_commit(&s, &mut d, 50), 5);
+        close(s, d);
+    }
+    replace(&commits_dir(&a));
+    match open_err(&v, mode) {
+        StackError::Fork { at } => assert_eq!(at.0, 3),
+        e => panic!("expected Fork two commits above the floor, got {e:?}"),
+    }
 
     // The honest chain attaches and the data is the last honest write.
     replace(&honest);
+    let pins_at_3 = t.path().join("pins-at-3");
+    std::fs::copy(v.voldir.join("state/pins"), &pins_at_3).unwrap();
     let s = open(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(d.read(0, 64 << 10), pattern(3, 64 << 10));
+    // Two more honest commits, then the floor of tip 3 again with commit 3
+    // gone (as if GC had deleted it): the walk cannot be completed.
+    assert_eq!(one_commit(&s, &mut d, 4), 4);
+    assert_eq!(one_commit(&s, &mut d, 5), 5);
     close(s, d);
+    std::fs::copy(&pins_at_3, v.voldir.join("state/pins")).unwrap();
+    std::fs::remove_file(commits_dir(&v.voldir).join(format!("{:016x}", 3))).unwrap();
+    match open_err(&v, mode) {
+        StackError::ForkUnverifiable { floor, tip, .. } => assert_eq!((floor.0, tip.0), (3, 5)),
+        e => panic!("expected ForkUnverifiable, got {e:?}"),
+    }
+    // The operator override attaches and raises the floor.
+    let mut p = params(&v, mode);
+    p.allow_unverifiable_fork = true;
+    let s = open_volume(p).expect("override");
+    assert_eq!(
+        s.store.rollback_floor().unwrap().unwrap().max_commit_seq.0,
+        5
+    );
+    s.engine.quiesce().unwrap();
 }
 
 #[test]
@@ -409,15 +448,33 @@ fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
     let cap = Arc::new(Capture::default());
     let sub = CaptureSub(Arc::clone(&cap));
     let s = tracing::subscriber::with_default(sub, || open(&v, mode));
-    let logged = cap.lines.lock().unwrap().iter().any(|l| {
-        l.contains("journal recovery stopped at a gap or skipped damage") && l.contains("damaged")
-    });
-    assert!(logged, "damage logged: {:?}", cap.lines.lock().unwrap());
+    // The damaged range, with its sequence bounds, and the records beyond
+    // the gap: in the report and in the log line written before any lane
+    // opened.
     let rep = s.engine.recovery_report();
-    assert!(
-        !rep.damaged.is_empty() || rep.ignored_after_gap.is_some(),
-        "{rep:?}"
-    );
+    assert_eq!(rep.damaged.len(), 1, "{rep:?}");
+    let dmg = &rep.damaged[0];
+    assert_eq!(dmg.prev_seq.0, 1, "{dmg:?}");
+    assert_eq!(dmg.next_seq.map(|w| w.0), Some(3), "{dmg:?}");
+    assert!(dmg.end > dmg.start);
+    let gap = rep
+        .ignored_after_gap
+        .expect("the third record is beyond the gap");
+    assert_eq!((gap.first.0, gap.last.0), (3, 3));
+    let lines = cap.lines.lock().unwrap();
+    let line = lines
+        .iter()
+        .find(|l| l.contains("journal recovery stopped at a gap or skipped damage"))
+        .unwrap_or_else(|| panic!("no damage log line: {lines:?}"));
+    for want in [
+        format!("start: {}", dmg.start),
+        format!("end: {}", dmg.end),
+        "prev_seq: WriteSeq(1)".to_string(),
+        "next_seq: Some(WriteSeq(3))".to_string(),
+    ] {
+        assert!(line.contains(&want), "{want} not in {line}");
+    }
+    drop(lines);
     // Logged before the wipe: the files are still as they were until the
     // first lane opens.
     assert!(

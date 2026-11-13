@@ -42,9 +42,8 @@ impl Registry {
                 volumes: Vec::new(),
             },
             Some(bytes) => {
-                let text = String::from_utf8(bytes).map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "not UTF-8")
-                })?;
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| lunix_format::FormatError::invalid("volumes.json", "not UTF-8"))?;
                 VolumesJson::from_json(&text)?
             }
         };

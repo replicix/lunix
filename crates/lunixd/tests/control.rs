@@ -48,6 +48,8 @@ fn attach_req(name: &str, cred: Option<Credential>) -> Request {
         cpus: None,
         max_io_buf_bytes: None,
         credential: cred,
+        on_journal_damage: None,
+        allow_unverifiable_fork: false,
     })
 }
 
@@ -56,6 +58,7 @@ fn pass_cred(p: &str) -> Credential {
         passphrase: Some(Secret::from_text(p)),
         key_file: None,
         fingerprint: None,
+        mode: None,
     }
 }
 
@@ -422,6 +425,7 @@ fn downgrade_cases_over_the_socket() {
         passphrase: None,
         key_file: None,
         fingerprint: Some("ab".repeat(16)),
+        mode: None,
     };
     assert_eq!(
         code(d.call(attach_req("i", Some(cred)))).0,
@@ -443,11 +447,13 @@ fn downgrade_cases_over_the_socket() {
             passphrase: None,
             key_file: Some(key.to_string_lossy().into_owned()),
             fingerprint: None,
+            mode: None,
         },
         Credential {
             passphrase: None,
             key_file: None,
             fingerprint: Some("cd".repeat(16)),
+            mode: None,
         },
     ] {
         assert_eq!(
@@ -460,6 +466,45 @@ fn downgrade_cases_over_the_socket() {
         Response::Attached(_)
     ));
     ok(d.call(Request::Detach(name("p"))));
+
+    // An integrity volume given an encryption credential (key material
+    // without a declared mode means "encrypted"): Downgrade; the same key
+    // declared as an integrity credential attaches.
+    let ikey = voldir_of(&mut d, "i").join("integrity.key");
+    let kcred = |mode| Credential {
+        passphrase: None,
+        key_file: Some(ikey.to_string_lossy().into_owned()),
+        fingerprint: None,
+        mode,
+    };
+    assert_eq!(
+        code(d.call(attach_req("i", Some(kcred(None))))).0,
+        ErrorCode::Downgrade
+    );
+    assert!(matches!(
+        ok(d.call(attach_req("i", Some(kcred(Some(VolumeMode::Integrity)))))),
+        Response::Attached(_)
+    ));
+    ok(d.call(Request::Detach(name("i"))));
+    // An integrity volume with a passphrase slot, attached by declaring the
+    // mode (request D), on any host.
+    ok(d.call(create_req(
+        "ip",
+        &vols,
+        VolumeMode::Integrity,
+        Some("ipass"),
+    )));
+    assert_eq!(
+        code(d.call(attach_req("ip", Some(pass_cred("ipass"))))).0,
+        ErrorCode::Downgrade
+    );
+    let mut ic = pass_cred("ipass");
+    ic.mode = Some(VolumeMode::Integrity);
+    assert!(matches!(
+        ok(d.call(attach_req("ip", Some(ic)))),
+        Response::Attached(_)
+    ));
+    ok(d.call(Request::Detach(name("ip"))));
 
     // A plain volume put where an integrity volume was (same uuid, same
     // directory, its pin kept): the pin records a stronger mode, Downgrade.
@@ -548,29 +593,46 @@ fn rollback_and_fork_over_the_socket_in_all_modes() {
             std::fs::remove_file(commits(&dir).join(format!("{s:016x}"))).unwrap();
         }
         let (c, m1) = code(d.call(attach_req(n, cred())));
-        assert_eq!(c, ErrorCode::Downgrade, "{n}: {m1}");
-        assert!(m1.starts_with("rollback:"), "{n}: {m1}");
+        assert_eq!(c, ErrorCode::Rollback, "{n}: {m1}");
 
         // Forked at the floor's height.
         grow_copy(&a, m, pass, SIZE + 16 * u64::from(CS), 2);
         std::fs::remove_dir_all(commits(&dir)).unwrap();
         cp(&commits(&a), &commits(&dir));
         let (c, m2) = code(d.call(attach_req(n, cred())));
-        assert_eq!(c, ErrorCode::Downgrade, "{n}: {m2}");
-        assert!(m2.starts_with("fork:"), "{n}: {m2}");
+        assert_eq!(c, ErrorCode::Fork, "{n}: {m2}");
 
         // The honest chain attaches.
         std::fs::remove_dir_all(commits(&dir)).unwrap();
         cp(&honest, &commits(&dir));
-        assert!(matches!(
-            ok(d.call(attach_req(n, cred()))),
-            Response::Attached(_)
-        ));
+        match ok(d.call(attach_req(n, cred()))) {
+            Response::Attached(a) => assert!(!a.first_attach, "the floor exists since create"),
+            r => panic!("{r:?}"),
+        }
         match ok(d.call(Request::VolumeStatus(name(n)))) {
             Response::VolumeStatus(s) => {
                 assert_eq!(s.last_commit_seq, 3);
                 assert_eq!(s.size_bytes, SIZE + 48 * u64::from(CS));
+                let f = s.rollback_floor.expect("floor shown");
+                assert_eq!(f.max_commit_seq, 3);
+                assert_eq!(f.tip_hash.len(), 64);
+                assert!(s.last_commit_ms.is_some());
             }
+            r => panic!("{r:?}"),
+        }
+        ok(d.call(Request::Detach(name(n))));
+        // The floor is shown for a detached volume too.
+        match ok(d.call(Request::VolumeStatus(name(n)))) {
+            Response::VolumeStatus(s) => {
+                assert_eq!(s.state, VolumeState::Detached);
+                assert_eq!(s.rollback_floor.expect("floor").max_commit_seq, 3);
+            }
+            r => panic!("{r:?}"),
+        }
+        // A host with no floor (state/pins gone): the attach says first_attach.
+        std::fs::remove_file(dir.join("state/pins")).unwrap();
+        match ok(d.call(attach_req(n, cred()))) {
+            Response::Attached(a) => assert!(a.first_attach, "{n}"),
             r => panic!("{r:?}"),
         }
         ok(d.call(Request::Detach(name(n))));

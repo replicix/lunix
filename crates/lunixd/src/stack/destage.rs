@@ -131,20 +131,20 @@ pub fn map_outcome(o: M9Outcome) -> DestageOutcome {
 
 /// The engine's failure for M9's error.
 pub fn map_error(e: DestageError) -> DestageFailure {
-    // R2: M9 deleted the failed cut's segments; a delete that failed is not
-    // reported back, so the list is logged for the operator (the open-time
-    // sweep or GC removes a survivor).
-    if !e.partial.segments.is_empty() {
+    // R2: M9 deleted the failed cut's segments and lists the deletes that
+    // failed. Those files are outside the space ledger until the open-time
+    // sweep removes them (only above the high-water mark) or GC does.
+    if !e.partial.undeleted.is_empty() {
         let ids: Vec<String> = e
             .partial
-            .segments
+            .undeleted
             .iter()
-            .map(|s| s.seg.to_string())
+            .map(ToString::to_string)
             .collect();
         tracing::warn!(
             segments = %ids.join(","),
             class = ?e.class,
-            "destage failed after sealing segments; they were deleted (a survivor is swept at open or by GC)"
+            "segments of a failed cut could not be deleted; GC (or the open-time sweep, above the high-water mark) removes them"
         );
     }
     DestageFailure {

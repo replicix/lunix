@@ -9,8 +9,10 @@
 //!
 //! `ctl` is a minimal client for scripts and tests until `lunix` (M13a) is
 //! merged: `JSON` is a request object such as `{"method":"ping"}`; `v` and
-//! `id` are filled in when absent. The exit code is 0 on success, else the
-//! error code's (`ErrorCode::exit_code`).
+//! `id` are filled in when absent. A request that carries a secret
+//! (`passphrase`) is refused on the command line, where the process list
+//! shows it: pass `-` (or nothing) and write the request to stdin. The exit
+//! code is 0 on success, else the error code's (`ErrorCode::exit_code`).
 
 #![forbid(unsafe_code)]
 
@@ -49,8 +51,8 @@ enum Cmd {
         /// The control socket.
         #[arg(long, default_value = "/run/lunix/ctl.sock")]
         socket: PathBuf,
-        /// The request, as JSON.
-        request: String,
+        /// The request, as JSON; `-` or absent reads it from stdin.
+        request: Option<String>,
     },
     /// Offline self-check of a detached volume (stand-in for `lunix fsck`).
     Check {
@@ -64,8 +66,21 @@ enum Cmd {
     },
 }
 
-fn ctl(socket: &std::path::Path, request: &str) -> anyhow::Result<u8> {
-    let mut v: serde_json::Value = serde_json::from_str(request).context("request is not JSON")?;
+fn ctl(socket: &std::path::Path, request: Option<&str>) -> anyhow::Result<u8> {
+    let text = match request {
+        Some(r) if r != "-" => {
+            if r.contains("passphrase") {
+                anyhow::bail!("a request with a passphrase must come on stdin (`lunixd ctl -`), not the command line");
+            }
+            r.to_owned()
+        }
+        _ => {
+            let mut t = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut t)?;
+            t
+        }
+    };
+    let mut v: serde_json::Value = serde_json::from_str(&text).context("request is not JSON")?;
     let obj = v.as_object_mut().context("request must be a JSON object")?;
     obj.entry("v").or_insert(PROTOCOL_VERSION.into());
     obj.entry("id").or_insert(1.into());
@@ -90,6 +105,8 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     };
     let cfg = DaemonConfig::load(&path, explicit)?;
     StderrLog::install(cfg.log_level);
+    // Before any thread allocates (decision 2 of 2026-11-13).
+    lunixd::trim::tune_allocator();
     // Before any other thread exists: the mount namespace and the I/O-flusher
     // flag are inherited, mlockall covers what follows. Core dumps are off in
     // every build (a dump keeps /dev/ublkcN open and holds key material).
@@ -108,11 +125,14 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     std::fs::create_dir_all(&cfg.state_dir)
         .with_context(|| format!("state dir {}", cfg.state_dir.display()))?;
     let daemon = Arc::new(Daemon::new(cfg)?);
-    daemon.recover_on_start();
+    // Bind first (nothing is accepted yet), then the signal handlers, then
+    // recovery (M12a review m2): a failed bind recovers nothing, and a
+    // SIGTERM during recovery is a quiesce.
     let listener = lunixd::server::bind(&daemon.config().socket, daemon.config().socket_group)
         .context("control socket")?;
     tracing::info!(socket = %daemon.config().socket.display(), "lunixd started");
-    let code = lunixd::server::run(Arc::clone(&daemon), listener)?;
+    daemon.spawn_idle_trim();
+    let code = lunixd::server::run(Arc::clone(&daemon), listener, |d| d.recover_on_start())?;
     let _ = std::fs::remove_file(&daemon.config().socket);
     Ok(code)
 }
@@ -164,7 +184,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Some(Cmd::Ctl { socket, request }) => match ctl(socket, request) {
+        Some(Cmd::Ctl { socket, request }) => match ctl(socket, request.as_deref()) {
             Ok(code) => ExitCode::from(code),
             Err(e) => {
                 eprintln!("lunixd ctl: {e:#}");

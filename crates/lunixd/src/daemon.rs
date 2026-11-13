@@ -12,17 +12,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use lunix_crypto::{Argon2Cost, AttachError};
+use lunix_engine::OnJournalDamage;
 use lunix_format::commit::Commit;
-use lunix_format::local::{DeviceRecord, RegistryEntry, VolumeJson};
+use lunix_format::local::{DeviceRecord, RegistryEntry, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
 use lunix_format::volume::{CodecPolicy, VolumeDescriptor};
 use lunix_format::{CommitSeq, CryptoMode, IdLen};
 use lunix_iface::block::BlockEngine;
 use lunix_iface::crypto::CommitCodec;
 use lunix_iface::ctl::{
-    Attach, Attached, Compress, CtlError, ErrorCode, GcRequest, NameParam, Request, Resize,
-    Response, SpaceBody, SpaceFigures, SpaceRequest, VolumeCreate, VolumeCreated, VolumeMode,
-    VolumeState, VolumeStatusBody, VolumeSummary, PROTOCOL_VERSION,
+    Attach, Attached, Compress, CtlError, ErrorCode, GcRequest, JournalDamagePolicy, NameParam,
+    Request, Resize, Response, RollbackFloorView, SpaceBody, SpaceFigures, SpaceRequest,
+    VolumeCreate, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody, VolumeSummary,
+    PROTOCOL_VERSION,
 };
 use lunix_iface::gc::GcStatusSnapshot;
 use lunix_iface::space::{SpaceEvents, SpaceGate};
@@ -33,11 +35,14 @@ use lunix_ublk::{current_boot_id, UblkConfig, UblkError, DEFAULT_DEPTH};
 
 use crate::audit::{Audit, Peer};
 use crate::config::{DaemonConfig, DeviceKind};
-use crate::device::{start_ublk, Device, DeviceError, DeviceParams, NullDevice, Started};
+use crate::device::{
+    delete_dead, kernel_has_device, probe_recorded, start_ublk, Device, DeviceError, DeviceParams,
+    NullDevice, RecordedDevice, Started,
+};
 use crate::registry::Registry;
 use crate::stack::{
-    create_volume, open_volume, unlock, AttachCredential, CreateParams, OpenParams, StackError,
-    VolumeStack,
+    create_volume, open_volume, read_pins_unlocked, unlock, AttachCredential, CreateParams,
+    OpenParams, StackError, VolumeStack,
 };
 use crate::{fsio, lock};
 
@@ -47,6 +52,10 @@ struct Live {
     device: Device,
     stack: VolumeStack,
     link: Option<PathBuf>,
+    /// A detach got past `TRY_STOP_DEV` and then failed (drain or `DEL_DEV`
+    /// timeout): the device is stopping, holds no started request and is
+    /// not quiesced again.
+    stopping: bool,
 }
 
 #[derive(Default)]
@@ -54,6 +63,14 @@ enum Slot {
     #[default]
     Detached,
     Attached(Box<Live>),
+    /// A start failed after the kernel device existed and the device was not
+    /// deleted (M10: a `START_DEV` timeout may still be pending). The queue
+    /// threads may hold the engine and `LOCK`; a daemon restart recovers or
+    /// replaces the device.
+    Orphan {
+        dev_id: u32,
+        why: String,
+    },
 }
 
 /// What a handled call asks the server to do after replying.
@@ -71,7 +88,13 @@ pub struct Daemon {
     registry: Mutex<Registry>,
     slots: Mutex<HashMap<String, Arc<Mutex<Slot>>>>,
     audit: Audit,
+    /// Set before a quiesce takes its snapshot: mutating calls are refused
+    /// (cleared again when the quiesce fails without freezing anything).
+    quiescing: AtomicBool,
     exiting: AtomicBool,
+    /// Where an exit request goes (the server's main loop). The exit never
+    /// depends on a reply being written (M12a review M2).
+    exit_tx: Mutex<Option<tokio::sync::mpsc::UnboundedSender<i32>>>,
 }
 
 impl std::fmt::Debug for Daemon {
@@ -86,9 +109,7 @@ fn err(code: ErrorCode, msg: impl Into<String>) -> CtlError {
     CtlError::new(code, msg)
 }
 
-/// The control error for a stack failure. Rollback and fork have no code of
-/// their own in the protocol yet (see the M12a report, iface gaps): they use
-/// `downgrade` with messages that start with `rollback:` and `fork:`.
+/// The control error for a stack failure.
 pub fn stack_error(e: &StackError) -> CtlError {
     let code = match e {
         StackError::Attach(a) => match a {
@@ -102,8 +123,10 @@ pub fn stack_error(e: &StackError) -> CtlError {
             AttachError::Format(_) => ErrorCode::Io,
             _ => ErrorCode::Internal,
         },
-        StackError::Rollback { .. } | StackError::Fork { .. } => ErrorCode::Downgrade,
-        StackError::JournalDamage => ErrorCode::Io,
+        StackError::Rollback { .. } => ErrorCode::Rollback,
+        StackError::Fork { .. } => ErrorCode::Fork,
+        StackError::ForkUnverifiable { .. } => ErrorCode::ForkUnverifiable,
+        StackError::JournalDamage => ErrorCode::JournalDamage,
         StackError::Invalid(_) => ErrorCode::Invalid,
         StackError::Store(s) => store_code(s.kind()),
         StackError::Open(o) => match o {
@@ -148,6 +171,8 @@ pub struct AttachOpts {
     cpus: Option<String>,
     max_io_buf_bytes: Option<u32>,
     credential: AttachCredential,
+    on_journal_damage: Option<OnJournalDamage>,
+    allow_unverifiable_fork: bool,
 }
 
 impl AttachOpts {
@@ -160,6 +185,7 @@ impl AttachOpts {
                 None => None,
                 Some(hex) => Some(parse_fingerprint(&hex)?),
             };
+            credential.mode = c.mode.map(CryptoMode::from);
         }
         Ok(Self {
             queues: a.queues,
@@ -167,6 +193,11 @@ impl AttachOpts {
             cpus: a.cpus,
             max_io_buf_bytes: a.max_io_buf_bytes,
             credential,
+            on_journal_damage: a.on_journal_damage.map(|p| match p {
+                JournalDamagePolicy::Wipe => OnJournalDamage::Wipe,
+                JournalDamagePolicy::Refuse => OnJournalDamage::Refuse,
+            }),
+            allow_unverifiable_fork: a.allow_unverifiable_fork,
         })
     }
 }
@@ -281,8 +312,11 @@ fn ratio(num: u64, den: u64) -> Option<f64> {
 }
 
 impl Daemon {
-    /// A daemon over `cfg`, with the registry loaded (or rebuilt from
-    /// `volume_roots` when it does not parse).
+    /// A daemon over `cfg`, with the registry loaded. A registry that does
+    /// not parse is renamed aside and rebuilt from `volume_roots`; with no
+    /// roots configured the daemon refuses to start (an empty registry would
+    /// leave the devices of every volume unrecovered). An I/O error is never
+    /// "rebuild": the file is left alone and the start fails.
     ///
     /// # Errors
     /// The registry could neither be read nor rebuilt.
@@ -290,8 +324,19 @@ impl Daemon {
         let path = cfg.registry();
         let registry = match Registry::load(&path) {
             Ok(r) => r,
-            Err(e) => {
-                tracing::error!(error = %e, "registry unreadable; rebuilding it from volume_roots");
+            Err(crate::registry::RegistryError::Format(e)) => {
+                if cfg.volume_roots.is_empty() {
+                    anyhow::bail!(
+                        "registry {} does not parse ({e}) and no volume_roots are configured to rebuild it from; fix or remove it",
+                        path.display()
+                    );
+                }
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let aside = path.with_extension(format!("json.bad-{ts}"));
+                std::fs::rename(&path, &aside)?;
+                tracing::error!(error = %e, aside = %aside.display(), "registry does not parse; kept aside, rebuilding it from volume_roots");
                 let (r, skipped) = Registry::rebuild(&path, &cfg.volume_roots);
                 for s in skipped {
                     tracing::warn!(entry = %s, "registry rebuild skipped");
@@ -299,14 +344,51 @@ impl Daemon {
                 r.save()?;
                 r
             }
+            Err(e) => anyhow::bail!("registry {}: {e}", path.display()),
         };
+        // Every registered volume has its slot from the start, so a quiesce
+        // snapshot sees it (M12a review m1).
+        let slots = registry
+            .entries()
+            .iter()
+            .map(|e| (e.name.clone(), Arc::new(Mutex::new(Slot::Detached))))
+            .collect();
         Ok(Self {
             audit: Audit::new(cfg.audit_log()),
             cfg,
             registry: Mutex::new(registry),
-            slots: Mutex::new(HashMap::new()),
+            slots: Mutex::new(slots),
+            quiescing: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
+            exit_tx: Mutex::new(None),
         })
+    }
+
+    /// Where exit requests go (the server's main loop).
+    pub fn set_exit_sender(&self, tx: tokio::sync::mpsc::UnboundedSender<i32>) {
+        *lock(&self.exit_tx) = Some(tx);
+    }
+
+    /// Asks the server to exit with `code` after `delay` (the delay lets a
+    /// reply to the caller go out first; the exit does not wait for it).
+    fn request_exit(&self, code: i32, delay: std::time::Duration) {
+        let Some(tx) = lock(&self.exit_tx).clone() else {
+            // No server (tests of the library): exit directly.
+            std::thread::sleep(delay);
+            std::process::exit(code);
+        };
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            let _ = tx.send(code);
+        });
+    }
+
+    /// Audits a mutating request that `validate` refused.
+    pub fn audit_refused(&self, peer: Peer, req: &Request, message: &str) {
+        if crate::audit::is_mutating(req) {
+            self.audit
+                .record(peer, req, Err((ErrorCode::Invalid, message)));
+        }
     }
 
     /// The configuration.
@@ -333,6 +415,14 @@ impl Daemon {
         let (res, after) = if self.exiting.load(Ordering::Acquire) {
             (
                 Err(err(ErrorCode::Busy, "the daemon is shutting down")),
+                After::Continue,
+            )
+        } else if mutating
+            && !matches!(req, Request::QuiesceAll)
+            && self.quiescing.load(Ordering::Acquire)
+        {
+            (
+                Err(err(ErrorCode::Busy, "a quiesce of every device is running")),
                 After::Continue,
             )
         } else {
@@ -429,6 +519,7 @@ impl Daemon {
             let _ = std::fs::remove_dir_all(&created.voldir);
             return Err(err(ErrorCode::Io, format!("registry: {e}")));
         }
+        drop(self.slot(&c.name));
         if mode == CryptoMode::Plain {
             tracing::warn!(volume = %c.name, "plain volume: corruption detection only, no protection against anyone who can write its storage");
         }
@@ -465,6 +556,14 @@ impl Daemon {
                     l.stack.desc.crypto_mode,
                     self.device_path(&e.name, l),
                 ),
+                Slot::Orphan { dev_id, .. } => match peek(Path::new(&e.directory)) {
+                    Ok(p) => (
+                        p.size,
+                        p.desc.crypto_mode,
+                        Some(format!("/dev/ublkb{dev_id}")),
+                    ),
+                    Err(_) => continue,
+                },
                 Slot::Detached => match peek(Path::new(&e.directory)) {
                     Ok(p) => (p.size, p.desc.crypto_mode, None),
                     Err(_) => continue,
@@ -480,6 +579,13 @@ impl Daemon {
             });
         }
         Ok(Response::VolumeList { volumes })
+    }
+
+    fn floor_view(f: Option<RollbackFloor>) -> Option<RollbackFloorView> {
+        f.map(|f| RollbackFloorView {
+            max_commit_seq: f.max_commit_seq.0,
+            tip_hash: f.tip_hash.iter().map(|b| format!("{b:02x}")).collect(),
+        })
     }
 
     fn status(&self, p: &NameParam) -> Result<Response, CtlError> {
@@ -510,22 +616,37 @@ impl Daemon {
                     journal_used: fill.used_bytes,
                     journal_capacity: fill.capacity_bytes,
                     last_commit_seq: tip.0,
-                    last_commit_ms: None,
+                    last_commit_ms: Some(s.engine.tip_created_at().0),
                     dedup_ratio: ratio(written, written.saturating_sub(stats.dedup_hits)),
                     compression_ratio: ratio(stats.stored_ulen, stats.stored_clen),
                     stats,
+                    rollback_floor: Self::floor_view(s.store.rollback_floor().ok().flatten()),
                 }
             }
-            Slot::Detached => {
-                let pk = peek(Path::new(&e.directory))?;
+            Slot::Detached | Slot::Orphan { .. } => {
+                let dir = Path::new(&e.directory);
+                let pk = peek(dir)?;
+                let floor = read_pins_unlocked(dir)
+                    .map_err(|x| stack_error(&x))?
+                    .and_then(|f| f.floor);
+                let orphan = match &*g {
+                    Slot::Orphan { dev_id, .. } => Some(*dev_id),
+                    _ => None,
+                };
                 VolumeStatusBody {
                     name: p.name.clone(),
                     uuid: e.uuid,
-                    state: VolumeState::Detached,
+                    // A device left in the kernel after a failed start: not
+                    // attached, not usable until a restart recovers it.
+                    state: if orphan.is_some() {
+                        VolumeState::ReadOnly
+                    } else {
+                        VolumeState::Detached
+                    },
                     size_bytes: pk.size,
                     chunk_size: pk.desc.chunk_size,
                     mode: pk.desc.crypto_mode.into(),
-                    device: None,
+                    device: orphan.map(|id| format!("/dev/ublkb{id}")),
                     stats: Default::default(),
                     space: SpaceFigures::default(),
                     journal_used: 0,
@@ -534,6 +655,7 @@ impl Daemon {
                     last_commit_ms: None,
                     dedup_ratio: None,
                     compression_ratio: None,
+                    rollback_floor: Self::floor_view(floor),
                 }
             }
         };
@@ -548,33 +670,88 @@ impl Daemon {
         let opts = AttachOpts::from_request(a)?;
         let slot = self.slot(&name);
         let mut g = lock(&slot);
-        if matches!(*g, Slot::Attached(_)) {
-            return Err(err(ErrorCode::Busy, format!("{name} is already attached")));
+        if self.quiescing.load(Ordering::Acquire) {
+            return Err(err(ErrorCode::Busy, "a quiesce of every device is running"));
         }
-        let (live, recovered) = self.bring_up(&name, Path::new(&e.directory), opts)?;
-        let (queues, depth) = live.device.geometry();
-        let resp = Attached {
-            device: self.device_path(&name, &live).unwrap_or_default(),
-            dev_id: live.device.dev_id().unwrap_or(0),
-            queues,
-            depth,
-            recovered,
-        };
-        *g = Slot::Attached(Box::new(live));
-        Ok(Response::Attached(resp))
+        match &*g {
+            Slot::Attached(_) => {
+                return Err(err(ErrorCode::Busy, format!("{name} is already attached")));
+            }
+            Slot::Orphan { dev_id, why } => {
+                return Err(err(
+                    ErrorCode::Busy,
+                    format!("device {dev_id} of {name} was left in the kernel after a failed start ({why}); restart lunixd, which recovers or replaces it"),
+                ));
+            }
+            Slot::Detached => {}
+        }
+        match self.bring_up(&name, Path::new(&e.directory), opts) {
+            Ok((live, recovered, first_attach)) => {
+                let (queues, depth) = live.device.geometry();
+                let resp = Attached {
+                    device: self.device_path(&name, &live).unwrap_or_default(),
+                    dev_id: live.device.dev_id().unwrap_or(0),
+                    queues,
+                    depth,
+                    recovered,
+                    first_attach,
+                };
+                *g = Slot::Attached(Box::new(live));
+                Ok(Response::Attached(resp))
+            }
+            Err(Failed::Orphan { dev_id, error }) => {
+                *g = Slot::Orphan {
+                    dev_id,
+                    why: error.message.clone(),
+                };
+                Err(error)
+            }
+            Err(Failed::Plain(e)) => Err(e),
+        }
     }
 
     /// Opens the volume and puts a device in front of it (create or recover).
-    fn bring_up(&self, name: &str, voldir: &Path, o: AttachOpts) -> Result<(Live, bool), CtlError> {
+    /// Returns the live volume, whether the device was recovered, and whether
+    /// this host had no floor (`first_attach`).
+    fn bring_up(
+        &self,
+        name: &str,
+        voldir: &Path,
+        o: AttachOpts,
+    ) -> Result<(Live, bool, bool), Failed> {
         let started_at = Instant::now();
         let record = device_record_unlocked(voldir)
             .filter(|r| current_boot_id().is_ok_and(|b| b == r.boot_id));
+        // The record's geometry rules only for a device that can actually be
+        // recovered (M12a review m10): a dead or vanished device's record is
+        // not a reason to repeat its geometry.
+        let record = match (&record, self.cfg.device) {
+            (Some(r), DeviceKind::Ublk) => match probe_recorded(r) {
+                RecordedDevice::Recoverable | RecordedDevice::Unknown => record,
+                RecordedDevice::DeadOwn => {
+                    delete_dead(r);
+                    None
+                }
+                RecordedDevice::Gone => None,
+            },
+            _ => None,
+        };
         let on_disk = journal_lanes(voldir);
         let default_q = self.cfg.queues.unwrap_or_else(|| {
             UblkConfig::default_queues(
                 std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get),
             )
         });
+        if let (Some(r), Some(q)) = (&record, o.queues) {
+            if q != r.nr_queues {
+                tracing::warn!(
+                    volume = name,
+                    requested = q,
+                    recorded = r.nr_queues,
+                    "the device to recover keeps its recorded queue count"
+                );
+            }
+        }
         // A device to recover keeps its geometry (the kernel's values rule).
         let queues = match (&record, o.queues) {
             (Some(r), _) => r.nr_queues,
@@ -582,13 +759,13 @@ impl Daemon {
             (None, None) => on_disk.unwrap_or(default_q),
         };
         if on_disk.is_some_and(|l| l > queues) {
-            return Err(err(
+            return Err(Failed::Plain(err(
                 ErrorCode::Invalid,
                 format!(
-                    "the journal has {} lanes; attach with at least that many queues",
+                    "the journal has {} lanes; attach with at least that many queues (lanes never shrink in phase 1)",
                     on_disk.unwrap_or(0)
                 ),
-            ));
+            )));
         }
         let depth = record
             .as_ref()
@@ -596,7 +773,7 @@ impl Daemon {
             .or(o.depth)
             .unwrap_or(DEFAULT_DEPTH);
         let cpus = match o.cpus.as_deref().or(self.cfg.cpus.as_deref()) {
-            Some(s) => parse_cpus(s)?,
+            Some(s) => parse_cpus(s).map_err(Failed::Plain)?,
             None => Vec::new(),
         };
         let buf = record
@@ -606,10 +783,30 @@ impl Daemon {
         let mut op = OpenParams::new(voldir.to_path_buf(), queues);
         op.credential = o.credential;
         op.max_io_buf_bytes = buf;
-        op.on_journal_damage = self.cfg.on_journal_damage;
-        let stack = open_volume(op).map_err(|e| stack_error(&e))?;
+        op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
+        op.allow_unverifiable_fork = o.allow_unverifiable_fork;
+        if o.allow_unverifiable_fork {
+            tracing::warn!(
+                volume = name,
+                "attach with the operator override allow_unverifiable_fork (audited)"
+            );
+        }
+        let stack = open_volume(op).map_err(|e| Failed::Plain(stack_error(&e)))?;
+        let max_buf = buf.unwrap_or(stack.json.max_io_buf_bytes);
+        let locked = u64::from(queues) * u64::from(depth) * u64::from(max_buf);
+        if locked > self.cfg.max_locked_buffers {
+            return Err(Failed::Plain(err(
+                ErrorCode::Invalid,
+                format!(
+                    "{queues} queues x depth {depth} x {max_buf} bytes = {} MiB of locked buffers exceeds max_locked_buffers ({} MiB)",
+                    locked >> 20,
+                    self.cfg.max_locked_buffers >> 20
+                ),
+            )));
+        }
         let rep = stack.engine.recovery_report();
-        if stack.floor_before.is_none() {
+        let first_attach = rep.first_attach;
+        if first_attach {
             tracing::info!(volume = name, "first attach on this host: a rollback of history before it cannot be detected (ADR-31); the floor is recorded now");
         }
         tracing::info!(
@@ -622,7 +819,7 @@ impl Daemon {
         let dp = DeviceParams {
             queues,
             depth,
-            max_io_buf_bytes: buf.unwrap_or(stack.json.max_io_buf_bytes),
+            max_io_buf_bytes: max_buf,
             chunk_bytes: stack.desc.chunk_size,
             cpus,
             timeouts: Timeouts::default(),
@@ -639,25 +836,33 @@ impl Daemon {
         let Started { device, recovered } = match started {
             Ok(s) => s,
             Err(e) => {
+                let ctl = device_error(&e);
                 if let DeviceError::Ublk(u) = &e {
                     if let Some(id) = u.dev_id() {
-                        tracing::error!(volume = name, dev_id = id, error = %u, "device left in the kernel; delete it once this daemon is gone");
+                        if kernel_has_device(id) {
+                            tracing::error!(volume = name, dev_id = id, error = %u, "a failed start left the device in the kernel; the volume is unusable until lunixd restarts (another process deletes or recovers it)");
+                            // The queue threads may hold the engine: keep it
+                            // (and LOCK) rather than drop it under them.
+                            std::mem::forget(stack);
+                            return Err(Failed::Orphan {
+                                dev_id: id,
+                                error: ctl,
+                            });
+                        }
+                        tracing::warn!(volume = name, dev_id = id, error = %u, "the start failed; the new device was deleted again");
                     }
                 }
-                return Err(device_error(&e));
+                return Err(Failed::Plain(ctl));
             }
         };
         for w in device.warnings() {
             tracing::warn!(volume = name, warning = %w, "device");
         }
         let link = device.bdev_path().and_then(|b| self.make_link(name, &b));
-        // An exact journal ledger after a crash between C6 and C9 (M11
-        // re-review): commit the replayed records once the lanes are open.
-        if stack.engine.recovery_report().replayed > 0 {
-            if let Err(e) = stack.engine.commit_now(false) {
-                tracing::warn!(volume = name, error = %e, "post-recovery commit failed; the next trigger retries");
-            }
-        }
+        // No commit here: the coordinator's own triggers destage what the
+        // journal replayed, in the background (M12a review m6). After a crash
+        // between C6 and C9 `Journal::fill()` overstates the ring until the
+        // first commit; that is accepted.
         tracing::info!(
             volume = name,
             recovered,
@@ -669,8 +874,10 @@ impl Daemon {
                 device,
                 stack,
                 link,
+                stopping: false,
             },
             recovered,
+            first_attach,
         ))
     }
 
@@ -706,7 +913,7 @@ impl Daemon {
         self.entry(&p.name)?;
         let slot = self.slot(&p.name);
         let mut g = lock(&slot);
-        let Slot::Attached(live) = &*g else {
+        let Slot::Attached(live) = &mut *g else {
             return Err(err(
                 ErrorCode::Invalid,
                 format!("{} is not attached", p.name),
@@ -726,6 +933,9 @@ impl Daemon {
             Err(_) => false,
         };
         if !gone {
+            // Past TRY_STOP_DEV: the device is stopping and is never
+            // quiesced again (M12a review M1).
+            live.stopping = true;
             let e = res.err().map(|e| device_error(&e));
             return Err(e.unwrap_or_else(|| err(ErrorCode::Internal, "detach failed")));
         }
@@ -736,7 +946,7 @@ impl Daemon {
             Self::remove_link(l);
         }
         if let Err(e) = live.stack.store.clear_device_record() {
-            tracing::warn!(volume = %p.name, error = %e, "state/device not removed");
+            tracing::warn!(volume = %p.name, error = %e, "state/device not removed (the next start sees the device gone and clears it)");
         }
         drop(live);
         match res {
@@ -747,16 +957,21 @@ impl Daemon {
 
     // ------------------------------------------------------------ resize, space
 
+    fn attached_live<'a>(g: &'a MutexGuard<'_, Slot>, name: &str) -> Result<&'a Live, CtlError> {
+        match &**g {
+            Slot::Attached(l) => Ok(l),
+            _ => Err(err(
+                ErrorCode::Invalid,
+                format!("attach {name} first (phase 1 grows online only)"),
+            )),
+        }
+    }
+
     fn resize(&self, r: &Resize) -> Result<Response, CtlError> {
         self.entry(&r.name)?;
         let slot = self.slot(&r.name);
         let g = lock(&slot);
-        let Slot::Attached(live) = &*g else {
-            return Err(err(
-                ErrorCode::Invalid,
-                "attach the volume first (phase 1 grows online only)",
-            ));
-        };
+        let live = Self::attached_live(&g, &r.name)?;
         let cur = live.stack.engine.size_bytes();
         if r.size_bytes < cur {
             return Err(err(ErrorCode::Invalid, "shrink is not supported"));
@@ -824,7 +1039,7 @@ impl Daemon {
                     figures: SpaceFigures::from(&st.space.snapshot()),
                 }))
             }
-            Slot::Detached => {
+            Slot::Detached | Slot::Orphan { .. } => {
                 let path = Path::new(&e.directory).join(lpath::volume_json());
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| err(ErrorCode::Io, format!("volume.json: {e}")))?;
@@ -864,60 +1079,191 @@ impl Daemon {
     // ------------------------------------------------------------ quiesce, startup
 
     /// Quiesces every device (W1: `QUIESCE_DEV`, a true drain, the final
-    /// commit; never a stop). On success the slots stay locked and the
-    /// caller exits; on a failure the daemon keeps serving and logs (a device
-    /// that timed out stays latched quiescing until a retry).
+    /// commit; never a stop) and asks the server to exit.
+    ///
+    /// Every device is walked, in name order, and failures are collected
+    /// (M12a review M1). A device whose detach already got past
+    /// `TRY_STOP_DEV` is stopping and has no started request: nothing to do.
+    /// When some device failed:
+    /// * if nothing else was quiesced, the daemon keeps running and logs; a
+    ///   device whose `QUIESCE_DEV` timed out refuses new I/O until a retry
+    ///   or a crash for recovery (M10), and the log says so;
+    /// * if other devices are already quiesced, the failed ones are retried
+    ///   once, and if they still fail the process aborts (DESIGN §3: retry,
+    ///   then `abort()`, recoverable like `kill -9`), so it never serves on
+    ///   with frozen devices.
+    ///
+    /// On success the slots stay locked and the exit is requested directly,
+    /// not through the reply (M12a review M2).
     pub fn quiesce_all(&self) -> (Result<Response, CtlError>, After) {
-        let slots: Vec<Arc<Mutex<Slot>>> = lock(&self.slots).values().cloned().collect();
-        let guards: Vec<MutexGuard<'_, Slot>> = slots.iter().map(|s| lock(s)).collect();
-        let mut devices = 0u32;
+        if self.quiescing.swap(true, Ordering::AcqRel) {
+            return (
+                Err(err(
+                    ErrorCode::Busy,
+                    "a quiesce of every device is already running",
+                )),
+                After::Continue,
+            );
+        }
+        let mut slots: Vec<(String, Arc<Mutex<Slot>>)> = lock(&self.slots)
+            .iter()
+            .map(|(k, v)| (k.clone(), Arc::clone(v)))
+            .collect();
+        slots.sort_by(|a, b| a.0.cmp(&b.0));
+        let guards: Vec<(String, MutexGuard<'_, Slot>)> =
+            slots.iter().map(|(n, s)| (n.clone(), lock(s))).collect();
+        let t = self.cfg.quiesce_timeout;
+        let mut quiesced = 0u32;
         let mut engine_failures = 0u32;
-        for g in &guards {
-            let Slot::Attached(live) = &**g else { continue };
-            match live.device.quiesce(self.cfg.quiesce_timeout) {
-                Ok(None) => devices += 1,
-                Ok(Some(e)) => {
-                    devices += 1;
-                    engine_failures += 1;
-                    tracing::error!(error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+        let mut orphans = Vec::new();
+        let mut failed: Vec<(usize, String)> = Vec::new();
+        for (i, (name, g)) in guards.iter().enumerate() {
+            match &**g {
+                Slot::Attached(live) if live.stopping => {
+                    tracing::info!(volume = %name, "device is stopping after a failed detach; nothing to quiesce");
                 }
-                Err(e) => {
-                    tracing::error!(error = %e, "quiesce failed; the daemon keeps serving (retry QuiesceAll, or crash for recovery)");
-                    return (Err(device_error(&e)), After::Continue);
+                Slot::Attached(live) => match live.device.quiesce(t) {
+                    Ok(None) => quiesced += 1,
+                    Ok(Some(e)) => {
+                        quiesced += 1;
+                        engine_failures += 1;
+                        tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                    }
+                    Err(e) => failed.push((i, e.to_string())),
+                },
+                Slot::Orphan { dev_id, .. } => orphans.push(*dev_id),
+                Slot::Detached => {}
+            }
+        }
+        if !failed.is_empty() {
+            if quiesced == 0 {
+                for (i, e) in &failed {
+                    tracing::error!(volume = %guards[*i].0, error = %e, "quiesce failed: after a QUIESCE_DEV timeout the device refuses new I/O until QuiesceAll is retried or the daemon crashes for recovery; nothing else was quiesced, the daemon keeps running");
+                }
+                drop(guards);
+                self.quiescing.store(false, Ordering::Release);
+                let names: Vec<&str> = failed
+                    .iter()
+                    .map(|(i, _)| guards_name(&slots, *i))
+                    .collect();
+                return (
+                    Err(err(
+                        ErrorCode::Io,
+                        format!(
+                            "quiesce failed for {}: retry QuiesceAll (the device refuses new I/O meanwhile)",
+                            names.join(", ")
+                        ),
+                    )),
+                    After::Continue,
+                );
+            }
+            for (i, e) in &failed {
+                let (name, g) = &guards[*i];
+                tracing::warn!(volume = %name, error = %e, "quiesce failed while other devices are quiesced; retrying once");
+                let retried = match &**g {
+                    Slot::Attached(live) => live.device.quiesce(t),
+                    _ => Ok(None),
+                };
+                match retried {
+                    Ok(engine) => {
+                        quiesced += 1;
+                        if let Some(e) = engine {
+                            engine_failures += 1;
+                            tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(volume = %name, error = %e, "quiesce failed again with other devices already quiesced: aborting for recovery (DESIGN §3; recovered like kill -9)");
+                        std::process::abort();
+                    }
                 }
             }
         }
         self.exiting.store(true, Ordering::Release);
         // Nothing may touch a quiesced device again: the slots stay locked
         // until the process exits.
-        for g in guards {
+        for (_, g) in guards {
             std::mem::forget(g);
         }
-        tracing::info!(devices, "quiesced; exiting without a stop command");
-        let code = if engine_failures > 0 { 70 } else { 0 };
-        (Ok(Response::Quiesced { devices }), After::Exit(code))
+        let code = if !orphans.is_empty() {
+            tracing::error!(?orphans, "devices left in the kernel after a failed start were not quiesced; the next start recovers or replaces them");
+            75
+        } else if engine_failures > 0 {
+            70
+        } else {
+            0
+        };
+        tracing::info!(
+            devices = quiesced,
+            code,
+            "quiesced; exiting without a stop command"
+        );
+        self.request_exit(code, std::time::Duration::from_secs(2));
+        (
+            Ok(Response::Quiesced { devices: quiesced }),
+            After::Exit(code),
+        )
     }
 
-    /// Plan step 8: recovers every registered volume that has a device record
-    /// before the control socket accepts calls. A volume that needs a
-    /// credential (encrypted, or an integrity volume without its own key file)
-    /// is left for an explicit attach, which recovers its device.
+    /// Plan step 8: recovers every registered volume whose device is still in
+    /// the kernel. A record whose device is gone (a detach completed but the
+    /// record was not removed, or the id was reused) is cleared and the volume
+    /// stays detached (M12a review m4); a DEAD device of this volume is
+    /// deleted. A volume that needs a credential (encrypted, or an integrity
+    /// volume without its own key file) is left for an explicit attach, which
+    /// recovers its device.
     pub fn recover_on_start(&self) {
         let entries: Vec<RegistryEntry> = lock(&self.registry).entries().to_vec();
         for e in entries {
+            if self.quiescing.load(Ordering::Acquire) {
+                tracing::info!("a quiesce started: recovery stops here");
+                return;
+            }
             let voldir = PathBuf::from(&e.directory);
-            if !voldir.join(lpath::state_device()).exists() {
+            let Some(rec) = device_record_unlocked(&voldir) else {
                 continue;
+            };
+            let same_boot = current_boot_id().is_ok_and(|b| b == rec.boot_id);
+            let probe = if self.cfg.device == DeviceKind::Ublk && same_boot {
+                probe_recorded(&rec)
+            } else {
+                RecordedDevice::Gone
+            };
+            match probe {
+                RecordedDevice::Recoverable => {}
+                RecordedDevice::Unknown => {
+                    tracing::warn!(volume = %e.name, dev_id = rec.dev_id, "the recorded device cannot be inspected; not recovered (attach it to retry)");
+                    continue;
+                }
+                RecordedDevice::DeadOwn | RecordedDevice::Gone => {
+                    if probe == RecordedDevice::DeadOwn {
+                        delete_dead(&rec);
+                    }
+                    tracing::info!(volume = %e.name, dev_id = rec.dev_id, same_boot, "the recorded device is gone: the record is stale and cleared, the volume stays detached");
+                    if let Err(x) = std::fs::remove_file(voldir.join(lpath::state_device()))
+                        .and_then(|()| fsio::sync_dir(&voldir.join("state")))
+                    {
+                        tracing::warn!(volume = %e.name, error = %x, "stale state/device not removed");
+                    }
+                    continue;
+                }
             }
             let started = Instant::now();
             let slot = self.slot(&e.name);
             let mut g = lock(&slot);
             match self.bring_up(&e.name, &voldir, AttachOpts::default()) {
-                Ok((live, recovered)) => {
+                Ok((live, recovered, _)) => {
                     tracing::info!(volume = %e.name, recovered, stall_ms = started.elapsed().as_millis() as u64, "volume recovered at start");
                     *g = Slot::Attached(Box::new(live));
                 }
-                Err(c) => {
+                Err(Failed::Orphan { dev_id, error }) => {
+                    tracing::error!(volume = %e.name, dev_id, error = %error.message, "volume not recovered at start: its device is left in the kernel");
+                    *g = Slot::Orphan {
+                        dev_id,
+                        why: error.message,
+                    };
+                }
+                Err(Failed::Plain(c)) => {
                     tracing::error!(volume = %e.name, code = ?c.code, error = %c.message, "volume not recovered at start; attach it (with its credential)");
                 }
             }
@@ -949,22 +1295,85 @@ impl Daemon {
             .map(|e| PathBuf::from(&e.directory))
     }
 
-    /// The volume's rollback floor as `VolumeStatus` should show it (the
-    /// protocol has no field for it yet; the CLI or a test reads it here).
-    pub fn rollback_floor(&self, name: &str) -> Option<(u64, [u8; 32])> {
-        let slot = self.slot(name);
-        let g = lock(&slot);
-        match &*g {
-            Slot::Attached(l) => l
-                .stack
-                .store
-                .rollback_floor()
-                .ok()
-                .flatten()
-                .map(|f| (f.max_commit_seq.0, f.tip_hash)),
-            Slot::Detached => None,
+    /// A number that changes whenever any attached volume does I/O or
+    /// commits, and whether every slot could be looked at (a slot busy with
+    /// a control call counts as activity).
+    fn activity(&self) -> (u64, bool) {
+        let slots: Vec<Arc<Mutex<Slot>>> = lock(&self.slots).values().cloned().collect();
+        let mut sum = 0u64;
+        for s in slots {
+            let Ok(g) = s.try_lock() else {
+                return (0, false);
+            };
+            if let Slot::Attached(l) = &*g {
+                let st = l.stack.engine.stats();
+                sum = sum
+                    .wrapping_add(st.ops_read)
+                    .wrapping_add(st.ops_write)
+                    .wrapping_add(st.ops_flush)
+                    .wrapping_add(st.ops_discard)
+                    .wrapping_add(st.ops_write_zeroes)
+                    .wrapping_add(st.commits)
+                    .wrapping_add(1);
+            }
+        }
+        (sum, true)
+    }
+
+    /// Starts the idle-trim thread (decision 2 of 2026-11-13): once every
+    /// volume has been idle for `idle_trim_ms`, the heap is trimmed once, off
+    /// the queue threads; activity re-arms it.
+    pub fn spawn_idle_trim(self: &Arc<Self>) {
+        let Some(idle) = self.cfg.idle_trim else {
+            return;
+        };
+        let weak = Arc::downgrade(self);
+        let period = (idle / 4).clamp(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_secs(2),
+        );
+        let spawned = std::thread::Builder::new()
+            .name("lunixd-trim".into())
+            .spawn(move || {
+                let mut last = (u64::MAX, Instant::now());
+                let mut trimmed = false;
+                loop {
+                    std::thread::sleep(period);
+                    let Some(d) = weak.upgrade() else { return };
+                    if d.is_exiting() {
+                        return;
+                    }
+                    let (sig, complete) = d.activity();
+                    if !complete || sig != last.0 {
+                        last = (sig, Instant::now());
+                        trimmed = false;
+                        continue;
+                    }
+                    if !trimmed && last.1.elapsed() >= idle {
+                        let before = crate::trim::rss_bytes();
+                        crate::trim::trim();
+                        let after = crate::trim::rss_bytes();
+                        tracing::debug!(before = ?before, after = ?after, "idle: heap trimmed");
+                        trimmed = true;
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "idle trim thread not started");
         }
     }
+}
+
+fn guards_name(slots: &[(String, Arc<Mutex<Slot>>)], i: usize) -> &str {
+    slots.get(i).map_or("?", |(n, _)| n.as_str())
+}
+
+/// Why `bring_up` failed.
+enum Failed {
+    /// A device was left in the kernel (a tombstone is kept).
+    Orphan { dev_id: u32, error: CtlError },
+    /// Anything else; nothing is left.
+    Plain(CtlError),
 }
 
 #[cfg(test)]

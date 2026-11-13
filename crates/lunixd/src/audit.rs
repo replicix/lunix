@@ -35,6 +35,9 @@ struct AuditLine<'a> {
     outcome: &'a str,
     code: Option<ErrorCode>,
     message: Option<&'a str>,
+    /// Operator overrides the request used (ADR-31: `allow_unverifiable_fork`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    overrides: Vec<&'static str>,
 }
 
 /// The method name of a request (snake case, as on the wire).
@@ -117,6 +120,10 @@ impl Audit {
             outcome,
             code,
             message,
+            overrides: match req {
+                Request::Attach(a) if a.allow_unverifiable_fork => vec!["allow_unverifiable_fork"],
+                _ => Vec::new(),
+            },
         };
         let Ok(mut text) = serde_json::to_string(&line) else {
             return;
@@ -129,7 +136,10 @@ impl Audit {
             .append(true)
             .mode(0o600)
             .open(&self.path)
-            .and_then(|mut f| f.write_all(text.as_bytes()));
+            .and_then(|mut f| {
+                f.write_all(text.as_bytes())?;
+                f.sync_data()
+            });
         if let Err(e) = res {
             tracing::warn!(error = %e, path = %self.path.display(), "audit log not written");
         }

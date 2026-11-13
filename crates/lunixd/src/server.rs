@@ -55,7 +55,11 @@ pub fn bind(path: &Path, group: Option<u32>) -> io::Result<std::os::unix::net::U
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let l = std::os::unix::net::UnixListener::bind(path)?;
+    // No window in which the socket exists with looser permissions.
+    let old = rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o177));
+    let bound = std::os::unix::net::UnixListener::bind(path);
+    rustix::process::umask(old);
+    let l = bound?;
     let mode = if group.is_some() { 0o660 } else { 0o600 };
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
     if let Some(gid) = group {
@@ -128,6 +132,7 @@ fn connection(daemon: &Arc<Daemon>, mut stream: StdStream, peer: Peer) -> Option
             continue;
         }
         if let Err(e) = frame.call.validate() {
+            daemon.audit_refused(peer, &frame.call, &e.to_string());
             if reply(
                 &mut stream,
                 &ResponseFrame::err(id, CtlError::new(ErrorCode::Invalid, e.to_string())),
@@ -159,6 +164,11 @@ fn run_call(
     peer: Peer,
     frame: RequestFrame,
 ) -> (Result<Response, CtlError>, After) {
+    // QuiesceAll is bounded by its own watchdogs and must never be cut off
+    // from its exit (M12a review M2): it runs inline, without the timeout.
+    if matches!(frame.call, lunix_iface::ctl::Request::QuiesceAll) {
+        return daemon.handle(peer, frame.call);
+    }
     let timeout = daemon.config().call_timeout;
     let (tx, rx) = mpsc::channel();
     let d = Arc::clone(daemon);
@@ -192,21 +202,29 @@ fn run_call(
 }
 
 /// Accepts connections and handles signals until a call or a signal asks to
-/// exit; returns the exit code.
+/// exit; returns the exit code. The listener is already bound (nothing is
+/// accepted yet) and the signal handlers are installed before `startup` runs
+/// (startup recovery, M12a review m2), so a `SIGTERM` during recovery is a
+/// quiesce, never the default action.
 ///
 /// # Errors
 /// The listener or the signal setup failed.
-pub fn run(daemon: Arc<Daemon>, listener: std::os::unix::net::UnixListener) -> io::Result<i32> {
+pub fn run(
+    daemon: Arc<Daemon>,
+    listener: std::os::unix::net::UnixListener,
+    startup: impl FnOnce(&Arc<Daemon>) + Send + 'static,
+) -> io::Result<i32> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .max_blocking_threads(64)
+        .max_blocking_threads(256)
         .thread_name("lunixd-ctl")
         .enable_all()
         .build()?;
     let code = rt.block_on(async move {
         listener.set_nonblocking(true)?;
         let listener = UnixListener::from_std(listener)?;
-        let (exit_tx, mut exit_rx) = tokio::sync::mpsc::channel::<i32>(4);
+        let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
+        daemon.set_exit_sender(exit_tx.clone());
         for kind in [
             SignalKind::terminate(),
             SignalKind::interrupt(),
@@ -214,26 +232,32 @@ pub fn run(daemon: Arc<Daemon>, listener: std::os::unix::net::UnixListener) -> i
         ] {
             let mut sig = signal(kind)?;
             let d = Arc::clone(&daemon);
-            let tx = exit_tx.clone();
             tokio::spawn(async move {
                 while sig.recv().await.is_some() {
                     tracing::info!("signal: quiescing every device");
+                    // Its own thread, not the blocking pool that connections
+                    // may fill (M12a review m9); the exit is requested by
+                    // quiesce_all itself.
                     let d2 = Arc::clone(&d);
-                    let out = tokio::task::spawn_blocking(move || d2.quiesce_all()).await;
-                    match out {
-                        Ok((_, After::Exit(code))) => {
-                            let _ = tx.send(code).await;
-                            return;
-                        }
-                        Ok((Err(e), _)) => {
-                            tracing::error!(error = %e.message, "quiesce on signal failed; still serving");
-                        }
-                        _ => {}
+                    let spawned = std::thread::Builder::new()
+                        .name("lunixd-quiesce".into())
+                        .spawn(move || {
+                            if let (Err(e), _) = d2.quiesce_all() {
+                                tracing::error!(error = %e.message, "quiesce on signal failed; still running");
+                            }
+                        });
+                    if let Err(e) = spawned {
+                        tracing::error!(error = %e, "cannot start the quiesce thread");
                     }
                 }
             });
         }
+        let d = Arc::clone(&daemon);
+        tokio::task::spawn_blocking(move || startup(&d))
+            .await
+            .map_err(io::Error::other)?;
         tracing::info!("control socket ready");
+        let idle = daemon.config().conn_idle_timeout;
         loop {
             tokio::select! {
                 Some(code) = exit_rx.recv() => return io::Result::Ok(code),
@@ -249,11 +273,14 @@ pub fn run(daemon: Arc<Daemon>, listener: std::os::unix::net::UnixListener) -> i
                     let peer = peer_of(&stream);
                     let std = stream.into_std()?;
                     std.set_nonblocking(false)?;
+                    // An idle client is closed, so connections cannot pin
+                    // the blocking pool for ever.
+                    std.set_read_timeout(Some(idle))?;
                     let d = Arc::clone(&daemon);
                     let tx = exit_tx.clone();
                     tokio::task::spawn_blocking(move || {
                         if let Some(code) = connection(&d, std, peer) {
-                            let _ = tx.blocking_send(code);
+                            let _ = tx.send(code);
                         }
                     });
                 }

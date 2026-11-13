@@ -10,6 +10,7 @@
 //! | [`daemon`] | the volumes and the control-call handlers |
 //! | [`server`] | the control socket and the signals |
 //! | [`audit`], [`log`] | the audit log and the stderr subscriber |
+//! | [`trim`] | allocator tuning and idle heap trimming (the memory gate after a workload) |
 //! | [`check`] | `lunixd check`, the offline store self-check (stand-in for `lunix fsck` until M14) |
 //!
 //! # Threads
@@ -19,7 +20,7 @@
 //! `lunix-ublk`'s, the coordinator and the read helpers the engine's, the
 //! destage pool M9's.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod audit;
 pub mod check;
@@ -31,6 +32,7 @@ pub mod log;
 pub mod registry;
 pub mod server;
 pub mod stack;
+pub mod trim;
 
 #[cfg(feature = "testsupport")]
 pub mod testsupport;
