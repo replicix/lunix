@@ -82,6 +82,7 @@ check_fs() { # fs dev  (unmounted); prints the exit code
 # teardown: the only exit path. Order: load, serving daemon, unmount, detach, delete.
 teardown() {
   trap - EXIT INT TERM
+  CRASH_AT=""   # a daemon started for the teardown must not carry a crash point
   local p
   for p in $FIO_PID $HB_PID $S1_PID $S2_PID; do kill -TERM "$p" 2>/dev/null; done
   for p in $FIO_PID $HB_PID $S1_PID $S2_PID; do

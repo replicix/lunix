@@ -127,6 +127,10 @@ run_phase() { # name count delay
   done
   [ -n "$aborted" ] && echo "ABORTED: $aborted" | tee "$d/aborted.txt"
   CRASH_AT=""
+  if [ "$KILL_MODE" = crashpoint ]; then   # the running daemon still carries a crash point: replace it
+    kill -9 "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null
+    start_daemon recover "${DARGS[@]}" || wedged "no daemon after the crash-point cycles"
+  fi
   # a serving daemon is needed for the rest of the phase
   kill -0 "$DPID" 2>/dev/null || start_daemon recover "${DARGS[@]}" || wedged "no daemon after the cycles"
   [ -n "$FIO_PID" ] && { wait "$FIO_PID"; frc=$?; } ; FIO_PID=""
