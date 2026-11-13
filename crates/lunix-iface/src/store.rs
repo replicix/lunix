@@ -34,7 +34,7 @@ use lunix_format::node::NodeLoc;
 use lunix_format::segment::FooterBody;
 use lunix_format::{ChunkId, CommitSeq, Hint, ObjId, PackId, SegId, TimeMs, VolumeUuid};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::journal::WriteSeqRange;
 
 /// Allocates object ids (segments, map packs, index runs share one counter,
@@ -439,14 +439,12 @@ pub trait VolumeDir: Send + Sync {
 
     /// The rollback floor `{max_commit_seq, tip_hash}` of `state/pins`
     /// version 2 (ADR-31, rule R4); `None` when no floor was ever recorded,
-    /// when `state/pins` is absent, and for a version 1 file. The default is
-    /// `None` for implementations that predate the floor.
+    /// when `state/pins` is absent, and for a version 1 file. Required (no
+    /// default): a silent `None` would make every rollback pass R4.
     ///
     /// # Errors
     /// `Io`, `Corrupt` for an unreadable `state/pins`.
-    fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
-        Ok(None)
-    }
+    fn rollback_floor(&self) -> Result<Option<RollbackFloor>>;
 
     /// Raises the rollback floor, keeping the rest of `state/pins`. The new
     /// floor is durable (temporary file, `fdatasync`, rename, directory
@@ -462,14 +460,8 @@ pub trait VolumeDir: Send + Sync {
     ///
     /// # Errors
     /// `Refused` for a lower `max_commit_seq` or an equal one with another
-    /// hash (nothing changes); `Io`; `Unsupported` for implementations that
-    /// predate the floor (the default).
-    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
-        let _ = floor;
-        Err(Error::Unsupported {
-            what: "rollback floor",
-        })
-    }
+    /// hash (nothing changes); `Io`.
+    fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()>;
 
     /// The shared object-id allocator.
     fn ids(&self) -> Arc<dyn IdAllocator>;

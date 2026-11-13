@@ -92,21 +92,21 @@ independent review; no milestone has run.
 
 | milestone | crate / owner paths | model | review | status |
 |---|---|---|---|---|
-| M1.A0 byte layouts, `FREEZE.md` draft, attach matrix | `docs/reference/on-disk-formats.md`, `docs/reference/attach-matrix.md`, `crates/lunix-format/FREEZE.md` | design-heavy (or lead) | required (independent) + maintainer sign-off | not started |
-| M1.A workspace, CI, `lunix-format` | root files, `tools/`, `crates/lunix-format`, crate skeletons | design-heavy | required (independent) | not started |
-| M1.B1 `lunix-iface` | `crates/lunix-iface` | design-heavy | required (independent) | not started |
-| M1.B2a `lunix-testkit` part 1 | `crates/lunix-testkit` | routine | lead skim | not started |
-| M1.B2b `lunix-testkit` part 2 (fakes, contract tests) | `crates/lunix-testkit` | design-heavy | required (with B1) | not started |
-| M2 `lunix-crypto` | `crates/lunix-crypto` | design-heavy | required (independent) | not started |
-| M3 `lunix-journal` | `crates/lunix-journal` | design-heavy | required (recovery) | not started |
-| M4 `lunix-overlay` | `crates/lunix-overlay` | routine | lead skim | not started |
-| M5 `lunix-map` | `crates/lunix-map` | routine (spike-guided) | lead skim | not started |
-| M6 `lunix-index` | `crates/lunix-index` | routine | lead skim | not started |
-| M7 `lunix-store` | `crates/lunix-store` | routine | recommended (durability order) | not started |
-| M8 `lunix-space` | `crates/lunix-space` | routine | lead skim | not started |
-| M9 `lunix-destage` | `crates/lunix-destage` | design-heavy | required (with M11) | not started |
-| M10 `lunix-ublk` | `crates/lunix-ublk` | design-heavy | required (independent) | not started |
-| M11 `lunix-engine` | `crates/lunix-engine` | design-heavy | required (commit protocol) | not started |
+| M1.A0 byte layouts, `FREEZE.md` draft, attach matrix | `docs/reference/on-disk-formats.md`, `docs/reference/attach-matrix.md`, `crates/lunix-format/FREEZE.md` | design-heavy (or lead) | required (independent) + maintainer sign-off | merged |
+| M1.A workspace, CI, `lunix-format` | root files, `tools/`, `crates/lunix-format`, crate skeletons | design-heavy | required (independent) | merged |
+| M1.B1 `lunix-iface` | `crates/lunix-iface` | design-heavy | required (independent) | merged |
+| M1.B2a `lunix-testkit` part 1 | `crates/lunix-testkit` | routine | lead skim | merged |
+| M1.B2b `lunix-testkit` part 2 (fakes, contract tests) | `crates/lunix-testkit` | design-heavy | required (with B1) | merged |
+| M2 `lunix-crypto` | `crates/lunix-crypto` | design-heavy | required (independent) | merged |
+| M3 `lunix-journal` | `crates/lunix-journal` | design-heavy | required (recovery) | merged |
+| M4 `lunix-overlay` | `crates/lunix-overlay` | routine | lead skim | merged |
+| M5 `lunix-map` | `crates/lunix-map` | routine (spike-guided) | lead skim | merged |
+| M6 `lunix-index` | `crates/lunix-index` | routine | lead skim | merged |
+| M7 `lunix-store` | `crates/lunix-store` | routine | recommended (durability order) | merged |
+| M8 `lunix-space` | `crates/lunix-space` | routine | lead skim | merged |
+| M9 `lunix-destage` | `crates/lunix-destage` | design-heavy | required (with M11) | merged |
+| M10 `lunix-ublk` | `crates/lunix-ublk` | design-heavy | required (independent) | merged (follow-up R1 open) |
+| M11 `lunix-engine` | `crates/lunix-engine` | design-heavy | required (commit protocol) | merged |
 | M12a `lunixd` daemon, control plane, wiring | `crates/lunixd` (except `tests/stack_*.rs`; creates the `testsupport` stub) | design-heavy | recommended (wiring) | not started |
 | M12b in-process stack tests, `lunixd::testsupport` | `crates/lunixd/tests/stack_*.rs`, `crates/lunixd/src/testsupport.rs` | design-heavy | recommended | not started |
 | M13a `lunix-cli`, socket commands | `crates/lunix-cli` (all, including the `fsck`/`key` stubs and their wiring) | routine | lead skim | not started |
@@ -2653,7 +2653,10 @@ Output is human text or `--json`; exit 0 clean, 1 warnings only, 2 errors.
   codec 1, and a node whose hash differs from the parent's `child_hash` (R2),
   a chain rolled back below the floor (`rollback`) and a fork at the floor
   height (`fork`); `--repair --truncate-tip` lowers the floor to the new tip
-  and `--repair --reset-floor` sets it to the verified tip; `state/pins`
+  and `--repair --reset-floor` sets it to the verified tip (open iface item for
+  M14: `VolumeDir` has no lowering path, since `raise_rollback_floor` refuses a
+  lower seq and `store_local_pins` keeps the floor; M14 proposes an offline-only
+  `reset_rollback_floor` to the lead before using it); `state/pins`
   corrupted in each byte is detected or harmless; a version 1 `pins` file
   reads without a floor.
 - Journal resync: a one-byte flip in a record at or below the floor gives a
