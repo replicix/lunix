@@ -107,3 +107,6 @@ this note `2b1ee48`, and the maintainer's re-sign `2d877db`. The review fixes:
 - **`61ad263`, second run:** `ci: all green`, 1 371 tests passed, 0 failed. That is 1 362 plus the 4 new engine
   tests, which run in both the workspace and the crashpoints step, and the new journal test.
 - The build host's target directory was removed afterwards (disk budget).
+- **Review fixes, `fe46fe5`** (rebased onto `63172f3`; source and target in the host's `journalwm` directories): the
+  first run passed every test (1 429 passed, 0 failed) and stopped at the ownership step, which fails by design on a
+  lead branch; the rerun with `LUNIX_SKIP_OWNERSHIP=1`: `ci: all green`, 1 429 tests passed, 0 failed.
