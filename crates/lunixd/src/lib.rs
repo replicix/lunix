@@ -10,7 +10,7 @@
 //! | [`daemon`] | the volumes and the control-call handlers |
 //! | [`server`] | the control socket and the signals |
 //! | [`audit`], [`log`] | the audit log and the stderr subscriber |
-//! | [`trim`] | allocator tuning and idle heap trimming (the memory gate after a workload) |
+//! | [`trim`] | idle heap trimming (the memory gate after a workload) |
 //! | [`check`] | `lunixd check`, the offline store self-check (stand-in for `lunix fsck` until M14) |
 //!
 //! # Threads

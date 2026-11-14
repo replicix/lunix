@@ -41,8 +41,8 @@ use crate::device::{
 };
 use crate::registry::Registry;
 use crate::stack::{
-    create_volume, open_volume, read_pins_unlocked, unlock, AttachCredential, CreateParams,
-    OpenParams, StackError, VolumeStack,
+    create_volume, lock_volume, open_volume, read_pins_unlocked, unlock, AttachCredential,
+    CreateParams, OpenParams, StackError, VolumeStack,
 };
 use crate::{fsio, lock};
 
@@ -52,10 +52,6 @@ struct Live {
     device: Device,
     stack: VolumeStack,
     link: Option<PathBuf>,
-    /// A detach got past `TRY_STOP_DEV` and then failed (drain or `DEL_DEV`
-    /// timeout): the device is stopping, holds no started request and is
-    /// not quiesced again.
-    stopping: bool,
 }
 
 #[derive(Default)]
@@ -266,6 +262,17 @@ fn device_record_unlocked(voldir: &Path) -> Option<DeviceRecord> {
     DeviceRecord::decode(&bytes).ok()
 }
 
+/// `volume.json`, read without the volume lock (the locked-buffer bound is
+/// checked before the volume is opened).
+fn volume_json_unlocked(voldir: &Path) -> Result<VolumeJson, CtlError> {
+    let bytes = fsio::read_capped(&voldir.join(lpath::volume_json()), 1 << 20)
+        .map_err(|e| err(ErrorCode::Io, format!("volume.json: {e}")))?
+        .ok_or_else(|| err(ErrorCode::NotFound, "volume.json is missing"))?;
+    let text =
+        String::from_utf8(bytes).map_err(|_| err(ErrorCode::Io, "volume.json is not UTF-8"))?;
+    VolumeJson::from_json(&text).map_err(|e| err(ErrorCode::Io, format!("volume.json: {e}")))
+}
+
 /// The newest commit in `state/commits/`.
 fn tip_on_disk(voldir: &Path) -> Option<CommitSeq> {
     let rd = std::fs::read_dir(voldir.join("state/commits")).ok()?;
@@ -412,6 +419,11 @@ impl Daemon {
     pub fn handle(&self, peer: Peer, req: Request) -> (Result<Response, CtlError>, After) {
         let mutating = crate::audit::is_mutating(&req);
         let audit_req = mutating.then(|| req.clone());
+        // An override is audited before it can take effect, so a crash during
+        // the attach still leaves the line (M12a re-review nit).
+        if matches!(&req, Request::Attach(a) if a.allow_unverifiable_fork) {
+            self.audit.record_intent(peer, &req);
+        }
         let (res, after) = if self.exiting.load(Ordering::Acquire) {
             (
                 Err(err(ErrorCode::Busy, "the daemon is shutting down")),
@@ -724,12 +736,15 @@ impl Daemon {
             .filter(|r| current_boot_id().is_ok_and(|b| b == r.boot_id));
         // The record's geometry rules only for a device that can actually be
         // recovered (M12a review m10): a dead or vanished device's record is
-        // not a reason to repeat its geometry.
+        // not a reason to repeat its geometry. The probe is read-only; a DEAD
+        // device of this volume is deleted only after LOCK and the credential
+        // check (re-review R5), below.
+        let mut dead_own = None;
         let record = match (&record, self.cfg.device) {
             (Some(r), DeviceKind::Ublk) => match probe_recorded(r) {
                 RecordedDevice::Recoverable | RecordedDevice::Unknown => record,
                 RecordedDevice::DeadOwn => {
-                    delete_dead(r);
+                    dead_own = Some(r.clone());
                     None
                 }
                 RecordedDevice::Gone => None,
@@ -780,19 +795,16 @@ impl Daemon {
             .as_ref()
             .map(|r| r.max_io_buf_bytes)
             .or(o.max_io_buf_bytes);
-        let mut op = OpenParams::new(voldir.to_path_buf(), queues);
-        op.credential = o.credential;
-        op.max_io_buf_bytes = buf;
-        op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
-        op.allow_unverifiable_fork = o.allow_unverifiable_fork;
-        if o.allow_unverifiable_fork {
-            tracing::warn!(
-                volume = name,
-                "attach with the operator override allow_unverifiable_fork (audited)"
-            );
-        }
-        let stack = open_volume(op).map_err(|e| Failed::Plain(stack_error(&e)))?;
-        let max_buf = buf.unwrap_or(stack.json.max_io_buf_bytes);
+        // The locked-buffer bound before anything is opened (re-review R5):
+        // the buffer size comes from the request, the record or volume.json.
+        let max_buf = match buf {
+            Some(b) => b,
+            None => {
+                volume_json_unlocked(voldir)
+                    .map_err(Failed::Plain)?
+                    .max_io_buf_bytes
+            }
+        };
         let locked = u64::from(queues) * u64::from(depth) * u64::from(max_buf);
         if locked > self.cfg.max_locked_buffers {
             return Err(Failed::Plain(err(
@@ -803,6 +815,23 @@ impl Daemon {
                     self.cfg.max_locked_buffers >> 20
                 ),
             )));
+        }
+        let mut op = OpenParams::new(voldir.to_path_buf(), queues);
+        op.credential = o.credential;
+        op.max_io_buf_bytes = Some(max_buf);
+        op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
+        op.allow_unverifiable_fork = o.allow_unverifiable_fork;
+        if o.allow_unverifiable_fork {
+            tracing::warn!(
+                volume = name,
+                "attach with the operator override allow_unverifiable_fork (audited)"
+            );
+        }
+        let stack = open_volume(op).map_err(|e| Failed::Plain(stack_error(&e)))?;
+        // LOCK is held and the credential passed: now a DEAD device of this
+        // volume may be deleted (M10 re-review R4).
+        if let Some(r) = dead_own {
+            delete_dead(&r);
         }
         let rep = stack.engine.recovery_report();
         let first_attach = rep.first_attach;
@@ -874,7 +903,6 @@ impl Daemon {
                 device,
                 stack,
                 link,
-                stopping: false,
             },
             recovered,
             first_attach,
@@ -913,7 +941,7 @@ impl Daemon {
         self.entry(&p.name)?;
         let slot = self.slot(&p.name);
         let mut g = lock(&slot);
-        let Slot::Attached(live) = &mut *g else {
+        let Slot::Attached(live) = &*g else {
             return Err(err(
                 ErrorCode::Invalid,
                 format!("{} is not attached", p.name),
@@ -933,9 +961,8 @@ impl Daemon {
             Err(_) => false,
         };
         if !gone {
-            // Past TRY_STOP_DEV: the device is stopping and is never
-            // quiesced again (M12a review M1).
-            live.stopping = true;
+            // The layer knows whether TRY_STOP_DEV got through; the quiesce
+            // asks it (Device::needs_quiesce), not this error.
             let e = res.err().map(|e| device_error(&e));
             return Err(e.unwrap_or_else(|| err(ErrorCode::Internal, "detach failed")));
         }
@@ -1119,8 +1146,8 @@ impl Daemon {
         let mut failed: Vec<(usize, String)> = Vec::new();
         for (i, (name, g)) in guards.iter().enumerate() {
             match &**g {
-                Slot::Attached(live) if live.stopping => {
-                    tracing::info!(volume = %name, "device is stopping after a failed detach; nothing to quiesce");
+                Slot::Attached(live) if !live.device.needs_quiesce() => {
+                    tracing::info!(volume = %name, "device is stopping or deleted (a detach got past TRY_STOP_DEV): no started request, nothing to quiesce");
                 }
                 Slot::Attached(live) => match live.device.quiesce(t) {
                     Ok(None) => quiesced += 1,
@@ -1185,14 +1212,14 @@ impl Daemon {
         for (_, g) in guards {
             std::mem::forget(g);
         }
-        let code = if !orphans.is_empty() {
-            tracing::error!(?orphans, "devices left in the kernel after a failed start were not quiesced; the next start recovers or replaces them");
-            75
-        } else if engine_failures > 0 {
-            70
-        } else {
-            0
-        };
+        if !orphans.is_empty() {
+            // M10's contract for a device left after a failed start: such a
+            // device may have gone live late and hold started requests, so
+            // the only sanctioned exit is abort() (recovered like kill -9).
+            tracing::error!(?orphans, "devices left in the kernel after a failed start cannot be quiesced: aborting for recovery (the other devices are quiesced)");
+            std::process::abort();
+        }
+        let code = if engine_failures > 0 { 70 } else { 0 };
         tracing::info!(
             devices = quiesced,
             code,
@@ -1205,13 +1232,24 @@ impl Daemon {
         )
     }
 
-    /// Plan step 8: recovers every registered volume whose device is still in
-    /// the kernel. A record whose device is gone (a detach completed but the
-    /// record was not removed, or the id was reused) is cleared and the volume
-    /// stays detached (M12a review m4); a DEAD device of this volume is
-    /// deleted. A volume that needs a credential (encrypted, or an integrity
-    /// volume without its own key file) is left for an explicit attach, which
-    /// recovers its device.
+    /// Plan step 8 (with step 5): every registered volume that has a device
+    /// record is brought back before the socket accepts calls.
+    ///
+    /// * Same boot, the recorded device QUIESCED or LIVE with this volume's
+    ///   tag: it is recovered.
+    /// * Same boot, the device gone, another volume's, or DEAD with this tag:
+    ///   a detach had completed (or the start never did). The volume stays
+    ///   detached; the record is cleared, and a DEAD device of this volume
+    ///   deleted, only after `LOCK` is held and the credential check passed
+    ///   (M12a re-review R5), so a second daemon on the same directory cannot
+    ///   delete a device the first is starting.
+    /// * Another boot (lead decision of 2026-11-14, following the plan): the
+    ///   volume was attached when the host went down, so it is attached again
+    ///   with a **new** device.
+    ///
+    /// A volume that needs a credential (encrypted, or integrity without its
+    /// own key file) is left for an explicit attach. Recovery stops as soon as
+    /// a quiesce starts, and re-checks that under each slot lock.
     pub fn recover_on_start(&self) {
         let entries: Vec<RegistryEntry> = lock(&self.registry).entries().to_vec();
         for e in entries {
@@ -1223,34 +1261,45 @@ impl Daemon {
             let Some(rec) = device_record_unlocked(&voldir) else {
                 continue;
             };
+            if self.cfg.device != DeviceKind::Ublk {
+                continue;
+            }
             let same_boot = current_boot_id().is_ok_and(|b| b == rec.boot_id);
-            let probe = if self.cfg.device == DeviceKind::Ublk && same_boot {
-                probe_recorded(&rec)
+            if same_boot {
+                match probe_recorded(&rec) {
+                    RecordedDevice::Recoverable => {}
+                    RecordedDevice::Unknown => {
+                        tracing::warn!(volume = %e.name, dev_id = rec.dev_id, "the recorded device cannot be inspected; not recovered (attach it to retry)");
+                        continue;
+                    }
+                    probe @ (RecordedDevice::DeadOwn | RecordedDevice::Gone) => {
+                        match lock_volume(&voldir, &AttachCredential::default()) {
+                            Ok(store) => {
+                                if probe == RecordedDevice::DeadOwn {
+                                    delete_dead(&rec);
+                                }
+                                if let Err(x) = store.clear_device_record() {
+                                    tracing::warn!(volume = %e.name, error = %x, "stale state/device not removed");
+                                }
+                                tracing::info!(volume = %e.name, dev_id = rec.dev_id, "the recorded device is gone (a detach completed): record cleared, the volume stays detached");
+                            }
+                            Err(x) => {
+                                tracing::warn!(volume = %e.name, error = %x, "the recorded device is gone; the record stays until an attach with the volume's credential clears it");
+                            }
+                        }
+                        continue;
+                    }
+                }
             } else {
-                RecordedDevice::Gone
-            };
-            match probe {
-                RecordedDevice::Recoverable => {}
-                RecordedDevice::Unknown => {
-                    tracing::warn!(volume = %e.name, dev_id = rec.dev_id, "the recorded device cannot be inspected; not recovered (attach it to retry)");
-                    continue;
-                }
-                RecordedDevice::DeadOwn | RecordedDevice::Gone => {
-                    if probe == RecordedDevice::DeadOwn {
-                        delete_dead(&rec);
-                    }
-                    tracing::info!(volume = %e.name, dev_id = rec.dev_id, same_boot, "the recorded device is gone: the record is stale and cleared, the volume stays detached");
-                    if let Err(x) = std::fs::remove_file(voldir.join(lpath::state_device()))
-                        .and_then(|()| fsio::sync_dir(&voldir.join("state")))
-                    {
-                        tracing::warn!(volume = %e.name, error = %x, "stale state/device not removed");
-                    }
-                    continue;
-                }
+                tracing::info!(volume = %e.name, "device record from another boot: the volume was attached; attaching it again with a new device");
             }
             let started = Instant::now();
             let slot = self.slot(&e.name);
             let mut g = lock(&slot);
+            if self.quiescing.load(Ordering::Acquire) {
+                tracing::info!("a quiesce started: recovery stops here");
+                return;
+            }
             match self.bring_up(&e.name, &voldir, AttachOpts::default()) {
                 Ok((live, recovered, _)) => {
                     tracing::info!(volume = %e.name, recovered, stall_ms = started.elapsed().as_millis() as u64, "volume recovered at start");

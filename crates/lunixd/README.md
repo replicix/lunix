@@ -24,6 +24,11 @@ lunixd check --dir VOLDIR       offline store self-check of a detached volume (u
   journal has lanes) and `journal_max` must be at least queues x 128 MiB. `dir` and `key_file`
   of a request are paths the root daemon reads or creates: give `socket_group` only to
   trusted users.
+- `on_journal_damage = refuse` is, until the journal records its flushed watermark, meant for
+  single-queue volumes or setups that run `fsck` after every crash: with several queues an
+  ordinary crash under load leaves a gap across lanes, which `refuse` still refuses (ADR-4).
+- After a reboot, a volume that was attached (its `state/device` is from another boot) is
+  attached again at start with a new device.
 - Tests: `tests/wiring.rs`, `tests/r1_crypto.rs`, `tests/destage_adapter.rs`,
   `tests/control.rs` (no root); `tests/root/m12a-smoke.sh` (root, through `tools/remote.sh root`).
   `tests/stack_*.rs` and the body of `src/testsupport.rs` are M12b's.

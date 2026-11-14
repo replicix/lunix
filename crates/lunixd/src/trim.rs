@@ -1,41 +1,22 @@
 //! Heap retention after a workload (maintainer, 2026-11-13: the memory gate is
 //! measured after a workload).
 //!
-//! glibc keeps freed memory: its mmap threshold grows after the first large
-//! free, so later 64 KiB-1 MiB chunk buffers come from the heap and stay there,
-//! and every thread gets an arena. Under `mlockall` the pages stay resident and
-//! `madvise(MADV_DONTNEED)` on locked pages does not release them, so
-//! `malloc_trim` alone cannot give the memory back. Two measures:
+//! [`trim`] runs from the daemon's idle thread (never a queue thread), once
+//! every volume has been idle for `idle_trim_ms`: `malloc_trim(0)` returns the
+//! top of each heap and what `madvise` can release.
 //!
-//! * [`tune_allocator`] at start, before any thread: a fixed mmap threshold
-//!   (allocations of 128 KiB and more are mmapped and unmapped on free, which
-//!   also unlocks them) and a bounded arena count.
-//! * [`trim`] from the daemon's idle thread (never a queue thread), once every
-//!   volume has been idle for `idle_trim_ms`: `malloc_trim(0)`, which returns
-//!   the top of each heap (`brk`/heap shrink) and what `madvise` can release.
+//! The allocator keeps glibc's defaults (M12a re-review R6): a fixed mmap
+//! threshold would turn every chunk-size allocation into an `mmap`, which under
+//! `mlockall` is populated and locked at once and whose `munmap` sends TLB
+//! shootdowns to the queue threads, and fewer arenas would make the queue
+//! threads share them. Whether more than the idle trim is needed is decided by
+//! the memory gate after a workload (root, old host), and the throughput effect
+//! of any further measure by M16. Note that under `mlockall` the kernel ignores
+//! `MADV_DONTNEED` on locked pages, so the trim may release less than it would
+//! without it; the gate's reading says how much.
 //!
-//! Other allocators: both are no-ops outside glibc.
+//! Outside glibc the trim is a no-op.
 #![allow(unsafe_code)]
-
-/// Allocations at least this large are served by `mmap` (glibc's dynamic
-/// threshold is switched off by setting it).
-pub const MMAP_THRESHOLD: i32 = 128 << 10;
-
-/// Arenas glibc may create (the default is 8 × cores).
-pub const ARENA_MAX: i32 = 4;
-
-/// Sets the allocator options. Call once, before other threads exist.
-pub fn tune_allocator() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        // SAFETY: mallopt takes two integers and only changes allocator
-        // parameters; it is called before any other thread allocates.
-        unsafe {
-            libc::mallopt(libc::M_MMAP_THRESHOLD, MMAP_THRESHOLD);
-            libc::mallopt(libc::M_ARENA_MAX, ARENA_MAX);
-        }
-    }
-}
 
 /// Returns free heap memory to the kernel where the allocator can.
 pub fn trim() {
@@ -63,7 +44,6 @@ mod tests {
 
     #[test]
     fn trim_runs_and_rss_is_read() {
-        tune_allocator();
         let big: Vec<Vec<u8>> = (0..64).map(|i| vec![i as u8; 256 << 10]).collect();
         drop(big);
         trim();

@@ -711,3 +711,55 @@ fn damage_followed_by_a_valid_record_is_refused() {
         "refuse touched the journal"
     );
 }
+
+/// M12a re-review R2: a fork's commits copied over a directory that still holds
+/// the honest commits. The walk back to the floor finds the honest commit at
+/// the floor's height, which the fork's next commit does not name: positive
+/// evidence of a fork, `Fork`, and the operator override does not accept it.
+#[test]
+fn a_fork_spliced_onto_the_honest_chain_is_a_fork_even_with_the_override() {
+    let Some(t) = scratch("splice") else { return };
+    let mode = CryptoMode::Integrity;
+    let v = create(t.path(), mode, 64 << 10);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    assert_eq!(one_commit(&s, &mut d, 1), 1);
+    close(s, d);
+    let a = t.path().join("fork-a");
+    copy_dir(&v.voldir, &a);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    assert_eq!(one_commit(&s, &mut d, 2), 2);
+    assert_eq!(one_commit(&s, &mut d, 3), 3);
+    close(s, d);
+    let fork = CreatedVolume {
+        uuid: v.uuid,
+        voldir: a.clone(),
+        generated_key_file: None,
+    };
+    let s = open(&fork, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    for (seed, want) in [(20u64, 2u64), (30, 3), (40, 4), (50, 5)] {
+        assert_eq!(one_commit(&s, &mut d, seed), want);
+    }
+    close(s, d);
+    for seq in [4u64, 5] {
+        let name = format!("{seq:016x}");
+        std::fs::copy(
+            commits_dir(&a).join(&name),
+            commits_dir(&v.voldir).join(&name),
+        )
+        .unwrap();
+    }
+    match open_err(&v, mode) {
+        StackError::Fork { at } => assert_eq!(at.0, 3),
+        e => panic!("expected Fork, got {e:?}"),
+    }
+    let mut p = params(&v, mode);
+    p.allow_unverifiable_fork = true;
+    match open_volume(p) {
+        Err(StackError::Fork { at }) => assert_eq!(at.0, 3),
+        Err(e) => panic!("expected Fork with the override, got {e:?}"),
+        Ok(_) => panic!("the override must not accept a fork"),
+    }
+}

@@ -632,6 +632,21 @@ pub fn unlock(
     Ok(check_attach(desc, keyring.as_deref(), &req)?)
 }
 
+/// Takes a volume's `LOCK` after the attach check passed, without opening the
+/// engine: for housekeeping that must not race another daemon on the same
+/// directory (clearing a stale `state/device`, deleting a DEAD device).
+///
+/// # Errors
+/// The attach check's refusal, `Busy` while another process holds `LOCK`, or
+/// a read failure.
+pub fn lock_volume(voldir: &Path, cred: &AttachCredential) -> Result<LocalVolume, StackError> {
+    let bytes = read_volume_file(voldir)?;
+    let desc = VolumeDescriptor::decode(&bytes).map_err(Error::from)?;
+    let ok = unlock(voldir, &desc, cred)?;
+    let meta: Arc<dyn MetaCodec> = ok.crypto.meta().clone();
+    Ok(LocalVolume::open(voldir, meta, StoreOptions::default())?)
+}
+
 /// Records the pin (first use) and the highest keyring sequence seen, keeping
 /// the rollback floor. Called after the engine opened (R4 first).
 fn record_pins(

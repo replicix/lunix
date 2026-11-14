@@ -105,8 +105,6 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     };
     let cfg = DaemonConfig::load(&path, explicit)?;
     StderrLog::install(cfg.log_level);
-    // Before any thread allocates (decision 2 of 2026-11-13).
-    lunixd::trim::tune_allocator();
     // Before any other thread exists: the mount namespace and the I/O-flusher
     // flag are inherited, mlockall covers what follows. Core dumps are off in
     // every build (a dump keeps /dev/ublkcN open and holds key material).

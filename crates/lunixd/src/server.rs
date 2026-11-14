@@ -252,10 +252,15 @@ pub fn run(
                 }
             });
         }
+        // The exit channel is read while startup runs: a signal during
+        // recovery quiesces and must end the process even if recovery is
+        // still blocked (M12a re-review R4).
         let d = Arc::clone(&daemon);
-        tokio::task::spawn_blocking(move || startup(&d))
-            .await
-            .map_err(io::Error::other)?;
+        let startup_task = tokio::task::spawn_blocking(move || startup(&d));
+        tokio::select! {
+            r = startup_task => r.map_err(io::Error::other)?,
+            Some(code) = exit_rx.recv() => return io::Result::Ok(code),
+        }
         tracing::info!("control socket ready");
         let idle = daemon.config().conn_idle_timeout;
         loop {

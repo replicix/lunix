@@ -35,8 +35,8 @@ use lunix_store::LocalVolume;
 use lunix_ublk::config::Timeouts;
 use lunix_ublk::ctl::STATE_DEAD;
 use lunix_ublk::{
-    current_boot_id, volume_tag, ControlPlane, IdentityMismatch, Persist, RingControl, UblkConfig,
-    UblkDevice, UblkError,
+    current_boot_id, volume_tag, ControlPlane, DeviceLifecycle, IdentityMismatch, Persist,
+    RingControl, UblkConfig, UblkDevice, UblkError,
 };
 
 /// How to build a device.
@@ -123,6 +123,19 @@ impl Device {
                 (i.nr_hw_queues, i.queue_depth)
             }
             Self::Null(n) => (n.queues, n.depth),
+        }
+    }
+
+    /// False when the device holds no started request: the layer's lifecycle
+    /// is stopping (a detach got past `TRY_STOP_DEV`) or deleted. Taken from
+    /// the layer, never from an error kind (M12a re-review R3).
+    pub fn needs_quiesce(&self) -> bool {
+        match self {
+            Self::Ublk(d) => !matches!(
+                d.lifecycle(),
+                DeviceLifecycle::Stopping | DeviceLifecycle::Deleted
+            ),
+            Self::Null(_) => true,
         }
     }
 

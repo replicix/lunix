@@ -104,12 +104,29 @@ impl Audit {
         }
     }
 
+    /// Records that a call is about to run (operator overrides), before its
+    /// outcome is known.
+    pub fn record_intent(&self, peer: Peer, req: &Request) {
+        self.write(peer, req, "intent", None, None);
+    }
+
     /// Records one call. Failures to write are logged, never fatal.
     pub fn record(&self, peer: Peer, req: &Request, result: Result<(), (ErrorCode, &str)>) {
         let (outcome, code, message) = match result {
             Ok(()) => ("ok", None, None),
             Err((c, m)) => ("error", Some(c), Some(m)),
         };
+        self.write(peer, req, outcome, code, message);
+    }
+
+    fn write(
+        &self,
+        peer: Peer,
+        req: &Request,
+        outcome: &str,
+        code: Option<ErrorCode>,
+        message: Option<&str>,
+    ) {
         let line = AuditLine {
             ts_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
