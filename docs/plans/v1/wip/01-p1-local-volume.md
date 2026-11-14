@@ -2257,9 +2257,11 @@ watermark the journal records carry, that is a loss of durable data; anything
 above it, a torn last record, a gap across lanes or a torn batch followed by
 a later one, is treated as crash residue, logged at warn and wiped; a
 `write_seq` found twice is refused at any watermark; an interrupted ring
-file reinitialisation is not damage; medium damage in the unwitnessed window
-reads as residue, ADR-4; maintainer, 2026-11-14, ADR-4, on-disk-formats §5.2
-amendment re-signed 2026-11-14). Gate: a test with a damaged record above the
+file reinitialisation is not damage; the journal writes a mark witnessing a
+flush that no later flush witnessed within the idle delay, so only a crash
+within that delay leaves medium damage reading as residue, ADR-4;
+maintainer, 2026-11-14, ADR-4, on-disk-formats §5.2 amendment re-signed
+2026-11-14, mark ring amendment pending re-sign). Gate: a test with a damaged record above the
 floor shows the log line before the wipe, and `refuse` leaves the journal
 untouched.
 

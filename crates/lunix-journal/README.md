@@ -21,6 +21,14 @@
   (`Recovered::flushed`), so the engine refuses only gaps or damage at or below it, and a
   `write_seq` found twice (`Recovered::duplicate`). `submit_group_flush` clamps `upto` to
   `last_issued()`, so no watermark names an unwritten number.
+- Marks (on-disk-formats §5.1 and §5.3, amendment 2026-11-14 (b), pending re-sign): after a group flush
+  that raised the watermark, unless a later group with `upto` above the counter at the raise completes
+  within `JournalConfig::mark_idle` (default 50 ms; `None` disables), the coordinator appends one mark
+  (kind 3, 64 bytes in its own 4 KiB block) carrying the watermark to the mark ring `m00-<ordinal>.j`
+  (4 files of 1 MiB) and `fdatasync`s it; also once after `prepare`. The mark takes the next `write_seq`;
+  a failed mark poisons at its number. `FileJournal::marks_written()` and `marks_skipped()` (the ring was
+  full until the next cut) are the metrics; exporting them from `lunixd` is a follow-up. Lanes cannot
+  reserve kind 3.
 - Recovery (`scan.rs`): normative reader `lunix_format::journal::scan_file` per file, merge,
   stop at the first gap or duplicate. It also plans a **wipe**: everything a lane holds after
   its last record below `next_seq` is zeroed by the first `open_lane` (not by `recover`), so

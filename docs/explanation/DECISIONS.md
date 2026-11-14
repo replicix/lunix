@@ -230,21 +230,26 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
     not damage (on-disk-formats §5.1): a kill during journal reclaim opens.
   This replaces the rule of 2026-11-13 (refuse on any gap or any damage with
   a later record), which refused ordinary crashes of multi-queue volumes.
-  **The unwitnessed window.** A completed flush is witnessed only by a record
-  appended after it completed. Every record above the highest watermark a
-  surviving record carries is in the window; after a burst of writes, one
-  FLUSH and no later write, that is the whole burst. A crash alone cannot
-  damage those records (they were durable), but medium damage to one of
-  them is indistinguishable from residue: `refuse` opens, and the damaged
-  record and every record after it are wiped although their flush was
-  acknowledged. Inside the window this rule is weaker than the rule of
-  2026-11-13, which refused any records beyond a gap; outside it (a later
-  record witnessed the flush) it is stronger, since damage to a flushed
-  record with no later record in its lane is refused too. The window closes
-  when a later record lands or a cut moves the floor past the records.
-  Shrinking it (a witness written when a group flush completes on an idle
-  journal, or the watermark in the checkpoint slot) is format work, not
-  taken; the maintainer confirms the trade (review M2, 2026-11-14).
+  **Marks close the unwitnessed window (maintainer, 2026-11-14, review M2;
+  the format part, kind 3 and the mark ring, is pending the `FREEZE.md`
+  re-sign).** A completed flush is witnessed only by a record appended after
+  it completed; without one, every record above the highest surviving
+  watermark (after a burst, one FLUSH and no later write, the whole burst)
+  would read as residue under medium damage. So the flush coordinator
+  writes a witness itself: when no later group flush makes a record
+  carrying the watermark durable within the idle delay (default 50 ms), it
+  appends a **mark** (record kind 3, 64 bytes, no data) carrying the
+  watermark to its own mark ring `m00-<ordinal>.j` and syncs it. A mark
+  takes the next `write_seq`, so it leaves no gap; recovery counts it for
+  contiguity and the watermark and never hands it to the engine (it changes
+  no block); at most one mark per group flush that raised the watermark, and
+  a metric counts them. The window that remains is a crash within the idle
+  delay: the last flush is then unwitnessed, and medium damage to its
+  records reads as crash residue and is wiped with every record after it
+  (a crash alone cannot damage them). Inside that window the rule is weaker
+  than the rule of 2026-11-13, which refused any records beyond a gap;
+  everywhere else it is stronger, since damage to a flushed record with no
+  later record in its lane is refused too. A lost or torn mark is residue.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes

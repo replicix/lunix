@@ -4,10 +4,11 @@ The M12a implementer made this branch for the lead, from `lead/p1-iface2` `3fe9a
 `63172f3` (where `3fe9a8a` is merged) for the review fixes. Ownership fails for this branch by design, so CI ran with
 `LUNIX_SKIP_OWNERSHIP=1`.
 
-**Status:** the maintainer re-signed the FREEZE.md amendment (`9b60936`, `2d877db` after the rebase, text unchanged).
-The independent review (`01-p1-journal-wm-review.md`) is "merge after fixes". The fixes are below. M2 needs the
-maintainer's explicit confirmation of the trade (docs only, no code change). The four-queue `kill -9` + `refuse` cell is
-the remaining gate.
+**Status:** the maintainer re-signed the watermark amendment (`9b60936`, `2d877db` after the rebase). The independent
+review (`01-p1-journal-wm-review.md`) is "merge after fixes"; the fixes are below. The maintainer decided M2: close the
+unwitnessed window with a witness, a mark record (kind 3) in a coordinator-owned mark ring. That is implemented here;
+its FREEZE.md amendment (b) is **pending the maintainer's re-sign**. The four-queue `kill -9` + `refuse` cell is the
+remaining gate.
 
 ## The rule
 
@@ -23,11 +24,17 @@ the remaining gate.
 - A `write_seq` found twice (`Recovered::duplicate`) is refused at any watermark: a wipe did not happen.
 - A ring file left by a reinitialisation interrupted between its header write and its rename (a valid header of the
   same lane and volume with a higher ordinal, zero body) is not damage.
-- The unwitnessed window (review M2): a flush is witnessed only by a record appended after it completed. Every record
-  above `W` is in the window, which after a burst, one FLUSH and no later write is the whole burst. Medium damage there
-  reads as residue: the volume opens and the damaged record and every record after it are wiped, although their flush
-  was acknowledged. Here the rule is weaker than the 2026-11-13 rule; outside the window it is stronger. The docs now
-  say so (ADR-4, on-disk-formats §5.3, DESIGN §4.1); the maintainer confirms the trade.
+- Marks (review M2, maintainer decision): a flush is witnessed only by a record appended after it completed. After a
+  group flush that raised `W`, unless a later group whose `upto` is above the counter at the raise completes within
+  the idle delay (`JournalConfig::mark_idle`, default 50 ms), the flush coordinator appends a mark (kind 3, 64 bytes
+  in its own 4 KiB block, a `write_seq` of its own) carrying `W` to the mark ring `m00-<ordinal>.j` (4 files of 1 MiB)
+  and `fdatasync`s it. At most one mark per such flush, only while no flush is queued; also once after recovery's
+  `prepare`. Recovery counts marks for contiguity and the watermark and never lists them as records, so they never
+  reach the overlay or the map. A failed mark poisons the journal at its number. Metrics:
+  `FileJournal::marks_written()` and `marks_skipped()` (ring full until the next cut).
+- The remaining window: a crash within the idle delay. The last flush is then unwitnessed and medium damage to its
+  records reads as residue (wiped with every record after it); a crash alone cannot damage them. A lost or torn mark
+  is residue.
 - This replaces the 2026-11-13 rule (refuse only mid-journal damage) and the interim limit of `2244313` (refuse is
   for single-queue volumes or setups that run fsck after every crash).
 
@@ -49,15 +56,13 @@ this note `2b1ee48`, and the maintainer's re-sign `2d877db`. The review fixes:
 | `08c5e2c` | m2: `encode_delta_region` writes `flushed = 0`, `decode_delta_region` rejects any other value (f02 case). m5: the re-sign in the field rustdoc. |
 | `cb7583f` | M2 wording (ADR-4, on-disk-formats §5.3, DESIGN §4.1 and §4.4 step 7, plan); M1 in on-disk-formats §5.1 and ADR-4; duplicates; DELTA `flushed = 0` in §5.4; "pending re-sign" replaced in on-disk-formats §5.2 and §5.3, ADR-4, the plan, the journal README and the field rustdoc. DESIGN §4.1 step 4 no longer says that no marker of the last flushed `write_seq` exists. |
 
-## Compatibility
+## Format status
 
-- A record written under the signed layout has zeros in bytes 56-63 and reads as watermark 0. The item 2 goldens are
-  unchanged byte for byte.
-- A journal with watermark 0 everywhere refuses nothing for gaps or damage, which matches `wipe` for such journals. A
-  journal written before this change is replayed and rewritten at the next attach, so the watermark starts working
-  after one attach.
-- Downgrade: a signed-layout reader rejects a record with non-zero bytes 56-63. Journals written by this branch cannot
-  be read by older builds. Phase 1 has no released journals, so this is noted only.
+- The watermark (bytes 56-63) is re-signed (`2d877db`). 0 means no watermark known; the reader rejects
+  `flushed >= write_seq`. Its amendment text in FREEZE.md lost its compatibility reasoning under the maintainer's
+  no-compat rule of 2026-11-14 (layout unchanged).
+- The mark ring (kind 3, `m00-<ordinal>.j`, golden `02-journal-record-mark.bin`) is **pending the maintainer's
+  re-sign**: FREEZE.md "Amendment 2026-11-14 (b)".
 
 ## Tests
 
