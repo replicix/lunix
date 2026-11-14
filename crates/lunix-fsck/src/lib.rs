@@ -242,7 +242,11 @@ pub fn check(dir: &Path, opts: &Options) -> Report {
         ratios: facts.ratios,
         stats: facts.stats,
         repairs,
-        uncovered: uncovered(opts.deep),
+        uncovered: {
+            let mut u = uncovered(opts.deep);
+            u.extend(facts.uncovered.iter().cloned());
+            u
+        },
         peak_rss_kib: peak_rss_kib(),
     }
 }
