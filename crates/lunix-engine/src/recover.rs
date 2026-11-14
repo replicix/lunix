@@ -26,7 +26,7 @@ use lunix_iface::overlay::BlockRange;
 use lunix_iface::space::SpaceKind;
 use lunix_iface::stats::EngineStats;
 use lunix_iface::store::{SegmentFooters, SegmentStore, SweepReport, SweepRequest};
-use lunix_iface::Result;
+use lunix_iface::{ErrorKind, Result};
 
 use crate::config::{EngineConfig, OnJournalDamage};
 use crate::deps::EngineDeps;
@@ -107,8 +107,15 @@ impl SegmentFooters for Footers<'_> {
 /// the chain from the tip back to the floor's height must pass through the
 /// commit the floor recorded. The links down to `chain_floor` are already
 /// verified; below it the walk continues over commits that may still exist
-/// (GC keeps them while a floor needs them, M17). A missing or unverifiable
-/// link is `ForkUnverifiable`, unless the operator override is set.
+/// (GC keeps them while a floor needs them, M17).
+///
+/// * Only a **missing** link (`NotFound`: commits below the tip deleted) is
+///   `ForkUnverifiable`, which the operator override may accept.
+/// * A commit that is present but does not authenticate, does not decode or
+///   does not link (`parent_hash`, `commit_seq`, `epoch`) is positive
+///   evidence of another history: `Fork`, never overridable (M12a re-review
+///   R2).
+/// * A host I/O error is reported as such.
 fn check_floor_on_path(
     cfg: &EngineConfig,
     d: &EngineDeps,
@@ -120,29 +127,38 @@ fn check_floor_on_path(
         .commit_codec
         .verify_chain(&*d.commits, tip_seq, f.max_commit_seq, volume_hash)
         .and_then(|_| d.commits.get(f.max_commit_seq));
+    let fork = || OpenError::Fork {
+        tip: f.max_commit_seq,
+    };
     match walked {
-        Ok(bytes) => {
-            if d.commit_codec.object_hash(&bytes) != f.tip_hash {
-                return Err(OpenError::Fork {
-                    tip: f.max_commit_seq,
-                });
+        Ok(bytes) if d.commit_codec.object_hash(&bytes) != f.tip_hash => Err(fork()),
+        Ok(_) => Ok(()),
+        Err(source) if source.kind() == ErrorKind::NotFound => {
+            if cfg.allow_unverifiable_fork {
+                tracing::warn!(
+                    floor = f.max_commit_seq.0,
+                    tip = tip_seq.0,
+                    error = %source,
+                    "operator override: a commit between the tip and the rollback floor is missing; opening anyway"
+                );
+                return Ok(());
             }
-            Ok(())
+            Err(OpenError::ForkUnverifiable {
+                floor: f.max_commit_seq,
+                tip: tip_seq,
+                source,
+            })
         }
-        Err(source) if cfg.allow_unverifiable_fork => {
+        Err(source) if source.kind() == ErrorKind::Io => Err(OpenError::Store(source)),
+        Err(source) => {
             tracing::warn!(
                 floor = f.max_commit_seq.0,
                 tip = tip_seq.0,
                 error = %source,
-                "operator override: the chain back to the rollback floor cannot be walked; opening anyway"
+                "a commit between the tip and the rollback floor does not authenticate or link: fork"
             );
-            Ok(())
+            Err(fork())
         }
-        Err(source) => Err(OpenError::ForkUnverifiable {
-            floor: f.max_commit_seq,
-            tip: tip_seq,
-            source,
-        }),
     }
 }
 

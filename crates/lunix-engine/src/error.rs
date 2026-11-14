@@ -51,10 +51,10 @@ pub enum OpenError {
         /// The height compared (the floor's `max_commit_seq`).
         tip: CommitSeq,
     },
-    /// R4 (ADR-31): the tip is above the floor but the chain from the tip back
-    /// to the floor's height cannot be walked (a commit is missing or does not
-    /// authenticate), so a fork cannot be ruled out. Refused unless
-    /// `EngineConfig::allow_unverifiable_fork`.
+    /// R4 (ADR-31): the tip is above the floor but a commit on the chain from
+    /// the tip back to the floor's height is missing, so a fork cannot be
+    /// ruled out. Refused unless `EngineConfig::allow_unverifiable_fork`. A
+    /// present commit that does not authenticate or link is `Fork`.
     #[error("fork unverifiable: the chain from tip {tip} back to the floor {floor} cannot be walked: {source}")]
     ForkUnverifiable {
         /// The floor's `max_commit_seq`.
