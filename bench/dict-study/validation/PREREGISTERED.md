@@ -73,7 +73,7 @@ with a naive Bayes classifier over the first 4 KiB and the 64 KiB size rule.
   was built for has no case.
 - **5 pp under 64 KiB and 1 pp corpus-wide for D5.** The file-type study's R1 floor was 8 % on 1-64 KiB *text*; a real file system's
   files are mixed (ELF, locales, docs, caches), so the small-object floor is lower, and the 1 pp corpus-wide floor (ADR-30's
-  volume-wide rule) guarantees the gain is visible on the bill, not only on a subset.
+  volume-wide rule) guarantees the gain shows in the stored bytes of the whole volume, not only on a subset (wording amended 2026-11-14: no pricing).
 - **3 pp for D6.** Constellation would need a database detector and a per-path chunk-size policy; the gain must show at a size the
   product can configure today (1 MiB), not at a page size it cannot.
 - **Expected results, stated now so they can be falsified:** dictionaries lose on objects of 256 KiB and more (file-type study §6.6,
@@ -340,3 +340,14 @@ first analysis and fixes D2 for both families; no threshold changes.
    measured on the four file corpora, so that the decision table carries D5; the hard cap still applies regardless of `N`.
 6. **Intervals.** 1 MiB blocks remain the pre-registered resampling unit and decide; the 16 MiB-block intervals are printed next to
    them in every table, because neighbouring 1 MiB blocks are measurably dependent.
+
+## Ruling R-D2 (2026-11-14, maintainer, made AFTER the follow-up data were seen)
+
+The A1 analysis found D2 for database images "GO at 16 KiB only" (9 of 15, 8 needed; 0 of 15 at 64 KiB). Three of its deciding
+margins are inside measurement noise: the vote rests on an either-level rule that A1 did not fix (one fixed level per size gives
+7 of 15); the COVER trigger is cleared by 0.008 pp (judged on `pv`, 5 of 15); and three images clear the 0.8× cap by 0.002-0.009,
+while the timing cells' max/min spread reaches 1.019. Because this ruling was made with the data in view, it does not claim to
+be a pre-registered verdict. **Ruling:** D2 for database images is recorded as **marginal, not established**. Codec 3 stays
+reserved and ADR-30's `estimate`, `train` and `apply` stay out of v1 (D7-Lunix stands in effect). The summary states the deciding
+experiment for a later release: a product-level rule fixed in advance (one level, or a stated per-volume level choice), repeated
+timing (several hosts or runs) on all three engines, and a pre-stated COVER/fastCover choice.
