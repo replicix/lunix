@@ -736,7 +736,9 @@ impl Journal for MemJournal {
             done(Err(poisoned_err()));
             return Ok(());
         }
-        st.pending.push_back((upto.0, done));
+        // Never covers a number handed out after the submission.
+        let upto = upto.0.min(st.last_issued);
+        st.pending.push_back((upto, done));
         drop(st);
         self.inner.cv.notify_all();
         Ok(())
@@ -858,6 +860,8 @@ impl Journal for MemJournal {
             gap_at,
             damaged,
             flushed: WriteSeq(watermark),
+            // The model never keeps two records with one number.
+            duplicate: None,
         })
     }
 

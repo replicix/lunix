@@ -55,6 +55,19 @@
 //! FUA write passes its own sequence number as `upto`, which may be below
 //! `last_issued()`; it waits for every lower sequence number, not for higher ones.
 //!
+//! # The flushed watermark
+//!
+//! When a group flush completes (every `fdatasync` done, nothing poisoned at
+//! or below `upto`), every record at or below its `upto` is durable on every
+//! lane. The journal writes the highest such `upto` into every record it
+//! appends afterwards (on-disk-formats §5.2), and [`Journal::recover`]
+//! reports the highest value any surviving record carries as
+//! [`Recovered::flushed`]. A gap or damage at or below it is loss of durable
+//! data; above it, recovery cannot tell crash residue from medium damage,
+//! because a flush is witnessed only by a record appended after it completed
+//! (the unwitnessed window, ADR-4). `upto` is clamped to `last_issued()` at
+//! submission, so the watermark never names a number not yet written.
+//!
 //! # `JournalReserved` units
 //!
 //! Admission charges, and reclaim releases, the **encoded record length**
@@ -358,8 +371,9 @@ pub struct Recovered {
     /// `floor + 1` when none was kept.
     pub next_seq: WriteSeq,
     /// The `write_seq` range of valid records found beyond the first gap.
-    /// They are **ignored**, not an error: nothing on disk records the last
-    /// flushed `write_seq`. `lunix fsck` reports them as a warning (N4).
+    /// They are **ignored**; whether the gap is real loss or crash residue
+    /// follows from [`flushed`](Self::flushed). `lunix fsck` reports them
+    /// as a warning (N4).
     pub ignored_after_gap: Option<WriteSeqRange>,
     /// The first missing `write_seq`, set exactly when `ignored_after_gap` is.
     pub gap_at: Option<WriteSeq>,
@@ -371,6 +385,10 @@ pub struct Recovered {
     /// gap above it is crash residue (ADR-4, maintainer decision of
     /// 2026-11-14). 0 when no record carries one.
     pub flushed: WriteSeq,
+    /// A `write_seq` found in two valid records. Recovery stops there like at
+    /// a gap, but it is never crash residue (an earlier wipe did not happen):
+    /// `on_journal_damage = refuse` refuses it at any watermark.
+    pub duplicate: Option<WriteSeq>,
 }
 
 /// Per lane, the lowest ring file ordinal that may still hold a record above a
@@ -439,7 +457,10 @@ pub trait Journal: Send + Sync {
     /// in flight; a second submission queues behind it. A flush covers every
     /// write **acknowledged before the group formed**: with
     /// `upto = last_issued()` read at formation, all of them have a sequence
-    /// number `<= upto` (see the module docs).
+    /// number `<= upto` (see the module docs). An `upto` above
+    /// [`last_issued`](Self::last_issued) is clamped to it at submission: a
+    /// flush never covers a number handed out after it was submitted, and the
+    /// flushed watermark it raises (on-disk-formats §5.2) never names one.
     ///
     /// If the journal is poisoned and `upto >=` the failed sequence number, `done`
     /// receives `Err(Io)` (immediately or when the poisoning happens); a flush

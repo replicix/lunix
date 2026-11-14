@@ -178,3 +178,146 @@ fn two_batches_in_flight_on_one_lane_lose_the_first_above_the_watermark() {
     assert_eq!(r.damaged.len(), 1);
     assert_eq!(r.damaged[0].next_seq, Some(WriteSeq(3)));
 }
+
+/// Review M1 (2026-11-14): `reinit_slot` (reclaim, or a bad file at open)
+/// zeroes the body, syncs, writes a header with the new ordinal, syncs and
+/// renames. A crash between the header and the rename leaves a valid header
+/// that does not match the file name, over a zero body. No record is lost:
+/// it must not be reported as damage, which `refuse` would refuse because the
+/// lane's next record is far below the watermark.
+#[test]
+fn an_interrupted_reinitialisation_is_not_damage() {
+    use lunix_format::journal::FileHeader;
+    for body_dirty in [false, true] {
+        let t = scratch();
+        let cfg = small_cfg(t.path().join("journal"), 1, 4);
+        let j = open_journal(&cfg);
+        recover_all(&j);
+        let mut l = lanes_of(&j, 1);
+        for i in 0..40u64 {
+            write(&mut *l[0], i * 16, 16);
+            complete_appends(&mut *l[0], 1);
+        }
+        group_flush(&j);
+        assert_eq!(put(&mut *l[0], 1000), 41, "witnesses the flush of 40");
+        drop(l);
+        drop(j);
+        // The first file: the cut covers everything in it, so reclaim takes it.
+        let (first, _) = find(&cfg.dir, 1);
+        let cut = (1..=41u64)
+            .take_while(|&s| find(&cfg.dir, s).0 == first)
+            .last()
+            .expect("records in the first file");
+        assert!(cut < 40, "the first file holds part of the journal only");
+        let mut b = std::fs::read(&first).unwrap();
+        let mut h = FileHeader::decode(&b[..4096]).expect("header");
+        h.ordinal = 99;
+        h.generation = h.generation.rotate_left(7) | 1;
+        let mut block = Vec::new();
+        h.encode(&mut block).expect("encode");
+        b.fill(0);
+        b[..4096].copy_from_slice(&block);
+        if body_dirty {
+            b[3 * 4096 + 17] = 0xa5;
+        }
+        std::fs::write(&first, &b).unwrap();
+
+        let j = open_journal(&cfg);
+        let r = j.recover(None, WriteSeq(cut)).expect("recover");
+        assert_eq!(r.flushed, WriteSeq(40));
+        assert_eq!(r.gap_at, None);
+        assert_eq!(r.next_seq, WriteSeq(42));
+        assert_eq!(r.records.len() as u64, 41 - cut);
+        if body_dirty {
+            // Not what reinit_slot leaves: real damage, reported as before.
+            assert_eq!(r.damaged.len(), 1, "{:?}", r.damaged);
+            assert_eq!(r.damaged[0].next_seq, Some(WriteSeq(cut + 1)));
+            continue;
+        }
+        assert!(r.damaged.is_empty(), "{:?}", r.damaged);
+        // Opening a lane finishes the re-initialisation; the journal goes on.
+        let mut l = lanes_of(&j, 1);
+        assert_eq!(put(&mut *l[0], 2000), 42);
+        group_flush(&j);
+        drop(l);
+        drop(j);
+        let j = open_journal(&cfg);
+        let r = j.recover(None, WriteSeq(cut)).expect("recover again");
+        assert!(r.damaged.is_empty() && r.gap_at.is_none(), "{r:?}");
+        assert_eq!(r.next_seq, WriteSeq(43));
+    }
+}
+
+/// Review m3 (2026-11-14): a number found twice means an earlier wipe did not
+/// happen. Recovery stops there and reports it apart from a gap, so the
+/// engine refuses it at any watermark.
+#[test]
+fn a_duplicate_write_seq_is_reported_apart_from_a_gap() {
+    let t = scratch();
+    let cfg = small_cfg(t.path().join("journal"), 2, 4);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = lanes_of(&j, 2);
+    assert_eq!(put(&mut *l[0], 10), 1);
+    assert_eq!(put(&mut *l[1], 20), 2);
+    assert_eq!(put(&mut *l[0], 11), 3);
+    group_flush(&j);
+    drop(l);
+    drop(j);
+    // Keep lane 1's file as it is, then lose record 2: the next incarnation
+    // wipes lane 0 after record 1 and reissues 2 and 3 there.
+    let (lane1, _) = find(&cfg.dir, 2);
+    let saved = std::fs::read(&lane1).unwrap();
+    erase(&cfg.dir, 2);
+    let j = open_journal(&cfg);
+    let r = recover_all(&j);
+    assert_eq!(r.gap_at, Some(WriteSeq(2)));
+    assert_eq!(r.duplicate, None, "a gap is not a duplicate");
+    let mut l = lanes_of(&j, 2);
+    assert_eq!(put(&mut *l[0], 12), 2);
+    assert_eq!(put(&mut *l[0], 13), 3);
+    group_flush(&j);
+    drop(l);
+    drop(j);
+    // The wipe of lane 1 "did not happen": the old record 2 is back.
+    std::fs::write(&lane1, &saved).unwrap();
+    let j = open_journal(&cfg);
+    let r = recover_all(&j);
+    assert_eq!(r.duplicate, Some(WriteSeq(2)), "{r:?}");
+    assert!(r.gap_at.is_some());
+}
+
+/// Review m1 (2026-11-14): a flush whose `upto` is above `last_issued()` is
+/// clamped at submission. Unclamped, it would raise the watermark to a number
+/// handed out later and not yet written, and a later record would claim it
+/// durable.
+#[test]
+fn a_flush_above_last_issued_does_not_raise_the_watermark_past_it() {
+    use lunix_format::journal::RecordKind;
+    use lunix_iface::journal::SlotOutcome;
+    let t = scratch();
+    let cfg = small_cfg(t.path().join("journal"), 2, 4);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = lanes_of(&j, 2);
+    assert_eq!(put(&mut *l[0], 1), 1);
+    let (tx, rx) = std::sync::mpsc::channel();
+    j.submit_group_flush(
+        WriteSeq(1000),
+        Box::new(move |r| {
+            let _ = tx.send(r.is_ok());
+        }),
+    )
+    .expect("submit");
+    assert!(rx.recv_timeout(T).expect("flush completion"));
+    // Lane 0 holds a slot for 2 (not written); lane 1 writes 3.
+    let slot = match l[0].try_reserve(RecordKind::Write, 1).expect("reserve") {
+        SlotOutcome::Reserved(s) => s,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(slot.write_seq, WriteSeq(2));
+    assert_eq!(put(&mut *l[1], 3), 3);
+    assert_eq!(flushed_of(&cfg.dir, 3), 1, "record 2 was never written");
+    l[0].append(slot, 2, &pattern(2, 1)).expect("append");
+    complete_appends(&mut *l[0], 1);
+}

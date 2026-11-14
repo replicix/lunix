@@ -326,6 +326,7 @@ impl Journal for TJournal {
             gap_at,
             damaged: Vec::new(),
             flushed: WriteSeq(0),
+            duplicate: None,
         })
     }
 

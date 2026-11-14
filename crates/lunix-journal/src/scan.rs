@@ -45,6 +45,10 @@ struct ScannedFile {
     ordinal: u32,
     len: u64,
     bad: bool,
+    /// A bad file that is an interrupted re-initialisation: a valid header
+    /// for a higher ordinal over a zero body. It held no record since its
+    /// zeroing was synced, so it is not damage.
+    reinit: bool,
     skipped: bool,
     recs: Vec<ScRec>,
     damaged: Vec<Range<u64>>,
@@ -118,20 +122,20 @@ fn scan_lane(
     tail: Option<u32>,
 ) -> std::result::Result<Vec<ScannedFile>, Error> {
     let ring = &rings.lanes[lane];
-    let mut order: Vec<(usize, u32, bool)> = {
+    let mut order: Vec<(usize, u32, bool, bool)> = {
         let inner = lock(&ring.inner);
         inner
             .slots
             .iter()
             .enumerate()
-            .map(|(i, s)| (i, s.ordinal, s.bad))
+            .map(|(i, s)| (i, s.ordinal, s.bad, s.reinit))
             .collect()
     };
-    order.sort_by_key(|&(_, o, _)| o);
+    order.sort_by_key(|&(_, o, _, _)| o);
     let highest_valid = order.iter().rev().find(|e| !e.2).map(|e| e.0);
     let mut out = Vec::with_capacity(order.len());
     let mut prev = 0u64;
-    for (slot, ordinal, bad) in order {
+    for (slot, ordinal, bad, reinit) in order {
         let file = &ring.files[slot].file;
         let len = floor4k_len(file.metadata().map_err(io_err)?.len());
         let mut sf = ScannedFile {
@@ -143,6 +147,18 @@ fn scan_lane(
         };
         if bad || len < B {
             sf.bad = true;
+            // `reinit_slot` syncs the zeroed body before it writes the new
+            // header, so a re-initialisation interrupted before its rename
+            // leaves a zero body; anything else in the file is damage.
+            if reinit && len >= B {
+                let buf = sys::read_aligned(
+                    file,
+                    0,
+                    usize::try_from(len).map_err(|_| Error::invalid("file length"))?,
+                )
+                .map_err(io_err)?;
+                sf.reinit = sys::nonzero_end(buf.as_slice()) == B;
+            }
             out.push(sf);
             continue;
         }
@@ -211,6 +227,11 @@ fn run(
         let mut open: Vec<usize> = Vec::new();
         for f in files {
             if f.skipped {
+                continue;
+            }
+            if f.reinit {
+                // An interrupted re-initialisation (reclaim, or a bad file
+                // at open): no record was lost, nothing to report.
                 continue;
             }
             if f.bad {
@@ -297,6 +318,7 @@ fn run(
     let mut records = Vec::new();
     let mut ignored: Option<WriteSeqRange> = None;
     let mut gap_at = None;
+    let mut duplicate = None;
     for c in &all {
         match &mut ignored {
             Some(range) => range.last = WriteSeq(c.seq),
@@ -317,6 +339,9 @@ fn run(
                 expected += 1;
             }
             None => {
+                if c.seq < expected {
+                    duplicate = Some(WriteSeq(c.seq));
+                }
                 gap_at = Some(WriteSeq(expected));
                 ignored = Some(WriteSeqRange {
                     first: WriteSeq(c.seq),
@@ -341,6 +366,7 @@ fn run(
             gap_at,
             damaged,
             flushed: WriteSeq(watermark),
+            duplicate,
         },
         plan,
     ))

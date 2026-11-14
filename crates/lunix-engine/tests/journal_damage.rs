@@ -7,6 +7,7 @@ mod common;
 use common::*;
 use lunix_engine::{EngineConfig, OnJournalDamage, OpenError};
 use lunix_format::WriteSeq;
+use lunix_iface::block::IoOp;
 use lunix_testkit::{CrashModel, JournalMode};
 
 const CS: u32 = 16 << 10;
@@ -116,25 +117,43 @@ fn damage_at_or_below_the_watermark_is_refused_and_wipe_opens() {
     }
 }
 
+/// Seeded crash images (review m4, 2026-11-14): a flushed history, then 8 to
+/// 24 unflushed writes over both queues with out-of-order completions, then
+/// 1 to 4 appends still in flight (held) at the crash. The crash model keeps,
+/// drops or tears every record no completed flush covered. Every image must
+/// open under `refuse`, and the run must actually produce residue.
 #[test]
 fn random_crash_residue_always_opens_under_refuse() {
     let mut residue = 0;
-    for seed in 0..24u64 {
+    let mut gaps = 0;
+    for seed in 0..32u64 {
         let mut v = Vol::create(CS, 64, 2, JournalMode::Mixed(seed));
         v.tweak = refuse;
         let mut r = v.open().map_err(|e| e.0).expect("open");
-        for blk in 0..24u64 {
-            assert!(r
-                .write(
-                    (blk % 2) as usize,
-                    blk * 4096,
-                    &pattern(seed ^ blk, 4096),
-                    false
-                )
-                .is_ok());
-            if blk % 7 == 6 {
-                assert!(r.flush((blk % 2) as usize).is_ok());
+        let mut blk = 0u64;
+        let mut next = || {
+            let q = (blk % 2) as usize;
+            let off = (blk % 200) * 4096;
+            blk += 1;
+            (q, off, pattern(seed * 1000 + blk, 4096))
+        };
+        for i in 0..12 {
+            let (q, off, data) = next();
+            assert!(r.write(q, off, &data, false).is_ok());
+            if i % 5 == 4 {
+                assert!(r.flush(q).is_ok());
             }
+        }
+        assert!(r.flush(0).is_ok());
+        for _ in 0..8 + seed % 17 {
+            let (q, off, data) = next();
+            assert!(r.write(q, off, &data, false).is_ok());
+        }
+        // Appends in flight at the crash: submitted, never completed.
+        r.journal.set_completion_mode(JournalMode::Manual);
+        for _ in 0..1 + seed % 4 {
+            let (q, off, data) = next();
+            r.submit(q, IoOp::Write, false, off, 4096, &data);
         }
         let p = r.stop();
         v.store = p.store.crash(seed);
@@ -148,10 +167,11 @@ fn random_crash_residue_always_opens_under_refuse() {
         if rep.ignored_after_gap.is_some() || !rep.damaged.is_empty() {
             residue += 1;
         }
-        assert!(rep.flushed.0 > 0, "seed {seed}: {rep:?}");
+        if rep.ignored_after_gap.is_some() {
+            gaps += 1;
+        }
+        assert!(rep.flushed.0 >= 10, "seed {seed}: {rep:?}");
     }
-    assert!(
-        residue > 0,
-        "no crash image had residue: the test tests nothing"
-    );
+    assert!(residue > 8, "too few crash images had residue: {residue}");
+    assert!(gaps > 0, "no crash image had a gap");
 }

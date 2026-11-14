@@ -65,6 +65,12 @@ pub(crate) struct SlotInfo {
     /// The header failed its checks (or does not match the name): the file
     /// holds no records and is re-initialised before use.
     pub bad: bool,
+    /// `bad` because the header is a valid header of this lane and volume
+    /// with a higher ordinal than the name: a re-initialisation
+    /// ([`Rings::reinit_slot`]) interrupted between its header write and its
+    /// rename. The scan does not report such a file as damage when its body
+    /// is zero (on-disk-formats §5.1).
+    pub reinit: bool,
 }
 
 /// One physical file. The descriptor lives as long as the journal; a recycle
@@ -236,6 +242,9 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
             let head = sys::read_aligned(&file, 0, BLOCK)
                 .ok()
                 .and_then(|b| FileHeader::decode(b.as_slice()).ok());
+            let reinit = head.as_ref().is_some_and(|h| {
+                h.lane == lane && h.ordinal > ordinal && h.volume_uuid == cfg.volume_uuid
+            });
             let (gen, bad) = match head {
                 Some(h) if h.lane == lane && h.ordinal == ordinal => {
                     if h.volume_uuid != cfg.volume_uuid {
@@ -256,6 +265,7 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
                 gen,
                 role: Role::Used,
                 bad,
+                reinit,
             });
         }
         let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
@@ -269,6 +279,7 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
                 gen,
                 role: Role::Free,
                 bad: false,
+                reinit: false,
             });
             next_ordinal += 1;
         }
@@ -337,6 +348,9 @@ impl Rings {
         file.file
             .write_all_at(sys::header_block(&hdr)?.as_slice(), 0)?;
         file.file.sync_data()?;
+        // The file now has a valid header that does not match its name; the
+        // scan recognises the state (`SlotInfo::reinit`).
+        lunix_iface::crashpoint!("journal.reinit.before_rename");
         std::fs::rename(self.path(lane, old_ordinal), self.path(lane, new_ordinal))?;
         Ok(gen)
     }

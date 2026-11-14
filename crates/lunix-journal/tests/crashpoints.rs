@@ -16,10 +16,12 @@ const BIG: u32 = 16;
 const LANES: u16 = 2;
 const FILES: u64 = 3;
 
-/// The child: writes 6 rounds of 24 records over two lanes, flushing after each
-/// round, and from round 3 on treats everything but the last 10 records as
-/// committed and reclaims it. Progress goes to stdout: `flushed <seq>` after
-/// each completed flush, `floor <seq>` before each reclaim.
+/// The child: writes 8 rounds of 24 records over two lanes, flushing after each
+/// round and then writing one small witness record (it carries the flush as
+/// its watermark, so recovery sees how far durability reached), and from
+/// round 3 on treats everything but the last 10 records as committed and
+/// reclaims it. Progress goes to stdout: `flushed <seq>` after each completed
+/// flush, `floor <seq>` before each reclaim.
 #[test]
 fn child_body() {
     let Some(dir) = std::env::var_os("LUNIX_CRASH_CHILD_DIR") else {
@@ -39,6 +41,9 @@ fn child_body() {
         }
         group_flush(&j);
         println!("flushed {last}");
+        let w = write_rec(&mut *ls[0], 0, 1);
+        complete_appends(&mut *ls[0], 1);
+        last = w.seq;
         if round >= 2 {
             let floor = last - 10;
             println!("floor {floor}");
@@ -105,6 +110,17 @@ fn check_after_kill(point: &str, o: &Outcome, dir: &std::path::Path) {
         o.flushed
     );
     assert_eq!(r.next_seq, WriteSeq(k + 1), "{point}");
+    // A kill loses no durable record, so `on_journal_damage = refuse` must
+    // open: no gap and no damage at or below the flushed watermark (the
+    // engine's rule, ADR-4).
+    let w = r.flushed;
+    assert!(
+        !(r.gap_at.is_some_and(|g| g <= w)
+            || r.damaged.iter().any(|d| d.next_seq.is_some_and(|n| n <= w))),
+        "{point}: refuse would refuse a kill: gap {:?}, damaged {:?}, flushed {w:?}",
+        r.gap_at,
+        r.damaged
+    );
     for rec in &r.records {
         let mut buf = vec![0u8; rec.record.blocks as usize * 4096];
         j.read_at(rec.loc, &mut buf).expect("read_at");
@@ -172,6 +188,14 @@ fn kill_after_reclaim_delete() {
     kill_at("journal.after_reclaim_delete", &[1, 2]);
 }
 
+/// Review M1 (2026-11-14): a reclaim killed between the new header and the
+/// rename leaves a file whose header does not match its name. It is an
+/// interrupted re-initialisation, not damage.
+#[test]
+fn kill_between_the_reinit_header_and_the_rename() {
+    kill_at("journal.reinit.before_rename", &[1, 2, 5]);
+}
+
 #[test]
 fn the_crash_points_are_registered_and_unique() {
     // Touch every point once so the registry sees them (they register on first
@@ -184,6 +208,7 @@ fn the_crash_points_are_registered_and_unique() {
         "journal.group_flush.after_watermark_wait",
         "journal.before_reclaim_delete",
         "journal.after_reclaim_delete",
+        "journal.reinit.before_rename",
     ] {
         assert!(names.contains(&n), "{n} missing from {names:?}");
     }

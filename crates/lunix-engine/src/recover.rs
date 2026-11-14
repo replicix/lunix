@@ -177,17 +177,27 @@ fn check_floor_on_path(
 /// * a gap at or below the watermark (`gap_at <= flushed`) is a durable record
 ///   that is gone, and a damaged range whose next valid record in its lane is
 ///   at or below the watermark is damage inside durable history: refused;
-/// * everything above the watermark was never covered by an acknowledged
-///   flush, whatever its shape: a torn last record, a gap across lanes (one
-///   lane's record still in its open batch at a kill), a torn batch followed
-///   by a later batch of the same lane (two batches in flight). That is crash
-///   residue a block device may lose: logged at warn and wiped.
+/// * a `write_seq` found twice is never crash residue (an earlier wipe did not
+///   happen): refused at any watermark;
+/// * everything above the watermark is treated as crash residue, whatever its
+///   shape: a torn last record, a gap across lanes (one lane's record still in
+///   its open batch at a kill), a torn batch followed by a later batch of the
+///   same lane (two batches in flight). It is logged at warn and wiped, with
+///   every record after the first gap.
 ///
-/// What the watermark cannot see is damage to the newest flushed records when
-/// no later record witnessed that flush; those read as residue.
+/// The unwitnessed window (review M2, 2026-11-14): a completed flush is
+/// witnessed only by a record appended after it completed. Every record above
+/// the highest watermark a surviving record carries is in the window, and
+/// after a burst followed by one FLUSH and no later write that is the whole
+/// burst. A crash alone cannot damage those records (they were durable), but
+/// medium damage to one of them is indistinguishable from residue: it is
+/// wiped, and so is every record after it, although the flush that covered
+/// them was acknowledged. The window closes when a later record lands or a
+/// cut moves the floor past the records.
 fn refuse_worthy(rec: &lunix_iface::journal::Recovered) -> bool {
     let w = rec.flushed;
-    rec.gap_at.is_some_and(|g| g <= w)
+    rec.duplicate.is_some()
+        || rec.gap_at.is_some_and(|g| g <= w)
         || rec
             .damaged
             .iter()
@@ -308,7 +318,9 @@ pub(crate) fn recover(
         tracing::warn!(
             ignored_after_gap = ?rec.ignored_after_gap,
             gap_at = ?rec.gap_at,
+            duplicate = ?rec.duplicate,
             damaged = ?rec.damaged,
+            flushed = rec.flushed.0,
             "journal recovery stopped at a gap or skipped damage"
         );
         if cfg.on_journal_damage == OnJournalDamage::Refuse && refuse_worthy(&rec) {
@@ -317,7 +329,7 @@ pub(crate) fn recover(
         if !refuse_worthy(&rec) {
             tracing::warn!(
                 flushed = rec.flushed.0,
-                "the damage and gaps are above the flushed watermark: crash residue of writes no acknowledged flush covered; wiped"
+                "the damage and gaps are above the flushed watermark: treated as crash residue (no surviving record witnessed a flush covering them); wiped"
             );
         }
     }
@@ -410,6 +422,7 @@ mod tests {
             gap_at: gap.then_some(WriteSeq(3)),
             damaged,
             flushed: WriteSeq(flushed),
+            duplicate: None,
         }
     }
 
@@ -450,5 +463,9 @@ mod tests {
             refuse_worthy(&rec(vec![dmg(None)], true, 5)),
             "a durable record gone"
         );
+        // A duplicate number is never residue, at any watermark.
+        let mut dup = rec(Vec::new(), true, 0);
+        dup.duplicate = Some(WriteSeq(2));
+        assert!(refuse_worthy(&dup), "duplicate above the watermark");
     }
 }

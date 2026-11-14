@@ -166,6 +166,7 @@ impl FileJournal {
                     s.ordinal = new_ordinal;
                     s.gen = gen;
                     s.bad = false;
+                    s.reinit = false;
                     drop(inner);
                     file.reset_counters();
                 } else if let Some((from, to)) = fp.wipe {
@@ -252,6 +253,10 @@ impl Journal for FileJournal {
         if self.sh.closed.load(Ordering::SeqCst) {
             return Err(Error::Closed);
         }
+        // A flush never covers a number handed out after its submission: an
+        // `upto` above it would let the coordinator raise the watermark over
+        // a number not yet written (review m1, 2026-11-14).
+        let upto = WriteSeq(upto.0.min(self.sh.counter.load(Ordering::SeqCst)));
         if self.sh.poisoned_at().is_some_and(|p| upto.0 >= p) {
             done(Err(Shared::poisoned_error()));
             return Ok(());
