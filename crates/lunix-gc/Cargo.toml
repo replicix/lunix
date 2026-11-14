@@ -10,6 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiled out unless on (see lunix_iface::crashpoint); only lunixd's
+# crashpoints build enables it.
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true
