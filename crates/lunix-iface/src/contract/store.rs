@@ -8,7 +8,8 @@ use lunix_format::{ChunkId, CommitSeq, VolumeUuid};
 
 use crate::error::ErrorKind;
 use crate::store::{
-    CheckpointStore, CommitStore, GcStateStore, PackStore, SegmentStore, SweepRequest, VolumeDir,
+    CheckpointStore, CommitStore, FloorReset, GcStateStore, PackStore, SegmentStore, SweepRequest,
+    VolumeDir,
 };
 
 /// The stores of one volume directory, plus restart.
@@ -339,6 +340,35 @@ pub fn rollback_floor_is_raise_only<F: StoreFixture>(f: &mut F) {
             "replacing the pins keeps the floor"
         );
     }
+}
+
+/// A store opened without offline repair refuses every floor reset, for every
+/// reason, and changes nothing (the gate that keeps a running daemon from
+/// lowering its own floor).
+pub fn reset_rollback_floor_is_refused_without_the_option<F: StoreFixture>(f: &mut F) {
+    let floor = |seq: u64, h: u8| RollbackFloor {
+        max_commit_seq: CommitSeq(seq),
+        tip_hash: [h; 32],
+    };
+    f.volume()
+        .raise_rollback_floor(&floor(5, 1))
+        .expect("raise");
+    for why in [
+        FloorReset::TruncateTip,
+        FloorReset::OperatorReset,
+        FloorReset::RepairPins,
+    ] {
+        let e = f
+            .volume()
+            .reset_rollback_floor(&floor(2, 9), why)
+            .expect_err("refused");
+        assert_eq!(e.kind(), ErrorKind::Refused, "{why:?}");
+    }
+    assert_eq!(
+        f.volume().rollback_floor().expect("read"),
+        Some(floor(5, 1)),
+        "a refusal changes nothing"
+    );
 }
 
 /// The sweep deletes unnamed sealed files above the mark only, reports the

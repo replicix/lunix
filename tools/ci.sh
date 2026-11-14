@@ -59,6 +59,13 @@ cargo test -j "$jobs" -p lunix-ublk --features crashpoints
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 
+step "allow_floor_reset is set only by lunix-fsck (ADR-31: only offline repair lowers the floor)"
+if grep -rnE 'allow_floor_reset[[:space:]]*(:|=)[[:space:]]*true' crates --include=*.rs \
+    | grep -vE '^crates/(lunix-fsck/|lunix-store/src/tests/|lunix-testkit/)'; then
+  echo "allow_floor_reset must not be enabled outside lunix-fsck and the store and testkit tests" >&2
+  exit 1
+fi
+
 step "feature-edge check"
 bash tools/check-features.sh
 
