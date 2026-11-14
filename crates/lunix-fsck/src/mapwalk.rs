@@ -47,6 +47,9 @@ pub(crate) struct WalkOut {
     pub(crate) used_packs: HashSet<ObjId>,
 }
 
+/// Pack descriptors kept open at once.
+const MAX_OPEN_PACKS: usize = 32;
+
 struct Walker<'a> {
     s: &'a Session,
     packs: &'a std::collections::BTreeMap<ObjId, crate::containers::Container>,
@@ -221,6 +224,12 @@ impl<'a> Walker<'a> {
 
     fn pread(&mut self, loc: NodeLoc) -> std::io::Result<()> {
         if !self.files.contains_key(&loc.pack) {
+            // A volume has one live pack per commit that left a node behind:
+            // keep the descriptors bounded, the walk revisits a pack's nodes
+            // close together.
+            if self.files.len() >= MAX_OPEN_PACKS {
+                self.files.clear();
+            }
             let f = File::open(self.s.dir.join(pack_name(loc.pack)))?;
             self.files.insert(loc.pack, f);
         }

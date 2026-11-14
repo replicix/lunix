@@ -257,3 +257,96 @@ fn a_lean_volume_has_no_index_fallback() {
     assert_eq!(r.exit_code(), 2, "{}", r.render_text());
     assert!(r.has(code::MAP_ENTRY_UNRESOLVED));
 }
+
+// ---------------------------------------------------------------------------
+// The review's tests (B1): segments that only stale hints reach.
+
+/// Restamps again on top of the previous restamp.
+fn restamp_next(b: &mut Built) {
+    restamp(b, stale);
+    let seq = b.known.tip + 1;
+    let bytes = b.read(&b.commit_rel(seq));
+    b.known.tip = seq;
+    b.known.tip_hash = b.crypto.meta().object_hash(&bytes);
+}
+
+/// Both retained roots have stale hints only, and the commits that named the
+/// segments are gone (GC deleted them below chain_floor).
+fn aged(mode: lunix_format::CryptoMode) -> Built {
+    let mut b = build(&spec(mode));
+    let old_tip = b.known.tip;
+    restamp_next(&mut b);
+    restamp_next(&mut b);
+    for s in 0..=old_tip {
+        std::fs::remove_file(b.path(&b.commit_rel(s))).expect("remove old commit");
+    }
+    b
+}
+
+#[test]
+fn review_aged_volume_is_clean_with_its_index() {
+    for mode in ALL_MODES {
+        let b = aged(mode);
+        let r = b.fsck(&b.opts());
+        assert!(r.exit_code() <= 1, "{}", r.render_text());
+        assert!(!r.has(code::MAP_ENTRY_UNRESOLVED));
+    }
+}
+
+#[test]
+fn review_delete_orphans_without_an_index_keeps_live_segments() {
+    for mode in ALL_MODES {
+        let b = aged(mode);
+        let want = b.fsck(&b.opts()).ratios.expect("ratios");
+        clear_index(&b);
+        let r = b.fsck(&Options {
+            repair: true,
+            delete_orphans: true,
+            ..b.opts()
+        });
+        // The index was rebuilt first, so every live segment is still referenced:
+        // only segments nothing reaches (dead chunks only) may go.
+        assert!(!r.has(code::MAP_ENTRY_UNRESOLVED), "{}", r.render_text());
+        assert!(!r.has(code::REPAIR_REFUSED), "{}", r.render_text());
+        let after = b.fsck(&b.deep());
+        assert_eq!(after.exit_code(), 0, "{}", after.render_text());
+        let got = after.ratios.expect("ratios");
+        assert_eq!(
+            (got.mapped_chunks, got.unique_chunks),
+            (want.mapped_chunks, want.unique_chunks)
+        );
+        assert_eq!(got.unresolved_entries, 0);
+    }
+}
+
+#[test]
+fn review_rebuild_index_without_an_index_restores_resolution() {
+    for mode in ALL_MODES {
+        let b = aged(mode);
+        clear_index(&b);
+        let r = b.fsck(&Options {
+            rebuild_index: true,
+            ..b.opts()
+        });
+        assert!(!r.has(code::MAP_ENTRY_UNRESOLVED), "{}", r.render_text());
+    }
+}
+
+#[test]
+fn delete_orphans_is_refused_when_the_index_cannot_be_trusted_or_an_error_exists() {
+    let b = aged(lunix_format::CryptoMode::Integrity);
+    let before = list(&b.dir, "segments");
+    // A damaged retained pack: the walk fails, nothing may be deleted.
+    let pack = b.pack_rel(*b.known.packs.last().expect("pack"));
+    let orig = b.read(&pack);
+    b.flip(&pack, 100);
+    clear_index(&b);
+    let r = b.fsck(&Options {
+        repair: true,
+        delete_orphans: true,
+        ..b.opts()
+    });
+    assert!(r.has(code::REPAIR_REFUSED), "{}", r.render_text());
+    assert_eq!(before, list(&b.dir, "segments"));
+    b.write(&pack, &orig);
+}

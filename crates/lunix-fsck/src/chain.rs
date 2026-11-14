@@ -230,6 +230,16 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
             facts.named_segments.extend(f.new_segments.iter().copied());
             facts.named_packs.extend(f.map_packs.iter().copied());
             facts.named_packs.extend(f.map_root.pack);
+            facts.high_water = facts.high_water.max(
+                f.new_segments
+                    .iter()
+                    .chain(&f.map_packs)
+                    .chain(&f.index_packs)
+                    .chain(f.map_root.pack.iter())
+                    .map(|i| i.raw())
+                    .max()
+                    .unwrap_or(0),
+            );
         }
     }
 

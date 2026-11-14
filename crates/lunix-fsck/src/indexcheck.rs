@@ -28,12 +28,35 @@ pub(crate) struct Scratch {
 }
 
 impl Scratch {
-    pub(crate) fn new(tag: &str) -> std::io::Result<Self> {
-        let n = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("lunix-fsck-{}-{n}-{tag}", std::process::id()));
-        fs::create_dir_all(&path)?;
-        Ok(Self { path })
+    /// A private directory (mode 0700) created exclusively inside `base`; a
+    /// name that exists is never reused. Falls back to the system temporary
+    /// directory when `base` is not writable.
+    pub(crate) fn new(base: &Path, tag: &str) -> std::io::Result<Self> {
+        match Self::make(base, tag) {
+            Ok(s) => Ok(s),
+            Err(_) => Self::make(&std::env::temp_dir(), tag),
+        }
+    }
+
+    fn make(base: &Path, tag: &str) -> std::io::Result<Self> {
+        use std::os::unix::fs::DirBuilderExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let mut last = None;
+        for _ in 0..64 {
+            let n = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
+            let path = base.join(format!(
+                ".lunix-fsck-{}-{nanos:08x}-{n:x}-{tag}",
+                std::process::id()
+            ));
+            match fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => return Ok(Self { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| std::io::Error::other("no scratch name")))
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -55,7 +78,7 @@ pub(crate) struct IndexView {
 
 /// Opens the scratch copy and reports damage.
 pub(crate) fn open_view(s: &Session, sink: &mut Sink) -> Option<IndexView> {
-    let scratch = match Scratch::new("index") {
+    let scratch = match Scratch::new(&s.scratch_base, "index") {
         Ok(x) => x,
         Err(e) => {
             sink.push(Finding::new(
@@ -144,7 +167,7 @@ pub(crate) fn open_view(s: &Session, sink: &mut Sink) -> Option<IndexView> {
 /// A second index, built from the footers of the good segments, for the
 /// delete-time invariant (M17 rule 5).
 pub(crate) fn rebuilt(s: &Session, facts: &Facts) -> Option<IndexView> {
-    let scratch = Scratch::new("rebuilt").ok()?;
+    let scratch = Scratch::new(&s.scratch_base, "rebuilt").ok()?;
     let idx = LsmIndex::open(scratch.path(), s.vol.ids(), s.desc.id_len).ok()?;
     let segs: Vec<ObjId> = facts
         .segments
@@ -242,12 +265,17 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
 /// use and persists it. Returns the number of entries in the new index.
 pub(crate) fn rebuild(s: &Session, facts: &Facts) -> lunix_iface::Result<u64> {
     let idx = LsmIndex::open(&s.dir, s.vol.ids(), s.desc.id_len)?;
+    // Every good sealed segment at or below the high-water mark (DESIGN 4.4
+    // step 4, M17 rule 7) and the ones the retained roots reach: a stale hint
+    // is resolved only through the index, so a segment left out here would
+    // leave its entries unresolved and look like an orphan.
     let segs: Vec<ObjId> = facts
         .segments
         .iter()
         .filter(|(id, c)| {
             c.good
-                && (facts.named_segments.contains(id)
+                && (id.raw() <= facts.high_water
+                    || facts.named_segments.contains(id)
                     || facts.referenced_segments.contains(id)
                     || facts.condemned_ids.contains(id))
         })
@@ -257,11 +285,35 @@ pub(crate) fn rebuild(s: &Session, facts: &Facts) -> lunix_iface::Result<u64> {
     idx.rebuild(&segs, footers)?;
     // Persist what the durable commits cover: every segment up to the highest
     // one the retained chain names (the engine's own rule, DESIGN 4.4).
-    let upto = facts.named_segments.iter().copied().max();
+    let upto = facts
+        .segments
+        .keys()
+        .filter(|id| id.raw() <= facts.high_water)
+        .copied()
+        .max();
     if let Some(upto) = upto {
         idx.persist(upto)?;
     }
     let mut n = 0u64;
     idx.iter_entries(&mut |_| n += 1)?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_scratch_directory_is_private_and_never_reused() {
+        let base = std::env::temp_dir();
+        let a = Scratch::new(&base, "t").expect("a");
+        let b = Scratch::new(&base, "t").expect("b");
+        assert_ne!(a.path(), b.path());
+        let mode = fs::metadata(a.path()).expect("meta").permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let p = a.path().to_path_buf();
+        drop(a);
+        assert!(!p.exists(), "removed on drop");
+    }
 }

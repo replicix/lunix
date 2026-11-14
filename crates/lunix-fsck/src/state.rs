@@ -27,6 +27,7 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         Ok(b) => match LocalPinsFile::decode(&b) {
             Ok(p) => Some(p),
             Err(e) => {
+                facts.pins_rejected = true;
                 sink.push(Finding::new(code::STATE_PINS, "state/pins", format!("{e}")));
                 None
             }
@@ -70,12 +71,16 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         }
     }
 
-    if let Err(e) = s.vol.roots() {
-        sink.push(Finding::new(
-            code::PIN_OBJECT,
-            "snapshots/ readers/ holds/",
-            format!("{e}"),
-        ));
+    match s.vol.roots() {
+        Ok(r) => facts.pins_busy = !r.is_empty(),
+        Err(e) => {
+            facts.pins_busy = true;
+            sink.push(Finding::new(
+                code::PIN_OBJECT,
+                "snapshots/ readers/ holds/",
+                format!("{e}"),
+            ));
+        }
     }
 
     match fs::read(s.dir.join(lpath::state_gc_condemned())) {

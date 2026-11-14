@@ -2,8 +2,6 @@
 
 mod common;
 
-use std::sync::Arc;
-
 use common::*;
 use lunix_format::local::RollbackFloor;
 use lunix_format::{CommitSeq, CryptoMode, ExtentKind, Level, ObjId};
@@ -22,7 +20,6 @@ fn spec(mode: CryptoMode) -> Spec {
 fn repair(b: &Built) -> Options {
     Options {
         repair: true,
-        floor_lowering: Some(Arc::new(DirectPins)),
         ..b.opts()
     }
 }
@@ -287,23 +284,6 @@ fn truncate_tip_refuses_without_a_previous_commit_that_authenticates() {
 }
 
 #[test]
-fn truncate_tip_refuses_before_changing_anything_while_floor_lowering_is_not_wired_in() {
-    let b = build(&spec(CryptoMode::Integrity));
-    let tip = b.commit_rel(b.known.tip);
-    b.flip(&tip, 50);
-    let r = b.fsck(&Options {
-        repair: true,
-        truncate_tip: true,
-        ..b.opts()
-    });
-    let f = r.with_code(code::REPAIR_REFUSED).next().expect("refused");
-    assert!(f.message.contains("reset_rollback_floor"), "{}", f.message);
-    assert!(has(&tip, &b));
-    assert!(!has(&format!("{tip}.damaged"), &b));
-    assert!(b.read("state/checkpoint").iter().any(|x| *x != 0));
-}
-
-#[test]
 fn truncate_tip_needs_the_repair_flag() {
     let b = build(&spec(CryptoMode::Plain));
     b.flip(&b.commit_rel(b.known.tip), 50);
@@ -338,14 +318,6 @@ fn reset_floor_sets_the_floor_to_the_verified_tip_and_is_never_implied() {
         let r = b.fsck(&repair(&b));
         assert!(r.has(code::ROLLBACK), "{}", r.render_text());
         assert_eq!(b.read("state/pins"), bytes);
-        // Without the hook the lowering is refused.
-        let r = b.fsck(&Options {
-            repair: true,
-            reset_floor: true,
-            ..b.opts()
-        });
-        assert!(r.has(code::REPAIR_REFUSED), "{}", r.render_text());
-        assert_eq!(b.read("state/pins"), bytes);
         // With it the floor is the verified tip, and old and new are printed.
         let r = b.fsck(&Options {
             reset_floor: true,
@@ -375,7 +347,7 @@ fn reset_floor_sets_the_floor_to_the_verified_tip_and_is_never_implied() {
 }
 
 #[test]
-fn reset_floor_raises_a_lower_floor_without_the_lowering_hook() {
+fn reset_floor_raises_a_lower_floor() {
     let b = build(&spec(CryptoMode::Integrity));
     let mut f = lunix_format::local::LocalPinsFile::decode(&b.read("state/pins")).expect("pins");
     f.floor = None;
@@ -413,4 +385,164 @@ fn reset_floor_refuses_on_an_unverified_tip() {
         ..repair(&b)
     });
     assert!(r.has(code::REPAIR_REFUSED), "{}", r.render_text());
+}
+
+#[test]
+fn review_truncate_tip_with_reset_floor_leaves_a_mountable_floor() {
+    let b = build(&spec(CryptoMode::Integrity));
+    // The floor lags one commit behind the tip.
+    let prev = b.known.tip - 1;
+    let prev_hash = b.crypto.meta().object_hash(&b.read(&b.commit_rel(prev)));
+    set_floor(
+        &b,
+        Some(RollbackFloor {
+            max_commit_seq: CommitSeq(prev),
+            tip_hash: prev_hash,
+        }),
+    );
+    b.fsck(&Options {
+        repair: true,
+        truncate_tip: true,
+        reset_floor: true,
+        ..b.opts()
+    });
+    let again = b.fsck(&b.opts());
+    assert!(!again.has(code::ROLLBACK), "{}", again.render_text());
+    assert_eq!(again.tip, Some(prev));
+}
+
+#[test]
+fn delete_orphans_is_refused_while_pins_exist_or_cannot_be_read() {
+    use lunix_format::pins::{Consistency, SnapshotPin};
+    use lunix_format::{paths, ObjectKind, TimeMs};
+    use lunix_iface::crypto::MetaCodec;
+    let b = build(&spec(CryptoMode::Integrity));
+    let seg = orphan_segment(&b);
+    // Garbage in snapshots/: roots() fails.
+    b.write("snapshots/junk", b"not a pin");
+    let r = b.fsck(&Options {
+        delete_orphans: true,
+        ..repair(&b)
+    });
+    assert!(
+        r.has(code::REPAIR_REFUSED) && r.has(code::PIN_OBJECT),
+        "{}",
+        r.render_text()
+    );
+    assert!(has(&b.seg_rel(seg), &b));
+    std::fs::remove_file(b.path("snapshots/junk")).expect("rm");
+    // A valid pin on an old commit: roots() is not empty.
+    let mut body = Vec::new();
+    SnapshotPin {
+        consistency: Consistency::Crash,
+        commit_seq: CommitSeq(1),
+        created: TimeMs(1),
+        label: "keep".into(),
+    }
+    .encode(&mut body)
+    .expect("pin");
+    let name = paths::snapshot("keep").expect("name");
+    let sealed = b
+        .crypto
+        .meta()
+        .seal(ObjectKind::Snapshots, &name, &body)
+        .expect("seal");
+    b.write("snapshots/keep", &sealed);
+    let r = b.fsck(&Options {
+        delete_orphans: true,
+        ..repair(&b)
+    });
+    assert!(r.has(code::REPAIR_REFUSED), "{}", r.render_text());
+    assert!(has(&b.seg_rel(seg), &b));
+}
+
+#[test]
+fn truncate_tip_refuses_when_the_previous_commit_is_no_longer_a_root() {
+    // retain_last = 1: the previous commit is below the tip's chain_floor.
+    let mut s = spec(CryptoMode::Integrity);
+    s.retain_last = 1;
+    let b = build(&s);
+    let tip = b.commit_rel(b.known.tip);
+    let r = b.fsck(&Options {
+        truncate_tip: true,
+        ..repair(&b)
+    });
+    let f = r.with_code(code::REPAIR_REFUSED).next().expect("refused");
+    assert!(f.message.contains("chain_floor"), "{}", f.message);
+    assert!(has(&tip, &b));
+}
+
+#[test]
+fn truncate_tip_walks_the_previous_root_before_changing_anything() {
+    let b = build(&spec(CryptoMode::Integrity));
+    let tip = b.commit_rel(b.known.tip);
+    b.flip(&tip, 50);
+    // A segment the previous commit's map needs is gone.
+    std::fs::remove_file(b.path(&b.seg_rel(b.known.segments[0]))).expect("rm");
+    let before = b.read("state/checkpoint");
+    let r = b.fsck(&Options {
+        truncate_tip: true,
+        ..repair(&b)
+    });
+    let f = r.with_code(code::REPAIR_REFUSED).next().expect("refused");
+    assert!(f.message.contains("does not resolve"), "{}", f.message);
+    assert!(has(&tip, &b));
+    assert!(!has(&format!("{tip}.damaged"), &b));
+    assert_eq!(b.read("state/checkpoint"), before);
+}
+
+#[test]
+fn repair_pins_replaces_a_rejected_pins_file_from_the_verified_tip() {
+    for mode in ALL_MODES {
+        let b = build(&spec(mode));
+        b.flip("state/pins", 20);
+        let r = b.fsck(&b.opts());
+        assert!(
+            r.has(code::STATE_PINS) && r.exit_code() == 2,
+            "{}",
+            r.render_text()
+        );
+        // Without the option nothing replaces it; with it, but without
+        // --repair, it is refused.
+        let r = b.fsck(&Options {
+            repair_pins: true,
+            ..b.opts()
+        });
+        assert!(r.has(code::REPAIR_REFUSED));
+        let r = b.fsck(&Options {
+            repair_pins: true,
+            ..repair(&b)
+        });
+        assert!(
+            r.repairs.iter().any(|a| a.action == "repair_pins"),
+            "{}",
+            r.render_text()
+        );
+        assert_eq!(r.exit_code(), 0, "{}", r.render_text());
+        let store = b.open_store();
+        let floor = store.rollback_floor().expect("floor").expect("some");
+        assert_eq!(floor.max_commit_seq, CommitSeq(b.known.tip));
+        let log = std::fs::read_to_string(b.path("state/floor-resets.log")).expect("audit");
+        assert!(log.contains("repair_pins"), "{log}");
+        // A readable file is not repaired.
+        drop(store);
+        let r = b.fsck(&Options {
+            repair_pins: true,
+            ..repair(&b)
+        });
+        assert!(r.has(code::REPAIR_REFUSED));
+    }
+}
+
+#[test]
+fn the_floor_repairs_leave_an_audit_line_each() {
+    let b = build(&spec(CryptoMode::Integrity));
+    b.flip(&b.commit_rel(b.known.tip), 50);
+    b.fsck(&Options {
+        truncate_tip: true,
+        ..repair(&b)
+    });
+    let log = std::fs::read_to_string(b.path("state/floor-resets.log")).expect("audit");
+    assert_eq!(log.lines().count(), 1, "{log}");
+    assert!(log.contains("truncate_tip"));
 }

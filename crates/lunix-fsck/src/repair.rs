@@ -9,40 +9,20 @@
 
 use lunix_format::commit::Commit;
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
-use lunix_iface::store::{CheckpointStore, CommitStore, PackStore, SegmentStore, VolumeDir};
-use lunix_iface::Result;
+use lunix_iface::store::{
+    CheckpointStore, CommitStore, FloorReset, PackStore, SegmentStore, VolumeDir,
+};
 
 use crate::code;
-use crate::facts::Facts;
+use crate::facts::{Facts, Retained, Tip};
 use crate::gc::{self, GcContext};
 use crate::indexcheck;
 use crate::journal;
-use crate::report::{Finding, RepairAction, Sink};
+use crate::mapwalk;
+use crate::report::{Finding, RepairAction, Severity, Sink};
+use crate::resolve;
 use crate::session::Session;
 use crate::Options;
-
-/// The one operation fsck needs and `lunix-iface` does not offer: lowering the
-/// rollback floor (`VolumeDir::raise_rollback_floor` is raise-only and
-/// `store_local_pins` keeps the floor).
-///
-/// **Open iface item (M14 report, proposal P1).** Until the lead approves the
-/// proposed `VolumeDir::reset_rollback_floor(&RollbackFloor, reason)`, no
-/// implementation is wired in: [`Options::floor_lowering`] is `None` and every
-/// repair that would lower the floor is refused before it changes anything.
-/// Tests install a stand-in that rewrites `state/pins` with the format types.
-pub trait FloorLowering: Send + Sync {
-    /// Sets the floor of `vol` to `new`, lower than the one recorded or not.
-    /// `reason` is `"truncate_tip"` or `"reset_floor"`, for the audit line.
-    ///
-    /// # Errors
-    /// Whatever the implementation refuses with; nothing may have changed.
-    fn set_floor(
-        &self,
-        vol: &dyn VolumeDir,
-        new: &RollbackFloor,
-        reason: &'static str,
-    ) -> Result<()>;
-}
 
 fn refuse(sink: &mut Sink, what: &str, why: impl Into<String>) {
     sink.push(Finding::new(
@@ -52,100 +32,123 @@ fn refuse(sink: &mut Sink, what: &str, why: impl Into<String>) {
     ));
 }
 
-const NEEDS_IFACE: &str = "lowering the rollback floor needs the iface method VolumeDir::reset_rollback_floor, which is not wired in yet (M14 report, proposal P1)";
+/// Runs the checks again; later repairs must use the state after the earlier ones.
+pub(crate) type Recheck<'a> = &'a dyn Fn(&mut Sink) -> Facts;
 
-/// Lowers (or sets) the floor through the installed hook.
-fn lower_floor(
-    s: &Session,
-    opts: &Options,
-    new: &RollbackFloor,
-    reason: &'static str,
-) -> std::result::Result<(), String> {
-    match &opts.floor_lowering {
-        None => Err(NEEDS_IFACE.to_owned()),
-        Some(h) => h
-            .set_floor(&s.vol, new, reason)
-            .map_err(|e| format!("lowering the floor failed: {e}")),
-    }
+fn refresh(recheck: Recheck<'_>, facts: &mut Facts, found: &mut Sink) {
+    let mut sink = Sink::default();
+    *facts = recheck(&mut sink);
+    *found = sink;
 }
 
 pub(crate) fn run(
     s: &Session,
-    facts: &Facts,
     opts: &Options,
-    found: &Sink,
-    sink: &mut Sink,
+    facts: &mut Facts,
+    found: &mut Sink,
+    refusals: &mut Sink,
     actions: &mut Vec<RepairAction>,
+    recheck: Recheck<'_>,
 ) {
     if opts.truncate_tip {
         if !opts.repair {
-            refuse(sink, "--truncate-tip", "it is a repair: add --repair");
-        } else if !truncate_tip(s, facts, opts, sink, actions) {
-            // Nothing else runs on a volume whose tip is in question.
-            return;
+            refuse(refusals, "--truncate-tip", "it is a repair: add --repair");
+        } else {
+            let before = actions.len();
+            let ok = truncate_tip(s, facts, refusals, actions);
+            if actions.len() > before {
+                refresh(recheck, facts, found);
+            }
+            if !ok {
+                // Nothing else runs on a volume whose tip is in question.
+                return;
+            }
+        }
+    }
+    if opts.repair_pins {
+        if !opts.repair {
+            refuse(refusals, "--repair-pins", "it is a repair: add --repair");
+        } else if repair_pins(s, facts, refusals, actions) {
+            refresh(recheck, facts, found);
         }
     }
     if opts.reset_floor {
         if !opts.repair {
-            refuse(sink, "--reset-floor", "it is a repair: add --repair");
-        } else {
-            reset_floor(s, facts, opts, sink, actions);
+            refuse(refusals, "--reset-floor", "it is a repair: add --repair");
+        } else if reset_floor(s, facts, refusals, actions) {
+            refresh(recheck, facts, found);
         }
+    }
+    if opts.gc && !opts.repair {
+        refuse(refusals, "--gc", "it is a repair: add --repair");
+    }
+    if opts.delete_orphans && !opts.repair {
+        refuse(refusals, "--delete-orphans", "it is a repair: add --repair");
     }
     if opts.repair {
         match s.vol.remove_leftovers() {
             Ok(0) => {}
-            Ok(n) => actions.push(RepairAction {
-                action: "remove_leftovers",
-                detail: format!("{n} *.tmp and *.open files removed"),
-            }),
-            Err(e) => refuse(sink, "leftovers", format!("{e}")),
+            Ok(n) => {
+                actions.push(RepairAction {
+                    action: "remove_leftovers",
+                    detail: format!("{n} *.tmp and *.open files removed"),
+                });
+                refresh(recheck, facts, found);
+            }
+            Err(e) => refuse(refusals, "leftovers", format!("{e}")),
         }
     }
-    if opts.repair && opts.delete_orphans {
-        if opts.truncate_tip {
-            refuse(
-                sink,
-                "--delete-orphans",
-                "not together with --truncate-tip: the checkpoint's id_high is zeroed with it and the ids of deleted objects could be reissued; run it after the next mount",
-            );
-        } else {
-            delete_orphans(s, facts, sink, actions);
-        }
-    } else if opts.delete_orphans {
-        refuse(sink, "--delete-orphans", "it is a repair: add --repair");
-    }
+    // The index first: a stale hint is resolved only through it, so what is an
+    // orphan can be said only after it is whole again.
     let index_damaged = [
         code::INDEX_RUN,
         code::INDEX_MISSING,
         code::INDEX_STALE,
         code::INDEX_EXTRA,
-        code::INDEX_FILE,
+        code::MAP_ENTRY_UNRESOLVED,
     ]
     .iter()
     .any(|c| found.has(c));
     if opts.rebuild_index || (opts.repair && index_damaged) {
         if facts.tip.is_none() || !facts.chain_ok {
             refuse(
-                sink,
+                refusals,
                 "index",
                 "the retained chain does not verify, so the segments in use are unknown; repair the chain first",
             );
         } else {
             match indexcheck::rebuild(s, facts) {
-                Ok(n) => actions.push(RepairAction {
-                    action: "rebuild_index",
-                    detail: format!("rebuilt from the footers: {n} entries"),
-                }),
-                Err(e) => refuse(sink, "index", format!("{e}")),
+                Ok(n) => {
+                    actions.push(RepairAction {
+                        action: "rebuild_index",
+                        detail: format!(
+                            "rebuilt from every good segment at or below the high-water mark: {n} entries"
+                        ),
+                    });
+                    refresh(recheck, facts, found);
+                }
+                Err(e) => refuse(refusals, "index", format!("{e}")),
             }
         }
     }
-    if opts.repair && found.has(code::CHECKPOINT) && !opts.truncate_tip {
-        rewrite_checkpoint(s, facts, sink, actions);
+    if opts.repair && opts.delete_orphans {
+        if opts.truncate_tip {
+            refuse(
+                refusals,
+                "--delete-orphans",
+                "not together with --truncate-tip: the checkpoint's id_high is zeroed with it and the ids of deleted objects could be reissued; run it after the next mount",
+            );
+        } else if delete_orphans(s, facts, found, refusals, actions) {
+            // The index still names what was deleted: rebuild it from what is left.
+            refresh(recheck, facts, found);
+            if let Err(e) = indexcheck::rebuild(s, facts) {
+                refuse(refusals, "index", format!("after the delete: {e}"));
+            }
+            refresh(recheck, facts, found);
+        }
     }
-    if opts.gc && !opts.repair {
-        refuse(sink, "--gc", "it is a repair: add --repair");
+    if opts.repair && found.has(code::CHECKPOINT) && !opts.truncate_tip {
+        rewrite_checkpoint(s, facts, refusals, actions);
     }
     if opts.repair && opts.gc {
         let ctx = GcContext {
@@ -153,13 +156,16 @@ pub(crate) fn run(
             facts,
             repair: true,
         };
-        for f in gc::check_gc(&ctx) {
-            sink.push(f);
+        let fs = gc::check_gc(&ctx);
+        if !fs.is_empty() {
+            for f in fs {
+                refusals.push(f);
+            }
+            actions.push(RepairAction {
+                action: "gc",
+                detail: "the GC repair ran".to_owned(),
+            });
         }
-        actions.push(RepairAction {
-            action: "gc",
-            detail: "the GC repair of this build has no pending work to finish".to_owned(),
-        });
     }
 }
 
@@ -167,7 +173,6 @@ pub(crate) fn run(
 fn truncate_tip(
     s: &Session,
     facts: &Facts,
-    opts: &Options,
     sink: &mut Sink,
     actions: &mut Vec<RepairAction>,
 ) -> bool {
@@ -224,21 +229,60 @@ fn truncate_tip(
         );
         return false;
     }
+    // The previous commit must still be a root: what only it references may
+    // already be collected (the rollback floor keeps its commit file, not its
+    // data).
+    if let Some(t) = &facts.tip {
+        if prev.seq < t.full.chain_floor {
+            refuse(
+                sink,
+                what,
+                format!(
+                    "the previous commit {} is below the tip's chain_floor {}: GC may have collected what only it references",
+                    prev.seq.0, t.full.chain_floor.0
+                ),
+            );
+            return false;
+        }
+    } else if facts.json.as_ref().is_some_and(|j| j.retain_last < 2) {
+        refuse(
+            sink,
+            what,
+            "retain_last is below 2: the previous commit is not a retained root and its data may be gone",
+        );
+        return false;
+    }
     let prev_hash = s.commit_codec().object_hash(&prev_bytes);
+    if let Err(why) = previous_root_resolves(s, facts, &prev_commit, prev.seq, prev_hash) {
+        refuse(
+            sink,
+            what,
+            format!("the previous commit's map does not resolve completely ({why}); nothing was changed"),
+        );
+        return false;
+    }
     let new_floor = RollbackFloor {
         max_commit_seq: prev.seq,
         tip_hash: prev_hash,
     };
     // The floor first: a crash after it leaves the old tip with a lower
     // floor, and a rerun does the same again.
-    let mut lowered = None;
     if let Some(f) = facts.floor {
         if f.max_commit_seq > prev.seq {
-            if let Err(why) = lower_floor(s, opts, &new_floor, "truncate_tip") {
-                refuse(sink, what, why);
+            if let Err(e) = s
+                .vol
+                .reset_rollback_floor(&new_floor, FloorReset::TruncateTip)
+            {
+                refuse(sink, what, format!("lowering the floor failed: {e}"));
                 return false;
             }
-            lowered = Some(f);
+            actions.push(RepairAction {
+                action: "lower_floor",
+                detail: format!(
+                    "rollback floor lowered from commit {} to commit {}",
+                    f.max_commit_seq.0, prev.seq.0
+                ),
+            });
         } else if f.max_commit_seq == prev.seq && f.tip_hash != prev_hash {
             refuse(
                 sink,
@@ -248,14 +292,14 @@ fn truncate_tip(
             return false;
         }
     }
-    // What the older floor can no longer cover.
+    // What the older cut can no longer cover.
     let mut jn = Sink::default();
     let sc = journal::scan(s, &mut jn);
     let cut = prev_commit.cut_seq.0;
     let first_above = sc.seqs.iter().copied().find(|q| *q > cut);
     let lost = match first_above {
         Some(q) if q > cut + 1 => format!(
-            "journal records {}..={} were reclaimed by the damaged tip's cut and are lost",
+            "journal records {}..={} were reclaimed by the damaged tip's cut and are lost; recovery stops at that gap and ignores every record above it (ignored_after_gap)",
             cut + 1,
             q - 1
         ),
@@ -264,7 +308,7 @@ fn truncate_tip(
     };
     if let Err(e) = s.vol.set_aside(tip.seq) {
         refuse(sink, what, format!("{e}"));
-        return false;
+        return !actions.is_empty();
     }
     if let Err(e) = s.vol.zero() {
         refuse(
@@ -272,6 +316,13 @@ fn truncate_tip(
             "checkpoint",
             format!("the tip was set aside but the checkpoint could not be zeroed: {e}"),
         );
+        actions.push(RepairAction {
+            action: "truncate_tip",
+            detail: format!(
+                "commit {} moved aside; the checkpoint is NOT zeroed",
+                tip.seq.0
+            ),
+        });
         return false;
     }
     actions.push(RepairAction {
@@ -281,25 +332,91 @@ fn truncate_tip(
             tip.seq.0, tip.seq.0, prev.seq.0
         ),
     });
-    if let Some(old) = lowered {
-        actions.push(RepairAction {
-            action: "lower_floor",
-            detail: format!(
-                "rollback floor lowered from commit {} to commit {}",
-                old.max_commit_seq.0, prev.seq.0
-            ),
-        });
-    }
     true
 }
 
+/// Walks the previous commit's map completely: nothing may be unresolved.
+fn previous_root_resolves(
+    s: &Session,
+    facts: &Facts,
+    prev: &lunix_format::commit::Full,
+    seq: lunix_format::CommitSeq,
+    hash: [u8; 32],
+) -> std::result::Result<(), String> {
+    let mut f = Facts {
+        segments: facts.segments.clone(),
+        packs: facts.packs.clone(),
+        tip: Some(Tip {
+            seq,
+            hash,
+            full: prev.clone(),
+        }),
+        retained: vec![Retained {
+            seq,
+            commit: Commit::Full(prev.clone()),
+            hash,
+        }],
+        ..Facts::default()
+    };
+    let mut sink = Sink::default();
+    mapwalk::walk(s, &mut sink, &mut f);
+    let view = indexcheck::open_view(s, &mut sink);
+    resolve::run(s, view.as_ref(), &mut sink, &mut f);
+    let bad = sink.findings.iter().find(|x| x.severity == Severity::Error);
+    match bad {
+        Some(x) => Err(format!("{}: {}", x.code, x.message)),
+        None if !f.walk.as_ref().is_some_and(|w| w.tip_complete) => {
+            Err("the walk did not complete".to_owned())
+        }
+        None => Ok(()),
+    }
+}
+
+/// `--repair-pins`: a rejected `state/pins` is replaced from the verified tip.
+fn repair_pins(
+    s: &Session,
+    facts: &Facts,
+    sink: &mut Sink,
+    actions: &mut Vec<RepairAction>,
+) -> bool {
+    let what = "--repair-pins";
+    if !facts.pins_rejected {
+        refuse(sink, what, "state/pins is not rejected; nothing to repair");
+        return false;
+    }
+    let (Some(tip), true) = (&facts.tip, facts.chain_ok) else {
+        refuse(sink, what, "the tip or its chain does not verify");
+        return false;
+    };
+    let new = RollbackFloor {
+        max_commit_seq: tip.seq,
+        tip_hash: tip.hash,
+    };
+    match s.vol.reset_rollback_floor(&new, FloorReset::RepairPins) {
+        Ok(_) => {
+            actions.push(RepairAction {
+                action: "repair_pins",
+                detail: format!(
+                    "state/pins replaced; floor is commit {}; max_keyring_seq, max_epoch and the pin were reset (the next attach pins again)",
+                    tip.seq.0
+                ),
+            });
+            true
+        }
+        Err(e) => {
+            refuse(sink, what, format!("{e}"));
+            false
+        }
+    }
+}
+
+/// Returns true when the floor changed.
 fn reset_floor(
     s: &Session,
     facts: &Facts,
-    opts: &Options,
     sink: &mut Sink,
     actions: &mut Vec<RepairAction>,
-) {
+) -> bool {
     let what = "--reset-floor";
     let Some(tip) = &facts.tip else {
         refuse(
@@ -307,11 +424,11 @@ fn reset_floor(
             what,
             "the tip does not authenticate; there is no verified tip to set the floor to",
         );
-        return;
+        return false;
     };
     if !facts.chain_ok {
         refuse(sink, what, "the chain does not verify down to chain_floor");
-        return;
+        return false;
     }
     let new = RollbackFloor {
         max_commit_seq: tip.seq,
@@ -323,31 +440,29 @@ fn reset_floor(
             action: "reset_floor",
             detail: format!("the floor is already commit {}", tip.seq.0),
         });
-        return;
+        return false;
     }
-    let lowering = old.is_some_and(|f| {
-        f.max_commit_seq > new.max_commit_seq
-            || (f.max_commit_seq == new.max_commit_seq && f.tip_hash != new.tip_hash)
-    });
-    let r: std::result::Result<(), String> = if lowering {
-        lower_floor(s, opts, &new, "reset_floor")
-    } else {
-        s.vol.raise_rollback_floor(&new).map_err(|e| format!("{e}"))
-    };
+    let r = s.vol.reset_rollback_floor(&new, FloorReset::OperatorReset);
     match r {
-        Ok(()) => actions.push(RepairAction {
-            action: "reset_floor",
-            detail: format!(
-                "floor was {}, now commit {} ({})",
-                old.map_or_else(
-                    || "absent".to_owned(),
-                    |f| format!("commit {}", f.max_commit_seq.0)
+        Ok(_) => {
+            actions.push(RepairAction {
+                action: "reset_floor",
+                detail: format!(
+                    "floor was {}, now commit {} ({})",
+                    old.map_or_else(
+                        || "absent".to_owned(),
+                        |f| format!("commit {}", f.max_commit_seq.0)
+                    ),
+                    tip.seq.0,
+                    hex8(&tip.hash)
                 ),
-                tip.seq.0,
-                hex8(&tip.hash)
-            ),
-        }),
-        Err(why) => refuse(sink, what, why),
+            });
+            true
+        }
+        Err(e) => {
+            refuse(sink, what, format!("{e}"));
+            false
+        }
     }
 }
 
@@ -399,8 +514,9 @@ fn rewrite_checkpoint(
     let Some(slot) = checkpoint_slot(s, facts) else {
         return;
     };
-    // Both slots go: a damaged one must not survive next to the new one.
-    let written = s.vol.zero().and_then(|()| s.vol.store(&slot));
+    // Two stores: each writes the older slot, so the damaged one is replaced
+    // and, with a crash in between, a valid slot always remains.
+    let written = s.vol.store(&slot).and_then(|()| s.vol.store(&slot));
     match written {
         Ok(()) => actions.push(RepairAction {
             action: "rewrite_checkpoint",
@@ -413,16 +529,49 @@ fn rewrite_checkpoint(
     }
 }
 
-fn delete_orphans(s: &Session, facts: &Facts, sink: &mut Sink, actions: &mut Vec<RepairAction>) {
+/// Returns true when something was deleted.
+fn delete_orphans(
+    s: &Session,
+    facts: &Facts,
+    found: &Sink,
+    sink: &mut Sink,
+    actions: &mut Vec<RepairAction>,
+) -> bool {
     let what = "--delete-orphans";
-    let walked = facts.walk.as_ref().is_some_and(|w| w.tip_complete);
-    if facts.tip.is_none() || !facts.chain_ok || !walked {
+    // What is an orphan is said only from a complete resolution: any error
+    // finding (an unresolved entry, a failed walk, a damaged container, ...),
+    // a missing index view or a pin that is not understood stops it.
+    let worst = found
+        .findings
+        .iter()
+        .find(|f| f.severity == Severity::Error);
+    if let Some(f) = worst {
         refuse(
             sink,
             what,
-            "the retained roots could not be walked completely, so nothing can be called an orphan",
+            format!(
+                "the checks found an error ({}: {}); repair that first, a segment that a stale hint still reaches must never be deleted",
+                f.code, f.message
+            ),
         );
-        return;
+        return false;
+    }
+    let walked = facts.walk.as_ref().is_some_and(|w| w.tip_complete);
+    if facts.tip.is_none() || !facts.chain_ok || !walked || !facts.index_ok {
+        refuse(
+            sink,
+            what,
+            "the retained roots could not be walked completely or the index could not be read, so nothing can be called an orphan",
+        );
+        return false;
+    }
+    if facts.pins_busy {
+        refuse(
+            sink,
+            what,
+            "there are snapshot, reader or hold pins (or they cannot be read): fsck does not walk pinned roots yet",
+        );
+        return false;
     }
     let used_packs = facts
         .walk
@@ -450,7 +599,7 @@ fn delete_orphans(s: &Session, facts: &Facts, sink: &mut Sink, actions: &mut Vec
         .copied()
         .collect();
     if segs.is_empty() && packs.is_empty() {
-        return;
+        return false;
     }
     // Ids are never reused: record the highest id on disk before any delete.
     let hi = highest_id(s, facts);
@@ -459,7 +608,7 @@ fn delete_orphans(s: &Session, facts: &Facts, sink: &mut Sink, actions: &mut Vec
         if let Some(slot) = checkpoint_slot(s, facts) {
             if let Err(e) = s.vol.store(&slot) {
                 refuse(sink, "checkpoint", format!("{e}"));
-                return;
+                return false;
             }
         }
     }
@@ -486,4 +635,5 @@ fn delete_orphans(s: &Session, facts: &Facts, sink: &mut Sink, actions: &mut Vec
         action: "delete_orphans",
         detail: format!("{ns} segments and {np} packs deleted, {bytes} bytes freed"),
     });
+    ns + np > 0
 }

@@ -367,14 +367,6 @@ fn a_consistent_map_that_is_not_what_its_parents_say_is_caught_by_r2() {
 // ---------------------------------------------------------------------------
 // R4: the rollback floor.
 
-fn set_floor(b: &Built, floor: Option<RollbackFloor>) {
-    let mut f = LocalPinsFile::decode(&b.read("state/pins")).expect("pins");
-    f.floor = floor;
-    let mut out = Vec::new();
-    f.encode(&mut out).expect("encode");
-    b.write("state/pins", &out);
-}
-
 #[test]
 fn a_chain_rolled_back_below_the_floor_is_rollback() {
     for mode in keyed_modes() {

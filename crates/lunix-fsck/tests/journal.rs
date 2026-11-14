@@ -127,3 +127,15 @@ fn a_decreasing_created_at_is_a_warning_and_never_an_error() {
         assert!(r.has(code::CREATED_AT));
     }
 }
+
+#[test]
+fn a_damaged_ring_file_header_is_at_least_a_warning() {
+    for mode in ALL_MODES {
+        let b = build(&spec(mode));
+        // Lane 0's only file: its header goes, and every record in it.
+        b.flip(&lane_file(0), 10);
+        let r = b.fsck(&b.opts());
+        assert!(r.exit_code() >= 1, "{}", r.render_text());
+        assert!(r.has(code::JOURNAL_FILE), "{}", r.render_text());
+    }
+}

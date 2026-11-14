@@ -28,5 +28,9 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
    floor, sets the tip aside, then zeroes the checkpoint; it loses the journal
    records C9 already reclaimed, and says which. `--delete-orphans` is refused
    with `--truncate-tip` (the zeroed checkpoint loses `id_high`).
-7. Lowering the rollback floor is a stub (`FloorLowering`) until the lead
-   approves `VolumeDir::reset_rollback_floor` (M14 report, proposal P1).
+7. The floor is lowered only through `VolumeDir::reset_rollback_floor`
+   (store opened with `allow_floor_reset`, audited in `state/floor-resets.log`).
+8. Memory is about 330 bytes per distinct chunk (see the crate docs).
+9. Taking the lock rewrites `LOCK` with the pid: that is the one write a check
+   makes, and a read-only medium cannot be checked.
+10. A keyed volume without a credential gets no check at all.

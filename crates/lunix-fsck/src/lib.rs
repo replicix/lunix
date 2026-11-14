@@ -46,10 +46,16 @@
 //!
 //! # Memory
 //!
-//! The walk is streaming. Memory is the entries of the tip root (about 64
-//! bytes each), the footers of the segments in use (about 70 bytes per
-//! extent) and a set of distinct chunk ids; one container's extent region
-//! (a segment is 16 MiB) is read whole to hash it.
+//! The walk streams the nodes, but the checks keep per-chunk state: the tip
+//! root's entries (64 bytes per **mapped** chunk), the footers of every
+//! container (about 48 bytes per extent), and sets of distinct chunk ids
+//! (resolution, index comparison). Measured on a volume with 320 000
+//! distinct and 400 000 mapped chunks: peak RSS 100 MiB, about **330 bytes per
+//! distinct chunk**. A full 1 TiB volume of 64 KiB chunks (16 M chunks) needs
+//! about 5 GiB, one of 16 KiB chunks about 20 GiB, plus the scratch copy of
+//! the index on disk and one container's extent region (16 MiB) in memory.
+//! A streaming rework (resolve per segment and drop, sorted vectors for the
+//! id sets) is a listed follow-up.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -69,25 +75,24 @@ mod session;
 mod state;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-pub use repair::FloorLowering;
 pub use report::{
     CategoryBytes, Finding, Ratios, RepairAction, Report, Severity, Stats, PER_CODE_CAP,
 };
 
 use facts::Facts;
+use lunix_iface::ctl::Secret;
 use report::Sink;
 
 /// How to unlock a keyed volume.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Credentials {
     /// A key file (the raw 32 bytes). For an `integrity` volume made by
     /// `volume create` without a passphrase, `<volume dir>/integrity.key` is
     /// tried when nothing else is given.
     pub key_file: Option<PathBuf>,
-    /// A passphrase.
-    pub passphrase: Option<Vec<u8>>,
+    /// A passphrase, any bytes. Zeroized on drop; never printed.
+    pub passphrase: Option<Secret>,
 }
 
 impl std::fmt::Debug for Credentials {
@@ -103,7 +108,7 @@ impl std::fmt::Debug for Credentials {
 }
 
 /// What to do.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Options {
     /// `--deep`: open every extent.
     pub deep: bool,
@@ -121,9 +126,14 @@ pub struct Options {
     pub reset_floor: bool,
     /// Credentials for a keyed volume.
     pub credentials: Credentials,
-    /// How the rollback floor is lowered; see [`FloorLowering`]. `None` until
-    /// the iface method is approved: such repairs are refused.
-    pub floor_lowering: Option<Arc<dyn FloorLowering>>,
+    /// `--repair-pins` (with `--repair`): replace a rejected `state/pins` by a
+    /// fresh file whose floor is the verified tip. Gives up the recorded
+    /// `max_keyring_seq`, `max_epoch` and pin; audited.
+    pub repair_pins: bool,
+    /// Where the scratch copy of the index goes: a private directory (mode
+    /// 0700, created exclusively) is made inside it. Default: the directory
+    /// that holds the volume directory, so it is on the same file system.
+    pub scratch_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Options {
@@ -136,6 +146,7 @@ impl std::fmt::Debug for Options {
             .field("gc", &self.gc)
             .field("truncate_tip", &self.truncate_tip)
             .field("reset_floor", &self.reset_floor)
+            .field("repair_pins", &self.repair_pins)
             .finish_non_exhaustive()
     }
 }
@@ -158,6 +169,7 @@ fn run_checks(s: &session::Session, opts: &Options, sink: &mut Sink) -> Facts {
     }
     containers::check(s, opts.deep, sink, &mut facts);
     let view = indexcheck::open_view(s, sink);
+    facts.index_ok = view.is_some();
     mapwalk::walk(s, sink, &mut facts);
     resolve::run(s, view.as_ref(), sink, &mut facts);
     resolve::orphans(sink, &facts);
@@ -205,6 +217,10 @@ fn uncovered(deep: bool) -> Vec<String> {
 /// Never panics on a damaged volume and never returns an error: every
 /// failure, including a volume that cannot be opened, is a finding.
 pub fn check(dir: &Path, opts: &Options) -> Report {
+    // The keyring lives beside the volume directory: resolve a relative path
+    // first (`Path::new("vol").parent()` is the empty path, not `.`).
+    let abs = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir = abs.as_path();
     let mut sink = Sink::default();
     let mut ident = None;
     let session = session::open(dir, opts, &mut sink, &mut ident);
@@ -216,17 +232,27 @@ pub fn check(dir: &Path, opts: &Options) -> Report {
             || opts.rebuild_index
             || opts.truncate_tip
             || opts.reset_floor
+            || opts.repair_pins
             || opts.delete_orphans
             || opts.gc;
         if wants_repair {
-            let mut rsink = Sink::default();
-            repair::run(s, &facts, opts, &sink, &mut rsink, &mut repairs);
+            let mut refusals = Sink::default();
+            let recheck = |sink: &mut Sink| run_checks(s, opts, sink);
+            repair::run(
+                s,
+                opts,
+                &mut facts,
+                &mut sink,
+                &mut refusals,
+                &mut repairs,
+                &recheck,
+            );
             if !repairs.is_empty() {
-                // Report the state after the repair.
+                // Report the state after the repairs.
                 sink = Sink::default();
                 facts = run_checks(s, opts, &mut sink);
             }
-            for f in rsink.findings {
+            for f in refusals.findings {
                 sink.push(f);
             }
         }

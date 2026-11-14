@@ -57,4 +57,12 @@ pub(crate) struct Facts {
     /// Sum of `journal/` file sizes.
     pub(crate) journal_bytes: u64,
     pub(crate) uncovered: Vec<String>,
+    /// The highest object id any retained commit names (DESIGN 4.4 step 4).
+    pub(crate) high_water: u64,
+    /// The scratch copy of the index could be opened.
+    pub(crate) index_ok: bool,
+    /// `state/pins` exists and was rejected.
+    pub(crate) pins_rejected: bool,
+    /// `PinSource::roots()` failed or returned something.
+    pub(crate) pins_busy: bool,
 }

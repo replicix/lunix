@@ -57,6 +57,10 @@ pub struct Spec {
     pub segment_target: u64,
     /// The last commit's `created_at` steps back (a clock step).
     pub clock_back: bool,
+    /// An encrypted volume unlocked by this passphrase (any bytes) instead of a key file.
+    pub passphrase: Option<Vec<u8>>,
+    /// Every chunk compresses to a few bytes (many distinct extents stay small).
+    pub compressible_only: bool,
 }
 
 impl Spec {
@@ -75,6 +79,8 @@ impl Spec {
             lanes: 2,
             segment_target: 8 << 20,
             clock_back: false,
+            passphrase: None,
+            compressible_only: false,
         }
     }
 }
@@ -181,8 +187,12 @@ pub fn lz4_runs(data: &[u8]) -> Vec<u8> {
 
 /// Blob `i` of `chunk_size` bytes: its content, codec and compressed form.
 pub fn blob(i: usize, chunk_size: u32) -> (Vec<u8>, Codec, Vec<u8>) {
+    blob_kind(i, chunk_size, i % 4)
+}
+
+pub fn blob_kind(i: usize, chunk_size: u32, kind: usize) -> (Vec<u8>, Codec, Vec<u8>) {
     let n = chunk_size as usize;
-    match i % 4 {
+    match kind {
         0 => {
             let d = lcg(i as u64 + 1, n);
             (d.clone(), Codec::Raw, d)
@@ -254,17 +264,41 @@ pub fn build(spec: &Spec) -> Built {
             (Some(c.root), Some(kf), Some(c.bytes))
         }
         CryptoMode::Encrypted => {
-            let kfp = base.join("kmk.key");
-            let kf = KeyFile::generate().expect("key file");
-            kf.write_new(&kfp).expect("write key file");
-            let c = keyring::create(
-                Profile::Default,
-                FamilyId(family),
-                RootKind::Kmk,
-                &NewSlot::KeyFile(&kf),
-            )
-            .expect("kmk");
-            (Some(c.root), Some(kfp), Some(c.bytes))
+            let (slot_file, created) = match &spec.passphrase {
+                Some(p) => (
+                    None,
+                    keyring::create(
+                        Profile::Default,
+                        FamilyId(family),
+                        RootKind::Kmk,
+                        &NewSlot::Passphrase {
+                            passphrase: p,
+                            cost: keyring::Argon2Cost {
+                                m_kib: 19_456,
+                                t: 2,
+                                p: 1,
+                            },
+                        },
+                    )
+                    .expect("kmk"),
+                ),
+                None => {
+                    let kfp = base.join("kmk.key");
+                    let kf = KeyFile::generate().expect("key file");
+                    kf.write_new(&kfp).expect("write key file");
+                    (
+                        Some(kfp),
+                        keyring::create(
+                            Profile::Default,
+                            FamilyId(family),
+                            RootKind::Kmk,
+                            &NewSlot::KeyFile(&kf),
+                        )
+                        .expect("kmk"),
+                    )
+                }
+            };
+            (Some(created.root), slot_file, Some(created.bytes))
         }
     };
     let desc_bytes = seal_descriptor(&mut desc, root.as_ref()).expect("seal descriptor");
@@ -385,7 +419,11 @@ fn fill(
             if stored.contains_key(&b) {
                 continue;
             }
-            let (data, codec, comp) = blob(b, spec.chunk_size);
+            let (data, codec, comp) = blob_kind(
+                b,
+                spec.chunk_size,
+                if spec.compressible_only { 1 } else { b % 4 },
+            );
             let id = extents.chunk_id(ExtentKind::Data, &data);
             let mut ext = Vec::new();
             extents
@@ -716,25 +754,14 @@ pub fn mode_name(m: CryptoMode) -> &'static str {
     }
 }
 
-/// Stands in for the proposed `VolumeDir::reset_rollback_floor`: rewrites
-/// `state/pins` with the format types.
-pub struct DirectPins;
-
-impl lunix_fsck::FloorLowering for DirectPins {
-    fn set_floor(
-        &self,
-        vol: &dyn VolumeDir,
-        new: &lunix_format::local::RollbackFloor,
-        _reason: &'static str,
-    ) -> lunix_iface::Result<()> {
-        let path = vol.dir().join("state/pins");
-        let mut f = lunix_format::local::LocalPinsFile::decode(&std::fs::read(&path)?)?;
-        f.floor = Some(*new);
-        let mut out = Vec::new();
-        f.encode(&mut out)?;
-        std::fs::write(&path, out)?;
-        Ok(())
-    }
+/// Sets (or clears) the floor of `state/pins` directly, to build a volume the
+/// engine would never leave behind.
+pub fn set_floor(b: &Built, floor: Option<lunix_format::local::RollbackFloor>) {
+    let mut f = lunix_format::local::LocalPinsFile::decode(&b.read("state/pins")).expect("pins");
+    f.floor = floor;
+    let mut out = Vec::new();
+    f.encode(&mut out).expect("encode");
+    b.write("state/pins", &out);
 }
 
 /// The records of every ring file of `dir`: `(write_seq, offset in file)`.

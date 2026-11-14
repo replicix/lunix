@@ -61,10 +61,15 @@ pub(crate) fn parse_hex16(name: &str) -> Option<u64> {
     }
 }
 
-fn names(dir: &Path) -> Vec<String> {
-    let mut v: Vec<String> = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
+fn names(dir: &Path, rel: &str, sink: &mut Sink) -> Vec<String> {
+    let rd = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            sink.push(Finding::new(code::IO, rel, format!("cannot list: {e}")));
+            return Vec::new();
+        }
+    };
+    let mut v: Vec<String> = rd
         .flatten()
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
@@ -72,8 +77,11 @@ fn names(dir: &Path) -> Vec<String> {
     v
 }
 
+/// No footer is longer than this, whatever the trailer claims.
+const MAX_FOOTER_LEN: u64 = 256 << 20;
+
 pub(crate) fn check(s: &Session, deep: bool, sink: &mut Sink, facts: &mut Facts) {
-    for name in names(&s.dir.join("segments")) {
+    for name in names(&s.dir.join("segments"), "segments/", sink) {
         let Some(stem) = name.strip_suffix(".seg") else {
             continue;
         };
@@ -84,7 +92,7 @@ pub(crate) fn check(s: &Session, deep: bool, sink: &mut Sink, facts: &mut Facts)
         facts.stats.segments += 1;
         facts.segments.insert(id, c);
     }
-    for name in names(&s.dir.join("map")) {
+    for name in names(&s.dir.join("map"), "map/", sink) {
         let Some(id) = parse_hex16(&name).and_then(|r| ObjId::from_raw(r).ok()) else {
             continue;
         };
@@ -169,7 +177,7 @@ fn verify(
         return c;
     };
     let cap = cap as u64;
-    if u64::from(trailer.footer_len) > cap + cap / 128 + 1024 {
+    if u64::from(trailer.footer_len) > (cap + cap / 128 + 1024).min(MAX_FOOTER_LEN) {
         sink.push(Finding::new(
             code::FOOTER_CORRUPT,
             &obj,

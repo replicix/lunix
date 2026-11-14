@@ -97,11 +97,15 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
         let len = buf.len() / BLOCK * BLOCK;
         let whole = &buf[..len];
         let mut bad = len < BLOCK;
+        let mut header_bad = bad;
         let mut recs: Vec<(u64, usize)> = Vec::new();
         let mut damaged: Vec<Range<usize>> = Vec::new();
         if !bad {
             match scan_file(whole, WriteSeq(prev)) {
-                Err(_) => bad = true,
+                Err(_) => {
+                    bad = true;
+                    header_bad = true;
+                }
                 Ok(res) => {
                     if res.header.volume_uuid != s.desc.volume_uuid {
                         sink.push(Finding::new(
@@ -132,6 +136,15 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
             // A file that was never initialised is all zeros and holds nothing.
             if buf.iter().all(|b| *b == 0) {
                 continue;
+            }
+            // Every record in a file whose header is gone is lost: at least a
+            // warning, whatever follows in its lane.
+            if header_bad {
+                sink.push(Finding::new(
+                    code::JOURNAL_FILE,
+                    &rel,
+                    "the file header is damaged or wrong: every record in the file is unreadable",
+                ));
             }
             open.push(out.damaged.len());
             out.damaged.push(Damage {

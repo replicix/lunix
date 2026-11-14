@@ -29,6 +29,8 @@ pub(crate) struct Session {
     pub(crate) crypto: VolumeCrypto,
     /// BLAKE3-256 of the exact `volume` bytes (the genesis `parent_hash`).
     pub(crate) volume_hash: [u8; 32],
+    /// Where scratch directories go: next to the volume, or `Options::scratch_dir`.
+    pub(crate) scratch_base: PathBuf,
 }
 
 impl Session {
@@ -143,7 +145,7 @@ pub(crate) fn open(
             cands.push(Cand::KeyFile(p.clone()));
         }
         if let Some(p) = &opts.credentials.passphrase {
-            cands.push(Cand::Pass(p));
+            cands.push(Cand::Pass(p.expose()));
         }
         let default_key = dir.join(lpath::integrity_key());
         if default_key.exists()
@@ -236,6 +238,8 @@ pub(crate) fn open(
     let meta: Arc<dyn MetaCodec> = crypto.meta().clone();
     let store_opts = StoreOptions {
         allow_tmpfs: true,
+        // The one place that may lower the rollback floor (offline repair).
+        allow_floor_reset: true,
         ..StoreOptions::default()
     };
     let vol = match LocalVolume::open(dir, meta, store_opts) {
@@ -260,6 +264,11 @@ pub(crate) fn open(
         desc,
         crypto,
         volume_hash,
+        scratch_base: opts
+            .scratch_dir
+            .clone()
+            .or_else(|| dir.parent().map(Path::to_path_buf))
+            .unwrap_or_else(std::env::temp_dir),
     })
 }
 
