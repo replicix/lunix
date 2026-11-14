@@ -1008,6 +1008,7 @@ dependencies = [
  "lunix-fsck",
  "lunix-iface",
  "lunix-testkit",
+ "proptest",
  "serde",
  "serde_json",
  "tempfile",

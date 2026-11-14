@@ -1,0 +1,3 @@
+note: this host had no rollback floor for this volume. A rollback of its history
+before this attach cannot be detected; the floor is recorded now, and later
+rollbacks are refused.

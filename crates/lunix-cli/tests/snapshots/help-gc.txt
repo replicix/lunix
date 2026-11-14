@@ -1,0 +1,14 @@
+Run a garbage-collection pass, a dry run, or show the collector state
+
+Usage: lunix gc [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --dry-run        Change nothing; report what a pass would do
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --status         Show the collector's state instead of running a pass
+      --timeout <T>    How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+      --json           Print JSON instead of text
+  -h, --help           Print help

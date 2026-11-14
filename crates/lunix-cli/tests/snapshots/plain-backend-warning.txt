@@ -1,0 +1,4 @@
+warning: this volume is plain. Plain mode detects corruption only: with a
+backend added, anyone who can write to the bucket can change the volume's
+contents without detection, and nothing in the volume can be authenticated.
+The mode is fixed in the descriptor and cannot be changed later.

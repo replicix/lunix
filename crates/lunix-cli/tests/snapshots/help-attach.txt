@@ -1,0 +1,62 @@
+Attach a volume and expose it as /dev/lunix/NAME
+
+Usage: lunix attach [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The volume name
+
+Options:
+      --queues <N>
+          Number of queues (1 to 16; the daemon's default when absent)
+
+      --socket <PATH>
+          The control socket of lunixd
+          
+          [default: /run/lunix/ctl.sock]
+
+      --depth <D>
+          Queue depth (1 to 4096)
+
+      --timeout <T>
+          How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous
+          
+          [default: 10m]
+
+      --cpus <LIST>
+          CPUs for the queue threads, such as 2-5,8
+
+      --max-io-buf <SIZE>
+          Largest I/O buffer, at least 256K (such as 1M)
+
+      --key-file <FILE>
+          A key file the daemon reads to unlock the volume (an integrity volume with its own integrity.key needs nothing)
+
+      --passphrase
+          Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
+
+      --passphrase-fd <FD>
+          Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
+
+      --fingerprint <HEX>
+          The key fingerprint you expect, 32 lowercase hex digits
+
+      --credential-mode <MODE>
+          The mode of your credential. A passphrase or key file for an integrity volume must say `integrity`; the default with key material is `encrypted`
+
+          Possible values:
+          - encrypted: The credential unlocks an encrypted volume (the default when a key or passphrase is given)
+          - integrity: The credential is an integrity credential (a passphrase or key file for an integrity volume)
+
+      --on-journal-damage <POLICY>
+          What to do about journal damage found at recovery (the daemon's configured default when absent)
+
+          Possible values:
+          - wipe:   Log the damage and wipe the damaged tail (a torn last record is always crash residue and is wiped)
+          - refuse: Refuse to attach on damage in the middle of the journal; run fsck
+
+      --allow-unverifiable-fork
+          Attach although the commit chain back to this host's rollback floor cannot be walked (audited by the daemon)
+
+  -h, --help
+          Print help (see a summary with '-h')

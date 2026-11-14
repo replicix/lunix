@@ -1,0 +1,13 @@
+List the key slots (a plain volume has none)
+
+Usage: lunix key ls [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --dir <DIR>      The directory the volume was created in
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --json           Print JSON instead of text
+      --timeout <T>    How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+  -h, --help           Print help

@@ -1,0 +1,11 @@
+Detach a volume
+
+Usage: lunix detach [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --timeout <T>    How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+  -h, --help           Print help

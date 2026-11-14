@@ -1,0 +1,3 @@
+NAME   MODE          SIZE  DEVICE            DIRECTORY
+alpha  integrity  200 GiB  /dev/lunix/alpha  /data/a
+b      encrypted        -  -                 /data/b

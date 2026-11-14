@@ -1,0 +1,40 @@
+Show or change a volume's space policy
+
+Usage: lunix space [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          The volume name
+
+Options:
+      --floor <X>
+          Free-space floor on the host file system: a percentage (10%) or a size
+
+      --socket <PATH>
+          The control socket of lunixd
+          
+          [default: /run/lunix/ctl.sock]
+
+      --on-full <POLICY>
+          What writers do when the space ladder is exhausted
+
+          Possible values:
+          - wait:  Block writers until space returns
+          - error: Fail the write
+
+      --timeout <T>
+          How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous
+          
+          [default: 10m]
+
+      --full-timeout <T>
+          How long writers wait for space: 500ms, 60s, 5m or 1h
+
+      --cache-max <X>
+          The most the local cache may grow to
+
+      --json
+          Print JSON instead of text
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,12 @@
+Show one volume's status, or every volume's
+
+Usage: lunix status [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  The volume (every volume when absent)
+
+Options:
+      --json           Print JSON instead of text
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --timeout <T>    How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+  -h, --help           Print help

@@ -1,0 +1,34 @@
+Command line client of lunixd
+
+Usage: lunix [OPTIONS] <COMMAND>
+
+Commands:
+  volume  Create and list volumes
+  attach  Attach a volume and expose it as /dev/lunix/NAME
+  detach  Detach a volume
+  status  Show one volume's status, or every volume's
+  resize  Grow a volume
+  space   Show or change a volume's space policy
+  gc      Run a garbage-collection pass, a dry run, or show the collector state
+  fsck    Check (and repair) a detached volume offline
+  key     List and change the key slots of a detached volume
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --timeout <T>    How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+  -h, --help           Print help
+  -V, --version        Print version
+
+Exit codes:
+  0  success
+  1  generic error (including a daemon that cannot be reached)
+  2  usage error
+  3  busy (the volume or device is in use)
+  4  not found
+  5  no space
+  6  downgrade, wrong key, rollback or fork (the credential or history does not match)
+  7  journal damage found and the attach asked to refuse
+
+Sizes are digits with an optional K, M, G or T suffix (powers of 1024).
+Secrets are read from a terminal prompt, --passphrase-fd or a key file, never from
+the command line or the environment.
