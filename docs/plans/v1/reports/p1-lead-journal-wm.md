@@ -56,6 +56,33 @@ this note `2b1ee48`, and the maintainer's re-sign `2d877db`. The review fixes:
 | `08c5e2c` | m2: `encode_delta_region` writes `flushed = 0`, `decode_delta_region` rejects any other value (f02 case). m5: the re-sign in the field rustdoc. |
 | `cb7583f` | M2 wording (ADR-4, on-disk-formats §5.3, DESIGN §4.1 and §4.4 step 7, plan); M1 in on-disk-formats §5.1 and ADR-4; duplicates; DELTA `flushed = 0` in §5.4; "pending re-sign" replaced in on-disk-formats §5.2 and §5.3, ADR-4, the plan, the journal README and the field rustdoc. DESIGN §4.1 step 4 no longer says that no marker of the last flushed `write_seq` exists. |
 
+## Mark ring (review M2, maintainer decision)
+
+| commit | content |
+|---|---|
+| `bf6dcd1` | lunix-format: `RecordKind::Mark` = 3 (`len` 0, `lba` 0, no data), strict encode and parse, `BatchBuilder::push_mark`, `MARK_FILE_LEN`, DELTA rejects marks; golden `02-journal-record-mark.bin`; FREEZE.md amendment 2026-11-14 (b), pending re-sign, and the compatibility wording of the watermark amendment dropped. |
+| `1e19b30` | lunix-journal: the mark ring `m00-<ordinal>.j` (4 x 1 MiB), loaded, scanned, planned, prepared and reclaimed with the lanes; the coordinator's `MarkDue` and `write_mark` (crash points `journal.mark.before_write` and `journal.mark.after_sync`); `JournalConfig::mark_idle`, `TraceEvent::Mark`, `marks_written()`/`marks_skipped()`; lanes refuse to reserve kind 3. lunix-iface: `MARK_RING_LANE`, `record_bytes` for marks, contract docs. lunix-engine: skips a mark on replay. lunix-testkit: `MemJournal::set_marks` (a mark at once after each flush that raised the watermark). Tests below. |
+| `d4ea229` | ADR-4, on-disk-formats §5 intro and §5.1 to §5.4, DESIGN §4.1 and §4.4 step 7, plan, journal README, this note. |
+
+Tests:
+- lunix-format f02: the mark golden and its negative suite; `len`/`lba`/data/watermark rules; marks read back by the
+  normative reader; DELTA encode and decode refuse a mark.
+- lunix-journal `tests/marks.rs`: an idle flush gets exactly one mark and recovery counts it (no record, next number
+  after it); the review's M2 probe (10 records, one flush, record 3 damaged) is refuse-worthy once the mark landed and
+  reads as residue without marks; no mark before the idle delay ends; a later flush within the delay makes the mark
+  unneeded; a lost or torn mark is residue; a damaged durable mark followed by a later one is reported (lane
+  `MARK_RING_LANE`) and refuse-worthy; a lane cannot reserve a mark; recovered records get a mark after open.
+- lunix-journal kill tests: the child idles past a 5 ms mark delay after each flush; `kill_before_the_mark_write` and
+  `kill_after_the_mark_sync` (the watermark then covers the last flush the child saw). Every kill test checks that each
+  number up to `next_seq` is a record or a mark, and that `refuse` would open. The M1 kill test still fails without
+  its fix.
+- lunix-engine: `the_m2_probe_is_refused_once_the_mark_landed` (`OpenError::JournalDamage` with marks, opens without),
+  `marks_take_numbers_and_change_no_block`, the seeded refuse test with marks in half the seeds, and the engine model
+  test with marks in half the workloads (numbers the engine never issued between its own).
+- Not covered: the mark ring filling up (255 marks per file, 4 files) before a cut frees a file; `marks_skipped`
+  counts that case. fsck listing marks is M14's follow-up; exporting the two metrics from `lunixd` is a follow-up
+  for M12.
+
 ## Format status
 
 - The watermark (bytes 56-63) is re-signed (`2d877db`). 0 means no watermark known; the reader rejects
@@ -115,3 +142,6 @@ this note `2b1ee48`, and the maintainer's re-sign `2d877db`. The review fixes:
 - **Review fixes, `fe46fe5`** (rebased onto `63172f3`; source and target in the host's `journalwm` directories): the
   first run passed every test (1 429 passed, 0 failed) and stopped at the ownership step, which fails by design on a
   lead branch; the rerun with `LUNIX_SKIP_OWNERSHIP=1`: `ci: all green`, 1 429 tests passed, 0 failed.
+- **Mark ring, `d4ea229`** (scratch under a milestone id of its own, after a shared scratch directory lost a test's
+  template mid-run): `ci: all green`, 1 446 tests passed, 0 failed (ownership skipped). An earlier run at the same
+  head failed `cargo fmt --check` on empty files a local `touch` had created on the build host; it was not the branch.
