@@ -2,7 +2,8 @@
 //! descriptor. Never from the command line or the environment.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use lunix_iface::ctl::Secret;
@@ -52,7 +53,7 @@ impl PassphraseArgs {
                 if confirm {
                     let again = prompt_tty("Repeat passphrase: ")?;
                     if first != again {
-                        return Err(CliError::Other("the passphrases do not match".to_owned()));
+                        return Err(CliError::Usage("the passphrases do not match".to_owned()));
                     }
                 }
                 first
@@ -90,10 +91,10 @@ pub fn read_secret<R: Read>(r: &mut R, line: bool) -> Result<Secret, CliError> {
             Err(e) => return Err(CliError::Other(format!("reading the passphrase: {e}"))),
         }
     }
-    if buf.ends_with(b"\n") {
-        buf.pop();
-    }
-    if buf.ends_with(b"\r") {
+    // One trailing newline; a carriage return goes only together with it.
+    if buf.ends_with(b"\r\n") {
+        buf.truncate(buf.len() - 2);
+    } else if buf.ends_with(b"\n") {
         buf.pop();
     }
     let secret = Secret::new(buf);
@@ -110,6 +111,9 @@ pub fn read_secret<R: Read>(r: &mut R, line: bool) -> Result<Secret, CliError> {
 
 fn read_from_fd(fd: u32) -> Result<Secret, CliError> {
     if fd == 0 {
+        if std::io::stdin().is_terminal() {
+            return Err(on_terminal(fd));
+        }
         return read_secret(&mut std::io::stdin().lock(), false);
     }
     let mut f = File::open(format!("/proc/self/fd/{fd}")).map_err(|e| {
@@ -117,7 +121,31 @@ fn read_from_fd(fd: u32) -> Result<Secret, CliError> {
             "cannot read the passphrase from file descriptor {fd}: {e} (it must be an open file or pipe)"
         ))
     })?;
+    if f.is_terminal() {
+        return Err(on_terminal(fd));
+    }
     read_secret(&mut f, false)
+}
+
+fn on_terminal(fd: u32) -> CliError {
+    CliError::Usage(format!(
+        "file descriptor {fd} is a terminal, where the passphrase would be echoed; \
+         use --passphrase without --passphrase-fd to be prompted"
+    ))
+}
+
+/// The `stty` binary by absolute path (never through `PATH`).
+fn stty_path() -> Result<&'static Path, CliError> {
+    ["/usr/bin/stty", "/bin/stty"]
+        .into_iter()
+        .map(Path::new)
+        .find(|p| p.exists())
+        .ok_or_else(|| {
+            CliError::Usage(
+                "cannot turn off terminal echo (no stty found); give the passphrase with --passphrase-fd instead"
+                    .to_owned(),
+            )
+        })
 }
 
 /// Turns terminal echo back on when dropped.
@@ -125,7 +153,7 @@ struct EchoGuard(File);
 
 impl EchoGuard {
     fn off(tty: &File) -> Result<Self, CliError> {
-        let status = Command::new("stty")
+        let status = Command::new(stty_path()?)
             .arg("-echo")
             .stdin(Stdio::from(tty.try_clone()?))
             .stdout(Stdio::null())
@@ -144,7 +172,8 @@ impl EchoGuard {
 impl Drop for EchoGuard {
     fn drop(&mut self) {
         if let Ok(tty) = self.0.try_clone() {
-            let _ = Command::new("stty")
+            let Ok(stty) = stty_path() else { return };
+            let _ = Command::new(stty)
                 .arg("echo")
                 .stdin(Stdio::from(tty))
                 .stdout(Stdio::null())
@@ -187,6 +216,11 @@ mod tests {
         assert_eq!(s.expose(), b"hunter2");
         let s = read_secret(&mut Cursor::new(b"a\nb\n\n".to_vec()), false).unwrap();
         assert_eq!(s.expose(), b"a\nb\n");
+        // A lone carriage return belongs to the passphrase.
+        let s = read_secret(&mut Cursor::new(b"abc\r".to_vec()), false).unwrap();
+        assert_eq!(s.expose(), b"abc\r");
+        let s = read_secret(&mut Cursor::new(b"abc\r\r\n".to_vec()), false).unwrap();
+        assert_eq!(s.expose(), b"abc\r");
     }
 
     #[test]

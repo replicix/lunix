@@ -35,10 +35,20 @@ pub struct FsckArgs {
     #[arg(long, requires = "repair")]
     pub gc: bool,
 
-    /// With --repair: drop the commits above the last good one (lowers the
-    /// rollback floor).
+    /// With --repair: set aside a tip that does not authenticate and make its
+    /// predecessor the tip (drops that one commit).
     #[arg(long, requires = "repair")]
     pub truncate_tip: bool,
+
+    /// With --repair: accept this copy as the trusted one and lower the
+    /// rollback floor to its tip (only after you verified the copy; loses
+    /// nothing, but disables rollback detection for the older history).
+    #[arg(long, requires = "repair")]
+    pub reset_floor: bool,
+
+    /// With --repair: delete orphaned files above the tip.
+    #[arg(long, requires = "repair")]
+    pub delete_orphans: bool,
 
     /// A key file to unlock the volume with.
     #[arg(long, value_name = "FILE")]

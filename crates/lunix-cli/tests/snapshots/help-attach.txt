@@ -18,6 +18,11 @@ Options:
       --depth <D>
           Queue depth (1 to 4096)
 
+      --timeout <T>
+          How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous
+          
+          [default: 10m]
+
       --cpus <LIST>
           CPUs for the queue threads, such as 2-5,8
 

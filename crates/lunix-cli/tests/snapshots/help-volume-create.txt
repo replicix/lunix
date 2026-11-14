@@ -9,6 +9,7 @@ Options:
       --size <SIZE>         Volume size (a multiple of 4096 bytes), such as 200G
       --socket <PATH>       The control socket of lunixd [default: /run/lunix/ctl.sock]
       --dir <DIR>           The directory that holds the volume's files (made absolute here: the daemon does not share this process's working directory)
+      --timeout <T>         How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
       --chunk <SIZE>        Chunk size: a power of two from 16K to 1M [default: 64K]
       --encrypt             Encrypted volume: AEAD extents and sealed metadata. Takes the same key options as the default mode
       --integrity           Integrity volume (the default): keyed tags and HMACs detect tampering by anyone without the key; the contents are not encrypted. A random key is written to <dir>/<uuid>/integrity.key (0600) unless --key-file or --passphrase says otherwise, and attach finds it by itself

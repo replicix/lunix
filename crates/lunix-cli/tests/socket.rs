@@ -719,8 +719,8 @@ fn error_codes_map_to_exit_codes() {
 fn attach_failures_carry_a_hint() {
     for (code, needle) in [
         (ErrorCode::ForkUnverifiable, "--allow-unverifiable-fork"),
-        (ErrorCode::Rollback, "--truncate-tip"),
-        (ErrorCode::Fork, "--truncate-tip"),
+        (ErrorCode::Rollback, "--reset-floor"),
+        (ErrorCode::Fork, "lunix fsck vol1"),
         (ErrorCode::JournalDamage, "lunix fsck vol1"),
         (ErrorCode::WrongKmk, "--credential-mode"),
         (ErrorCode::Downgrade, "--credential-mode"),
@@ -807,6 +807,8 @@ fn fsck_and_key_are_stubs_until_m13b() {
     );
     // --gc needs --repair.
     assert_eq!(env.run(&["fsck", "vol1", "--gc"]).code, 2);
+    assert_eq!(env.run(&["fsck", "vol1", "--reset-floor"]).code, 2);
+    assert_eq!(env.run(&["fsck", "vol1", "--delete-orphans"]).code, 2);
 }
 
 #[test]
@@ -824,4 +826,39 @@ fn usage_errors_exit_2() {
     }
     assert_eq!(common::run_bare(&["--help"]).code, 0);
     assert_eq!(common::run_bare(&["--version"]).code, 0);
+}
+
+#[test]
+fn a_silent_daemon_times_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("mute.sock");
+    let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let h = std::thread::spawn(move || {
+        let conn = l.accept();
+        // Keep the connection open (and silent) until the client has given up.
+        let _ = done_rx.recv();
+        drop(conn);
+    });
+    let started = std::time::Instant::now();
+    let o = common::run_with(
+        &sock,
+        &["--timeout", "300ms", "volume", "list"],
+        None,
+        dir.path(),
+    );
+    let waited = started.elapsed();
+    done_tx.send(()).unwrap();
+    h.join().unwrap();
+    assert_eq!(o.code, 1, "{}", o.stderr);
+    assert!(o.stderr.contains("did not answer in time"), "{}", o.stderr);
+    assert!(waited < std::time::Duration::from_secs(20), "{waited:?}");
+    assert_eq!(
+        common::run_bare(&["--timeout", "0s", "volume", "list"]).code,
+        2
+    );
+    assert_eq!(
+        common::run_bare(&["--timeout", "10", "volume", "list"]).code,
+        2
+    );
 }

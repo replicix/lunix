@@ -4,6 +4,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use lunix_iface::ctl::{
     Attach, Credential, GcRequest, NameParam, Request, Resize, Response, SpaceRequest,
@@ -45,7 +46,11 @@ impl From<std::io::Error> for Failure {
 /// Runs a parsed command line, writing results to `out` and diagnostics to
 /// `err`, and returns the process exit code.
 pub fn run(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
-    let Cli { socket, command } = cli;
+    let Cli {
+        socket,
+        timeout,
+        command,
+    } = cli;
     let result = match command {
         Command::Fsck(mut a) => {
             a.socket = socket;
@@ -55,7 +60,7 @@ pub fn run(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
             a.socket = socket;
             return run_key(a);
         }
-        other => dispatch(&socket, other, out, err),
+        other => dispatch(&socket, Duration::from_millis(timeout), other, out, err),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -72,11 +77,12 @@ pub fn run(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
 
 fn dispatch(
     socket: &Path,
+    timeout: Duration,
     command: Command,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<(), Failure> {
-    let mut c = Client::connect(socket)?;
+    let mut c = Client::connect_with_timeout(socket, timeout)?;
     match command {
         Command::Volume(v) => match v.command {
             VolumeCommand::Create(a) => create(&mut c, a, out, err),

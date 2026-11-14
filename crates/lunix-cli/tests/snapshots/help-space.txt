@@ -22,6 +22,11 @@ Options:
           - wait:  Block writers until space returns
           - error: Fail the write
 
+      --timeout <T>
+          How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous
+          
+          [default: 10m]
+
       --full-timeout <T>
           How long writers wait for space: 500ms, 60s, 5m or 1h
 

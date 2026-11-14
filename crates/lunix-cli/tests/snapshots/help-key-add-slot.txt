@@ -9,6 +9,7 @@ Options:
       --dir <DIR>                  The directory the volume was created in
       --socket <PATH>              The control socket of lunixd [default: /run/lunix/ctl.sock]
       --passphrase                 Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
+      --timeout <T>                How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
       --passphrase-fd <FD>         Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
       --key-file <FILE>            The new slot's key file (a key-file slot instead of a passphrase slot)
       --unlock-key-file <FILE>     An existing key file that unlocks the volume

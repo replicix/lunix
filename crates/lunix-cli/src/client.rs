@@ -2,6 +2,7 @@
 
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::time::Duration;
 
 use lunix_iface::ctl::{
     from_payload, read_frame, to_payload, write_frame, FrameError, Outcome, Request, RequestFrame,
@@ -14,7 +15,11 @@ use crate::error::CliError;
 pub struct Client {
     stream: UnixStream,
     next_id: u64,
+    timeout: Duration,
 }
+
+/// How long to wait for a reply by default (attach and gc can be slow).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
 impl Client {
     /// Connects to the control socket.
@@ -22,11 +27,24 @@ impl Client {
     /// # Errors
     /// [`CliError::Connect`] with the OS error.
     pub fn connect(path: &Path) -> Result<Self, CliError> {
+        Self::connect_with_timeout(path, DEFAULT_TIMEOUT)
+    }
+
+    /// Connects with a reply timeout. `QuiesceAll` is never subject to it
+    /// (the daemon answers after every device has quiesced).
+    ///
+    /// # Errors
+    /// [`CliError::Connect`] with the OS error.
+    pub fn connect_with_timeout(path: &Path, timeout: Duration) -> Result<Self, CliError> {
         let stream = UnixStream::connect(path).map_err(|source| CliError::Connect {
             path: path.display().to_string(),
             source,
         })?;
-        Ok(Self { stream, next_id: 1 })
+        Ok(Self {
+            stream,
+            next_id: 1,
+            timeout,
+        })
     }
 
     /// Sends a request and waits for its response. The request is validated
@@ -37,6 +55,10 @@ impl Client {
     /// reply that does not match, `Daemon` for an error response.
     pub fn call(&mut self, req: Request) -> Result<Response, CliError> {
         req.validate().map_err(|e| CliError::Usage(e.to_string()))?;
+        let wait = (!matches!(req, Request::QuiesceAll)).then_some(self.timeout);
+        self.stream
+            .set_read_timeout(wait)
+            .map_err(|e| CliError::Other(format!("control socket: {e}")))?;
         let id = self.next_id;
         self.next_id += 1;
         let payload = to_payload(&RequestFrame::new(id, req)).map_err(frame_err)?;
@@ -65,6 +87,17 @@ fn frame_err(e: FrameError) -> CliError {
     match e {
         FrameError::Eof | FrameError::Truncated { .. } => {
             CliError::Protocol("the daemon closed the connection".to_owned())
+        }
+        FrameError::Io(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            CliError::Protocol(
+                "the daemon did not answer in time (raise --timeout if the operation is slow)"
+                    .to_owned(),
+            )
         }
         FrameError::Io(e)
             if matches!(

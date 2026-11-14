@@ -40,6 +40,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "PATH", default_value = DEFAULT_SOCKET)]
     pub socket: PathBuf,
 
+    /// How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach
+    /// and gc can be slow, so the default is generous.
+    #[arg(long, global = true, value_name = "T", value_parser = parse_duration_ms, default_value = "10m")]
+    pub timeout: u64,
+
     /// What to do.
     #[command(subcommand)]
     pub command: Command,

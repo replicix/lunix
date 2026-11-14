@@ -9,10 +9,13 @@ Options:
       --dir <DIR>           The directory the volume was created in (the --dir of `volume create`)
       --socket <PATH>       The control socket of lunixd [default: /run/lunix/ctl.sock]
       --deep                Verify every extent, not only the metadata
+      --timeout <T>         How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
       --rebuild-index       Rebuild the chunk index from the segments
       --repair              Repair what can be repaired (the volume must be detached)
       --gc                  With --repair: also run garbage collection on condemned files
-      --truncate-tip        With --repair: drop the commits above the last good one (lowers the rollback floor)
+      --truncate-tip        With --repair: set aside a tip that does not authenticate and make its predecessor the tip (drops that one commit)
+      --reset-floor         With --repair: accept this copy as the trusted one and lower the rollback floor to its tip (only after you verified the copy; loses nothing, but disables rollback detection for the older history)
+      --delete-orphans      With --repair: delete orphaned files above the tip
       --key-file <FILE>     A key file to unlock the volume with
       --passphrase          Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
       --passphrase-fd <FD>  Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed

@@ -99,9 +99,14 @@ pub fn attach_hint(code: ErrorCode, name: &str) -> Option<String> {
              attach again with --allow-unverifiable-fork (audited)"
                 .to_owned(),
         ),
-        ErrorCode::Rollback | ErrorCode::Fork => Some(format!(
-            "this host recorded a newer or different history of the volume; restore the newer state, \
-             or lower the floor offline with `lunix fsck {name} --repair --truncate-tip` (loses the commits above it)"
+        ErrorCode::Rollback => Some(format!(
+            "this host recorded a newer state of the volume than the copy now on disk: restore the newer state. \
+             If you have verified that this copy is the one you trust, accept it offline with \
+             `lunix fsck {name} --repair --reset-floor`"
+        )),
+        ErrorCode::Fork => Some(format!(
+            "the volume's history diverged from the one this host recorded (two different commits at the same height); \
+             run `lunix fsck {name}` and read its report before deciding which copy to keep"
         )),
         ErrorCode::JournalDamage => Some(format!(
             "run `lunix fsck {name}` to inspect the journal, or attach with --on-journal-damage wipe to discard the damaged tail"
