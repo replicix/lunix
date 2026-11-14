@@ -630,7 +630,6 @@ pub enum VolumeState {
 
 /// The ledger as the socket reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct SpaceFigures {
     /// Bytes charged against the limit.
     pub used: u64,
@@ -700,7 +699,6 @@ pub struct Attached {
     pub recovered: bool,
     /// No rollback floor existed on this host: a rollback of history before
     /// this attach cannot be detected (ADR-31). The floor is recorded now.
-    #[serde(default)]
     pub first_attach: bool,
 }
 

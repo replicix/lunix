@@ -87,9 +87,9 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   item 8), `volume.json`, `volumes.json`, `state/checkpoint`,
   `state/device`, `state/pins`.
   Goldens: `14-checkpoint.bin` (both slots valid, and one torn),
-  `14-device.bin`, `14-pins.bin` and `14-pins-none.bin` (version 1 files,
-  now read-only inputs), `14-pins-v2.bin` (§23.9), `14-pins-v1-read.bin`
-  (version 1, read as "no floor"), `14-volume.json`, `14-volumes.json`.
+  `14-device.bin`, `14-pins.bin` and `14-pins-none.bin` (version 2 files
+  without a floor), `14-pins-v2.bin` (§23.9), `14-volume.json`,
+  `14-volumes.json`.
 - [x] **15. GC files** (§16): the `gc/<pass:016x>` object (envelope kind 7,
   opaque body `ver` 1) and the `state/gc/condemned` envelope.
   Goldens: `15-gc-pass.bin`, `15-gc-condemned-envelope.bin`.
@@ -106,9 +106,25 @@ above record the goldens of the signed layout; the goldens derived from
 `a0-segment-one-extent`, `04-segment-footer-body` if it is the §23.4 body,
 `a0-node-leaf-one-entry`, `05-node-interior-root`, `a0-commit-full-1`)
 change with the amendment and must be regenerated, `11-purposes.txt` gains
-purpose 0x0a, and `14-pins-v2.bin` (§23.9) and `14-pins-v1-read.bin`
-(a version 1 file read as "no floor") are added, before the re-sign.
+purpose 0x0a, and `14-pins-v2.bin` (§23.9) is added, before the re-sign.
 
 The first sign-off (before the amendment): the maintainer, 2026-11-12.
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-12 (amendment: keyed integrity chunk ids, rollback floor)
+
+**Amendment 2026-11-14 (no backward compatibility):** `state/pins` has one
+version. A reader accepts only version 2 (136 bytes, `ver` = 2); version 1
+(96 bytes, read as "no floor" and upgraded on the next write) is no longer
+read, and a version 1 file is rejected like any other bad `ver` or length
+(which attach and fsck report as an error, never as "no floor"). The decoder,
+the constant for the 96-byte length and `LocalPinsFile::V1_LEN` are gone.
+Item 14 goldens: `14-pins.bin` and `14-pins-none.bin` were version 1 files
+and are regenerated as version 2 files without a floor (136 bytes, same pins);
+`14-pins-v1-read.bin` is deleted; `14-pins-v2.bin` (§23.9) is unchanged. The
+version 2 byte layout is unchanged. The same change removes the reading of
+short or long checkpoint `stats` slot lists by the engine (an exact
+`EngineStats::SLOTS` count is required; that is a code rule, not a byte
+change) and edits the text of on-disk-formats.md §20, §24 items 45-46 and
+attach-matrix.md Table E (rule E-a, row 120).
+
+Re-signed by: _pending (the maintainer) — drop pins v1_

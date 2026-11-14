@@ -298,9 +298,7 @@ needing the re-sign of [FREEZE.md](../../crates/lunix-format/FREEZE.md).
     `id_prefix`, a prefix of a keyed id, and the node extent's header holds
     `BLAKE3(node encoding)`. They agree only by a chance collision of the
     keyed and the unkeyed function (2^-128 per pair at 16 bytes), which no
-    one can aim for without `K_ia`. (Before the amendment a node passed as
-    data only if the guest had written exactly those bytes, so the data was
-    right; now it never passes.)
+    one can aim for without `K_ia`.
   - *data presented as a node fails R2*: R2 recomputes the unkeyed node
     hash of the opened bytes and requires it to equal the extent header's
     `chunk_id`, which for a data extent is a keyed id.
@@ -1371,10 +1369,10 @@ Length: 96 bytes.
 
 `state/pins` (atomic replace: tmp, `fdatasync`, rename, directory `fsync`)
 holds the monotonic floors, the local trust-on-first-use pin (ADR-11 F6,
-F7) and, from version 2, the local **rollback anchor** (amendment
-2026-11-12, needing re-sign; M2 review, "Attack 8").
+F7) and the local **rollback anchor** (amendment 2026-11-12, needing
+re-sign; M2 review, "Attack 8").
 
-Version 2 (written by every writer from the amendment on):
+Version 2 is the only version:
 
 | field | offset | width | encoding | legal range | notes |
 |---|---|---|---|---|---|
@@ -1396,12 +1394,8 @@ Version 2 (written by every writer from the amendment on):
 
 Length: 136 bytes.
 
-Version 1 (the signed layout before the amendment) is still **read**, never
-written: bytes 0-79 as above with `ver` = 1 and bytes 12-15 reserved, then
-reserved bytes 80-91 and `crc32c(bytes 0..92)` at 92; 96 bytes. A version 1
-file means **no floor** (`floor_present` = 0); the next write upgrades it to
-version 2. A reader rejects any other `ver`, any length other than 96 (v1)
-or 136 (v2) and a bad `crc32c`. **A rejected file is an error, not an
+A reader rejects any `ver` other than 2, any length other than 136 and a
+bad `crc32c`. **A rejected file is an error, not an
 absent one** (lead, 2026-11-13, after the M12a review): attach and fsck
 refuse and report it, because treating it as absent would silently drop the
 rollback floor and the pin. Only a missing file means "nothing recorded";
@@ -1440,7 +1434,7 @@ rollback floor and the pin. Only a missing file means "nothing recorded";
 
 **What it does not cover.** The anchor detects a rollback or fork seen from
 a host that has attached before. A host with no floor (a first attach, an
-ephemeral client, a version 1 file) cannot detect a rollback to an older
+ephemeral client, or `floor_present` = 0) cannot detect a rollback to an older
 valid chain: that is ADR-11 F7's "by construction" case, restated for
 history. **A purely local volume cannot be protected from someone who can
 write its local disk**: whoever can write the store can also write
@@ -2193,8 +2187,7 @@ maintainer's re-sign)**
 46. **`state/pins` version 2 carries a local rollback anchor**
     `{max_commit_seq, tip_hash}`, raised after every verified attach and
     every FULL's C6, checked at attach with two new results, `Rollback` and
-    `Fork`; version 1 is still read and means no floor
-    ([§20](#20-local-pins-file-freeze-item-14)). Reason: M2 review, "Attack
+    `Fork` ([§20](#20-local-pins-file-freeze-item-14)). Reason: M2 review, "Attack
     8": nothing in the bucket can detect a rollback to an older fully valid
     chain, and the existing `max_epoch` misses commits hidden from the
     host's own last session. Recommendation A of that review; B (maximum
@@ -2220,7 +2213,7 @@ maintainer's re-sign)**
 | DESIGN §4.1 | the checkpoint is a hint whose loss is harmless | its lane tails are used only when `last_commit_seq` ≤ the tip, and `--truncate-tip` zeroes it ([§18](#18-checkpoint-freeze-item-14); A0 review finding 10) |
 | A0 draft open question; ADR-11 "Rejected: corruption detection only" | plain mode | `plain` is supported everywhere, backends included, as corruption detection only; the default of `volume create` is `integrity` (maintainer, 2026-11-12; [§4.1](#41-crypto-modes)) |
 | ADR-6, DESIGN §5 step 3 ("keyed if the family is encrypted"), signed layout §3 and §4.1 | the chunk id is unkeyed BLAKE3 in integrity mode | **amendment 2026-11-12, needs re-sign:** keyed under purpose 0x0a of the IK in integrity mode; plain stays unkeyed (item 45, M2 review finding 8) |
-| DESIGN §22.1 (rollback anchor, open), signed layout §20 (`state/pins` version 1) | no anchor against rollback to an older valid chain | **amendment 2026-11-12, needs re-sign:** `state/pins` version 2 with `{max_commit_seq, tip_hash}`, results `Rollback` and `Fork`; version 1 still read as "no floor" (item 46, M2 review "Attack 8") |
+| DESIGN §22.1 (rollback anchor, open), signed layout §20 (`state/pins` version 1) | no anchor against rollback to an older valid chain | **amendment 2026-11-12, needs re-sign:** `state/pins` version 2 with `{max_commit_seq, tip_hash}`, results `Rollback` and `Fork`; version 1 is no longer read (amendment 2026-11-14, no backward compatibility; item 46, M2 review "Attack 8") |
 
 ## 25. Open questions for the maintainer
 

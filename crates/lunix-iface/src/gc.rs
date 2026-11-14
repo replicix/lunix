@@ -152,7 +152,6 @@ pub struct GcProgress {
 
 /// Counters across passes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct GcStats {
     /// Passes completed.
     pub passes: u64,
@@ -172,7 +171,6 @@ pub struct GcStats {
 
 /// What a pass did or, for a dry run, would do. Also the `Gc` response body.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct GcPassSummary {
     /// The pass number (`gc/<pass:016x>`); 0 for a dry run.
     pub pass: u64,
@@ -221,7 +219,6 @@ pub trait Collector: Send {
 
 /// A snapshot of the collector for `GcStatus`.
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct GcStatusSnapshot {
     /// Where the current pass is (`None` is idle).
     pub state: Option<GcState>,

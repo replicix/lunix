@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full, MapRoot};
-use lunix_format::local::{LocalPinsFile, RollbackFloor};
+use lunix_format::local::RollbackFloor;
 use lunix_format::node::{Child, Interior, NodeLoc};
 use lunix_format::segment::{ContainerKind, Trailer, TRAILER_LEN};
 use lunix_format::{Codec, CommitSeq, CryptoMode, Epoch, ExtentKind, Level, TimeMs};
@@ -441,46 +441,4 @@ fn a_floor_above_the_tip_is_rollback_and_a_floor_at_the_tip_is_clean() {
     let r = b.fsck(&b.opts());
     assert_eq!(r.exit_code(), 0, "{}", r.render_text());
     assert!(r.has(code::NO_FLOOR), "a note, not a finding of substance");
-}
-
-fn crc32c(data: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &b in data {
-        crc ^= u32::from(b);
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0x82f6_3b78
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    !crc
-}
-
-#[test]
-fn a_version_1_pins_file_reads_without_a_floor() {
-    for mode in keyed_modes() {
-        let b = small(mode);
-        let v2 = LocalPinsFile::decode(&b.read("state/pins")).expect("pins");
-        let mut v1 = Vec::new();
-        v1.extend_from_slice(b"LUNIXPIN");
-        v1.extend_from_slice(&1u16.to_le_bytes());
-        v1.push(u8::from(v2.pins.pin.is_some()));
-        v1.push(v2.pins.pin.map_or(0, |p| p.mode as u8));
-        v1.extend_from_slice(&[0; 4]);
-        v1.extend_from_slice(&v2.pins.volume_uuid.0);
-        v1.extend_from_slice(&v2.pins.family_id.0);
-        v1.extend_from_slice(&v2.pins.max_keyring_seq.to_le_bytes());
-        v1.extend_from_slice(&v2.pins.max_epoch.to_le_bytes());
-        v1.extend_from_slice(&v2.pins.pin.map_or([0u8; 16], |p| p.fingerprint));
-        v1.extend_from_slice(&[0; 12]);
-        let crc = crc32c(&v1);
-        v1.extend_from_slice(&crc.to_le_bytes());
-        assert_eq!(v1.len(), LocalPinsFile::V1_LEN);
-        b.write("state/pins", &v1);
-        let r = b.fsck(&b.opts());
-        assert_eq!(r.exit_code(), 0, "{}", r.render_text());
-        assert!(r.has(code::NO_FLOOR));
-    }
 }

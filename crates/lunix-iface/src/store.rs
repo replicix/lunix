@@ -463,7 +463,7 @@ pub trait VolumeDir: Send + Sync {
 
     /// The rollback floor `{max_commit_seq, tip_hash}` of `state/pins`
     /// version 2 (ADR-31, rule R4); `None` when no floor was ever recorded,
-    /// when `state/pins` is absent, and for a version 1 file. Required (no
+    /// or when `state/pins` is absent. Required (no
     /// default): a silent `None` would make every rollback pass R4.
     ///
     /// # Errors

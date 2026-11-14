@@ -174,46 +174,12 @@ fn file_with(pins: LocalPins, floor: Option<RollbackFloor>) -> LocalPinsFile {
     LocalPinsFile { pins, floor }
 }
 
-/// Decode and re-encode: version 2 files only (the encoder writes nothing
-/// else), so a version 1 input is "not canonical" here.
+/// Decode and re-encode.
 fn pins_rt(b: &[u8]) -> Result<Vec<u8>, FormatError> {
     let d = LocalPinsFile::decode(b)?;
     let mut o = Vec::new();
     d.encode(&mut o)?;
     Ok(o)
-}
-
-/// A version 1 file, written by hand: the layout the amendment still reads.
-fn encode_v1(p: &LocalPins) -> Vec<u8> {
-    let mut b = b"LUNIXPIN".to_vec();
-    b.extend_from_slice(&1u16.to_le_bytes());
-    b.push(u8::from(p.pin.is_some()));
-    b.push(p.pin.map_or(0, |x| x.mode as u8));
-    b.extend_from_slice(&[0; 4]);
-    b.extend_from_slice(&p.volume_uuid.0);
-    b.extend_from_slice(&p.family_id.0);
-    b.extend_from_slice(&p.max_keyring_seq.to_le_bytes());
-    b.extend_from_slice(&p.max_epoch.to_le_bytes());
-    b.extend_from_slice(&p.pin.map_or([0; 16], |x| x.fingerprint));
-    b.extend_from_slice(&[0; 12]);
-    let c = lunix_format::bytes::crc32c(&b).to_le_bytes();
-    b.extend_from_slice(&c);
-    b
-}
-
-/// Decode a version 1 file and re-encode it as version 1 (the negative suite
-/// of the read-only layout).
-fn pins_v1_rt(b: &[u8]) -> Result<Vec<u8>, FormatError> {
-    if b.len() != 96 {
-        return Err(FormatError::Truncated {
-            what: "local pins",
-            need: 96,
-            have: b.len(),
-        });
-    }
-    let d = LocalPinsFile::decode(b)?;
-    assert_eq!(d.floor, None, "a version 1 file carries no floor");
-    Ok(encode_v1(&d.pins))
 }
 
 fn fixn(b: &mut [u8]) {
@@ -269,33 +235,22 @@ fn pins_v2_matches_section_23_9() {
 }
 
 #[test]
-fn pins_v1_is_read_as_no_floor() {
+fn pins_without_a_floor_goldens() {
     let fp: [u8; 16] = hex("92a4ec2689f62aab86bc8f278713183e").try_into().unwrap();
-    // The signed layout's goldens stay valid version 1 inputs.
     for (name, p) in [
         ("14-pins.bin", pins_with(Some((CryptoMode::Integrity, fp)))),
         ("14-pins-none.bin", pins_with(None)),
-        ("14-pins-v1-read.bin", doc_pins_b()),
     ] {
-        let g = golden(name, &encode_v1(&p));
-        assert_eq!(g.len(), 96);
+        let mut o = Vec::new();
+        file_with(p.clone(), None).encode(&mut o).unwrap();
+        let g = golden(name, &o);
+        assert_eq!(g.len(), 136);
         let d = LocalPinsFile::decode(&g).unwrap();
         assert_eq!(d.pins, p, "{name}");
         assert_eq!(d.floor, None, "{name}");
         assert_eq!(LocalPins::decode(&g).unwrap(), p, "{name}");
-        negative_suite(name, &pins_v1_rt, &g);
-        // The next write upgrades it: version 2, floor_present 0.
-        let mut up = Vec::new();
-        d.encode(&mut up).unwrap();
-        assert_eq!(up.len(), 136);
-        assert_eq!(&up[8..10], &[2, 0]);
-        assert_eq!(up[12], 0);
-        assert_eq!(LocalPinsFile::decode(&up).unwrap(), d);
+        negative_suite(name, &pins_rt, &g);
     }
-    // The version 1 file is the version 2 file of 23.9 without the floor.
-    let g = encode_v1(&doc_pins_b());
-    let v2 = hex(DOC_PINS_V2);
-    assert_eq!(&g[16..80], &v2[16..80]);
 }
 
 #[test]
@@ -309,7 +264,7 @@ fn pins_goldens_and_rejections() {
     assert!(file_with(pins_with(Some((CryptoMode::Plain, fp))), None)
         .encode(&mut Vec::new())
         .is_err());
-    // LocalPins keeps its shape: it writes version 2 without a floor and
+    // LocalPins keeps its shape: it writes the file without a floor and
     // drops the floor it reads.
     let mut w = Vec::new();
     pins_with(None).encode(&mut w).unwrap();
@@ -339,8 +294,8 @@ fn pins_goldens_and_rejections() {
     let mut bad_crc = g.clone();
     bad_crc[133] ^= 1;
     assert_rejects("crc", &pins_rt, &bad_crc);
-    // lengths other than 96 and 136
-    for n in [0usize, 95, 97, 135, 137, 232] {
+    // lengths other than 136
+    for n in [0usize, 95, 96, 97, 135, 137, 232] {
         let mut b = g.clone();
         b.resize(n, 0);
         assert_rejects("length", &pins_rt, &b);
@@ -380,21 +335,6 @@ fn pins_goldens_and_rejections() {
     b[64] = 1;
     fixn(&mut b);
     assert_rejects("fingerprint without pin", &pins_rt, &b);
-
-    // Version 1 rejections.
-    let v1 = encode_v1(&doc_pins_b());
-    let patch1 = |off: usize, v: &[u8]| {
-        let mut b = v1.clone();
-        b[off..off + v.len()].copy_from_slice(v);
-        fixn(&mut b);
-        b
-    };
-    assert_rejects("v1 reserved 12", &pins_v1_rt, &patch1(12, &[1]));
-    assert_rejects("v1 reserved 15", &pins_v1_rt, &patch1(15, &[1]));
-    assert_rejects("v1 reserved 85", &pins_v1_rt, &patch1(85, &[1]));
-    assert_rejects("v1 version 2", &pins_v1_rt, &patch1(8, &[2]));
-    assert_rejects("v1 present 2", &pins_v1_rt, &patch1(10, &[2]));
-    assert_rejects("v1 mode 3", &pins_v1_rt, &patch1(11, &[3]));
 }
 
 // ---------------------------------------------------------------------------
@@ -577,11 +517,6 @@ proptest! {
         prop_assert_eq!(o.len(), 136);
         prop_assert_eq!(LocalPinsFile::decode(&o).unwrap(), file);
         prop_assert_eq!(LocalPins::decode(&o).unwrap(), p.clone());
-        // and the same pins as a version 1 file read as "no floor"
-        let v1 = encode_v1(&p);
-        let d = LocalPinsFile::decode(&v1).unwrap();
-        prop_assert_eq!(d.pins, p);
-        prop_assert_eq!(d.floor, None);
     }
 
     #[test]
