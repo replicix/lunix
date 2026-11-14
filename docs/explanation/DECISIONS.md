@@ -205,28 +205,29 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   the floor, merges them and stops at the first gap. The checkpoint only
   says which files may be skipped. There is no mid-ring corruption error
   and no flush marker; `fsck` warns about valid records beyond the gap.
-- **What `on_journal_damage = refuse` refuses (lead, 2026-11-13, after the
-  M12a review).** Only mid-journal damage: a damaged range with a later
-  valid record in its lane, or valid records beyond the first gap. A torn
-  **last** record of a lane with nothing valid after it is crash residue:
-  it cannot be a write acknowledged as durable, because a FLUSH or FUA
-  completes only after the group flush that covers it (`fdatasync` of the
-  lane file) has finished, so every such record is on stable storage before
-  its acknowledgement and a crash cannot tear it. What a torn tail can hold
-  is a write never flushed, which block semantics allow to lose. It is
-  logged at warn and wiped; refusing it would keep every volume offline
-  after an ordinary crash.
-  **Interim limit (M12a re-review R1, 2026-11-14).** The same durability
-  argument makes a gap across lanes, and a damaged batch followed by a later
-  batch of the same lane (two batches in flight), ordinary residue of a crash
-  under load: no flush covering the later records was acknowledged. Until
-  the flushed watermark is in the journal format (maintainer decision of
-  2026-11-14, pending the `FREEZE.md` re-sign), `refuse` still refuses those
-  shapes, so it is meant for **single-queue volumes or setups that run
-  `fsck` after every crash**; `wipe` stays the default. With the watermark,
-  recovery refuses only damage or a gap at or below the highest flushed
-  `write_seq` a surviving record witnessed, and treats everything above it
-  as residue.
+- **What `on_journal_damage = refuse` refuses: the flushed watermark
+  (maintainer, 2026-11-14, after the M12a re-review; the record layout part
+  is pending the `FREEZE.md` re-sign).** Every journal record carries
+  `flushed`, the highest `write_seq` a completed group flush had made durable
+  on every lane when the record was appended (on-disk-formats §5.2).
+  Recovery reports the highest value any surviving record carries. A FLUSH
+  or FUA completes only after the group flush covering it has written and
+  `fdatasync`ed every lane's records up to its `upto`, so every record at or
+  below the watermark was durable before a later record witnessed it:
+  - a gap at or below the watermark, or a damaged range whose next valid
+    record in its lane is at or below it, is loss of durable data, and
+    `refuse` refuses it (the volume stays offline for `fsck`);
+  - everything above the watermark is crash residue no acknowledged flush
+    covered, whatever its shape: a torn last record, a gap across lanes (a
+    record still in its lane's open batch at a kill while another lane's
+    later record landed), a torn batch followed by a later batch of the same
+    lane (two batches in flight). It is logged at warn and wiped.
+  This replaces the rule of 2026-11-13 (refuse on any gap or any damage with
+  a later record), which refused ordinary crashes of multi-queue volumes,
+  and closes the other direction too: medium damage to a flushed record is
+  refused as soon as a later record witnessed the flush. Damage to the
+  newest flushed records that no later record witnessed still reads as
+  residue; nothing on disk can tell it apart.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes
