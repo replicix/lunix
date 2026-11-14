@@ -416,3 +416,123 @@ fn review_truncate_tip_with_reset_floor_leaves_a_mountable_floor() {
     assert!(!again.has(code::ROLLBACK), "{}", again.render_text());
 }
 ```
+
+---
+
+# Re-review (2026-11-14): `lead/p1-floor-reset` at `e74400f`, `p1/m14` at `517d944`
+
+Targeted at B1, M1, M8, the P1 gating, the audit record, `--repair-pins`, the memory figure and N10/N11 of the GC
+review. Read: the whole of the new `repair.rs`, the fix diff of the other fsck modules, and the P1 commit.
+
+## Verdicts
+
+| branch | verdict |
+|---|---|
+| `lead/p1-floor-reset` | **Merge.** The four amendments are built as asked. Four minors (P-1 to P-4). |
+| `p1/m14` | **Merge**, once the full `tools/ci.sh` has run on the new base (the report says its last run was interrupted). B1, M1-M8 are fixed and I could not make a repair lose a live segment. One follow-up for the lead (R-1) and five minors. |
+
+## What was checked
+
+- **B1.** Repairs now run in the order truncate, pins, floor, leftovers, index rebuild, re-check, orphans, and
+  `--delete-orphans` is refused on any error-severity finding, a missing index view, an incomplete tip walk or pins.
+  The rebuild takes every good segment at or below the high-water mark plus the named and referenced ones. The
+  argument that this is enough: after the re-check there is no error, so every entry of every retained root resolved
+  to a copy that was confirmed against an authenticated footer, and that copy's segment is in `referenced`; whatever
+  is deleted holds no copy an entry was resolved to, and the index is rebuilt again from what is left. A segment
+  above the mark that only the index reaches is left out of the rebuild, its entries stay unresolved, and that error
+  stops the delete: it fails safe.
+- **Variants run** (all pass, added to a scratch copy of `tests/stale.rs`): two flipped bytes in every index run,
+  then `--repair --delete-orphans` (ratios unchanged, `--deep` clean, all three modes); a flipped byte in a segment
+  with the index gone (nothing deleted, `repair_refused`); a flipped byte in the root node of the older retained root
+  (nothing deleted); the delete run twice (second run changes nothing); a lean volume with stale hints (nothing
+  deleted); `--truncate-tip` with `retain_last = 1`, tip authentic and tip damaged (nothing changed, `state/pins`
+  byte-identical); `--truncate-tip --reset-floor --rebuild-index` in one run with the index gone (floor lowered once,
+  "already commit 2", `--deep` afterwards warnings only, audit file present).
+- **M1.** The checks re-run after a truncate and every later repair uses the new facts; the original test passes.
+- **M8.** Refused when `prev.seq < tip.chain_floor`; the previous root is walked and resolved before anything
+  changes. See R-2 for the one case where it is now too strict.
+- **P1 gating.** `StoreOptions::allow_floor_reset` defaults to false, the store refuses without it (contract test in
+  all three modes and for `MemStore`), and the only non-test place that sets it is `lunix-fsck/src/session.rs:242`.
+  I ran the CI grep by hand on `p1/m14`: no hit outside the allowed paths.
+- **Audit record.** One line (time, reason, old and new floor with full hashes) appended to
+  `state/floor-resets.log`, `fdatasync`, directory `fsync` when the file is new, all before `state/pins` changes. A
+  failed pins write after it leaves a line for a reset that did not happen, which is the right side to err on.
+- **`--repair-pins`.** Explicit, needs `--repair`, needs a verified tip and chain, and the store refuses it unless
+  `state/pins` is really rejected (an absent file is refused too). It resets `max_keyring_seq`, `max_epoch` and the
+  pin, says so in the action, and is audited.
+- **Memory.** `memory_distinct` printed the report's figure here too: peak RSS 100 MiB for 320 000 distinct and
+  400 000 mapped chunks, 328 bytes per distinct chunk. It is one point and includes the fixed baseline, so it is an
+  upper estimate at that size; the doc's 5 GiB and 20 GiB for a full 1 TiB follow from it. The streaming rework
+  stays a follow-up.
+- **N10/N11 (GC review).** fsck does **not** require the objects named by commits below the tip's `chain_floor`:
+  it opens those commits, links them only in the fork walk, and uses what they name for one thing, keeping it out of
+  the orphan list. Two leftovers are in R-3. N12 fails safe: `--truncate-tip` runs `verify_chain` down to the
+  previous commit's own `chain_floor` and refuses when a commit there is gone.
+
+## New findings
+
+### R-1 (follow-up for the lead; M6, M11 and M14 together): an interrupted index rebuild leaves old segments out, and nothing but fsck puts them back
+
+`LsmIndex::rebuild` (`lunix-index/src/lib.rs`, around line 870) swaps in an empty manifest first and fills the
+memtable after; fsck then calls `persist`. A crash or kill between the two leaves an empty index on disk. Mount's
+`catch_up` covers only the segments the retained chain names, so every older segment stays without entries: stale
+hints into them do not resolve, and whatever GC decides from "the copy the index names" (M17 rule 3) is decided on
+an incomplete index. fsck reports this state as `index_missing`, a warning whose text says "mount catches up",
+which is not true for those segments. The window existed before the fixes; it matters more now because plain
+`--repair` rebuilds on more triggers.
+
+Suggested: (a) in fsck, make missing entries for a segment that the retained chain does **not** name an error with
+its own text ("only `--rebuild-index` restores it"); (b) make the rebuild atomic (build the runs, then one manifest
+swap), or have mount refuse an index whose manifest is empty while segments exist below the high-water mark. Not a
+reason to hold `p1/m14`.
+
+### R-2 (minor): with `retain_last < 2` and a tip that does not authenticate, `--truncate-tip` is refused with no way out
+
+`repair.rs:247-254`. The plan calls truncation "the only answer" to such a tip. The new walk of the previous root
+(`previous_root_resolves`) already proves whether its data is still there, so the flat refusal adds nothing when
+that walk succeeds. Drop it in favour of the walk, or keep it as a warning in the action.
+
+### R-3 (minor): leftovers of N11
+
+- `indexcheck.rs:186-190`: a segment named only by a commit below `chain_floor` counts as "in use" for the index
+  comparison, so entries GC already dropped for it give `index_missing`, and under `--repair` a rebuild. Compare
+  against segments the retained chain names or the retained roots reference.
+- The GC review asked fsck to report the window between the rollback floor and `chain_floor` as information. There
+  is no such note yet.
+
+### Minors on `p1/m14`
+
+- `session.rs:242`: every run opens the store with `allow_floor_reset: true`, a plain check included. Set it only
+  when `--truncate-tip`, `--reset-floor` or `--repair-pins` was given.
+- `repair.rs:309-312`: when the floor was lowered and `set_aside` then fails, the function returns "ok" and the
+  remaining repairs run on the old tip. Return false there.
+- `bin/lunix-fsck.rs:112-117` strips `\r` only as part of `\r\n`; `lunix-cli` strips any trailing `\r` (M13a
+  minor 2). Until M13a is fixed the two tools read different passphrases from the same file in that edge case.
+- The report's review response says the final `ci.sh` runs on the new base were interrupted; they still have to run.
+
+### Minors on `lead/p1-floor-reset`
+
+- **P-1.** The CI grep matches only the literal `allow_floor_reset: true` (or `= true`). `allow_floor_reset: flag`
+  or a struct update from another value passes. Match the identifier itself outside `lunix-store/src`,
+  `lunix-fsck` and `lunix-testkit`.
+- **P-2.** `state/floor-resets.log` is a new file in the volume directory and is not in
+  `docs/reference/on-disk-formats.md` (local layout). Add it, with the line format.
+- **P-3.** `audit_floor_reset` syncs the directory only when the file did not exist at that moment. If an earlier run
+  created the file and died before the directory sync, the entry is never synced. Sync the directory every time; it
+  is an offline path.
+- **P-4.** `RepairPins` writes `max_keyring_seq = 0`. fsck has just unlocked the current keyring and could pass its
+  sequence, so keyring rollback protection restarts at today's value and not at zero. This needs a parameter; the
+  lead may prefer to leave it and keep the action's warning.
+
+## What I ran (re-review)
+
+On the remote test host, no root, 4 CPUs, one cargo job at a time, from a scratch copy of `p1/m14` (deleted
+afterwards, with the host directory):
+
+| run | result |
+|---|---|
+| `cargo test --no-fail-fast -p lunix-fsck -p lunix-store -p lunix-testkit` (`RUST_TEST_THREADS=1`) | 378 passed, 0 failed. `lunix-fsck`: 79, of which 72 are the branch's (the three adapted review tests and the M1 test among them) and 7 are the variants above. `lunix-store` (92 unit tests, with the floor-reset and contract tests) and `lunix-testkit` (with `floor_reset.rs` and the contract suites) are the P1 code as `p1/m14` carries it |
+| the CI grep for `allow_floor_reset`, by hand | no hit outside the allowed paths |
+
+Not run: `tools/ci.sh`, clippy, anything as root, and `lead/p1-floor-reset` on its own (its code was tested as the
+base of `p1/m14`).
