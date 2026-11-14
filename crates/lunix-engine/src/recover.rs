@@ -50,6 +50,9 @@ pub struct RecoveryReport {
     pub ignored_after_gap: Option<WriteSeqRange>,
     /// Damaged journal ranges the resync skipped.
     pub damaged: Vec<DamagedRange>,
+    /// The journal's flushed watermark: every record at or below it was
+    /// durable before the crash; gaps and damage above it were crash residue.
+    pub flushed: WriteSeq,
     /// No rollback floor existed: this host cannot detect a rollback of
     /// earlier history (ADR-31); the floor is set now.
     pub first_attach: bool,
@@ -372,6 +375,7 @@ pub(crate) fn recover(
         next_seq: rec.next_seq,
         ignored_after_gap: rec.ignored_after_gap,
         damaged: rec.damaged,
+        flushed: rec.flushed,
         first_attach,
         sweep,
         catch_up,

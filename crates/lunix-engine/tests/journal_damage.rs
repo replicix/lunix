@@ -1,0 +1,157 @@
+//! `on_journal_damage = refuse` against the flushed watermark (ADR-4, maintainer
+//! decision of 2026-11-14): crash residue above the watermark opens, loss at
+//! or below it is refused, and `wipe` opens either way.
+
+mod common;
+
+use common::*;
+use lunix_engine::{EngineConfig, OnJournalDamage, OpenError};
+use lunix_format::WriteSeq;
+use lunix_testkit::{CrashModel, JournalMode};
+
+const CS: u32 = 16 << 10;
+
+fn refuse(cfg: &mut EngineConfig) {
+    cfg.on_journal_damage = OnJournalDamage::Refuse;
+}
+
+fn wipe(cfg: &mut EngineConfig) {
+    cfg.on_journal_damage = OnJournalDamage::Wipe;
+}
+
+/// Writes 4 KiB at block `blk` from queue `q` and returns its `write_seq`.
+fn put(v: &Vol, r: &mut Running, q: usize, blk: u64) -> WriteSeq {
+    v.hooks.take_seqs();
+    assert!(r.write(q, blk * 4096, &pattern(blk, 4096), false).is_ok());
+    let seqs = v.hooks.take_seqs();
+    assert_eq!(seqs.len(), 1, "one record per write");
+    seqs[0].2
+}
+
+/// Stops the engine and keeps every journal record (durable or not).
+fn crash_keep_all(v: &mut Vol, r: Running) {
+    let p = r.stop();
+    v.store = p.store.crash(1);
+    v.index = p.index.image();
+    v.journal = p.journal.crash_with(1, CrashModel::keep_all());
+}
+
+#[test]
+fn a_gap_across_lanes_above_the_watermark_opens_under_refuse() {
+    let mut v = Vol::create(CS, 64, 2, JournalMode::Immediate);
+    v.tweak = refuse;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    put(&v, &mut r, 0, 0);
+    let flushed = put(&v, &mut r, 1, 1);
+    assert!(r.flush(0).is_ok());
+    let lost = put(&v, &mut r, 0, 2);
+    put(&v, &mut r, 1, 3);
+    crash_keep_all(&mut v, r);
+    // Lane 0's last record never reached the file; lane 1's later one did.
+    assert!(v.journal.lose(lost));
+    let r = v
+        .open()
+        .map_err(|e| e.0)
+        .expect("residue opens under refuse");
+    let rep = r.engine.recovery_report();
+    assert!(rep.ignored_after_gap.is_some(), "{rep:?}");
+    assert!(rep.flushed >= flushed && rep.flushed < lost, "{rep:?}");
+}
+
+#[test]
+fn two_batches_in_flight_on_one_lane_open_under_refuse() {
+    let mut v = Vol::create(CS, 64, 1, JournalMode::Immediate);
+    v.tweak = refuse;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    put(&v, &mut r, 0, 0);
+    assert!(r.flush(0).is_ok());
+    let torn = put(&v, &mut r, 0, 1);
+    let landed = put(&v, &mut r, 0, 2);
+    crash_keep_all(&mut v, r);
+    // The first unflushed batch tore, the second landed.
+    assert!(v.journal.tear(torn));
+    let r = v
+        .open()
+        .map_err(|e| e.0)
+        .expect("residue opens under refuse");
+    let rep = r.engine.recovery_report();
+    assert_eq!(rep.damaged.len(), 1, "{rep:?}");
+    assert_eq!(rep.damaged[0].next_seq, Some(landed));
+    assert!(rep.flushed < torn, "{rep:?}");
+}
+
+#[test]
+fn damage_at_or_below_the_watermark_is_refused_and_wipe_opens() {
+    let mut v = Vol::create(CS, 64, 2, JournalMode::Immediate);
+    v.tweak = refuse;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    put(&v, &mut r, 0, 0);
+    let durable = put(&v, &mut r, 1, 1);
+    assert!(r.flush(1).is_ok());
+    // Appended after the flush: it witnesses `durable`.
+    put(&v, &mut r, 0, 2);
+    crash_keep_all(&mut v, r);
+    let image = v.journal.clone();
+    for damage in ["tear", "lose"] {
+        v.journal = image.clone();
+        if damage == "tear" {
+            assert!(v.journal.tear(durable));
+        } else {
+            assert!(v.journal.lose(durable));
+        }
+        v.tweak = refuse;
+        match v.open() {
+            Err((OpenError::JournalDamage, _)) => {}
+            Err((e, _)) => panic!("{damage}: {e}"),
+            Ok(_) => panic!("{damage}: a durable record is gone and refuse opened"),
+        }
+        v.tweak = wipe;
+        let r = v.open().map_err(|e| e.0).expect("wipe opens");
+        let rep = r.engine.recovery_report();
+        assert!(
+            rep.ignored_after_gap.is_some() || !rep.damaged.is_empty(),
+            "{damage}: {rep:?}"
+        );
+        assert!(rep.flushed >= durable, "{damage}: {rep:?}");
+    }
+}
+
+#[test]
+fn random_crash_residue_always_opens_under_refuse() {
+    let mut residue = 0;
+    for seed in 0..24u64 {
+        let mut v = Vol::create(CS, 64, 2, JournalMode::Mixed(seed));
+        v.tweak = refuse;
+        let mut r = v.open().map_err(|e| e.0).expect("open");
+        for blk in 0..24u64 {
+            assert!(r
+                .write(
+                    (blk % 2) as usize,
+                    blk * 4096,
+                    &pattern(seed ^ blk, 4096),
+                    false
+                )
+                .is_ok());
+            if blk % 7 == 6 {
+                assert!(r.flush((blk % 2) as usize).is_ok());
+            }
+        }
+        let p = r.stop();
+        v.store = p.store.crash(seed);
+        v.index = p.index.image();
+        v.journal = p.journal.crash_with(seed, CrashModel::default());
+        let r = v
+            .open()
+            .map_err(|e| e.0)
+            .unwrap_or_else(|e| panic!("seed {seed}: residue refused: {e}"));
+        let rep = r.engine.recovery_report();
+        if rep.ignored_after_gap.is_some() || !rep.damaged.is_empty() {
+            residue += 1;
+        }
+        assert!(rep.flushed.0 > 0, "seed {seed}: {rep:?}");
+    }
+    assert!(
+        residue > 0,
+        "no crash image had residue: the test tests nothing"
+    );
+}

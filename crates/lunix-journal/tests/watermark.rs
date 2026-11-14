@@ -145,3 +145,36 @@ fn damage_at_or_below_the_watermark_is_visible() {
     assert_eq!(r.damaged.len(), 1);
     assert_eq!(r.damaged[0].next_seq, Some(WriteSeq(3)));
 }
+
+#[test]
+fn two_batches_in_flight_on_one_lane_lose_the_first_above_the_watermark() {
+    let t = scratch();
+    let cfg = small_cfg(t.path().join("journal"), 1, 4);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = lanes_of(&j, 1);
+    assert_eq!(put(&mut *l[0], 1), 1);
+    group_flush(&j);
+    // Two batches after the flush, neither flushed: at a crash the second can
+    // land while the first is torn.
+    assert_eq!(put(&mut *l[0], 2), 2);
+    assert_eq!(put(&mut *l[0], 3), 3);
+    drop(l);
+    drop(j);
+    assert_eq!(
+        flushed_of(&cfg.dir, 3),
+        1,
+        "only the flush of 1 is witnessed"
+    );
+    damage(&cfg.dir, 2);
+    let j = open_journal(&cfg);
+    let r = recover_all(&j);
+    assert_eq!(r.gap_at, Some(WriteSeq(2)));
+    assert_eq!(
+        r.flushed,
+        WriteSeq(1),
+        "record 2 was never durable: residue"
+    );
+    assert_eq!(r.damaged.len(), 1);
+    assert_eq!(r.damaged[0].next_seq, Some(WriteSeq(3)));
+}

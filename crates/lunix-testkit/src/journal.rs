@@ -26,6 +26,10 @@
 //! seeded generator. Records can therefore be lost from the middle of a lane,
 //! which is what produces the gaps recovery must handle. [`MemJournal::from_image`]
 //! opens the image as a new journal; the caller runs `recover` as the engine does.
+//! Every record carries the flushed watermark (on-disk-formats §5.2) and
+//! `recover` reports the highest that survived: the model never loses a record
+//! at or below it. [`JournalImage::tear`] and [`JournalImage::lose`] damage or
+//! remove any record, durable or not, as a media error would.
 //!
 //! # Test controls
 //!
@@ -165,6 +169,8 @@ struct Rec {
     completed: bool,
     durable: bool,
     torn: bool,
+    /// The flushed watermark written into the record (on-disk-formats §5.2).
+    flushed: u64,
 }
 
 impl Rec {
@@ -184,6 +190,39 @@ struct RingFile {
 pub struct JournalImage {
     cfg: MemJournalConfig,
     lanes: Vec<BTreeMap<u32, RingFile>>,
+}
+
+impl JournalImage {
+    /// Damages the record numbered `seq` as a media error would, durable or
+    /// not (its data no longer checks). Returns whether the record exists.
+    pub fn tear(&mut self, seq: WriteSeq) -> bool {
+        for r in self
+            .lanes
+            .iter_mut()
+            .flat_map(|l| l.values_mut())
+            .flat_map(|f| f.recs.values_mut())
+        {
+            if r.seq == seq.0 {
+                r.torn = true;
+                r.data = Vec::new();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Removes the record numbered `seq` as if it had never reached the
+    /// file. Returns whether the record existed.
+    pub fn lose(&mut self, seq: WriteSeq) -> bool {
+        for f in self.lanes.iter_mut().flat_map(|l| l.values_mut()) {
+            let before = f.recs.len();
+            f.recs.retain(|_, r| r.seq != seq.0);
+            if f.recs.len() != before {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -222,6 +261,9 @@ struct State {
     fail_flush: bool,
     nospace: bool,
     retire_from: Option<u64>,
+    /// The highest `upto` of a completed group flush, or the recovered
+    /// records once the first lane open retired the rest.
+    flushed: u64,
 }
 
 struct Inner {
@@ -394,6 +436,7 @@ impl MemJournal {
                 fail_flush: false,
                 nospace: false,
                 retire_from: None,
+                flushed: 0,
             }),
             cv: Condvar::new(),
         });
@@ -632,6 +675,9 @@ fn coordinator(inner: &Inner) {
                     }
                 }
             }
+            if poisoned.is_none_or(|p| upto < p) {
+                st.flushed = st.flushed.max(upto);
+            }
             Ok(())
         };
         let (_, done) = st.pending.pop_front().expect("front checked above");
@@ -665,6 +711,8 @@ impl Journal for MemJournal {
                     f.recs.retain(|_, r| r.seq < from);
                 }
             }
+            // Every recovered record is durable (an image holds nothing else).
+            st.flushed = st.flushed.max(from - 1);
         }
         let l = &mut st.lanes[idx];
         l.opened = true;
@@ -764,6 +812,16 @@ impl Journal for MemJournal {
                 });
             }
         }
+        // The watermark: the highest any surviving record witnessed.
+        let watermark = st
+            .lanes
+            .iter()
+            .flat_map(|l| l.files.values())
+            .flat_map(|f| f.recs.values())
+            .filter(|r| !r.torn)
+            .map(|r| r.flushed)
+            .max()
+            .unwrap_or(0);
         valid.sort_by_key(|(seq, _)| *seq);
         valid.dedup_by_key(|(seq, _)| *seq);
         let mut expected = floor.0 + 1;
@@ -791,14 +849,15 @@ impl Journal for MemJournal {
         st.last_issued = expected - 1;
         st.retire_from = Some(expected);
         st.recovered = true;
+        // Until the first lane open, only the floor is known durable.
+        st.flushed = floor.0;
         Ok(Recovered {
             records,
             next_seq: WriteSeq(expected),
             ignored_after_gap,
             gap_at,
             damaged,
-            // The fake keeps no on-disk watermark: every gap is residue.
-            flushed: WriteSeq(0),
+            flushed: WriteSeq(watermark),
         })
     }
 
@@ -1012,6 +1071,7 @@ impl JournalLane for MemLane {
             completed: completes_now,
             durable: false,
             torn: false,
+            flushed: st.flushed.min(seq - 1),
         };
         let lane = &mut st.lanes[idx];
         lane.accepted_max = lane.accepted_max.max(seq);
