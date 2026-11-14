@@ -307,8 +307,12 @@ journal):
        is the residue of a crash during an unflushed batch and is logged and
        wiped: a record acknowledged by a FLUSH or FUA is durable (`fdatasync`
        of its lane file in the group flush) before the acknowledgement, so a
-       crash cannot tear it (ADR-4). A clean restart writes nothing to the
-       journal.
+       crash cannot tear it (ADR-4). Until the flushed watermark is in the
+       journal format, `refuse` also refuses a gap across lanes and a
+       damaged batch followed by a later one, which a crash under load
+       leaves too: use it for single-queue volumes or with `fsck` after
+       every crash (ADR-4, interim limit). A clean restart writes nothing to
+       the journal.
   3. Merge the lanes by `write_seq` and accept records in contiguous
      order. This global contiguity, not file position, decides what is
      kept, so resync is safe: a damaged record at or below the floor costs

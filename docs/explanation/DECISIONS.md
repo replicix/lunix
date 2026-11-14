@@ -216,6 +216,17 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   is a write never flushed, which block semantics allow to lose. It is
   logged at warn and wiped; refusing it would keep every volume offline
   after an ordinary crash.
+  **Interim limit (M12a re-review R1, 2026-11-14).** The same durability
+  argument makes a gap across lanes, and a damaged batch followed by a later
+  batch of the same lane (two batches in flight), ordinary residue of a crash
+  under load: no flush covering the later records was acknowledged. Until
+  the flushed watermark is in the journal format (maintainer decision of
+  2026-11-14, pending the `FREEZE.md` re-sign), `refuse` still refuses those
+  shapes, so it is meant for **single-queue volumes or setups that run
+  `fsck` after every crash**; `wipe` stays the default. With the watermark,
+  recovery refuses only damage or a gap at or below the highest flushed
+  `write_seq` a surviving record witnessed, and treats everything above it
+  as residue.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes
