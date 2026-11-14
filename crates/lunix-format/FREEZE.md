@@ -113,7 +113,7 @@ The first sign-off (before the amendment): the maintainer, 2026-11-12.
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-12 (amendment: keyed integrity chunk ids, rollback floor)
 
-**Amendment 2026-11-14 — pending maintainer re-sign** (maintainer decision
+**Amendment 2026-11-14** (maintainer decision
 of 2026-11-14 after the M12a re-review, finding R1; on-disk-formats.md §5.2
 and §5.3). Item 2: bytes 56-63 of the journal record header, reserved and
 zero in the signed layout, become `flushed` (u64): the highest `write_seq`
@@ -128,4 +128,4 @@ reports the highest watermark found; a gap or damage at or below it is
 real loss (what `on_journal_damage = refuse` refuses), everything above it
 is crash residue (ADR-4).
 
-Re-signed by: _pending (the maintainer) — journal flushed watermark_
+Re-signed by: the maintainer (Attila Nagy) on 2026-11-14 (amendment: journal flushed watermark; merge gated on an independent review and the four-queue kill -9 + refuse cell)
