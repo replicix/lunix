@@ -32,17 +32,25 @@
 //! Pack liveness uses a **full** `walk_nodes` of every root (two roots can
 //! store the same node in two packs, M5 note). The leaf walk skips every node
 //! hash an earlier root already reported, and walks the remaining leaves of a
-//! root in at most `max_leaf_batches` batches through `walk_leaves_skipping`
-//! (the other leaves are put in the skip set), so one budgeted unit of work is
-//! about `1/64` of a root.
+//! root `leaves_per_unit` at a time through `walk_leaves_skipping` (the other
+//! leaves stay in the skip set).
+//!
+//! # Units and their bounds
+//!
+//! | unit | work |
+//! |---|---|
+//! | init | the root set, the pins, four listings (sorted) |
+//! | nodes | one full `walk_nodes` of one root: one callback per stored node (interior nodes are resident in the map) |
+//! | leaves | at most `leaves_per_unit` new leaves (`× fanout` entries) resolved, plus one skip-set lookup per leaf of the root during the traversal |
+//! | finish | sort and deduplicate the live extents of segments until `finish_per_unit` extents are done (a segment is at most 16 MiB of extents) |
 //!
 //! # Memory
 //!
-//! The live-extent set is a **sorted vector** of [`LiveExtent`] (24 bytes per
-//! live extent: the hint and the first chunk number that references it, for
-//! compaction's LBA ordering). Beyond it a mark holds the node hashes of the
-//! roots (32 bytes per stored node), one batch of leaf entries, the
-//! per-segment totals and a bounded footer cache.
+//! The live-extent set is a **sorted vector per segment** of [`LiveExtent`]
+//! (24 bytes per live extent: the hint and the first chunk number that
+//! references it, for compaction's LBA ordering). Beyond it a mark holds the
+//! node hashes of the roots (32 bytes per stored node), one batch of leaf
+//! entries, the per-segment totals and a bounded footer cache.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::Duration;
@@ -84,25 +92,30 @@ pub struct Liveness {
     pub roots: Vec<Root>,
     /// Commits pins name.
     pub pinned: BTreeSet<CommitSeq>,
-    /// Live extents, sorted by `(seg, off)`, one per hint.
-    pub live: Vec<LiveExtent>,
+    /// Live extents per segment, sorted by offset, one per hint.
+    pub live: BTreeMap<SegId, Vec<LiveExtent>>,
     /// Live bytes (sum of `clen` of the live extents) per segment, only
     /// segments with a live extent.
     pub seg_live: BTreeMap<SegId, u64>,
     /// Packs holding a node of some root.
     pub live_packs: BTreeSet<PackId>,
     /// For a segment that hints point into while the live copy of the id is
-    /// elsewhere: the highest segment holding such a copy.
-    pub deps: BTreeMap<SegId, SegId>,
+    /// elsewhere: the segments holding such copies.
+    pub deps: BTreeMap<SegId, BTreeSet<SegId>>,
+    /// Segments holding a live extent that no confirmed index entry names
+    /// (compaction could not relocate it, so they are no candidates).
+    pub unindexed: BTreeSet<SegId>,
     /// Entries that resolved to no extent at all (already unreadable).
     pub unresolved: u64,
-    /// Sealed segments when the mark started.
+    /// Live extents in total.
+    pub live_count: u64,
+    /// Sealed segments when the mark started (ascending).
     pub segments: Vec<SegmentInfo>,
-    /// Sealed map packs when the mark started.
+    /// Sealed map packs when the mark started (ascending).
     pub packs: Vec<PackInfo>,
-    /// Index run files when the mark started.
+    /// Index run files when the mark started (ascending).
     pub runs: Vec<RunRef>,
-    /// Commit objects when the mark started.
+    /// Commit objects when the mark started (ascending).
     pub commits: Vec<CommitInfo>,
     /// When the mark started, on the view's monotonic clock.
     pub started: Duration,
@@ -116,9 +129,38 @@ impl Liveness {
 
     /// The live extents of `seg`, by offset.
     pub fn live_in(&self, seg: SegId) -> &[LiveExtent] {
-        let lo = self.live.partition_point(|e| e.hint.seg < seg);
-        let hi = self.live.partition_point(|e| e.hint.seg <= seg);
-        self.live.get(lo..hi).unwrap_or(&[])
+        self.live.get(&seg).map_or(&[], Vec::as_slice)
+    }
+
+    /// The size of a listed segment.
+    pub fn segment_size(&self, seg: SegId) -> Option<u64> {
+        let i = self.segments.binary_search_by_key(&seg, |x| x.seg).ok()?;
+        self.segments.get(i).map(|x| x.size_bytes)
+    }
+
+    /// The size of a listed pack.
+    pub fn pack_size(&self, pack: PackId) -> Option<u64> {
+        let i = self.packs.binary_search_by_key(&pack, |x| x.pack).ok()?;
+        self.packs.get(i).map(|x| x.size_bytes)
+    }
+
+    /// A listed run.
+    pub fn run(&self, run: lunix_format::RunId) -> Option<RunRef> {
+        let i = self.runs.binary_search_by_key(&run, |x| x.id).ok()?;
+        self.runs.get(i).copied()
+    }
+
+    /// The size of a listed commit object.
+    pub fn commit_size(&self, seq: CommitSeq) -> Option<u64> {
+        let i = self.commits.binary_search_by_key(&seq, |x| x.seq).ok()?;
+        self.commits.get(i).map(|x| x.size_bytes)
+    }
+
+    /// Bytes of the live-extent set.
+    pub fn live_set_bytes(&self) -> usize {
+        usize::try_from(self.live_count)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(std::mem::size_of::<LiveExtent>())
     }
 
     /// Total live bytes.
@@ -126,9 +168,9 @@ impl Liveness {
         self.seg_live.values().sum()
     }
 
+    /// Heap beyond the live-extent set.
     pub(crate) fn heap_bytes(&self) -> usize {
-        self.live.capacity() * std::mem::size_of::<LiveExtent>()
-            + (self.seg_live.len() + self.deps.len()) * 48
+        (self.live.len() + self.seg_live.len() + self.deps.len() + self.unindexed.len()) * 48
             + self.live_packs.len() * 32
             + self.segments.capacity() * std::mem::size_of::<SegmentInfo>()
             + self.packs.capacity() * std::mem::size_of::<PackInfo>()
@@ -187,11 +229,14 @@ enum Stage {
     Init,
     Nodes,
     Leaves {
-        batches: Vec<Vec<NodeHash>>,
+        new_leaves: Vec<NodeHash>,
         next: usize,
         root_hashes: Vec<NodeHash>,
     },
-    Finish,
+    Finish {
+        segs: Vec<SegId>,
+        next: usize,
+    },
     Done,
 }
 
@@ -226,12 +271,7 @@ impl Mark {
         }
     }
 
-    /// Bytes of the live-extent set being built.
-    pub(crate) fn live_set_bytes(&self) -> usize {
-        self.out.live.capacity() * std::mem::size_of::<LiveExtent>()
-    }
-
-    /// The result, once [`is_done`](Self::is_done).
+    /// The result, once the mark is done.
     pub(crate) fn into_liveness(self) -> Liveness {
         self.out
     }
@@ -239,10 +279,11 @@ impl Mark {
     pub(crate) fn heap_bytes(&self) -> usize {
         let batch = match &self.stage {
             Stage::Leaves {
-                batches,
+                new_leaves,
                 root_hashes,
                 ..
-            } => (batches.iter().map(Vec::capacity).sum::<usize>() + root_hashes.capacity()) * 32,
+            } => (new_leaves.capacity() + root_hashes.capacity()) * 32,
+            Stage::Finish { segs, .. } => segs.capacity() * 8,
             _ => 0,
         };
         (self.seen.capacity() + self.skip.capacity()) * 40
@@ -262,15 +303,20 @@ impl Mark {
                 self.out.roots = roots;
                 self.out.pinned = pinned;
                 self.out.segments = view.segments.list()?;
+                self.out.segments.sort_unstable_by_key(|x| x.seg);
                 self.out.packs = view.packs.list_packs()?;
+                self.out.packs.sort_unstable_by_key(|x| x.pack);
                 self.out.runs = view.index.all_runs()?;
+                self.out.runs.sort_unstable_by_key(|x| x.id);
                 self.out.commits = view.commits.list()?;
+                self.out.commits.sort_unstable_by_key(|x| x.seq);
                 self.existing = self.out.segments.iter().map(|s| s.seg).collect();
                 self.stage = Stage::Nodes;
             }
             Stage::Nodes => {
                 let Some(root) = self.out.roots.get(self.root_idx).copied() else {
-                    self.stage = Stage::Finish;
+                    let segs: Vec<SegId> = self.out.live.keys().copied().collect();
+                    self.stage = Stage::Finish { segs, next: 0 };
                     return Ok(false);
                 };
                 let mut root_hashes = Vec::new();
@@ -288,22 +334,16 @@ impl Mark {
                 if let Some(p) = root.root.pack {
                     self.out.live_packs.insert(p);
                 }
-                let per = new_leaves
-                    .len()
-                    .div_ceil(self.cfg.max_leaf_batches.max(1))
-                    .max(self.cfg.min_leaf_batch.max(1));
-                let batches: Vec<Vec<NodeHash>> =
-                    new_leaves.chunks(per).map(<[NodeHash]>::to_vec).collect();
                 self.skip = self.seen.clone();
                 self.skip.extend(new_leaves.iter().copied());
                 self.stage = Stage::Leaves {
-                    batches,
+                    new_leaves,
                     next: 0,
                     root_hashes,
                 };
             }
             Stage::Leaves {
-                batches,
+                new_leaves,
                 next,
                 root_hashes,
             } => {
@@ -313,7 +353,9 @@ impl Mark {
                     .get(self.root_idx)
                     .copied()
                     .ok_or(Error::invalid("mark root index out of range"))?;
-                if let Some(batch) = batches.get(next) {
+                let per = self.cfg.leaves_per_unit.max(1);
+                if let Some(batch) = new_leaves.get(next..).filter(|b| !b.is_empty()) {
+                    let batch = &batch[..batch.len().min(per)];
                     for h in batch {
                         self.skip.remove(h);
                     }
@@ -327,9 +369,10 @@ impl Mark {
                     self.skip.extend(batch.iter().copied());
                     walked?;
                     self.resolve(view)?;
+                    let n = batch.len();
                     self.stage = Stage::Leaves {
-                        batches,
-                        next: next + 1,
+                        new_leaves,
+                        next: next + n,
                         root_hashes,
                     };
                 } else {
@@ -339,7 +382,19 @@ impl Mark {
                     self.stage = Stage::Nodes;
                 }
             }
-            Stage::Finish => {
+            Stage::Finish { segs, mut next } => {
+                let mut done = 0usize;
+                while let Some(&seg) = segs.get(next) {
+                    done += self.finish_segment(seg);
+                    next += 1;
+                    if done >= self.cfg.finish_per_unit {
+                        break;
+                    }
+                }
+                if next < segs.len() {
+                    self.stage = Stage::Finish { segs, next };
+                    return Ok(false);
+                }
                 self.finish();
                 self.stage = Stage::Done;
                 return Ok(true);
@@ -356,13 +411,17 @@ impl Mark {
     }
 
     fn live(&mut self, hint: Hint, ci: u64) {
-        self.out.live.push(LiveExtent { hint, ci });
+        self.out
+            .live
+            .entry(hint.seg)
+            .or_default()
+            .push(LiveExtent { hint, ci });
+        self.out.live_count += 1;
     }
 
     fn dep(&mut self, from: SegId, on: SegId) {
         if from != on && self.existing.contains(&from) {
-            let d = self.out.deps.entry(from).or_insert(on);
-            *d = (*d).max(on);
+            self.out.deps.entry(from).or_default().insert(on);
         }
     }
 
@@ -401,8 +460,12 @@ impl Mark {
                         self.live(c.hint, ci);
                         self.dep(hint.seg, c.hint.seg);
                     }
-                    // No usable index entry: the hinted copy is the one.
-                    _ => self.live(hint, ci),
+                    // No usable index entry: the hinted copy is the one, and
+                    // compaction could not relocate it.
+                    _ => {
+                        self.live(hint, ci);
+                        self.out.unindexed.insert(hint.seg);
+                    }
                 },
                 None => self.stale(view, &e.prefix, hint, ci)?,
             }
@@ -432,21 +495,30 @@ impl Mark {
             if self.existing.contains(&hint.seg) {
                 // Unresolvable but its segment exists: keep that segment.
                 self.live(hint, ci);
+                self.out.unindexed.insert(hint.seg);
             }
         }
         Ok(())
     }
 
+    /// Sorts and deduplicates one segment's live extents; returns how many
+    /// there were.
+    fn finish_segment(&mut self, seg: SegId) -> usize {
+        let Some(v) = self.out.live.get_mut(&seg) else {
+            return 0;
+        };
+        let n = v.len();
+        v.sort_unstable_by_key(|l| (l.hint.off, l.hint.clen, l.ci));
+        v.dedup_by(|b, a| a.hint == b.hint);
+        v.shrink_to_fit();
+        let bytes: u64 = v.iter().map(|l| u64::from(l.hint.clen)).sum();
+        let kept = v.len() as u64;
+        self.out.live_count = self.out.live_count.saturating_sub(n as u64) + kept;
+        self.out.seg_live.insert(seg, bytes);
+        n
+    }
+
     fn finish(&mut self) {
-        let live = &mut self.out.live;
-        live.sort_unstable_by_key(|l| (l.hint.seg, l.hint.off, l.hint.clen, l.ci));
-        live.dedup_by(|b, a| a.hint == b.hint);
-        live.shrink_to_fit();
-        let mut seg_live = BTreeMap::new();
-        for l in live.iter() {
-            *seg_live.entry(l.hint.seg).or_insert(0u64) += u64::from(l.hint.clen);
-        }
-        self.out.seg_live = seg_live;
         // A segment that is live itself needs no dependency.
         let seg_live = &self.out.seg_live;
         self.out.deps.retain(|s, _| !seg_live.contains_key(s));

@@ -35,7 +35,7 @@ An object is **live** when a root reaches it:
 | segment | it holds the live copy of a chunk some root references (below) |
 | map pack | it stores a node of some root (a full node walk of every root) |
 | index run | the index manifest names it |
-| commit | `commit_seq >= chain_floor` of the durable tip, or a pin names it, or it is in the rollback-floor window (below) |
+| commit | `commit_seq >=` the lowest `chain_floor` any retained FULL records, or a pin names it, or it is in the rollback-floor window (below) |
 
 **The live copy of a chunk.** A leaf entry resolves through its hint when the
 hint's segment exists and its authenticated footer holds, at exactly that
@@ -83,23 +83,35 @@ their map roots are not roots, so their data may go.
    10 s plus twice `read_timeout_ms` (30 s with the defaults), and a shorter
    setting is refused. An object read back from the list after a restart
    starts its grace again.
-3. **Recheck.** A new mark from roots pinned after the grace. An object it
-   finds referenced (or named by a retained commit, above the high-water mark,
-   or an unnamed output) is un-condemned and its index flag cleared.
-4. **Delete.** Unlink and directory `fsync` in the store, then for a segment
-   `drop_segment` and clearing its flag in the index, then the ledger
-   `release` of the bytes freed. A segment that stale hints point into is
-   deleted only while the live copy of every id they resolve to is in a
-   segment a durable FULL has named (the delete-time index invariant):
-   at or below the highest id that any FULL committed since the collector
-   started names (it reads each new commit once) and not an unnamed
-   compaction output; otherwise it stays condemned for a later pass. Commit objects go through `CommitStore::delete` with the durable
-   tip's `chain_floor`.
+3. **Recheck.** A new mark from roots pinned after the grace. Each listed
+   object is then decided in its own unit, against the facts of that step: an
+   object the mark finds referenced (or named by a retained commit, above the
+   high-water mark, or an unnamed output) is un-condemned, its index flag
+   cleared and the list stored at once.
+4. **Delete.** Unlink and directory `fsync` in the store, the ledger
+   `release` of the bytes freed, then for a segment `drop_segment` and only
+   after it succeeded the flag cleared: **a segment's flag is never cleared
+   while index entries may still point into it.** A failed call leaves the
+   object listed (and flagged); the next pass finds it gone, drops its
+   entries, clears the flag, and releases the listed size if the earlier call
+   may have deleted it. A segment that stale hints point into is deleted only
+   while the live copy of every id they resolve to is in a segment a durable
+   FULL has named (the delete-time index invariant): at or below the highest
+   id named by a FULL that has a successor FULL (the collector reads each new
+   commit once) and not an unnamed compaction output; otherwise it stays
+   condemned for a later pass. This rule is exact only while the engine
+   persists the index entries of a named segment before its naming FULL
+   leaves the retained window (spec gap N13). Commit objects go through
+   `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
+   them down to the lowest `chain_floor` of a retained FULL, so that `fsck
+   --repair --truncate-tip` can mount the predecessor (N12).
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
 `read_timeout`), with that mark as their recheck, condemns what is newly dead,
-and compacts if still short. It never deletes without a recheck.
+and compacts if still short. It never deletes without a recheck. When it stops
+on an error after it freed bytes, it reports the bytes freed (and writes its
+evidence) rather than an error.
 
 ### Why a stale mark is safe
 
@@ -139,6 +151,15 @@ idle volume. Compaction reads at most `gc_rate` bytes per second (default
 
 The source segments become dead once the index's current copies are in the
 output; the next pass condemns them.
+
+Only the index's current copy of an id is moved, and a segment holding a live
+extent that no confirmed index entry names is no candidate (it could not be
+relocated and would be picked every pass). An extent that does not open
+(`Auth`, `Corrupt`, `Unsupported`) is skipped, reported with a `skip` line,
+and its segment is never picked again by the process. Any other compaction
+error ends compaction for that pass; the pass still finishes. Live extents are
+queued 65 536 at a time (plus at most one segment's), so the compactor's
+scratch is bounded.
 
 ## Settings (`volume.json`)
 
@@ -183,8 +204,9 @@ deferred, deleted or compacted anything; a pass that found nothing writes
 none, and its number is used by the next. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and
 `bytes` = the pass's lines, written once at pass end (and once per urgent
-pass). A crash before the write loses only that pass's evidence. Phase 2
-uploads the objects verbatim.
+pass). A pass abandoned on an error (not a crash) writes what it has, best
+effort, so the record of deletes already made is not lost. A crash before the
+write loses only that pass's evidence. Phase 2 uploads the objects verbatim.
 
 Each line is one JSON object, keys in this order, no spaces:
 
@@ -195,7 +217,7 @@ Each line is one JSON object, keys in this order, no spaces:
 | key | value |
 |---|---|
 | `time` | ms since the epoch |
-| `action` | `condemn`, `uncondemn`, `defer`, `delete`, `compact` (a source segment; `bytes` = its live bytes), `output` (a compaction output; `bytes` = its size), `truncated` (see below) |
+| `action` | `condemn`, `uncondemn`, `defer`, `delete` (also for an object found already gone: reason `already gone`), `compact` (a source segment; `bytes` = its live bytes), `output` (a compaction output; `bytes` = its size), `skip` (a source with an extent that does not open), `truncated` (see below) |
 | `kind` | `segment`, `pack`, `run`, `commit` (`pass` for `truncated`) |
 | `id` | 16 lowercase hex digits: the object id, or the `commit_seq` |
 | `bytes` | as above; for `delete` the bytes freed (0 when the file was already gone) |
@@ -212,7 +234,7 @@ count in `bytes`.
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
 | `gc.delete.before_unlink` | nothing deleted |
 | `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of the segment: `catch_up` drops them at open, a later pass removes the list entry |
-| `gc.delete.after_dirsync` | the index and the ledger are updated; the list still names the object until the end of the delete phase |
+| `gc.delete.after_dirsync` | the index and the ledger are updated; the list still names the object until the end of the delete phase (an un-condemn is stored at once) |
 | `gc.commit_delete.before_unlink` | the commit object is not deleted yet |
 | `gc.compact.after_segment_seal` | the output is sealed, nothing relocated: above the high-water mark, the open-time sweep removes it |
 | `gc.compact.after_relocate` | relocations are in the index memtable only, the moves never reached a commit: the sweep removes the output, the old segment stays named and indexed |
@@ -229,9 +251,22 @@ compaction output is charged from the headroom while it is written and trued
 up when it is sealed. `gc/` evidence objects are not in the ledger (startup
 accounting does not count them either).
 
+## Steps and their bounds
+
+A step runs units until its budget is spent, so it lasts at most the budget
+plus one unit. Units: the mark's init (the root set and four listings); one
+full `walk_nodes` of a root (one callback per stored node; interior nodes are
+resident); 32 new leaves of a root (`× fanout` entries resolved, plus one
+skip-set lookup per leaf of the root); the sort of about 262 144 live extents;
+the condemn list (one write); one index flag; one recheck-and-delete decision;
+one compaction copy or seal; the evidence write. The step-wide facts (retained
+names, the index manifest, the rollback floor) are read once per step.
+
 ## What the wiring must do
 
-- Build the collector with the volume directory as its floor source.
+- Build the collector once, with the volume directory as its floor source,
+  and keep it as long as the engine: the unnamed outputs and the moves not yet
+  handed over live in memory only.
 - Give every move a step or an urgent pass returns to the next cut
   (`MapTxn::rehint`) and name the output segments in that FULL.
 - Call it only between cuts, with the map equal to the tip's root.

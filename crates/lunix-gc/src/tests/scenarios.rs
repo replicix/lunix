@@ -432,10 +432,12 @@ fn the_rollback_floor_window_keeps_commits_below_chain_floor() {
         .verify_chain(&s.store, tip, floor, &[0x11; 32])
         .unwrap();
     assert_eq!(fh, s.store.rollback_floor().unwrap().unwrap().tip_hash);
-    // When the floor is raised, the window closes and the rest goes.
+    // When the floor is raised, the window closes and the rest goes (down to
+    // the lowest chain_floor of a retained FULL, N12).
     s.raise_floor = true;
     s.quiesce().unwrap();
-    let cf = s.tip.chain_floor.0;
+    let cf = s.keep_floor();
+    assert!(cf < s.tip.chain_floor.0);
     for seq in 0..=s.tip.common.commit_seq.0 {
         assert_eq!(s.commit_exists(seq), seq >= cf, "commit {seq}");
     }

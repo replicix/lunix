@@ -59,11 +59,12 @@ pub struct GcConfig {
     pub pass_interval: Duration,
     /// Live bytes compaction may rewrite in one pass (default 1 GiB).
     pub compact_per_pass: u64,
-    /// The mark walks each root in at most this many leaf batches (default
-    /// 64), so a batch is about `1/64` of a root's leaves.
-    pub max_leaf_batches: usize,
-    /// Leaves per batch at least (default 16).
-    pub min_leaf_batch: usize,
+    /// New leaves one mark unit walks and resolves (default 32: 16 384
+    /// entries at fanout 512).
+    pub leaves_per_unit: usize,
+    /// Live extents one finishing unit of a mark sorts (default 262 144).
+    pub finish_per_unit: usize,
+
     /// Decoded segment footers kept by the mark (default 32).
     pub footer_cache: usize,
 }
@@ -73,8 +74,8 @@ impl Default for GcConfig {
         Self {
             pass_interval: Duration::from_secs(30),
             compact_per_pass: 1 << 30,
-            max_leaf_batches: 64,
-            min_leaf_batch: 16,
+            leaves_per_unit: 32,
+            finish_per_unit: 1 << 18,
             footer_cache: 32,
         }
     }

@@ -32,6 +32,53 @@ enum Op {
     InterleavedPass(u64),
     Urgent(u32),
     Crash(u64),
+    Faulty(u8, u8, bool, u8),
+}
+
+/// Store and index points a collector call passes (non-crash faults).
+pub(crate) const FAULT_POINTS: &[&str] = &[
+    "segment.read",
+    "segment.footer",
+    "segment.append",
+    "segment.seal.before",
+    "segment.seal.after",
+    "segment.delete.before",
+    "segment.delete.after",
+    "pack.delete.before",
+    "pack.delete.after",
+    "commit.delete.before",
+    "commit.delete.after",
+    "condemned.store.before",
+    "condemned.store.after",
+    "evidence.put.before",
+    "evidence.put.after",
+    "index.condemn.before",
+    "index.drop.before",
+    "index.delete_run.before",
+];
+
+/// Runs `steps` collector calls with one fault armed, tolerating the errors
+/// it causes, then disarms; every root must still read.
+pub(crate) fn faulty_steps(
+    s: &mut Sim,
+    point: usize,
+    nth: u64,
+    nospace: bool,
+    steps: u8,
+) -> Result<(), String> {
+    let p = FAULT_POINTS[point % FAULT_POINTS.len()];
+    s.arm_fault(p, nth, nospace);
+    for k in 0..steps {
+        let _ = match k % 4 {
+            0 => s.unit().map(|_| ()),
+            3 => s.urgent(1 << 20).map(|_| ()),
+            _ => s.step().map(|_| ()),
+        };
+        s.clock.advance(Duration::from_secs(20));
+    }
+    s.disarm_faults();
+    s.check_roots()
+        .map_err(|e| format!("after faults at {p}: {e}"))
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -48,6 +95,8 @@ fn op() -> impl Strategy<Value = Op> {
         4 => any::<u64>().prop_map(Op::InterleavedPass),
         2 => (1u32..64).prop_map(Op::Urgent),
         1 => any::<u64>().prop_map(Op::Crash),
+        4 => (any::<u8>(), 1u8..6, any::<bool>(), 1u8..16)
+            .prop_map(|(p, n, ns, k)| Op::Faulty(p, n, ns, k)),
     ]
 }
 
@@ -105,6 +154,10 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                 s.crash_reopen(seed).map_err(err)?;
                 s.check_roots()
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
+            }
+            Op::Faulty(p, nth, nospace, steps) => {
+                faulty_steps(s, usize::from(p), u64::from(nth), nospace, steps)
+                    .map_err(|e| fail(format!("op {i}: {e}")))?;
             }
             Op::Urgent(kib) => {
                 s.urgent(u64::from(kib) << 10).map_err(err)?;

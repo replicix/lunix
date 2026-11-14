@@ -1,11 +1,12 @@
-//! Step budgets and memory on a 1 M-chunk fake volume (gate). The fakes cost
+//! Step budgets and memory on a 4 M-chunk fake volume (gate). The fakes cost
 //! nothing on a manual clock, so the stores are wrapped in a cost model that
 //! advances the clock per operation (stated below); no step may then take
 //! longer than twice its budget, and the collector's own structures beyond
 //! the live-extent set stay under 64 MiB.
 //!
 //! Cost model (deliberately pessimistic for an in-memory volume): map walks
-//! 0.5 µs per leaf entry, 2 µs per node and 20 µs per call; an index lookup
+//! 0.5 µs per leaf entry, 2 µs per node, 20 µs per call plus 20 ns per entry of
+//! the skip set (the traversal checks every leaf against it); an index lookup
 //! 1 µs, a prefix lookup 5 µs, a condemn flag 200 µs (a manifest write); a
 //! footer 50 µs plus 0.1 µs per entry, an extent read 5 µs, a delete 100 µs.
 
@@ -76,7 +77,8 @@ impl BlockMap for CostMap<'_> {
         skip: &HashSet<NodeHash>,
         f: &mut dyn FnMut(ChunkNo, &DataEntry),
     ) -> Result<()> {
-        self.1.ns(20_000);
+        // The traversal checks every leaf of the root against the skip set.
+        self.1.ns(20_000 + 20 * skip.len() as u64);
         self.0.walk_leaves_skipping(root, skip, &mut |c, e| {
             self.1.ns(500);
             f(c, e);
@@ -188,7 +190,7 @@ impl SegmentStore for CostSegs<'_> {
     }
 }
 
-const CHUNKS: u64 = 1 << 20;
+const CHUNKS: u64 = 4 << 20;
 
 fn id(i: u64, round: u64) -> ChunkId {
     let mut b = [0u8; 32];
@@ -297,7 +299,7 @@ impl Vol {
 }
 
 #[test]
-fn a_pass_over_a_million_chunks_stays_within_its_step_budgets() {
+fn a_pass_over_four_million_chunks_stays_within_its_step_budgets() {
     let chunks: u64 = std::env::var("LUNIX_GC_SCALE_CHUNKS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -423,10 +425,10 @@ fn a_pass_over_a_million_chunks_stays_within_its_step_budgets() {
         GcConfig::default(),
     )
     .unwrap();
-    let live_set = l.live.capacity() * std::mem::size_of::<crate::LiveExtent>();
+    let live_set = l.live_set_bytes();
     eprintln!(
         "scale: {chunks} chunks, {} live extents ({} MiB live set), {steps} steps, worst step {worst:?} (budget {:?}), peak heap beyond the live set {} MiB, freed {} MiB",
-        l.live.len(),
+        l.live_count,
         live_set >> 20,
         budget.max_duration,
         gc.peak_heap_beyond_live() >> 20,

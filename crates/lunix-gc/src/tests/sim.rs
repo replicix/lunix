@@ -884,7 +884,7 @@ impl Sim {
         let tip = self.tip.common.commit_seq.0;
         let low = floor
             .map_or(tip, |f| f.max_commit_seq.0.min(tip))
-            .min(self.tip.chain_floor.0);
+            .min(self.keep_floor());
         for s in low..=tip {
             self.store
                 .get(CommitSeq(s))
@@ -1070,6 +1070,40 @@ impl Sim {
     }
 
     /// Commits a quiescent volume must hold, and may hold no more than.
+    /// The lowest `chain_floor` of any retained FULL: commits from it up
+    /// stay so that `--truncate-tip` can mount the predecessor (N12).
+    pub(crate) fn keep_floor(&self) -> u64 {
+        self.retained
+            .iter()
+            .filter_map(|c| match c {
+                Commit::Full(f) => Some(f.chain_floor.0),
+                _ => None,
+            })
+            .chain(std::iter::once(self.tip.chain_floor.0))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// One-shot non-crash faults armed only around collector calls: `Io` or
+    /// `NoSpace` at the `nth` next pass of a store or index point.
+    pub(crate) fn arm_fault(&self, point: &str, nth: u64, nospace: bool) {
+        let fault = if nospace {
+            lunix_testkit::Fault::NoSpace
+        } else {
+            lunix_testkit::Fault::Io
+        };
+        if point.starts_with("index.") {
+            self.index.faults().arm(point, nth, fault);
+        } else {
+            self.store.faults().arm(point, nth, fault);
+        }
+    }
+
+    pub(crate) fn disarm_faults(&self) {
+        self.index.faults().disarm();
+        self.store.faults().disarm();
+    }
+
     pub(crate) fn expected_commits(&self) -> BTreeSet<u64> {
         let tip = self.tip.common.commit_seq.0;
         let floor = self
@@ -1077,7 +1111,7 @@ impl Sim {
             .rollback_floor()
             .expect("floor")
             .map_or(u64::MAX, |f| f.max_commit_seq.0);
-        let cf = self.tip.chain_floor.0;
+        let cf = self.keep_floor();
         let mut s: BTreeSet<u64> = (cf.min(floor)..=tip).collect();
         s.extend(self.pins.iter().map(|p| p.commit_seq.0));
         s

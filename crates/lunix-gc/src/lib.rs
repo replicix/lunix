@@ -12,8 +12,10 @@
 //!
 //! What the wiring must do besides calling the trait (M12):
 //!
-//! * construct the collector with the volume directory as its
-//!   [`FloorSource`] (the rollback floor of ADR-31 is not in the view);
+//! * construct the collector once, with the volume directory as its
+//!   [`FloorSource`] (the rollback floor of ADR-31 is not in the view), and
+//!   keep it as long as the engine (unnamed outputs and undelivered moves are
+//!   memory only);
 //! * hand **every** [`Moved`](lunix_iface::gc::Moved) record a step, an
 //!   urgent pass or a failed-then-retried step returns to the next cut
 //!   (`MapTxn::rehint`) and name the output segments in that FULL: pending

@@ -22,6 +22,8 @@ pub enum Action {
     Compact,
     /// A segment compaction wrote.
     Output,
+    /// A compaction source with an extent that does not open: skipped.
+    Skip,
 }
 
 impl Action {
@@ -33,6 +35,7 @@ impl Action {
             Self::Defer => "defer",
             Self::Compact => "compact",
             Self::Output => "output",
+            Self::Skip => "skip",
         }
     }
 }

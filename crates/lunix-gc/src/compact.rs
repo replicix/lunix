@@ -67,7 +67,9 @@ pub fn rank(cands: &mut [Candidate]) {
 /// The compaction candidates of a mark: segments with live bytes, a live
 /// fraction below `threshold`, an id at or below `high_water_mark`, and not
 /// excluded by the caller (condemned, unnamed output, named by the tip FULL:
-/// younger than one commit interval). Ranked.
+/// younger than one commit interval). Segments holding a live extent that no
+/// confirmed index entry names are left out: `relocate` could not move it, so
+/// the segment would be picked again every pass. Ranked.
 pub fn candidates(
     l: &Liveness,
     threshold: f64,
@@ -77,7 +79,9 @@ pub fn candidates(
     let mut out: Vec<Candidate> = l
         .segments
         .iter()
-        .filter(|s| s.seg.raw() <= high_water_mark && !exclude(s.seg))
+        .filter(|s| {
+            s.seg.raw() <= high_water_mark && !exclude(s.seg) && !l.unindexed.contains(&s.seg)
+        })
         .filter_map(|s| {
             let live = l.live_bytes(s.seg);
             let c = Candidate {
@@ -111,6 +115,10 @@ pub(crate) fn pick(cands: &[Candidate], budget: u64) -> Vec<Candidate> {
 pub(crate) struct Compactor {
     queue: VecDeque<LiveExtent>,
     pub(crate) sources: Vec<Candidate>,
+    /// The next source whose live extents are not queued yet.
+    next_source: usize,
+    /// Refill the queue to about this many extents (bounded scratch).
+    queue_cap: usize,
     writer: Option<Box<dyn SegmentWriter>>,
     reserved: u64,
     pending: Vec<(ChunkId, Hint, Hint)>,
@@ -121,6 +129,10 @@ pub(crate) struct Compactor {
     raw: Vec<u8>,
     stored: Vec<u8>,
     sealed: Vec<u8>,
+    /// Source segments with an extent that did not open (`Auth`, `Corrupt`,
+    /// `Unsupported`): skipped, reported, and never picked again by this
+    /// process.
+    pub(crate) bad: Vec<SegId>,
 }
 
 impl std::fmt::Debug for Compactor {
@@ -134,17 +146,16 @@ impl std::fmt::Debug for Compactor {
 }
 
 impl Compactor {
-    /// Queues the live extents of `sources`, ordered by chunk number (LBA
-    /// locality, map order).
-    pub(crate) fn new(l: &Liveness, sources: Vec<Candidate>, started: Duration) -> Self {
-        let mut queue: Vec<LiveExtent> = sources
-            .iter()
-            .flat_map(|c| l.live_in(c.seg).iter().copied())
-            .collect();
-        queue.sort_unstable_by_key(|e| (e.ci, e.hint.seg, e.hint.off));
+    /// A compaction of `sources`. Their live extents are queued a group of
+    /// sources at a time (about `queue_cap` extents, plus at most one
+    /// segment's), each group ordered by chunk number (LBA locality, map
+    /// order).
+    pub(crate) fn new(sources: Vec<Candidate>, started: Duration, queue_cap: usize) -> Self {
         Self {
-            queue: queue.into(),
+            queue: VecDeque::new(),
             sources,
+            next_source: 0,
+            queue_cap: queue_cap.max(1),
             writer: None,
             reserved: 0,
             pending: Vec::new(),
@@ -155,11 +166,25 @@ impl Compactor {
             raw: Vec::new(),
             stored: Vec::new(),
             sealed: Vec::new(),
+            bad: Vec::new(),
         }
     }
 
     pub(crate) fn is_done(&self) -> bool {
-        self.queue.is_empty() && self.writer.is_none()
+        self.queue.is_empty() && self.writer.is_none() && self.next_source >= self.sources.len()
+    }
+
+    fn refill(&mut self, l: &Liveness) {
+        while self.queue.len() < self.queue_cap {
+            let Some(c) = self.sources.get(self.next_source) else {
+                break;
+            };
+            self.queue.extend(l.live_in(c.seg).iter().copied());
+            self.next_source += 1;
+        }
+        self.queue
+            .make_contiguous()
+            .sort_unstable_by_key(|e| (e.ci, e.hint.seg, e.hint.off));
     }
 
     pub(crate) fn heap_bytes(&self) -> usize {
@@ -180,6 +205,7 @@ impl Compactor {
         self.reserved = 0;
         self.pending.clear();
         self.queue.clear();
+        self.next_source = self.sources.len();
     }
 
     /// Copies one extent, or seals the output when it is full or the queue is
@@ -189,17 +215,26 @@ impl Compactor {
     pub(crate) fn unit(
         &mut self,
         view: &GcView<'_>,
+        l: &Liveness,
         points: &Points,
         outbox: &mut Vec<Moved>,
         outputs: &mut BTreeSet<SegId>,
     ) -> Result<Option<(SegId, u64)>> {
+        let drained = self.queue.is_empty() && self.next_source >= self.sources.len();
         let full = self.writer.as_ref().is_some_and(|w| w.is_full());
-        if full || (self.queue.is_empty() && self.writer.is_some()) {
+        if full || (drained && self.writer.is_some()) {
             return self.seal(view, points, outbox, outputs).map(Some);
+        }
+        if self.queue.is_empty() {
+            self.refill(l);
+            return Ok(None);
         }
         let Some(ext) = self.queue.pop_front() else {
             return Ok(None);
         };
+        if self.bad.contains(&ext.hint.seg) {
+            return Ok(None);
+        }
         self.copy(view, ext.hint)?;
         Ok(None)
     }
@@ -213,6 +248,11 @@ impl Compactor {
             // Gone since the mark (or never there): nothing to move.
             return Ok(());
         };
+        // Only the index's current copy is moved: anything else could not be
+        // relocated, and the copy would be an orphan.
+        if view.index.get(&id)?.is_none_or(|c| c.hint != old) {
+            return Ok(());
+        }
         self.raw.clear();
         match view.segments.read_extent(&old, &mut self.raw) {
             Ok(()) => {}
@@ -221,7 +261,7 @@ impl Compactor {
         }
         self.bytes_read += self.raw.len() as u64;
         self.stored.clear();
-        let meta = view.extents.open(
+        let opened = view.extents.open(
             ExtentKind::Data,
             &self.raw,
             &OpenExpect {
@@ -232,7 +272,21 @@ impl Compactor {
                 output: OpenOutput::Stored,
             },
             &mut self.stored,
-        )?;
+        );
+        let meta = match opened {
+            Ok(m) => m,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::Auth | ErrorKind::Corrupt | ErrorKind::Unsupported
+                ) =>
+            {
+                tracing::warn!(error = %e, seg = ?old.seg, off = old.off, "gc compaction: an extent does not open; its segment is skipped");
+                self.bad.push(old.seg);
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
         self.sealed.clear();
         view.extents.seal(
             ExtentKind::Data,
@@ -264,28 +318,62 @@ impl Compactor {
             return Err(lunix_iface::Error::invalid("no compaction output is open"));
         };
         let reserved = std::mem::take(&mut self.reserved);
+        let id = writer.id();
         let sealed = match writer.seal(None) {
             Ok(s) => s,
             Err(e) => {
-                view.space.release(SpaceKind::Segments, reserved);
+                // The seal may have happened (an error after the rename): the
+                // file is then an orphan with no relocation, charged at its
+                // size; otherwise nothing exists and the headroom goes back.
                 self.pending.clear();
+                let size = view
+                    .segments
+                    .list()
+                    .ok()
+                    .and_then(|l| l.into_iter().find(|x| x.seg == id))
+                    .map(|x| x.size_bytes);
+                match size {
+                    Some(n) => {
+                        if view
+                            .space
+                            .transfer(SpaceKind::Segments, SpaceKind::Segments, reserved, n)
+                            .is_err()
+                        {
+                            tracing::warn!(
+                                "gc compaction: ledger true-up of a failed seal refused"
+                            );
+                        }
+                    }
+                    None => view.space.release(SpaceKind::Segments, reserved),
+                }
                 return Err(e);
             }
         };
         outputs.insert(sealed.seg);
         point!(points, "gc.compact.after_segment_seal");
-        view.space.transfer(
+        if let Err(e) = view.space.transfer(
             SpaceKind::Segments,
             SpaceKind::Segments,
             reserved,
             sealed.size_bytes,
-        )?;
+        ) {
+            tracing::warn!(error = %e, "gc compaction: ledger true-up of an output refused");
+        }
         self.bytes_written += sealed.size_bytes;
         let mut any = false;
         for (id, old, new) in std::mem::take(&mut self.pending) {
-            if view.index.relocate(&id, &old, &new)? {
-                outbox.push(Moved { id, old, new });
-                any = true;
+            match view.index.relocate(&id, &old, &new) {
+                Ok(true) => {
+                    outbox.push(Moved { id, old, new });
+                    any = true;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    if !any {
+                        outputs.remove(&sealed.seg);
+                    }
+                    return Err(e);
+                }
             }
         }
         if !any {

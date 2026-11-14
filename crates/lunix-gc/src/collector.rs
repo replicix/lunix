@@ -44,19 +44,61 @@ use lunix_iface::space::SpaceKind;
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::compact::{self, Compactor};
-use crate::condemned::{CondemnedEntry, CondemnedList, GraceStarts, ObjectRef};
+use crate::condemned::{CondemnedEntry, CondemnedList, GraceStarts, ObjectRef, MAX_ENTRIES};
 use crate::config::{self, FloorSource, GcConfig, GcHooks, NoHooks};
 use crate::evidence::{Action, Evidence};
 use crate::mark::{Liveness, Mark};
 use crate::points::{point, Points};
 
-/// What a recheck decided for one condemned object.
+/// Extents a compactor queues at a time.
+const COMPACT_QUEUE: usize = 1 << 16;
+
+/// Why an object must stay.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Keep {
+    /// A commit at or above the lowest `chain_floor` of a retained FULL.
+    ChainFloor,
+    /// A commit a pin names.
+    Pinned,
+    /// `state/pins` could not be read: no commit is deleted.
+    FloorUnreadable,
+    /// A commit in the rollback-floor window.
+    RollbackFloor,
+    /// Above the tip's high-water mark.
+    AboveMark,
+    /// Named by a currently retained commit.
+    Named,
+    /// A run the index manifest names.
+    Manifest,
+    /// Reached by a root of the mark.
+    Referenced,
+    /// A compaction output no FULL names yet.
+    Output,
+}
+
+impl Keep {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::ChainFloor => "at or above a retained chain_floor",
+            Self::Pinned => "pinned",
+            Self::FloorUnreadable => "rollback floor unreadable",
+            Self::RollbackFloor => "at or above the rollback floor",
+            Self::AboveMark => "above the high-water mark",
+            Self::Named => "named by a retained commit",
+            Self::Manifest => "named by the index manifest",
+            Self::Referenced => "referenced at recheck",
+            Self::Output => "unnamed compaction output",
+        }
+    }
+}
+
+/// What a recheck decides for one condemned object.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Verdict {
     /// Still unreferenced: delete.
     Delete,
     /// Referenced again (or named, or above the mark): un-condemn.
-    Uncondemn(&'static str),
+    Uncondemn(Keep),
     /// Already gone: drop from the list.
     Gone,
     /// Keep condemned, decide in a later pass.
@@ -77,7 +119,7 @@ enum Phase {
     },
     Rechecking(Box<Mark>),
     Deleting {
-        queue: VecDeque<(ObjectRef, Verdict)>,
+        queue: VecDeque<ObjectRef>,
     },
     Compacting(Option<Box<Compactor>>),
     Finishing,
@@ -115,95 +157,117 @@ fn named_by_retained(view: &GcView<'_>) -> BTreeSet<u64> {
     s
 }
 
-fn retained_seqs(view: &GcView<'_>) -> BTreeSet<CommitSeq> {
-    view.retained
-        .iter()
-        .map(|c| c.common().commit_seq)
-        .collect()
-}
-
 fn object_bytes(l: &Liveness, obj: ObjectRef) -> Option<u64> {
     match obj {
-        ObjectRef::Segment(s) => l.segments.iter().find(|x| x.seg == s).map(|x| x.size_bytes),
-        ObjectRef::Pack(p) => l.packs.iter().find(|x| x.pack == p).map(|x| x.size_bytes),
-        ObjectRef::Run(r) => l.runs.iter().find(|x| x.id == r).map(|x| x.size_bytes),
-        ObjectRef::Commit(c) => l.commits.iter().find(|x| x.seq == c).map(|x| x.size_bytes),
+        ObjectRef::Segment(s) => l.segment_size(s),
+        ObjectRef::Pack(p) => l.pack_size(p),
+        ObjectRef::Run(r) => l.run(r).map(|x| x.size_bytes),
+        ObjectRef::Commit(c) => l.commit_size(c),
     }
 }
 
-/// Inputs shared by condemn, recheck and delete decisions.
-struct Judge<'a> {
-    l: &'a Liveness,
+fn space_kind(obj: ObjectRef) -> SpaceKind {
+    match obj {
+        ObjectRef::Segment(_) => SpaceKind::Segments,
+        ObjectRef::Pack(_) => SpaceKind::Map,
+        ObjectRef::Run(_) => SpaceKind::Index,
+        ObjectRef::Commit(_) => SpaceKind::Commits,
+    }
+}
+
+/// What condemn, recheck and delete decisions read from the view and the
+/// stores: built once per step (no cut happens inside a step).
+#[derive(Debug)]
+struct Facts {
     named: BTreeSet<u64>,
     manifest: BTreeSet<ObjId>,
     retained: BTreeSet<CommitSeq>,
     hwm: u64,
     /// The highest id a durable FULL is known to name (see `Gc::named_high`).
     named_high: u64,
-    chain_floor: CommitSeq,
+    /// The lowest `chain_floor` of any retained FULL: commit objects from it
+    /// up are kept, so that `fsck --repair --truncate-tip` can mount the
+    /// predecessor (N12).
+    keep_floor: CommitSeq,
     tip: CommitSeq,
     /// `None` when `state/pins` could not be read.
     floor: Option<Option<RollbackFloor>>,
-    outputs: &'a BTreeSet<SegId>,
 }
 
-impl<'a> Judge<'a> {
-    fn new(
-        view: &GcView<'_>,
-        l: &'a Liveness,
-        floor_src: &dyn FloorSource,
-        outputs: &'a BTreeSet<SegId>,
-        named_high: u64,
-    ) -> Result<Self> {
+impl Facts {
+    fn read(view: &GcView<'_>, floor_src: &dyn FloorSource, named_high: u64) -> Result<Self> {
         let floor = match floor_src.current_floor() {
             Ok(f) => Some(f),
             Err(e) => {
-                tracing::warn!(error = %e, "gc: rollback floor unreadable; no commit object is deleted in this pass");
+                tracing::warn!(error = %e, "gc: rollback floor unreadable; no commit object is deleted in this step");
                 None
             }
         };
+        let keep_floor = view
+            .retained
+            .iter()
+            .filter_map(|c| match c {
+                Commit::Full(f) => Some(f.chain_floor),
+                _ => None,
+            })
+            .chain(std::iter::once(view.tip.chain_floor))
+            .min()
+            .unwrap_or(view.tip.chain_floor);
         Ok(Self {
-            l,
             named: named_by_retained(view),
             manifest: view.index.runs()?.iter().map(|r| r.id).collect(),
-            retained: retained_seqs(view),
+            retained: view
+                .retained
+                .iter()
+                .map(|c| c.common().commit_seq)
+                .collect(),
             hwm: view.tip.high_water_mark,
             named_high: named_high.max(view.tip.high_water_mark),
-            chain_floor: view.tip.chain_floor,
+            keep_floor,
             tip: view.tip.commit_seq,
             floor,
-            outputs,
         })
     }
+}
 
+/// Condemn, recheck and delete decisions over one mark.
+struct Judge<'a> {
+    f: &'a Facts,
+    l: &'a Liveness,
+    outputs: &'a BTreeSet<SegId>,
+}
+
+impl Judge<'_> {
     /// Why a commit object must stay, if it must.
-    fn commit_kept(&self, seq: CommitSeq) -> Option<&'static str> {
-        if seq >= self.chain_floor || seq >= self.tip || self.retained.contains(&seq) {
-            return Some("at or above chain_floor");
+    fn commit_kept(&self, seq: CommitSeq) -> Option<Keep> {
+        let f = self.f;
+        if seq >= f.keep_floor || seq >= f.tip || f.retained.contains(&seq) {
+            return Some(Keep::ChainFloor);
         }
         if self.l.pinned.contains(&seq) {
-            return Some("pinned");
+            return Some(Keep::Pinned);
         }
-        match self.floor {
-            None => Some("rollback floor unreadable"),
-            Some(Some(f)) if seq >= f.max_commit_seq => Some("at or above the rollback floor"),
+        match f.floor {
+            None => Some(Keep::FloorUnreadable),
+            Some(Some(fl)) if seq >= fl.max_commit_seq => Some(Keep::RollbackFloor),
             Some(_) => None,
         }
     }
 
     /// Why a container must stay regardless of liveness, if it must.
-    fn container_kept(&self, raw: u64) -> Option<&'static str> {
-        if raw > self.hwm {
-            Some("above the high-water mark")
-        } else if self.named.contains(&raw) {
-            Some("named by a retained commit")
+    fn container_kept(&self, raw: u64) -> Option<Keep> {
+        if raw > self.f.hwm {
+            Some(Keep::AboveMark)
+        } else if self.f.named.contains(&raw) {
+            Some(Keep::Named)
         } else {
             None
         }
     }
 
-    /// The dead objects of the mark that are not on `list` yet.
-    fn dead(&self, list: &CondemnedList) -> Vec<(ObjectRef, u64)> {
+    /// The dead objects of the mark that are not on `list` yet, at most
+    /// `room` of them.
+    fn dead(&self, list: &CondemnedList, room: usize) -> Vec<(ObjectRef, u64)> {
         let l = self.l;
         let mut out = Vec::new();
         for s in &l.segments {
@@ -220,7 +284,7 @@ impl<'a> Judge<'a> {
             }
         }
         for r in &l.runs {
-            if !self.manifest.contains(&r.id) && self.container_kept(r.id.raw()).is_none() {
+            if !self.f.manifest.contains(&r.id) && self.container_kept(r.id.raw()).is_none() {
                 out.push((ObjectRef::Run(r.id), r.size_bytes));
             }
         }
@@ -230,69 +294,72 @@ impl<'a> Judge<'a> {
             }
         }
         out.retain(|(o, _)| !list.entries.contains_key(o));
+        out.truncate(room);
         out
     }
 
     /// The recheck of one condemned object against this (newer) mark.
     fn verdict(&self, obj: ObjectRef) -> Verdict {
         let l = self.l;
-        let Some(_) = object_bytes(l, obj) else {
+        if object_bytes(l, obj).is_none() {
             return Verdict::Gone;
-        };
-        match obj {
+        }
+        let keep = match obj {
             ObjectRef::Segment(s) => {
                 if l.live_bytes(s) > 0 {
-                    Verdict::Uncondemn("referenced at recheck")
-                } else if let Some(why) = self.container_kept(s.raw()) {
-                    Verdict::Uncondemn(why)
+                    Some(Keep::Referenced)
                 } else if self.outputs.contains(&s) {
-                    Verdict::Uncondemn("unnamed compaction output")
+                    Some(Keep::Output)
                 } else {
-                    Verdict::Delete
+                    self.container_kept(s.raw())
                 }
             }
             ObjectRef::Pack(p) => {
                 if l.live_packs.contains(&p) {
-                    Verdict::Uncondemn("referenced at recheck")
-                } else if let Some(why) = self.container_kept(p.raw()) {
-                    Verdict::Uncondemn(why)
+                    Some(Keep::Referenced)
                 } else {
-                    Verdict::Delete
+                    self.container_kept(p.raw())
                 }
             }
             ObjectRef::Run(r) => {
-                if self.manifest.contains(&r) {
-                    Verdict::Uncondemn("named by the index manifest")
-                } else if let Some(why) = self.container_kept(r.raw()) {
-                    Verdict::Uncondemn(why)
+                if self.f.manifest.contains(&r) {
+                    Some(Keep::Manifest)
                 } else {
-                    Verdict::Delete
+                    self.container_kept(r.raw())
                 }
             }
-            ObjectRef::Commit(c) => match self.commit_kept(c) {
-                Some("rollback floor unreadable") => Verdict::Defer("rollback floor unreadable"),
-                Some(why) => Verdict::Uncondemn(why),
-                None => Verdict::Delete,
+            ObjectRef::Commit(c) => self.commit_kept(c),
+        };
+        match keep {
+            None => match obj {
+                ObjectRef::Segment(s) => match self.segment_deletable(s) {
+                    Some(why) => Verdict::Defer(why),
+                    None => Verdict::Delete,
+                },
+                _ => Verdict::Delete,
             },
+            Some(Keep::FloorUnreadable) => Verdict::Defer(Keep::FloorUnreadable.reason()),
+            Some(k) => Verdict::Uncondemn(k),
         }
     }
 
-    /// The delete-time index invariant for a segment: every copy that its
-    /// stale hints rely on must be durable, that is named by a durable FULL:
-    /// at or below a high-water mark this process has seen (a FULL named
-    /// everything up to it, D3, except compaction outputs whose moves are
-    /// still pending, which are excluded by name).
+    /// The delete-time index invariant for a segment: every copy its stale
+    /// hints rely on must be in a segment a durable FULL named (at or below
+    /// `named_high`) that is not an unnamed compaction output.
     fn segment_deletable(&self, s: SegId) -> Option<&'static str> {
-        match self.l.deps.get(&s) {
-            Some(dep) if dep.raw() > self.named_high || self.outputs.contains(dep) => {
-                Some("live copies of its ids are not durable yet")
-            }
-            _ => None,
-        }
+        let blocked = self.l.deps.get(&s).is_some_and(|deps| {
+            deps.iter()
+                .any(|d| d.raw() > self.f.named_high || self.outputs.contains(d))
+        });
+        blocked.then_some("live copies of its ids are not durable yet")
     }
 }
 
 /// The phase-1 collector (`lunix-gc`).
+///
+/// The collector must live as long as the engine: the unnamed compaction
+/// outputs and the moves not yet handed over are memory only, and a wiring
+/// that rebuilt it while moves were pending would lose that protection.
 pub struct Gc {
     cfg: GcConfig,
     floor: Arc<dyn FloorSource>,
@@ -301,14 +368,21 @@ pub struct Gc {
     list: CondemnedList,
     grace: GraceStarts,
     outputs: BTreeSet<SegId>,
-    /// The highest id named by any FULL read by `observe_named` (and the
-    /// tip's mark). Every segment at or below it was named by a durable FULL,
-    /// except compaction outputs still in `outputs` and segments no index
-    /// entry points into (orphans): ids are allocated in order and a cut
-    /// names everything it wrote, so only GC's own outputs can be passed by.
+    /// The highest id named by a FULL read by `observe_named` that has a
+    /// successor FULL (or the tip's mark). Every segment at or below it was
+    /// named by a durable FULL, except compaction outputs still in `outputs`
+    /// and segments no index entry points into (orphans): ids are allocated
+    /// in order and a cut names everything it wrote.
     named_high: u64,
     /// The newest commit `observe_named` has read.
     scanned: Option<CommitSeq>,
+    /// Facts of the current step (`None` between steps).
+    facts: Option<Facts>,
+    /// Objects whose delete call failed: the file may be gone without its
+    /// bytes released. Released when a later recheck finds it gone.
+    uncertain: BTreeMap<ObjectRef, u64>,
+    /// Compaction sources with an extent that does not open.
+    bad_sources: BTreeSet<SegId>,
     outbox: Vec<Moved>,
     phase: Phase,
     ctx: Option<PassCtx>,
@@ -354,6 +428,9 @@ impl Gc {
             outputs: BTreeSet::new(),
             named_high: 0,
             scanned: None,
+            facts: None,
+            uncertain: BTreeMap::new(),
+            bad_sources: BTreeSet::new(),
             outbox: Vec::new(),
             phase: Phase::Idle,
             ctx: None,
@@ -396,10 +473,15 @@ impl Gc {
         self.list.entries.keys().copied().collect()
     }
 
-    /// Compaction outputs this process sealed that no retained commit names
-    /// yet (never condemned).
+    /// Compaction outputs this process sealed that no FULL names yet (never
+    /// condemned).
     pub fn unnamed_outputs(&self) -> Vec<SegId> {
         self.outputs.iter().copied().collect()
+    }
+
+    /// Compaction sources skipped because an extent did not open.
+    pub fn skipped_sources(&self) -> Vec<SegId> {
+        self.bad_sources.iter().copied().collect()
     }
 
     /// The largest heap the collector held beyond the live-extent set,
@@ -418,7 +500,8 @@ impl Gc {
         self.unit_count
     }
 
-    /// Where the pass is.
+    /// Where the pass is (the evidence write at the end reports as
+    /// `Compacting`).
     pub fn state(&self) -> GcState {
         match &self.phase {
             Phase::Idle => GcState::Idle,
@@ -470,9 +553,20 @@ impl Gc {
         Ok(())
     }
 
+    /// The facts of this step.
+    fn facts(&mut self, view: &GcView<'_>) -> Result<&Facts> {
+        if self.facts.is_none() {
+            self.facts = Some(Facts::read(view, &*self.floor, self.named_high)?);
+        }
+        self.facts
+            .as_ref()
+            .ok_or(Error::invalid("gc facts missing"))
+    }
+
     /// Makes the index flags and the list agree: a listed segment without a
     /// flag is flagged and its grace restarts; a flagged segment that is not
-    /// listed is adopted (fresh grace) when it exists, else unflagged.
+    /// listed is adopted (fresh grace) when it exists; one that is gone has
+    /// its index entries dropped before its flag is cleared.
     fn reconcile(&mut self, view: &GcView<'_>) -> Result<()> {
         let now = view.clock.monotonic();
         let wall = view.clock.now();
@@ -514,7 +608,11 @@ impl Gc {
                     self.grace.insert(obj, now);
                     changed = true;
                 }
-                None => view.index.unmark_condemned(s)?,
+                None => {
+                    // Never clear the flag while entries may still point in.
+                    view.index.drop_segment(s)?;
+                    view.index.unmark_condemned(s)?;
+                }
             }
         }
         if changed {
@@ -527,21 +625,25 @@ impl Gc {
         view.state.store_condemned(&self.list.to_file()?)
     }
 
-    /// Reads the FULLs committed since the last call (up to the tip): every
-    /// id they name raises `named_high`, and a compaction output they name
-    /// is no longer pending. Commit objects are durable when they exist, and
-    /// GC deletes none it has not seen here first (a commit is condemned only
-    /// in a pass, after this ran), so no FULL is missed.
+    /// Reads the FULLs committed since the last call that have a successor
+    /// (the tip is read once the next FULL exists): every id they name
+    /// raises `named_high`. Requiring a successor is conservative while the
+    /// engine may not persist a FULL's index entries at its own C8 (N13). A
+    /// compaction output a retained or read FULL names is no longer pending.
+    /// Commit objects are durable when they exist, and GC deletes none it
+    /// has not seen here first (a commit is condemned only in a pass, after
+    /// this ran), so no FULL is missed.
     fn observe_named(&mut self, view: &GcView<'_>) -> Result<()> {
-        self.named_high = self.named_high.max(view.tip.high_water_mark);
         let named = named_by_retained(view);
         self.outputs.retain(|o| !named.contains(&o.raw()));
-        let tip = view.tip.commit_seq;
-        if self.scanned.is_some_and(|s| s >= tip) {
+        let Some(last) = view.tip.commit_seq.0.checked_sub(1).map(CommitSeq) else {
+            return Ok(());
+        };
+        if self.scanned.is_some_and(|s| s >= last) {
             return Ok(());
         }
         for c in view.commits.list()? {
-            if c.seq > tip || self.scanned.is_some_and(|s| c.seq <= s) {
+            if c.seq > last || self.scanned.is_some_and(|s| c.seq <= s) {
                 continue;
             }
             let bytes = match view.commits.get(c.seq) {
@@ -564,7 +666,7 @@ impl Gc {
                 }
             }
         }
-        self.scanned = Some(tip);
+        self.scanned = Some(last);
         Ok(())
     }
 
@@ -583,23 +685,46 @@ impl Gc {
         Ok(self.last_pins.as_ref() != Some(&pins))
     }
 
+    /// Writes the pass's evidence object when it has lines; returns its
+    /// number (0 when nothing was written).
+    fn write_evidence(&self, view: &GcView<'_>, ctx: &PassCtx) -> Result<u64> {
+        if ctx.evidence.is_empty() {
+            return Ok(0);
+        }
+        let pass = view.state.evidence_passes()?.last().copied().unwrap_or(0) + 1;
+        view.state
+            .put_evidence(pass, &ctx.evidence.finish(view.clock.now()))?;
+        Ok(pass)
+    }
+
     /// Drops the pass in progress (an error, or an urgent pass). The list,
-    /// the index flags and the unnamed outputs stay.
+    /// the index flags and the unnamed outputs stay; the evidence of what the
+    /// pass already did is written, best effort.
     fn abort_pass(&mut self, view: &GcView<'_>) {
         if let Phase::Compacting(Some(c)) = &mut self.phase {
             c.abandon(view);
         }
+        if let Some(ctx) = self.ctx.take() {
+            match self.write_evidence(view, &ctx) {
+                Ok(_) => self.add_totals(&ctx.summary),
+                Err(e) => {
+                    tracing::warn!(error = %e, "gc: the evidence of an abandoned pass was not written");
+                }
+            }
+        }
         self.phase = Phase::Idle;
-        self.ctx = None;
         self.last_end = Some(view.clock.monotonic());
     }
 
     fn note_heap(&mut self) {
-        let mut h = self.list.entries.len() * 64 + self.grace.len() * 48 + self.outputs.len() * 32;
+        let mut h = self.list.entries.len() * 64
+            + self.grace.len() * 48
+            + self.outputs.len() * 32
+            + self.uncertain.len() * 48;
         h += match &self.phase {
             Phase::Marking(m) | Phase::Rechecking(m) => m.heap_bytes(),
             Phase::Condemning { todo, .. } => todo.capacity() * 24,
-            Phase::Deleting { queue } => queue.capacity() * 32,
+            Phase::Deleting { queue } => queue.capacity() * 16,
             Phase::Compacting(Some(c)) => c.heap_bytes(),
             _ => 0,
         };
@@ -610,17 +735,8 @@ impl Gc {
             }
         }
         // The live-extent set is accounted for separately (the gate bounds
-        // what comes on top of it); at most one is held at a time.
-        let live = match (&self.phase, &self.ctx) {
-            (Phase::Marking(m) | Phase::Rechecking(m), _) => m.live_set_bytes(),
-            (
-                _,
-                Some(PassCtx {
-                    liveness: Some(l), ..
-                }),
-            ) => l.live.capacity() * std::mem::size_of::<crate::mark::LiveExtent>(),
-            _ => 0,
-        };
+        // what comes on top of it); two exist only while a recheck is built
+        // next to the condemn mark, and then the older one counts here.
         if let (
             Phase::Marking(_) | Phase::Rechecking(_),
             Some(PassCtx {
@@ -628,9 +744,9 @@ impl Gc {
             }),
         ) = (&self.phase, &self.ctx)
         {
-            h += l.live.capacity() * std::mem::size_of::<crate::mark::LiveExtent>();
+            h += l.live_set_bytes();
         }
-        self.peak_heap = self.peak_heap.max(h.saturating_sub(live));
+        self.peak_heap = self.peak_heap.max(h);
     }
 
     fn evidence(
@@ -672,9 +788,18 @@ impl Gc {
                 if m.unit(view)? {
                     point!(self.points, "gc.mark.end");
                     let l = m.into_liveness();
-                    self.after_mark(view, &l);
-                    let todo = Judge::new(view, &l, &*self.floor, &self.outputs, self.named_high)?
-                        .dead(&self.list);
+                    self.after_mark(&l);
+                    let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
+                    self.facts(view)?;
+                    let todo = match &self.facts {
+                        Some(f) => Judge {
+                            f,
+                            l: &l,
+                            outputs: &self.outputs,
+                        }
+                        .dead(&self.list, room),
+                        None => Vec::new(),
+                    };
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
@@ -693,7 +818,31 @@ impl Gc {
                 Flow::Continue
             }
             Phase::Condemning { todo, listed, next } => {
-                self.condemn_unit(view, todo, listed, next)?;
+                if !listed {
+                    self.list_condemned(view, &todo)?;
+                    self.phase = Phase::Condemning {
+                        todo,
+                        listed: true,
+                        next: 0,
+                    };
+                } else if let Some(&(obj, _)) = todo.get(next) {
+                    if let ObjectRef::Segment(s) = obj {
+                        view.index.mark_condemned(s)?;
+                    }
+                    self.phase = Phase::Condemning {
+                        todo,
+                        listed: true,
+                        next: next + 1,
+                    };
+                } else {
+                    let until = self.start_graces(view, &todo);
+                    // The condemn mark is not needed again: the recheck
+                    // makes its own.
+                    if let Some(ctx) = &mut self.ctx {
+                        ctx.liveness = None;
+                    }
+                    self.phase = Phase::Grace { until };
+                }
                 Flow::Continue
             }
             Phase::Grace { until } => {
@@ -708,11 +857,11 @@ impl Gc {
             Phase::Rechecking(mut m) => {
                 if m.unit(view)? {
                     let l = m.into_liveness();
-                    self.after_mark(view, &l);
-                    let queue = self.recheck(view, &l)?;
+                    self.after_mark(&l);
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
+                    let queue = self.list.entries.keys().copied().collect();
                     self.phase = Phase::Deleting { queue };
                 } else {
                     self.phase = Phase::Rechecking(m);
@@ -721,7 +870,8 @@ impl Gc {
             }
             Phase::Deleting { mut queue } => {
                 match queue.pop_front() {
-                    Some((obj, v)) => {
+                    Some(obj) => {
+                        let v = self.recheck_verdict(view, obj, view.params.grace)?;
                         *freed += self.apply_verdict(view, obj, v)?;
                         self.phase = Phase::Deleting { queue };
                     }
@@ -732,7 +882,7 @@ impl Gc {
                 }
                 Flow::Continue
             }
-            Phase::Compacting(c) => self.compact_unit(view, budget, c, step_bytes)?,
+            Phase::Compacting(c) => self.compact_unit(view, budget, c, step_bytes),
             Phase::Finishing => {
                 self.finish_pass(view)?;
                 Flow::PassDone
@@ -742,7 +892,7 @@ impl Gc {
         Ok(flow)
     }
 
-    fn after_mark(&mut self, view: &GcView<'_>, l: &Liveness) {
+    fn after_mark(&mut self, l: &Liveness) {
         self.stats.live_bytes = l.total_live();
         self.stats.dead_bytes = l
             .segments
@@ -750,54 +900,35 @@ impl Gc {
             .map(|s| s.size_bytes.saturating_sub(l.live_bytes(s.seg)))
             .sum();
         self.last_pins = Some(l.pinned.clone());
-        let _ = view;
     }
 
-    fn condemn_unit(
-        &mut self,
-        view: &GcView<'_>,
-        todo: Vec<(ObjectRef, u64)>,
-        listed: bool,
-        next: usize,
-    ) -> Result<()> {
-        if !listed {
-            let wall = view.clock.now();
-            for &(obj, bytes) in &todo {
-                self.list.entries.insert(
-                    obj,
-                    CondemnedEntry {
-                        condemned_at: wall,
-                        bytes,
-                    },
-                );
-                // Not yet flagged in the index: the grace starts below.
-                self.grace.insert(obj, Duration::MAX);
-            }
-            if !todo.is_empty() {
-                self.store_list(view)?;
-                point!(self.points, "gc.condemn.after_list_write");
-            }
-            self.phase = Phase::Condemning {
-                todo,
-                listed: true,
-                next: 0,
-            };
+    /// Adds `todo` to the list (grace not started: the flags come next) and
+    /// stores it.
+    fn list_condemned(&mut self, view: &GcView<'_>, todo: &[(ObjectRef, u64)]) -> Result<()> {
+        if todo.is_empty() {
             return Ok(());
         }
-        if let Some(&(obj, _)) = todo.get(next) {
-            if let ObjectRef::Segment(s) = obj {
-                view.index.mark_condemned(s)?;
-            }
-            self.phase = Phase::Condemning {
-                todo,
-                listed: true,
-                next: next + 1,
-            };
-            return Ok(());
+        let wall = view.clock.now();
+        for &(obj, bytes) in todo {
+            self.list.entries.insert(
+                obj,
+                CondemnedEntry {
+                    condemned_at: wall,
+                    bytes,
+                },
+            );
+            self.grace.insert(obj, Duration::MAX);
         }
-        // Everything is flagged: the graces start now.
+        self.store_list(view)?;
+        point!(self.points, "gc.condemn.after_list_write");
+        Ok(())
+    }
+
+    /// Everything in `todo` is flagged: the graces start now. Returns when the
+    /// latest grace of the list ends.
+    fn start_graces(&mut self, view: &GcView<'_>, todo: &[(ObjectRef, u64)]) -> Duration {
         let now = view.clock.monotonic();
-        for &(obj, bytes) in &todo {
+        for &(obj, bytes) in todo {
             self.grace.insert(obj, now);
             self.evidence(view, Action::Condemn, obj, bytes, "unreferenced");
             if let Some(ctx) = &mut self.ctx {
@@ -806,10 +937,6 @@ impl Gc {
                 }
             }
         }
-        // The condemn mark is not needed again: the recheck makes its own.
-        if let Some(ctx) = &mut self.ctx {
-            ctx.liveness = None;
-        }
         let latest = self
             .grace
             .values()
@@ -817,162 +944,83 @@ impl Gc {
             .filter(|&t| t != Duration::MAX)
             .max()
             .unwrap_or(now);
-        self.phase = Phase::Grace {
-            until: latest.saturating_add(view.params.grace),
-        };
-        Ok(())
+        latest.saturating_add(view.params.grace)
     }
 
-    /// Decides every listed object against the recheck mark `l`.
-    fn recheck(
+    /// The verdict for one listed object against the pass's recheck mark: a
+    /// grace of `grace` must have ended before that mark started.
+    fn recheck_verdict(
         &mut self,
         view: &GcView<'_>,
-        l: &Liveness,
-    ) -> Result<VecDeque<(ObjectRef, Verdict)>> {
-        let judge = Judge::new(view, l, &*self.floor, &self.outputs, self.named_high)?;
-        let mut queue = VecDeque::new();
-        for &obj in self.list.entries.keys() {
-            // Only objects whose grace ended before this mark started.
-            let elapsed = self.grace.get(&obj).is_some_and(|&t| {
-                t != Duration::MAX && t.saturating_add(view.params.grace) <= l.started
-            });
-            let v = if elapsed {
-                judge.verdict(obj)
-            } else {
-                Verdict::Defer("grace not over")
-            };
-            queue.push_back((obj, v));
+        obj: ObjectRef,
+        grace: Duration,
+    ) -> Result<Verdict> {
+        self.facts(view)?;
+        let (Some(f), Some(l)) = (
+            self.facts.as_ref(),
+            self.ctx.as_ref().and_then(|c| c.liveness.as_ref()),
+        ) else {
+            return Err(Error::invalid("recheck without a mark"));
+        };
+        let elapsed = self
+            .grace
+            .get(&obj)
+            .is_some_and(|&t| t != Duration::MAX && t.saturating_add(grace) <= l.started);
+        if !elapsed {
+            return Ok(Verdict::Defer("grace not over"));
         }
-        Ok(queue)
+        Ok(Judge {
+            f,
+            l,
+            outputs: &self.outputs,
+        }
+        .verdict(obj))
     }
 
     /// Applies one verdict; returns the bytes freed.
     fn apply_verdict(&mut self, view: &GcView<'_>, obj: ObjectRef, v: Verdict) -> Result<u64> {
         match v {
-            Verdict::Gone => {
-                self.forget(view, obj)?;
-                Ok(0)
-            }
+            Verdict::Gone => self.forget(view, obj),
             Verdict::Defer(why) => {
                 self.evidence(view, Action::Defer, obj, 0, why);
                 Ok(0)
             }
-            Verdict::Uncondemn(why) => {
+            Verdict::Uncondemn(keep) => {
                 if let ObjectRef::Segment(s) = obj {
                     view.index.unmark_condemned(s)?;
                 }
                 self.list.entries.remove(&obj);
                 self.grace.remove(&obj);
-                self.evidence(view, Action::Uncondemn, obj, 0, why);
+                // Durable at once: a crash must not re-flag a live segment.
+                self.store_list(view)?;
+                self.evidence(view, Action::Uncondemn, obj, 0, keep.reason());
                 Ok(0)
             }
-            Verdict::Delete => {
-                // Re-judged against the view of this step (cuts may have
-                // happened since the recheck).
-                let l = self
-                    .ctx
-                    .as_ref()
-                    .and_then(|c| c.liveness.as_ref())
-                    .ok_or(Error::invalid("delete without a recheck"))?;
-                let judge = Judge::new(view, l, &*self.floor, &self.outputs, self.named_high)?;
-                let again = judge.verdict(obj);
-                let blocked = match obj {
-                    ObjectRef::Segment(s) => judge.segment_deletable(s),
-                    _ => None,
-                };
-                drop(judge);
-                match (again, blocked) {
-                    (Verdict::Delete, Some(why)) => {
-                        self.apply_verdict(view, obj, Verdict::Defer(why))
-                    }
-                    (Verdict::Delete, None) => self.delete(view, obj),
-                    (other, _) => self.apply_verdict(view, obj, other),
-                }
-            }
+            Verdict::Delete => self.delete(view, obj),
         }
     }
 
-    /// Removes a listed object that no longer exists.
-    fn forget(&mut self, view: &GcView<'_>, obj: ObjectRef) -> Result<()> {
+    /// Removes a listed object that no longer exists. A segment's index
+    /// entries are dropped before its flag is cleared, and an error leaves
+    /// both for the next pass. Bytes of an earlier failed delete call are
+    /// released now.
+    fn forget(&mut self, view: &GcView<'_>, obj: ObjectRef) -> Result<u64> {
         if let ObjectRef::Segment(s) = obj {
+            view.index.drop_segment(s)?;
             view.index.unmark_condemned(s)?;
         }
         self.list.entries.remove(&obj);
         self.grace.remove(&obj);
-        Ok(())
+        let freed = self.uncertain.remove(&obj).unwrap_or(0);
+        if freed > 0 {
+            view.space.release(space_kind(obj), freed);
+            self.count_delete(obj, freed);
+        }
+        self.evidence(view, Action::Delete, obj, freed, "already gone");
+        Ok(freed)
     }
 
-    /// Deletes one object (unlink, directory fsync inside the store), then
-    /// the index follow-up and the ledger release.
-    fn delete(&mut self, view: &GcView<'_>, obj: ObjectRef) -> Result<u64> {
-        let freed = match obj {
-            ObjectRef::Segment(s) => {
-                point!(self.points, "gc.delete.before_unlink");
-                let n = view.segments.delete(s)?;
-                point!(self.points, "gc.delete.after_unlink");
-                view.index.drop_segment(s)?;
-                view.index.unmark_condemned(s)?;
-                if n > 0 {
-                    view.space.release(SpaceKind::Segments, n);
-                }
-                point!(self.points, "gc.delete.after_dirsync");
-                n
-            }
-            ObjectRef::Pack(p) => {
-                point!(self.points, "gc.delete.before_unlink");
-                let n = view.packs.delete_pack(p)?;
-                point!(self.points, "gc.delete.after_unlink");
-                if n > 0 {
-                    view.space.release(SpaceKind::Map, n);
-                }
-                point!(self.points, "gc.delete.after_dirsync");
-                n
-            }
-            ObjectRef::Run(r) => {
-                let run = self
-                    .ctx
-                    .as_ref()
-                    .and_then(|c| c.liveness.as_ref())
-                    .and_then(|l| l.runs.iter().find(|x| x.id == r).copied());
-                let Some(run) = run else {
-                    self.forget(view, obj)?;
-                    return Ok(0);
-                };
-                point!(self.points, "gc.delete.before_unlink");
-                let n = view.index.delete_run(run)?;
-                point!(self.points, "gc.delete.after_unlink");
-                if n > 0 {
-                    view.space.release(SpaceKind::Index, n);
-                }
-                point!(self.points, "gc.delete.after_dirsync");
-                n
-            }
-            ObjectRef::Commit(c) => {
-                point!(self.points, "gc.commit_delete.before_unlink");
-                match view.commits.delete(c, view.tip.chain_floor) {
-                    Ok(n) => {
-                        if n > 0 {
-                            view.space.release(SpaceKind::Commits, n);
-                        }
-                        n
-                    }
-                    Err(e) if e.kind() == ErrorKind::Refused => {
-                        self.evidence(view, Action::Defer, obj, 0, "refused by the commit store");
-                        return Ok(0);
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-        };
-        self.list.entries.remove(&obj);
-        self.grace.remove(&obj);
-        self.evidence(
-            view,
-            Action::Delete,
-            obj,
-            freed,
-            "unreferenced after grace and recheck",
-        );
+    fn count_delete(&mut self, obj: ObjectRef, freed: u64) {
         self.stats.bytes_freed += freed;
         if let Some(ctx) = &mut self.ctx {
             let s = &mut ctx.summary;
@@ -984,7 +1032,77 @@ impl Gc {
                 ObjectRef::Commit(_) => s.commits_deleted += 1,
             }
         }
-        Ok(freed)
+    }
+
+    /// Deletes one object (unlink, directory fsync inside the store) and
+    /// releases its bytes, then the index follow-up for a segment. A failed
+    /// call leaves the object in `uncertain` with its listed size.
+    fn delete(&mut self, view: &GcView<'_>, obj: ObjectRef) -> Result<u64> {
+        let listed = self
+            .ctx
+            .as_ref()
+            .and_then(|c| c.liveness.as_ref())
+            .and_then(|l| object_bytes(l, obj))
+            .unwrap_or(0);
+        let run = match obj {
+            ObjectRef::Run(r) => self
+                .ctx
+                .as_ref()
+                .and_then(|c| c.liveness.as_ref())
+                .and_then(|l| l.run(r)),
+            _ => None,
+        };
+        if matches!(obj, ObjectRef::Commit(_)) {
+            point!(self.points, "gc.commit_delete.before_unlink");
+        } else {
+            point!(self.points, "gc.delete.before_unlink");
+        }
+        self.uncertain.insert(obj, listed);
+        let res = match obj {
+            ObjectRef::Segment(s) => view.segments.delete(s),
+            ObjectRef::Pack(p) => view.packs.delete_pack(p),
+            ObjectRef::Run(_) => match run {
+                Some(run) => view.index.delete_run(run),
+                None => Ok(0),
+            },
+            ObjectRef::Commit(c) => view.commits.delete(c, view.tip.chain_floor),
+        };
+        let n = match res {
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Refused => {
+                // Nothing changed (the commit store's own floor check).
+                self.uncertain.remove(&obj);
+                self.evidence(view, Action::Defer, obj, 0, "refused by the store");
+                return Ok(0);
+            }
+            Err(e) => return Err(e),
+        };
+        self.uncertain.remove(&obj);
+        if n > 0 {
+            view.space.release(space_kind(obj), n);
+        }
+        if !matches!(obj, ObjectRef::Commit(_)) {
+            point!(self.points, "gc.delete.after_unlink");
+        }
+        if let ObjectRef::Segment(s) = obj {
+            // The flag stays until the entries are gone (B1).
+            view.index.drop_segment(s)?;
+            view.index.unmark_condemned(s)?;
+        }
+        if !matches!(obj, ObjectRef::Commit(_)) {
+            point!(self.points, "gc.delete.after_dirsync");
+        }
+        self.list.entries.remove(&obj);
+        self.grace.remove(&obj);
+        self.evidence(
+            view,
+            Action::Delete,
+            obj,
+            n,
+            "unreferenced after grace and recheck",
+        );
+        self.count_delete(obj, n);
+        Ok(n)
     }
 
     fn compaction_sources(
@@ -1000,6 +1118,7 @@ impl Gc {
         let exclude = |s: SegId| {
             young.contains(&s)
                 || self.outputs.contains(&s)
+                || self.bad_sources.contains(&s)
                 || self.list.entries.contains_key(&ObjectRef::Segment(s))
         };
         let cands = compact::candidates(
@@ -1011,20 +1130,38 @@ impl Gc {
         compact::pick(&cands, budget)
     }
 
+    /// Moves the compactor's skipped sources into `bad_sources`.
+    fn note_bad(&mut self, view: &GcView<'_>, c: &mut Compactor) {
+        for seg in std::mem::take(&mut c.bad) {
+            if self.bad_sources.insert(seg) {
+                self.evidence(
+                    view,
+                    Action::Skip,
+                    ObjectRef::Segment(seg),
+                    0,
+                    "an extent does not open",
+                );
+            }
+        }
+    }
+
+    /// One compaction unit. An error ends compaction (the pass still writes
+    /// its evidence and finishes); it never fails the step.
     fn compact_unit(
         &mut self,
         view: &GcView<'_>,
         budget: &GcBudget,
         c: Option<Box<Compactor>>,
         step_bytes: &mut u64,
-    ) -> Result<Flow> {
+    ) -> Flow {
         let mut c = match c {
             Some(c) => c,
             None => {
                 let sources = match self.ctx.as_ref().and_then(|x| x.liveness.as_ref()) {
                     Some(l) => {
                         let s = self.compaction_sources(view, l, self.cfg.compact_per_pass);
-                        (!s.is_empty()).then(|| Compactor::new(l, s, view.clock.monotonic()))
+                        (!s.is_empty())
+                            .then(|| Compactor::new(s, view.clock.monotonic(), COMPACT_QUEUE))
                     }
                     None => None,
                 };
@@ -1032,7 +1169,7 @@ impl Gc {
                     Some(c) => Box::new(c),
                     None => {
                         self.phase = Phase::Finishing;
-                        return Ok(Flow::Continue);
+                        return Flow::Continue;
                     }
                 }
             }
@@ -1040,20 +1177,36 @@ impl Gc {
         if c.is_done() {
             self.compaction_done(view, &c);
             self.phase = Phase::Finishing;
-            return Ok(Flow::Continue);
+            return Flow::Continue;
         }
         // Rate cap: bytes read so far may not run ahead of `gc_rate` by more
         // than one step's worth; a step moves at most `max_bytes`.
-        let elapsed = view.clock.monotonic().saturating_sub(c.started);
-        let allowed =
-            (view.params.rate_bytes_per_s as f64 * elapsed.as_secs_f64()) as u64 + budget.max_bytes;
-        if c.bytes_read >= allowed || *step_bytes >= budget.max_bytes {
+        let elapsed_ms = view.clock.monotonic().saturating_sub(c.started).as_millis();
+        let allowed = u128::from(view.params.rate_bytes_per_s)
+            .saturating_mul(elapsed_ms)
+            .checked_div(1000)
+            .unwrap_or(0)
+            .saturating_add(u128::from(budget.max_bytes));
+        if u128::from(c.bytes_read) >= allowed || *step_bytes >= budget.max_bytes {
             self.phase = Phase::Compacting(Some(c));
-            return Ok(Flow::Yield);
+            return Flow::Yield;
         }
         let before = c.bytes_read;
-        let res = c.unit(view, &self.points, &mut self.outbox, &mut self.outputs);
+        let res = {
+            let Gc {
+                ctx,
+                points,
+                outbox,
+                outputs,
+                ..
+            } = self;
+            match ctx.as_ref().and_then(|x| x.liveness.as_ref()) {
+                Some(l) => c.unit(view, l, points, outbox, outputs),
+                None => Err(Error::invalid("compaction without a mark")),
+            }
+        };
         *step_bytes += c.bytes_read - before;
+        self.note_bad(view, &mut c);
         match res {
             Ok(Some((seg, bytes))) => {
                 self.evidence(
@@ -1066,12 +1219,15 @@ impl Gc {
             }
             Ok(None) => {}
             Err(e) => {
+                tracing::warn!(error = %e, "gc compaction stopped for this pass");
                 c.abandon(view);
-                return Err(e);
+                self.compaction_done(view, &c);
+                self.phase = Phase::Finishing;
+                return Flow::Continue;
             }
         }
         self.phase = Phase::Compacting(Some(c));
-        Ok(Flow::Continue)
+        Flow::Continue
     }
 
     fn compaction_done(&mut self, view: &GcView<'_>, c: &Compactor) {
@@ -1094,19 +1250,8 @@ impl Gc {
         }
     }
 
-    /// Writes the evidence object (when the pass did anything) and closes the
-    /// pass.
-    fn finish_pass(&mut self, view: &GcView<'_>) -> Result<()> {
-        let mut ctx = self.ctx.take().unwrap_or_default();
-        if !ctx.evidence.is_empty() {
-            let pass = view.state.evidence_passes()?.last().copied().unwrap_or(0) + 1;
-            view.state
-                .put_evidence(pass, &ctx.evidence.finish(view.clock.now()))?;
-            point!(self.points, "gc.evidence.after_put");
-            ctx.summary.pass = pass;
-        }
-        self.stats.passes += 1;
-        let (t, p) = (&mut self.totals, &ctx.summary);
+    fn add_totals(&mut self, p: &GcPassSummary) {
+        let t = &mut self.totals;
         t.pass += u64::from(p.pass != 0);
         t.segments_condemned += p.segments_condemned;
         t.segments_deleted += p.segments_deleted;
@@ -1116,6 +1261,27 @@ impl Gc {
         t.segments_compacted += p.segments_compacted;
         t.bytes_freed += p.bytes_freed;
         t.bytes_moved += p.bytes_moved;
+    }
+
+    /// Writes the evidence object (when the pass did anything) and closes the
+    /// pass.
+    fn finish_pass(&mut self, view: &GcView<'_>) -> Result<()> {
+        let mut ctx = self.ctx.take().unwrap_or_default();
+        let written = self.write_evidence(view, &ctx);
+        let pass = match written {
+            Ok(p) => p,
+            Err(e) => {
+                // Keep the lines for `abort_pass` to retry.
+                self.ctx = Some(ctx);
+                return Err(e);
+            }
+        };
+        if pass != 0 {
+            point!(self.points, "gc.evidence.after_put");
+        }
+        ctx.summary.pass = pass;
+        self.stats.passes += 1;
+        self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);
         self.last_finished_ms = Some(view.clock.now().0);
         self.last_end = Some(view.clock.monotonic());
@@ -1132,6 +1298,23 @@ impl Gc {
         }
     }
 
+    fn run_units(&mut self, view: &GcView<'_>, budget: &GcBudget, freed: &mut u64) -> Result<bool> {
+        let deadline = view.clock.monotonic().saturating_add(budget.max_duration);
+        let mut step_bytes = 0u64;
+        self.load(view)?;
+        self.observe_named(view)?;
+        loop {
+            match self.unit(view, budget, freed, &mut step_bytes)? {
+                Flow::Continue => {}
+                Flow::Yield => return Ok(false),
+                Flow::PassDone => return Ok(true),
+            }
+            if view.clock.monotonic() >= deadline {
+                return Ok(false);
+            }
+        }
+    }
+
     // ------------------------------------------------------------ urgent
 
     fn urgent_inner(&mut self, view: &GcView<'_>, want: u64, freed: &mut u64) -> Result<()> {
@@ -1144,36 +1327,26 @@ impl Gc {
         m.run(view)?;
         point!(self.points, "gc.mark.end");
         let l = m.into_liveness();
-        self.after_mark(view, &l);
-        let floor_grace = config::grace_floor(&view.params);
-        // Old entries whose floor grace ended before this mark began: this
-        // mark is their recheck.
-        let verdicts: Vec<(ObjectRef, Verdict)> = {
-            let judge = Judge::new(view, &l, &*self.floor, &self.outputs, self.named_high)?;
-            self.list
-                .entries
-                .keys()
-                .map(|&o| {
-                    let ok = self.grace.get(&o).is_some_and(|&t| {
-                        t != Duration::MAX && t.saturating_add(floor_grace) <= l.started
-                    });
-                    (
-                        o,
-                        if ok {
-                            judge.verdict(o)
-                        } else {
-                            Verdict::Defer("floor grace not over")
-                        },
-                    )
-                })
-                .collect()
+        self.after_mark(&l);
+        let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
+        self.facts(view)?;
+        let todo = match &self.facts {
+            Some(f) => Judge {
+                f,
+                l: &l,
+                outputs: &self.outputs,
+            }
+            .dead(&self.list, room),
+            None => Vec::new(),
         };
-        let todo =
-            Judge::new(view, &l, &*self.floor, &self.outputs, self.named_high)?.dead(&self.list);
         if let Some(ctx) = &mut self.ctx {
             ctx.liveness = Some(l);
         }
-        for (obj, v) in verdicts {
+        // Old entries whose floor grace ended before this mark began: this
+        // mark is their recheck.
+        let floor_grace = config::grace_floor(&view.params);
+        for obj in self.list.entries.keys().copied().collect::<Vec<_>>() {
+            let v = self.recheck_verdict(view, obj, floor_grace)?;
             if *freed >= want && v == Verdict::Delete {
                 continue;
             }
@@ -1181,14 +1354,13 @@ impl Gc {
         }
         // New dead objects start their (floor) grace now.
         if !todo.is_empty() {
-            let l = self.ctx.as_mut().and_then(|c| c.liveness.take());
-            self.condemn_unit(view, todo.clone(), false, 0)?;
-            for i in 0..=todo.len() {
-                self.condemn_unit(view, todo.clone(), true, i)?;
+            self.list_condemned(view, &todo)?;
+            for &(obj, _) in &todo {
+                if let ObjectRef::Segment(s) = obj {
+                    view.index.mark_condemned(s)?;
+                }
             }
-            if let Some(ctx) = &mut self.ctx {
-                ctx.liveness = l;
-            }
+            self.start_graces(view, &todo);
         }
         self.store_list(view)?;
         if *freed < want {
@@ -1199,11 +1371,25 @@ impl Gc {
                     .and_then(|c| c.liveness.as_ref())
                     .ok_or(Error::invalid("urgent pass without a mark"))?;
                 let s = self.compaction_sources(view, l, want - *freed);
-                (!s.is_empty()).then(|| Compactor::new(l, s, view.clock.monotonic()))
+                (!s.is_empty()).then(|| Compactor::new(s, view.clock.monotonic(), COMPACT_QUEUE))
             };
             if let Some(mut c) = sources {
                 while !c.is_done() {
-                    match c.unit(view, &self.points, &mut self.outbox, &mut self.outputs) {
+                    let r = {
+                        let Gc {
+                            ctx,
+                            points,
+                            outbox,
+                            outputs,
+                            ..
+                        } = &mut *self;
+                        match ctx.as_ref().and_then(|x| x.liveness.as_ref()) {
+                            Some(l) => c.unit(view, l, points, outbox, outputs),
+                            None => Err(Error::invalid("compaction without a mark")),
+                        }
+                    };
+                    self.note_bad(view, &mut c);
+                    match r {
                         Ok(Some((seg, bytes))) => self.evidence(
                             view,
                             Action::Output,
@@ -1213,8 +1399,9 @@ impl Gc {
                         ),
                         Ok(None) => {}
                         Err(e) => {
+                            self.points.alive()?;
+                            tracing::warn!(error = %e, "gc urgent compaction stopped");
                             c.abandon(view);
-                            return Err(e);
                         }
                     }
                 }
@@ -1228,29 +1415,12 @@ impl Gc {
 impl Collector for Gc {
     fn step(&mut self, view: &GcView<'_>, budget: GcBudget) -> Result<GcProgress> {
         self.precheck(view)?;
-        let deadline = view.clock.monotonic().saturating_add(budget.max_duration);
+        self.facts = None;
         let mut freed = 0u64;
-        let mut step_bytes = 0u64;
-        let mut done = false;
-        let res = (|| -> Result<()> {
-            self.load(view)?;
-            self.observe_named(view)?;
-            loop {
-                match self.unit(view, &budget, &mut freed, &mut step_bytes)? {
-                    Flow::Continue => {}
-                    Flow::Yield => return Ok(()),
-                    Flow::PassDone => {
-                        done = true;
-                        return Ok(());
-                    }
-                }
-                if view.clock.monotonic() >= deadline {
-                    return Ok(());
-                }
-            }
-        })();
+        let res = self.run_units(view, &budget, &mut freed);
+        self.facts = None;
         match res {
-            Ok(()) => Ok(self.take_progress(freed, done)),
+            Ok(done) => Ok(self.take_progress(freed, done)),
             Err(e) => {
                 if self.points.alive().is_ok() {
                     tracing::warn!(error = %e, "gc pass abandoned; the next pass starts over");
@@ -1264,14 +1434,24 @@ impl Collector for Gc {
     fn urgent(&mut self, view: &GcView<'_>, want_bytes: u64) -> Result<GcProgress> {
         self.precheck(view)?;
         self.abort_pass(view);
+        self.facts = None;
         let mut freed = 0u64;
-        match self.urgent_inner(view, want_bytes, &mut freed) {
+        let res = self.urgent_inner(view, want_bytes, &mut freed);
+        self.facts = None;
+        match res {
             Ok(()) => Ok(self.take_progress(freed, true)),
             Err(e) => {
-                if self.points.alive().is_ok() {
-                    self.abort_pass(view);
+                if self.points.alive().is_err() {
+                    return Err(e);
                 }
-                Err(e)
+                tracing::warn!(error = %e, freed, "gc urgent pass stopped early");
+                self.abort_pass(view);
+                if freed > 0 {
+                    // The ladder needs to know what was freed.
+                    Ok(self.take_progress(freed, true))
+                } else {
+                    Err(e)
+                }
             }
         }
     }
@@ -1280,7 +1460,12 @@ impl Collector for Gc {
         self.precheck(view)?;
         self.load(view)?;
         let l = crate::mark::liveness(view, self.cfg)?;
-        let judge = Judge::new(view, &l, &*self.floor, &self.outputs, self.named_high)?;
+        let facts = Facts::read(view, &*self.floor, self.named_high)?;
+        let judge = Judge {
+            f: &facts,
+            l: &l,
+            outputs: &self.outputs,
+        };
         let mut s = GcPassSummary {
             dry_run: true,
             ..GcPassSummary::default()
@@ -1294,7 +1479,7 @@ impl Collector for Gc {
                 ObjectRef::Commit(_) => s.commits_deleted += 1,
             }
         };
-        let dead = judge.dead(&self.list);
+        let dead = judge.dead(&self.list, usize::MAX);
         for &(obj, bytes) in &dead {
             count(obj, bytes);
         }
@@ -1303,7 +1488,6 @@ impl Collector for Gc {
                 count(obj, object_bytes(&l, obj).unwrap_or(0));
             }
         }
-        drop(judge);
         s.segments_condemned = dead
             .iter()
             .filter(|(o, _)| matches!(o, ObjectRef::Segment(_)))
