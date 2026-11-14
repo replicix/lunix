@@ -1,0 +1,35 @@
+{
+ "name": "host-ext4",
+ "partitions": [
+  [
+   0,
+   34359738368,
+   null
+  ]
+ ],
+ "unaligned_64k": [
+  false
+ ],
+ "fs": "ext4",
+ "files": 220585,
+ "fiemap_translation_failures": 0,
+ "journal_blocks": 65536,
+ "icheck": {
+  "sampled": 31275,
+  "agree": 31275,
+  "disagree": 0,
+  "not_found": 0
+ },
+ "blocks_by_class": {
+  "data": 3099341,
+  "dir": 28207,
+  "meta": 143932,
+  "journal": 65536,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 0,
+  "ptable": 0
+ }
+}

@@ -1,0 +1,48 @@
+decision,reading,size,count,needed,verdict,note
+D1,same set and level on all 4 eligible,16384,0,4,NO-GO,decisive among the measured candidate sets (oracle LB < 3 pp on all 4)
+D1,any set/level per corpus,16384,0,4,NO-GO,
+D1,sensitivity 3 of 4 (lead ruling: never decides),16384,0,3,NO-GO,
+D1,same set and level on all 4 eligible,65536,0,4,NO-GO,oracle LB >= 3 pp on 4 corpora: not decisive
+D1,any set/level per corpus,65536,0,4,NO-GO,
+D1,sensitivity 3 of 4 (lead ruling: never decides),65536,0,3,NO-GO,
+D1,same set and level on all 4 eligible (16 MiB blocks),16384,0,4,NO-GO,decisive among the measured candidate sets (oracle LB < 3 pp on all 4)
+D1,any set/level per corpus (16 MiB blocks),16384,0,4,NO-GO,
+D1,sensitivity 3 of 4 (lead ruling: never decides) (16 MiB blocks),16384,0,3,NO-GO,
+D1,same set and level on all 4 eligible (16 MiB blocks),65536,0,4,NO-GO,oracle LB >= 3 pp on 4 corpora: not decisive
+D1,any set/level per corpus (16 MiB blocks),65536,0,4,NO-GO,
+D1,sensitivity 3 of 4 (lead ruling: never decides) (16 MiB blocks),65536,0,3,NO-GO,
+D2-raw,"pv against the counterfactual, either level",16384,0,4,not reached,
+D2-raw,"pv against the counterfactual, either level",65536,0,4,not reached,
+D2-db,"pv, either level; other arm (sensitivity)",16384,5,8,not reached,se-askubuntu-sq se-serverfault-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pv, one level (level of the counterfactual)",16384,5,8,not reached,
+D2-db,"pv, cap not applied (shows the cap; never decides)",16384,12,8,reached,se-askubuntu-my se-askubuntu-pg se-askubuntu-sq se-serverfault-my se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pv, either level; other arm (sensitivity)",65536,0,8,not reached,
+D2-db,"pv, one level (level of the counterfactual)",65536,0,8,not reached,
+D2-db,"pv, cap not applied (shows the cap; never decides)",65536,11,8,reached,se-askubuntu-my se-askubuntu-pg se-askubuntu-sq se-serverfault-my se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pv, either level; other arm (sensitivity), 16 MiB blocks",16384,5,8,not reached,se-askubuntu-sq se-serverfault-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pv, either level; other arm (sensitivity), 16 MiB blocks",65536,0,8,not reached,
+D2-db,"pvcover, either level; decides",16384,9,8,reached,se-askubuntu-sq se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pvcover, one level (level of the counterfactual)",16384,7,8,not reached,
+D2-db,"pvcover, cap not applied (shows the cap; never decides)",16384,13,8,reached,geonames-pg se-askubuntu-my se-askubuntu-pg se-askubuntu-sq se-serverfault-my se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pvcover, either level; decides",65536,0,8,not reached,
+D2-db,"pvcover, one level (level of the counterfactual)",65536,0,8,not reached,
+D2-db,"pvcover, cap not applied (shows the cap; never decides)",65536,13,8,reached,geonames-pg geonames-sq se-askubuntu-my se-askubuntu-pg se-askubuntu-sq se-serverfault-my se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pvcover, either level; decides, 16 MiB blocks",16384,9,8,reached,se-askubuntu-sq se-serverfault-pg se-serverfault-sq se-superuser-my se-superuser-pg se-superuser-sq tlc-2024q1-my tlc-2024q1-pg tlc-2024q1-sq
+D2-db,"pvcover, either level; decides, 16 MiB blocks",65536,0,8,not reached,
+D2,raw-device family,,0,4,NO-GO,
+D2,"database family (judged on pvcover-s1; 16 KiB decides, 64 KiB confirmatory)",,9,8,GO at 16 KiB only,
+D2c,pv-class vs pv on the volumes that made D2 fire,16384,0,5,NO-GO,
+D3,D1 does not fire,,,,NO-GO,
+D4-L,"engines with median N >= 5 pp (dbd@1, DB pages, 16 KiB)",16384,0,2,NO-GO,consumer D1 does not fire
+D4-L,"engines with median N >= 5 pp (dbd@3, DB pages, 16 KiB)",16384,0,2,NO-GO,consumer D1 does not fire
+D4-C,"engines with median N >= 5 pp (dbd@3, 1 MiB)",1048576,0,2,NO-GO,consumer D6 does not fire
+D6,"engines with median N >= 3 pp (dbd@3, 1 MiB)",1048576,0,2,NO-GO,
+D6,"same, 16 MiB file extents as the unit",1048576,0,2,NO-GO,
+D6,reported: 4 MiB,4194304,0,2,reported only,
+D6,page-size reference: images with LB >= 15 pp,page,0,1,no open question,
+D5,"corpora meeting both floors and R5 (table rule, cap not applied)",4194304,0,3,not reached,a floor missed on 4 of 4 corpora
+D5,"hard cap (select + dictionary vs zstd:3, compress)",4194304,0,4,fails (NO-GO regardless of N),"compress 0.39x all objects, 0.14x under 64 KiB"
+D5,verdict,,,,NO-GO,
+D7-Lunix,derived,,,,does not fire,
+D7-Constellation,derived,,,,fires (no dictionary work),
+D7-zdicts,derived,,,,fires (no dictionary work),

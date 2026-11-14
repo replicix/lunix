@@ -1,0 +1,41 @@
+{
+ "name": "vm-fedora",
+ "partitions": [
+  [
+   1048576,
+   2097152,
+   "21686148-6449-6E6F-744E-656564454649"
+  ],
+  [
+   3145728,
+   104857600,
+   "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+  ],
+  [
+   108003328,
+   5259657216,
+   "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709"
+  ]
+ ],
+ "unaligned_64k": [
+  false,
+  false,
+  false
+ ],
+ "fs": "btrfs",
+ "files": 32608,
+ "fiemap_translation_failures": 0,
+ "btrfs_chunks": 6,
+ "blocks_by_class": {
+  "data": 395294,
+  "dir": 0,
+  "meta": 67810,
+  "journal": 0,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 26112,
+  "ptable": 512
+ }
+}

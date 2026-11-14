@@ -1,0 +1,53 @@
+{
+ "name": "vm-ubuntu",
+ "partitions": [
+  [
+   1190133760,
+   2567945728,
+   "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709"
+  ],
+  [
+   1048576,
+   1072693760,
+   "BC13C2FF-59E6-4262-A352-B275FD6F7172"
+  ],
+  [
+   1074790400,
+   4194304,
+   "21686148-6449-6E6F-744E-656564454649"
+  ],
+  [
+   1078984704,
+   111149056,
+   "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+  ]
+ ],
+ "unaligned_64k": [
+  false,
+  false,
+  false,
+  false
+ ],
+ "fs": "ext4",
+ "files": 95070,
+ "fiemap_translation_failures": 0,
+ "journal_blocks": 16384,
+ "icheck": {
+  "sampled": 4898,
+  "agree": 4898,
+  "disagree": 0,
+  "not_found": 0
+ },
+ "blocks_by_class": {
+  "data": 478398,
+  "dir": 11431,
+  "meta": 21182,
+  "journal": 16384,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 290048,
+  "ptable": 517
+ }
+}

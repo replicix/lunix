@@ -1,0 +1,47 @@
+{
+ "name": "vm-debian",
+ "partitions": [
+  [
+   134217728,
+   3085959168,
+   "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709"
+  ],
+  [
+   1048576,
+   3145728,
+   "21686148-6449-6E6F-744E-656564454649"
+  ],
+  [
+   4194304,
+   130023424,
+   "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+  ]
+ ],
+ "unaligned_64k": [
+  false,
+  false,
+  false
+ ],
+ "fs": "ext4",
+ "files": 23006,
+ "fiemap_translation_failures": 0,
+ "journal_blocks": 16384,
+ "icheck": {
+  "sampled": 1476,
+  "agree": 1476,
+  "disagree": 0,
+  "not_found": 0
+ },
+ "blocks_by_class": {
+  "data": 145099,
+  "dir": 2525,
+  "meta": 14036,
+  "journal": 16384,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 32512,
+  "ptable": 512
+ }
+}

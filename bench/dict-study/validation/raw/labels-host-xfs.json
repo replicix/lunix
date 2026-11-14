@@ -1,0 +1,31 @@
+{
+ "name": "host-xfs",
+ "partitions": [
+  [
+   0,
+   34359738368,
+   null
+  ]
+ ],
+ "unaligned_64k": [
+  false
+ ],
+ "fs": "xfs",
+ "files": 220721,
+ "fiemap_translation_failures": 0,
+ "journal_blocks": 16384,
+ "blockget_meta_blocks": 30922,
+ "note": "blockget -v types give meta; non-zero blocks it does not name stay unmapped (0)",
+ "blocks_by_class": {
+  "data": 3101245,
+  "dir": 0,
+  "meta": 30926,
+  "journal": 16384,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 0,
+  "ptable": 0
+ }
+}

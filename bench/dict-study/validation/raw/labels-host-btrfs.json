@@ -1,0 +1,29 @@
+{
+ "name": "host-btrfs",
+ "partitions": [
+  [
+   0,
+   34359738368,
+   null
+  ]
+ ],
+ "unaligned_64k": [
+  false
+ ],
+ "fs": "btrfs",
+ "files": 220769,
+ "fiemap_translation_failures": 0,
+ "btrfs_chunks": 17,
+ "blocks_by_class": {
+  "data": 3409920,
+  "dir": 0,
+  "meta": 68864,
+  "journal": 0,
+  "unmapped": 0,
+  "dbpage": 0,
+  "wal": 0,
+  "dbother": 0,
+  "otherpart": 0,
+  "ptable": 0
+ }
+}

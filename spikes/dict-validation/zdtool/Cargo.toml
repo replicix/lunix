@@ -1,0 +1,16 @@
+[package]
+name = "zdtool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Study helper (dict-validation): applies zdicts' select_by_content to chunk heads and dumps the shipped dictionaries.
+# zdicts comes from the checkout of release v0.0.1 (commit 3b8645ef); Cargo.lock is copied from that checkout.
+[dependencies]
+zdicts = { path = "../../../../../zdicts/crates/zdicts" }
+
+# Timing: the same release profile as the zdicts workspace (v0.0.1), so the selector is timed as shipped.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
