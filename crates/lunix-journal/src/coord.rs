@@ -156,6 +156,11 @@ fn group(sh: &Shared, ring: Option<&mut IoUring>, flushes: Vec<(u64, FlushDone)>
     }
     sh.cfg.emit(|| TraceEvent::GroupDone { upto, ok });
     let at = sh.poisoned_at();
+    // Every record at or below `upto` is durable on every lane now: later
+    // records carry it as their flushed watermark (on-disk-formats §5.2).
+    if ok && at.is_none_or(|p| upto < p) {
+        sh.flushed.fetch_max(upto, Ordering::SeqCst);
+    }
     for (u, done) in flushes {
         if at.is_some_and(|p| u >= p) {
             done(Err(Shared::poisoned_error()));

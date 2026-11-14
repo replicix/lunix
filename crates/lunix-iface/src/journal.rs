@@ -365,6 +365,12 @@ pub struct Recovered {
     pub gap_at: Option<WriteSeq>,
     /// Damage the resync rule (D17) skipped, for fsck.
     pub damaged: Vec<DamagedRange>,
+    /// The flushed watermark: the highest `flushed` value of any record found
+    /// (at or below it every record was durable on every lane before a later
+    /// record was written). A gap or damage at or below it is real loss; a
+    /// gap above it is crash residue (ADR-4, maintainer decision of
+    /// 2026-11-14). 0 when no record carries one.
+    pub flushed: WriteSeq,
 }
 
 /// Per lane, the lowest ring file ordinal that may still hold a record above a

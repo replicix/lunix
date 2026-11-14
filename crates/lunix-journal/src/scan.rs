@@ -35,6 +35,8 @@ struct ScRec {
     blocks: u32,
     off: u64,
     enc: u64,
+    /// The record's flushed watermark.
+    flushed: u64,
 }
 
 #[derive(Debug, Default)]
@@ -168,6 +170,7 @@ fn scan_lane(
                         blocks: r.header.len,
                         off: r.header.off,
                         enc: r.encoded_len() as u64,
+                        flushed: r.header.flushed.0,
                     });
                 }
                 sf.damaged = res
@@ -256,6 +259,17 @@ fn run(
         }
     }
 
+    // The flushed watermark: the highest any surviving record witnessed.
+    // Every record at or below it was durable on every lane before that
+    // record was written, so a gap at or below it is real loss and a gap
+    // above it is crash residue (ADR-4, 2026-11-14).
+    let watermark = scans
+        .iter()
+        .flatten()
+        .flat_map(|f| f.recs.iter().map(|r| r.flushed))
+        .max()
+        .unwrap_or(0);
+
     // Merge by write_seq, stop at the first gap (or duplicate).
     struct Cand {
         seq: u64,
@@ -326,6 +340,7 @@ fn run(
             ignored_after_gap: ignored,
             gap_at,
             damaged,
+            flushed: WriteSeq(watermark),
         },
         plan,
     ))

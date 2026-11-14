@@ -618,6 +618,15 @@ impl JournalLane for FileLane {
                 len: o.blocks,
                 gen: o.gen,
                 off: o.file_off,
+                // A flush covering this record cannot complete before the
+                // record is written, so the watermark is below its number;
+                // the clamp only guards that invariant.
+                flushed: WriteSeq(
+                    self.sh
+                        .flushed
+                        .load(Ordering::Acquire)
+                        .min(o.seq.saturating_sub(1)),
+                ),
             },
             data,
         };

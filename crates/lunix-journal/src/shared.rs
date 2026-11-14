@@ -86,6 +86,11 @@ pub(crate) struct Shared {
     pub rings: Rings,
     /// The highest `write_seq` handed out.
     pub counter: AtomicU64,
+    /// The flushed watermark: the highest `upto` of a group flush that
+    /// completed (every `fdatasync` done, nothing poisoned at or below it),
+    /// or the recovered records once `prepare` made them durable. Written
+    /// into every record appended (on-disk-formats §5.2).
+    pub flushed: AtomicU64,
     /// The lowest sequence number of a failed append, dropped slot or failed
     /// sync; `NOT_POISONED` when healthy.
     pub poison_at: AtomicU64,

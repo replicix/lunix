@@ -797,6 +797,8 @@ impl Journal for MemJournal {
             ignored_after_gap,
             gap_at,
             damaged,
+            // The fake keeps no on-disk watermark: every gap is residue.
+            flushed: WriteSeq(0),
         })
     }
 

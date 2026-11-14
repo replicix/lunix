@@ -15,6 +15,10 @@
 - Flush coordinator: one thread, its own ring; waits for every lane's pending set to clear
   below `upto`, then fdatasyncs every dirty file in parallel. Poison = lowest failed or
   abandoned `write_seq`; flushes at or above it fail.
+- Flushed watermark (on-disk-formats §5.2, amendment 2026-11-14, pending re-sign): a completed group flush
+  raises `Shared::flushed` to its `upto`; every record appended carries it (bytes 56-63). `prepare` raises it
+  to the last recovered record once those are synced. Recovery reports the highest watermark found
+  (`Recovered::flushed`), so the engine refuses only gaps or damage at or below it.
 - Recovery (`scan.rs`): normative reader `lunix_format::journal::scan_file` per file, merge,
   stop at the first gap or duplicate. It also plans a **wipe**: everything a lane holds after
   its last record below `next_seq` is zeroed by the first `open_lane` (not by `recover`), so

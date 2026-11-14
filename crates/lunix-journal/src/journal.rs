@@ -58,6 +58,7 @@ impl FileJournal {
             cfg,
             rings,
             counter: AtomicU64::new(0),
+            flushed: AtomicU64::new(0),
             poison_at: AtomicU64::new(NOT_POISONED),
             flights: (0..lanes).map(|_| Mutex::new(LaneFlight::new())).collect(),
             coord: Coord::new(),
@@ -184,6 +185,11 @@ impl FileJournal {
         if renamed {
             sys::fsync_dir(&rings.dir).map_err(io_err)?;
         }
+        // Every record that survived recovery is durable now (synced above);
+        // no lane is open yet, so the counter is the last recovered number.
+        self.sh
+            .flushed
+            .fetch_max(self.sh.counter.load(Ordering::SeqCst), Ordering::SeqCst);
         st.prepared = true;
         Ok(())
     }
@@ -295,6 +301,9 @@ impl Journal for FileJournal {
         let (rec, plan) = scan::recover(&self.sh.rings, hint, floor)?;
         self.apply_plan(&plan);
         self.sh.counter.store(rec.next_seq.0 - 1, Ordering::SeqCst);
+        // Until prepare syncs the recovered records, only the floor (covered
+        // by a durable commit) is known durable.
+        self.sh.flushed.store(floor.0, Ordering::SeqCst);
         self.sh.poison_at.store(NOT_POISONED, Ordering::SeqCst);
         for f in &self.sh.flights {
             *lock(f) = LaneFlight::new();
