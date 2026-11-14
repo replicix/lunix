@@ -26,7 +26,7 @@ use lunix_iface::overlay::BlockRange;
 use lunix_iface::space::SpaceKind;
 use lunix_iface::stats::EngineStats;
 use lunix_iface::store::{SegmentFooters, SegmentStore, SweepReport, SweepRequest};
-use lunix_iface::Result;
+use lunix_iface::{ErrorKind, Result};
 
 use crate::config::{EngineConfig, OnJournalDamage};
 use crate::deps::EngineDeps;
@@ -103,6 +103,84 @@ impl SegmentFooters for Footers<'_> {
     }
 }
 
+/// R4 for a tip above the floor (ADR-31, maintainer decision of 2026-11-13):
+/// the chain from the tip back to the floor's height must pass through the
+/// commit the floor recorded. The links down to `chain_floor` are already
+/// verified; below it the walk continues over commits that may still exist
+/// (GC keeps them while a floor needs them, M17).
+///
+/// * Only a **missing** link (`NotFound`: commits below the tip deleted) is
+///   `ForkUnverifiable`, which the operator override may accept.
+/// * A commit that is present but does not authenticate, does not decode or
+///   does not link (`parent_hash`, `commit_seq`, `epoch`) is positive
+///   evidence of another history: `Fork`, never overridable (M12a re-review
+///   R2).
+/// * A host I/O error is reported as such.
+fn check_floor_on_path(
+    cfg: &EngineConfig,
+    d: &EngineDeps,
+    tip_seq: CommitSeq,
+    f: &RollbackFloor,
+    volume_hash: &[u8; 32],
+) -> std::result::Result<(), OpenError> {
+    let walked = d
+        .commit_codec
+        .verify_chain(&*d.commits, tip_seq, f.max_commit_seq, volume_hash)
+        .and_then(|_| d.commits.get(f.max_commit_seq));
+    let fork = || OpenError::Fork {
+        tip: f.max_commit_seq,
+    };
+    match walked {
+        Ok(bytes) if d.commit_codec.object_hash(&bytes) != f.tip_hash => Err(fork()),
+        Ok(_) => Ok(()),
+        Err(source) if source.kind() == ErrorKind::NotFound => {
+            if cfg.allow_unverifiable_fork {
+                tracing::warn!(
+                    floor = f.max_commit_seq.0,
+                    tip = tip_seq.0,
+                    error = %source,
+                    "operator override: a commit between the tip and the rollback floor is missing; opening anyway"
+                );
+                return Ok(());
+            }
+            Err(OpenError::ForkUnverifiable {
+                floor: f.max_commit_seq,
+                tip: tip_seq,
+                source,
+            })
+        }
+        Err(source) if source.kind() == ErrorKind::Io => Err(OpenError::Store(source)),
+        Err(source) => {
+            tracing::warn!(
+                floor = f.max_commit_seq.0,
+                tip = tip_seq.0,
+                error = %source,
+                "a commit between the tip and the rollback floor does not authenticate or link: fork"
+            );
+            Err(fork())
+        }
+    }
+}
+
+/// Whether journal damage is the kind `on_journal_damage = refuse` keeps the
+/// volume offline for (lead decision of 2026-11-13, after the M12a review).
+///
+/// * A damaged range followed by a valid record in the same lane
+///   (`next_seq` is set), or valid records beyond the first gap
+///   (`ignored_after_gap`), is real mid-journal damage or lost ordering of
+///   acknowledged writes: refused, so `fsck` sees the journal untouched.
+/// * A damaged **last** record of a lane with nothing valid after it is the
+///   residue of a crash during that record's batch write. It cannot hide a
+///   write that was acknowledged as durable: a FUA write or a FLUSH completes
+///   only after the group flush covering it (`fdatasync` of the lane file)
+///   has finished, so such a record is on stable storage before its
+///   acknowledgement, and a crash cannot tear it. What it can hide is a write
+///   that was never flushed, which block semantics allow to lose. It is
+///   logged at warn and wiped like any stale tail.
+fn refuse_worthy(rec: &lunix_iface::journal::Recovered) -> bool {
+    rec.ignored_after_gap.is_some() || rec.damaged.iter().any(|d| d.next_seq.is_some())
+}
+
 pub(crate) fn recover(
     cfg: &EngineConfig,
     d: &EngineDeps,
@@ -149,6 +227,9 @@ pub(crate) fn recover(
         }
         if tip_seq == f.max_commit_seq && f.tip_hash != tip_hash {
             return Err(OpenError::Fork { tip: tip_seq });
+        }
+        if tip_seq > f.max_commit_seq {
+            check_floor_on_path(cfg, d, tip_seq, f, &volume_hash)?;
         }
     }
 
@@ -217,8 +298,13 @@ pub(crate) fn recover(
             damaged = ?rec.damaged,
             "journal recovery stopped at a gap or skipped damage"
         );
-        if cfg.on_journal_damage == OnJournalDamage::Refuse {
+        if cfg.on_journal_damage == OnJournalDamage::Refuse && refuse_worthy(&rec) {
             return Err(OpenError::JournalDamage);
+        }
+        if !refuse_worthy(&rec) {
+            tracing::warn!(
+                "the damage is a torn last record of its lane with nothing valid after it: crash residue of a write that was never acknowledged as durable; wiped"
+            );
         }
     }
     let mut journal_charged = 0u64;
@@ -291,4 +377,49 @@ pub(crate) fn recover(
         index_charged,
         upto_seg,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lunix_iface::journal::{LaneId, Recovered};
+
+    fn rec(damaged: Vec<DamagedRange>, gap: bool) -> Recovered {
+        Recovered {
+            records: Vec::new(),
+            next_seq: WriteSeq(3),
+            ignored_after_gap: gap.then_some(WriteSeqRange {
+                first: WriteSeq(4),
+                last: WriteSeq(4),
+            }),
+            gap_at: gap.then_some(WriteSeq(3)),
+            damaged,
+        }
+    }
+
+    fn dmg(next: Option<u64>) -> DamagedRange {
+        DamagedRange {
+            lane: LaneId(0),
+            ordinal: 1,
+            start: 8192,
+            end: 12288,
+            prev_seq: WriteSeq(2),
+            next_seq: next.map(WriteSeq),
+        }
+    }
+
+    #[test]
+    fn only_mid_journal_damage_is_refused() {
+        assert!(!refuse_worthy(&rec(vec![dmg(None)], false)), "torn tail");
+        assert!(
+            refuse_worthy(&rec(vec![dmg(Some(4))], false)),
+            "a later valid record"
+        );
+        assert!(
+            refuse_worthy(&rec(vec![dmg(None)], true)),
+            "records beyond the gap"
+        );
+        assert!(refuse_worthy(&rec(Vec::new(), true)), "a gap alone");
+        assert!(!refuse_worthy(&rec(Vec::new(), false)), "clean");
+    }
 }

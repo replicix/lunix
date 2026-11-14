@@ -343,6 +343,11 @@ impl Engine {
         (co.tip.common.commit_seq, co.tip.cut_seq)
     }
 
+    /// The tip's `created_at` (the writer clamp of D17), for status displays.
+    pub fn tip_created_at(&self) -> lunix_format::TimeMs {
+        lock(&self.inner.coord).tip.common.created_at
+    }
+
     /// True once a test hook stopped the engine at a crash point, or a
     /// failure inside a cut made it give up.
     pub fn is_stopped(&self) -> bool {

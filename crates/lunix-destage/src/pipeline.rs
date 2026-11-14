@@ -212,9 +212,11 @@ pub fn destage_cut_with_cancel(
             // now rather than leave them to the next open (best effort).
             let segments = packer.finish();
             let mut freed_bytes = 0;
+            let mut undeleted = Vec::new();
             for s in &segments {
-                if let Ok(n) = deps.segments.delete(s.seg) {
-                    freed_bytes += n;
+                match deps.segments.delete(s.seg) {
+                    Ok(n) => freed_bytes += n,
+                    Err(_) => undeleted.push(s.seg),
                 }
             }
             stats.wall_ns = ns(started.elapsed());
@@ -224,6 +226,7 @@ pub fn destage_cut_with_cancel(
                 chunk: f.chunk,
                 partial: Box::new(Partial {
                     segments,
+                    undeleted,
                     freed_bytes,
                     stats,
                 }),

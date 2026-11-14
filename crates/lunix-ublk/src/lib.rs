@@ -59,7 +59,7 @@ pub use config::{
     DEFAULT_IO_BUF_BYTES, MIN_IO_BUF_BYTES,
 };
 pub use ctl::{ControlPlane, CtlOp, DevInfo, Params, RingControl};
-pub use device::{Persist, Quiesced, UblkDevice};
+pub use device::{DeviceLifecycle, Persist, Quiesced, UblkDevice};
 pub use error::{Errno, Result, SizeError, UblkError};
 pub use features::{check_flag_rules, flag, Features, KERNEL_FLOOR};
 pub use harden::{harden_process, Harden};

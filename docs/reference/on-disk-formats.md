@@ -1400,26 +1400,38 @@ Version 1 (the signed layout before the amendment) is still **read**, never
 written: bytes 0-79 as above with `ver` = 1 and bytes 12-15 reserved, then
 reserved bytes 80-91 and `crc32c(bytes 0..92)` at 92; 96 bytes. A version 1
 file means **no floor** (`floor_present` = 0); the next write upgrades it to
-version 2. A reader rejects any other `ver` and any length other than 96
-(v1) or 136 (v2), and treats a rejected file as absent.
+version 2. A reader rejects any other `ver`, any length other than 96 (v1)
+or 136 (v2) and a bad `crc32c`. **A rejected file is an error, not an
+absent one** (lead, 2026-11-13, after the M12a review): attach and fsck
+refuse and report it, because treating it as absent would silently drop the
+rollback floor and the pin. Only a missing file means "nothing recorded";
+`fsck --repair` may rewrite a rejected one from the verified tip.
 
 **The rollback anchor.**
 
-- *Written* (raise only: `max_commit_seq` never decreases) after every
-  verified attach, with the verified tip (and again after the attach's own
-  EPOCH commit, when it writes one, once that commit is durable), and after
-  every FULL commit, after its durability point C6. It is never written
+- *Written* (raise only: `max_commit_seq` never decreases) when the volume
+  is created (the genesis commit), after every verified attach, with the
+  verified tip (and again after the attach's own EPOCH commit, when it
+  writes one, once that commit is durable), and after every FULL commit,
+  after its durability point C6. It is never written
   ahead of a durable commit, so a crash leaves the floor at or below the
   tip, never above it.
 - *Checked* at attach, after the descriptor check
   ([attach-matrix.md](attach-matrix.md)) and after `verify_chain` (rule R4
   of the M2 review), when `floor_present` = 1:
   - tip `commit_seq` < `max_commit_seq` → **`Rollback`**;
-  - the commit at height `max_commit_seq` in the verified chain (the tip
-    itself when the heights are equal) hashes to anything other than
-    `tip_hash` → **`Fork`**;
-  - if that height is below the tip's `chain_floor`, the commit is gone and
-    the check cannot be made: attach proceeds and raises the floor.
+  - tip `commit_seq` == `max_commit_seq` and the tip hashes to anything
+    other than `tip_hash` → **`Fork`**;
+  - tip `commit_seq` > `max_commit_seq`: the chain is walked from the tip
+    back to height `max_commit_seq` (every link authenticated and checked as
+    in [§10.7](#107-chain-rules), also below the tip's `chain_floor`), and
+    the commit reached there must hash to `tip_hash`, else **`Fork`**
+    (maintainer decision of 2026-11-13);
+  - if a link of that walk is missing or does not authenticate (commits
+    below `chain_floor` deleted, damaged) → **`ForkUnverifiable`**: attach is
+    refused until the operator overrides it with an explicit, audited attach
+    flag. GC therefore keeps every commit at or above the floor's height
+    while a floor exists (plan M17, rule 6).
 - `lunix fsck --repair --truncate-tip` is the one operation that lowers the
   floor: it rewrites it to the new tip, as an explicit offline act of the
   operator ([§10.7](#107-chain-rules)).

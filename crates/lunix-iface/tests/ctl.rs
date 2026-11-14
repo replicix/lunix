@@ -44,11 +44,13 @@ fn credential() -> impl Strategy<Value = Credential> {
         proptest::option::of(secret()),
         proptest::option::of(path()),
         proptest::option::of("[0-9a-f]{32}"),
+        proptest::option::of(mode()),
     )
-        .prop_map(|(passphrase, key_file, fingerprint)| Credential {
+        .prop_map(|(passphrase, key_file, fingerprint, mode)| Credential {
             passphrase,
             key_file,
             fingerprint,
+            mode,
         })
 }
 
@@ -98,15 +100,31 @@ fn attach() -> impl Strategy<Value = Attach> {
         proptest::option::of("[0-9,-]{1,30}"),
         proptest::option::of(any::<u32>()),
         proptest::option::of(credential()),
+        proptest::option::of(prop_oneof![
+            Just(JournalDamagePolicy::Wipe),
+            Just(JournalDamagePolicy::Refuse)
+        ]),
+        any::<bool>(),
     )
         .prop_map(
-            |(name, queues, depth, cpus, max_io_buf_bytes, credential)| Attach {
+            |(
                 name,
                 queues,
                 depth,
                 cpus,
                 max_io_buf_bytes,
                 credential,
+                on_journal_damage,
+                allow_unverifiable_fork,
+            )| Attach {
+                name,
+                queues,
+                depth,
+                cpus,
+                max_io_buf_bytes,
+                credential,
+                on_journal_damage,
+                allow_unverifiable_fork,
             },
         )
 }
@@ -294,6 +312,10 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                     last_commit_ms,
                     dedup_ratio,
                     compression_ratio,
+                    rollback_floor: (last_commit_seq % 2 == 1).then(|| RollbackFloorView {
+                        max_commit_seq: last_commit_seq,
+                        tip_hash: "ab".repeat(32),
+                    }),
                 }
             },
         )
@@ -309,6 +331,10 @@ fn code() -> impl Strategy<Value = ErrorCode> {
         Just(ErrorCode::Invalid),
         Just(ErrorCode::Io),
         Just(ErrorCode::Internal),
+        Just(ErrorCode::Rollback),
+        Just(ErrorCode::Fork),
+        Just(ErrorCode::ForkUnverifiable),
+        Just(ErrorCode::JournalDamage),
     ]
 }
 
@@ -359,17 +385,19 @@ fn response() -> impl Strategy<Value = Response> {
             any::<u32>(),
             any::<u16>(),
             any::<u16>(),
+            any::<bool>(),
             any::<bool>()
         )
-            .prop_map(
-                |(device, dev_id, queues, depth, recovered)| Response::Attached(Attached {
+            .prop_map(|(device, dev_id, queues, depth, recovered, first_attach)| {
+                Response::Attached(Attached {
                     device,
                     dev_id,
                     queues,
                     depth,
-                    recovered
+                    recovered,
+                    first_attach,
                 })
-            ),
+            }),
         Just(Response::Detached),
         any::<u64>().prop_map(|size_bytes| Response::Resized { size_bytes }),
         (figures(), any::<u64>(), proptest::option::of(any::<u64>())).prop_map(
@@ -549,6 +577,8 @@ fn validation_bounds() {
             cpus: None,
             max_io_buf_bytes: None,
             credential: None,
+            on_journal_damage: None,
+            allow_unverifiable_fork: false,
         };
         f(&mut a);
         Request::Attach(a)
@@ -563,6 +593,18 @@ fn validation_bounds() {
     assert!(!ok(attach(&|a| a.cpus = Some("0;1".into()))));
     assert!(!ok(attach(&|a| a.credential = Some(Credential {
         fingerprint: Some("XYZ".into()),
+        ..Credential::default()
+    }))));
+    assert!(!ok(attach(&|a| a.name = ".".into())));
+    assert!(!ok(attach(&|a| a.name = "..".into())));
+    assert!(ok(attach(&|a| a.name = "..a".into())));
+    assert!(!ok(attach(&|a| a.credential = Some(Credential {
+        passphrase: Some(Secret::from_text("x")),
+        mode: Some(VolumeMode::Plain),
+        ..Credential::default()
+    }))));
+    assert!(ok(attach(&|a| a.credential = Some(Credential {
+        mode: Some(VolumeMode::Plain),
         ..Credential::default()
     }))));
     let create = |f: &dyn Fn(&mut VolumeCreate)| {
@@ -613,6 +655,8 @@ fn secrets_never_print() {
             passphrase: Some(s.clone()),
             ..Credential::default()
         }),
+        on_journal_damage: None,
+        allow_unverifiable_fork: false,
     });
     assert!(!format!("{req:?}").contains("hunter2"));
     assert_eq!(s, Secret::from_text("hunter2-canary"));
@@ -631,6 +675,10 @@ fn error_codes_map_to_exit_codes() {
         (ErrorCode::NoSpace, 5),
         (ErrorCode::Downgrade, 6),
         (ErrorCode::WrongKmk, 6),
+        (ErrorCode::Rollback, 6),
+        (ErrorCode::Fork, 6),
+        (ErrorCode::ForkUnverifiable, 6),
+        (ErrorCode::JournalDamage, 7),
         (ErrorCode::Invalid, 2),
         (ErrorCode::Io, 1),
         (ErrorCode::Internal, 1),
@@ -667,6 +715,35 @@ fn newer_daemon_codes_and_mode_conversions() {
         cpus: None,
         max_io_buf_bytes: Some(MAX_IO_BUF + 1),
         credential: None,
+        on_journal_damage: None,
+        allow_unverifiable_fork: false,
     });
     assert!(big.validate().is_err());
+}
+
+#[test]
+fn the_m12_additions_default_when_absent() {
+    let a: Attach = serde_json::from_value(json!({"name": "v"})).unwrap();
+    assert_eq!(
+        (a.on_journal_damage, a.allow_unverifiable_fork),
+        (None, false)
+    );
+    let c: Credential = serde_json::from_value(json!({"passphrase": "00"})).unwrap();
+    assert_eq!(c.mode, None);
+    let r: Attached = serde_json::from_value(
+        json!({"device": "/dev/lunix/v", "dev_id": 1, "queues": 4, "depth": 128, "recovered": false}),
+    )
+    .unwrap();
+    assert!(!r.first_attach);
+    let p: Attach =
+        serde_json::from_value(json!({"name": "v", "on_journal_damage": "refuse"})).unwrap();
+    assert_eq!(p.on_journal_damage, Some(JournalDamagePolicy::Refuse));
+    assert_eq!(
+        serde_json::to_value(ErrorCode::ForkUnverifiable).unwrap(),
+        json!("fork_unverifiable")
+    );
+    assert_eq!(
+        serde_json::to_value(ErrorCode::JournalDamage).unwrap(),
+        json!("journal_damage")
+    );
 }

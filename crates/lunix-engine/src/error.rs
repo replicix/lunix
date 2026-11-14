@@ -44,11 +44,26 @@ pub enum OpenError {
         /// The verified tip.
         tip: CommitSeq,
     },
-    /// R4: the tip is at the floor's height with another hash.
-    #[error("fork: tip {tip} differs from the commit the floor recorded at that height")]
+    /// R4: the chain from the tip does not pass through the commit the floor
+    /// recorded: at the floor's height there is another commit.
+    #[error("fork: the commit at height {tip} is not the one the floor recorded")]
     Fork {
-        /// The tip (and floor) height.
+        /// The height compared (the floor's `max_commit_seq`).
         tip: CommitSeq,
+    },
+    /// R4 (ADR-31): the tip is above the floor but a commit on the chain from
+    /// the tip back to the floor's height is missing, so a fork cannot be
+    /// ruled out. Refused unless `EngineConfig::allow_unverifiable_fork`. A
+    /// present commit that does not authenticate or link is `Fork`.
+    #[error("fork unverifiable: the chain from tip {tip} back to the floor {floor} cannot be walked: {source}")]
+    ForkUnverifiable {
+        /// The floor's `max_commit_seq`.
+        floor: CommitSeq,
+        /// The verified tip.
+        tip: CommitSeq,
+        /// Why the walk failed.
+        #[source]
+        source: Error,
     },
     /// Journal recovery found damage or records beyond a gap and the volume
     /// was opened with `on_journal_damage = refuse`. Nothing was wiped.

@@ -205,6 +205,28 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   the floor, merges them and stops at the first gap. The checkpoint only
   says which files may be skipped. There is no mid-ring corruption error
   and no flush marker; `fsck` warns about valid records beyond the gap.
+- **What `on_journal_damage = refuse` refuses (lead, 2026-11-13, after the
+  M12a review).** Only mid-journal damage: a damaged range with a later
+  valid record in its lane, or valid records beyond the first gap. A torn
+  **last** record of a lane with nothing valid after it is crash residue:
+  it cannot be a write acknowledged as durable, because a FLUSH or FUA
+  completes only after the group flush that covers it (`fdatasync` of the
+  lane file) has finished, so every such record is on stable storage before
+  its acknowledgement and a crash cannot tear it. What a torn tail can hold
+  is a write never flushed, which block semantics allow to lose. It is
+  logged at warn and wiped; refusing it would keep every volume offline
+  after an ordinary crash.
+  **Interim limit (M12a re-review R1, 2026-11-14).** The same durability
+  argument makes a gap across lanes, and a damaged batch followed by a later
+  batch of the same lane (two batches in flight), ordinary residue of a crash
+  under load: no flush covering the later records was acknowledged. Until
+  the flushed watermark is in the journal format (maintainer decision of
+  2026-11-14, pending the `FREEZE.md` re-sign), `refuse` still refuses those
+  shapes, so it is meant for **single-queue volumes or setups that run
+  `fsck` after every crash**; `wipe` stays the default. With the watermark,
+  recovery refuses only damage or a gap at or below the highest flushed
+  `write_seq` a surviving record witnessed, and treats everything above it
+  as residue.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes
@@ -2209,7 +2231,23 @@ is not an anchor.
     would refuse an honest volume after a crash.
   - At attach, after `verify_chain`, a tip with `commit_seq <
     max_commit_seq` is refused as `Rollback`, and a tip with `commit_seq ==
-    max_commit_seq` and a different hash as `Fork`. This is rule R4 of
+    max_commit_seq` and a different hash as `Fork`.
+  - **The fork window (maintainer, 2026-11-13, after the M12a review).** A
+    tip above the floor must descend from the floor's commit: the chain is
+    walked from the tip back to height `max_commit_seq` (every link
+    authenticated, also below `chain_floor`) and must arrive at a commit
+    whose hash is `tip_hash`, else `Fork`. With `retain_last = 2` the
+    retained chain alone covers only one commit above the floor, so without
+    the walk a copy that diverged two or more commits before the tip would
+    attach and raise the floor. When the walk cannot be completed (a link
+    deleted or damaged), the attach is refused as `ForkUnverifiable` until an
+    operator overrides it with an explicit, audited attach flag. GC keeps
+    every commit object at or above the floor's height while a floor exists
+    (plan M17 rule 6).
+  - The floor is recorded at volume creation, with the genesis commit, so a
+    volume's first attach on the host that made it is not a "first attach".
+  - A rejected `state/pins` (bad length, version or checksum) is an error,
+    never read as "no floor". This is rule R4 of
     ADR-11, together with `open_lease_fresh(bytes, max(chain epoch,
     pins.max_epoch))`.
   - Only offline `fsck --repair --truncate-tip` and an explicit,
@@ -2254,7 +2292,8 @@ is not an anchor.
 - **Format freeze.** `state/pins` version 2 and the new addressing-key
   purpose id (ADR-6, ADR-11) amend frozen items; each needs the maintainer's
   re-sign of `FREEZE.md` and a golden update.
-- New attach errors `Rollback` and `Fork` in the control API and the CLI;
-  `lunix status` shows the floor.
+- New attach errors `Rollback`, `Fork` and `ForkUnverifiable` in the
+  control API and the CLI, and the audited override; `lunix status` shows
+  the floor, also for a detached volume.
 - The rollback floor and `chain_floor` (retention) are unrelated: GC
   deleting old commits never lowers the rollback floor.

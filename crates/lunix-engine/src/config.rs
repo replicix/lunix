@@ -14,7 +14,12 @@ pub enum OnJournalDamage {
     /// Log and continue; the first `open_lane` wipes (availability first).
     #[default]
     Wipe,
-    /// Refuse to open, so `fsck` can read the journal untouched.
+    /// Refuse to open, so `fsck` can read the journal untouched, when the
+    /// damage is mid-journal: a damaged range with a later valid record in
+    /// its lane, or valid records beyond the first gap. A torn last record of
+    /// a lane with nothing valid after it is crash residue of a write never
+    /// acknowledged as durable (a flushed or FUA record is on stable storage
+    /// before its acknowledgement); it is logged and wiped as under `Wipe`.
     Refuse,
 }
 
@@ -61,6 +66,10 @@ pub struct EngineConfig {
     pub gc_budget: Option<GcBudget>,
     /// GC settings handed to the collector.
     pub gc_params: Option<lunix_iface::gc::GcParams>,
+    /// Operator override (ADR-31, decision of 2026-11-13): open although the
+    /// chain from the tip back to the rollback floor cannot be walked
+    /// (`OpenError::ForkUnverifiable`). The caller audits it.
+    pub allow_unverifiable_fork: bool,
 }
 
 impl EngineConfig {
@@ -91,6 +100,7 @@ impl EngineConfig {
             inflight_timeout: Duration::from_secs(60),
             gc_budget: None,
             gc_params: None,
+            allow_unverifiable_fork: false,
         }
     }
 
