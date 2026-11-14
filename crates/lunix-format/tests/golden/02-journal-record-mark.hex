@@ -1,0 +1,7 @@
+# lunix-format golden file 02-journal-record-mark.bin (64 bytes).
+# Changing this file is a format change and needs the maintainer.
+# Regenerate: LUNIX_REGEN_GOLDEN=1 tools/remote.sh cargo test -p lunix-format --test f02_journal
+00000000  4c 58 4a 52 01 03 00 00 09 00 00 00 00 00 00 00
+00000010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00000020  00 00 00 00 3a 53 0e ef 15 7c 4a 7f b9 79 37 9e
+00000030  00 30 00 00 00 00 00 00 08 00 00 00 00 00 00 00

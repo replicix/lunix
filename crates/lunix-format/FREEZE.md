@@ -28,7 +28,8 @@ on-disk-formats.md §23 byte for byte. `kat-vectors.json` is copied to
   (§23.1, blocks 0-5 of the file), `02-journal-record-write-1-block.bin`,
   `02-journal-record-hole.bin`, `02-journal-torn-batch.bin` (reader test
   input: a batch with its last block zeroed), `02-journal-resync.bin` (a
-  damaged record followed by valid ones: the reader resyncs).
+  damaged record followed by valid ones: the reader resyncs),
+  `02-journal-record-mark.bin` (amendment 2026-11-14 (b), pending re-sign).
 - [x] **3. Extent** (§6): plain and encrypted layouts, AAD builder, `info`
   builder, plain tag input.
   Goldens: `a0-extent-plain-keyed.bin` (§23.2), `03-extent-plain-unkeyed.bin`,
@@ -118,14 +119,50 @@ of 2026-11-14 after the M12a re-review, finding R1; on-disk-formats.md §5.2
 and §5.3). Item 2: bytes 56-63 of the journal record header, reserved and
 zero in the signed layout, become `flushed` (u64): the highest `write_seq`
 that a completed group flush had made durable on every lane when the record
-was appended, always below the record's `write_seq`. A record written under
-the signed layout (zeros there) reads as watermark 0, so the existing item 2
-goldens (`a0-journal-batch-two-records.bin`, `02-journal-record-*.bin`,
-`02-journal-torn-batch.bin`, `02-journal-resync.bin`) are unchanged byte for
-byte; the reader no longer requires the bytes to be zero and rejects
-`flushed >= write_seq`. DELTA regions and the memfd sink write 0. Recovery
+was appended, always below the record's `write_seq`; 0 when none is known
+(the item 2 goldens hold records written before any flush, so they carry 0
+there). The reader rejects `flushed >= write_seq`. DELTA regions and the
+memfd sink write 0, and the strict DELTA decoder rejects any other value.
+Recovery
 reports the highest watermark found; a gap or damage at or below it is
 real loss (what `on_journal_damage = refuse` refuses), everything above it
 is crash residue (ADR-4).
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-14 (amendment: journal flushed watermark; merge gated on an independent review and the four-queue kill -9 + refuse cell)
+
+**Amendment 2026-11-14 (b) — pending maintainer re-sign** (maintainer
+decision of 2026-11-14 on finding M2 of the watermark review: close the
+unwitnessed window with a witness; on-disk-formats.md §5 intro, §5.1, §5.2,
+§5.3 and §5.4). Item 2:
+
+1. Record `kind` 3, `mark`: `len` 0, `lba` 0, `epoch` 0 in phase 1, no data,
+   so the record is exactly 64 bytes. `write_seq` is a number of its own
+   from the journal's counter and rises within its ring like any record's;
+   `flushed` (< `write_seq`) is the watermark the mark witnesses; `gen`,
+   `off` and the CRC are those of any journal record. The reader accepts
+   kind 3 only with `len` 0 and `lba` 0. A mark changes no block.
+2. Mark ring files `journal/m00-<ordinal:08x>.j`: the item 2 file header
+   with `lane` 0 and the ordinal of the name, 1 MiB each in phase 1, four
+   per journal, one mark per 4 KiB block. Only the flush coordinator writes
+   them, one mark at a time, each followed by an `fdatasync`. They are
+   reinitialised, reclaimed (once every mark in a file is at or below the
+   cut) and recovered like lane files; recovery merges their marks with the
+   lanes for `write_seq` contiguity and the watermark, never hands a mark
+   to the engine, and reports damage in them under lane id `u16::MAX`.
+3. Marks exist only in the mark ring: DELTA regions and the memfd sink
+   never carry kind 3, and the strict DELTA decoder rejects it.
+4. When a mark is written (§5.3): after a group flush that raised the
+   watermark, unless a later group flush whose `upto` is above the counter
+   at that raise completes within the idle delay (default 50 ms,
+   configurable), at most one mark per such flush, only while no flush is
+   queued; after a restart, once the first lane open made the recovered
+   records durable. The remaining window is a crash within the idle delay.
+5. New golden: `02-journal-record-mark.bin` (a mark: `write_seq` 9,
+   `flushed` 8, `off` 12288). The other item 2 goldens are unchanged.
+
+The wording of the amendment above (2026-11-14) was changed at the same
+time to drop its compatibility reasoning (maintainer rule of 2026-11-14:
+no backward compatibility while Lunix is in progress); its layout is
+unchanged.
+
+Re-signed by: _pending (the maintainer) — mark ring, kind 3_

@@ -9,6 +9,10 @@
 //!
 //! The same record framing is the DELTA inline-records region
 //! ([`encode_delta_region`]) and the future memfd sink.
+//!
+//! The flush coordinator's mark ring (`m00-<ordinal>.j`, section 5.1) uses the
+//! same file header and reader; it holds only [`RecordKind::Mark`] records,
+//! one per 4 KiB block.
 
 use core::ops::Range;
 
@@ -27,6 +31,9 @@ pub const RECORD_MAGIC: &[u8; 4] = b"LXJR";
 pub const BLOCK: usize = 4096;
 /// Length of a journal file.
 pub const FILE_LEN: usize = 64 << 20;
+/// Length of a mark ring file (`m00-<ordinal>.j`, section 5.1): a header
+/// block and 255 marks, one per block.
+pub const MARK_FILE_LEN: usize = 1 << 20;
 /// Length of the inline record header.
 pub const RECORD_HEADER_LEN: usize = 64;
 /// Most blocks in one write record (1 MiB).
@@ -115,6 +122,12 @@ pub enum RecordKind {
     Write = 1,
     /// DISCARD or WRITE_ZEROES of `len` blocks; no data.
     Hole = 2,
+    /// A witness of the flushed watermark, written by the journal itself
+    /// into its mark ring (amendment 2026-11-14, section 5.2): `len` 0, `lba`
+    /// 0, no data. It takes a `write_seq` like any record, carries the
+    /// watermark in `flushed`, and changes no block of the device. Never in
+    /// a DELTA region or the memfd sink.
+    Mark = 3,
 }
 
 /// The fixed 64-byte record header, without its CRC.
@@ -139,8 +152,7 @@ pub struct RecordHeader {
     /// flush had made durable on every lane when this record was appended;
     /// 0 when none is known (DELTA regions, the first records after open).
     /// Always below `write_seq`: a flush covering this record cannot complete
-    /// before the record is written. Bytes 56-63, formerly reserved (a v1
-    /// record that wrote zeros there reads as watermark 0).
+    /// before the record is written. Bytes 56-63.
     pub flushed: WriteSeq,
 }
 
@@ -191,6 +203,17 @@ impl Record<'_> {
                     return Err(FormatError::invalid(WHAT_REC, "a hole carries no data"));
                 }
             }
+            RecordKind::Mark => {
+                if h.len != 0 {
+                    return Err(FormatError::range(WHAT_REC, "len", u64::from(h.len)));
+                }
+                if h.lba != 0 {
+                    return Err(FormatError::range(WHAT_REC, "lba", h.lba));
+                }
+                if !self.data.is_empty() {
+                    return Err(FormatError::invalid(WHAT_REC, "a mark carries no data"));
+                }
+            }
         }
         Ok(())
     }
@@ -228,6 +251,7 @@ impl Record<'_> {
         let kind = match r.u8()? {
             1 => RecordKind::Write,
             2 => RecordKind::Hole,
+            3 => RecordKind::Mark,
             v => return Err(FormatError::range(WHAT_REC, "kind", u64::from(v))),
         };
         r.reserved(2)?;
@@ -249,6 +273,15 @@ impl Record<'_> {
             RecordKind::Hole => {
                 if len == 0 {
                     return Err(FormatError::range(WHAT_REC, "len", 0));
+                }
+                0
+            }
+            RecordKind::Mark => {
+                if len != 0 {
+                    return Err(FormatError::range(WHAT_REC, "len", u64::from(len)));
+                }
+                if lba != 0 {
+                    return Err(FormatError::range(WHAT_REC, "lba", lba));
                 }
                 0
             }
@@ -411,6 +444,24 @@ impl BatchBuilder {
         )
     }
 
+    /// Appends a mark record (a witness of the batch's watermark, see
+    /// [`RecordKind::Mark`]). The mark ring writes one mark per batch.
+    pub fn push_mark(&mut self, write_seq: WriteSeq, epoch: u64) -> Result<()> {
+        self.push(
+            RecordHeader {
+                kind: RecordKind::Mark,
+                write_seq,
+                epoch,
+                lba: 0,
+                len: 0,
+                gen: 0,
+                off: 0,
+                flushed: WriteSeq(0),
+            },
+            &[],
+        )
+    }
+
     /// The batch, zero-padded to a multiple of 4096 bytes.
     pub fn finish(mut self) -> Vec<u8> {
         if let Some(n) = round4k(self.buf.len()) {
@@ -521,6 +572,9 @@ pub fn encode_delta_region(records: &[Record<'_>], out: &mut Vec<u8>) -> Result<
         if rec.header.write_seq.0 <= prev {
             return Err(FormatError::invalid(WHAT_REC, "write_seq must rise"));
         }
+        if rec.header.kind == RecordKind::Mark {
+            return Err(FormatError::invalid(WHAT_REC, "a mark in a DELTA region"));
+        }
         prev = rec.header.write_seq.0;
         let r = Record {
             header: RecordHeader {
@@ -548,6 +602,9 @@ pub fn decode_delta_region(region: &[u8]) -> Result<Vec<Record<'_>>> {
                 WHAT_REC,
                 "gen, off or flushed wrong for a DELTA record",
             ));
+        }
+        if rec.header.kind == RecordKind::Mark {
+            return Err(FormatError::invalid(WHAT_REC, "a mark in a DELTA region"));
         }
         if rec.header.write_seq.0 <= prev {
             return Err(FormatError::invalid(WHAT_REC, "write_seq does not rise"));

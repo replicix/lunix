@@ -537,7 +537,7 @@ proptest! {
 }
 
 #[test]
-fn the_flushed_watermark_round_trips_and_zero_is_the_v1_reserved_field() {
+fn the_flushed_watermark_round_trips_and_zero_means_none() {
     let data = vec![7u8; 4096];
     let mk = |flushed: u64| {
         let mut out = Vec::new();
@@ -561,7 +561,7 @@ fn the_flushed_watermark_round_trips_and_zero_is_the_v1_reserved_field() {
     let zero = mk(0);
     assert!(
         zero[56..64].iter().all(|b| *b == 0),
-        "watermark 0 is the old reserved zeros"
+        "watermark 0 (none known) is zeros"
     );
     let nine = mk(9);
     assert_eq!(u64::from_le_bytes(nine[56..64].try_into().unwrap()), 9);
@@ -584,4 +584,105 @@ fn the_flushed_watermark_round_trips_and_zero_is_the_v1_reserved_field() {
         r.encode(&mut bad).is_err(),
         "a record cannot witness its own flush"
     );
+}
+
+fn mark_record(write_seq: u64, flushed: u64, off: u64) -> Record<'static> {
+    Record {
+        header: RecordHeader {
+            kind: RecordKind::Mark,
+            write_seq: WriteSeq(write_seq),
+            epoch: 0,
+            lba: 0,
+            len: 0,
+            gen: GEN,
+            off,
+            flushed: WriteSeq(flushed),
+        },
+        data: &[],
+    }
+}
+
+/// Kind 3 `mark` (amendment 2026-11-14): 64 bytes, `len` 0, `lba` 0, no data,
+/// the watermark in `flushed`.
+#[test]
+fn a_mark_record_has_a_golden_and_strict_rules() {
+    let mut m = Vec::new();
+    mark_record(9, 8, 12288).encode(&mut m).unwrap();
+    assert_eq!(m.len(), 64);
+    let g = golden("02-journal-record-mark.bin", &m);
+    common::negative_suite("mark record", &rt_record, &g);
+    let back = Record::decode(&g).unwrap();
+    assert_eq!(back.header.kind, RecordKind::Mark);
+    assert_eq!(back.header.flushed, WriteSeq(8));
+
+    // len and lba must be 0, no data, and the watermark below write_seq.
+    for (len, lba, data) in [
+        (1u32, 0u64, &[][..]),
+        (0, 1, &[][..]),
+        (0, 0, &[0u8; 4096][..]),
+    ] {
+        let r = Record {
+            header: RecordHeader {
+                len,
+                lba,
+                ..mark_record(9, 8, 12288).header
+            },
+            data,
+        };
+        assert!(r.encode(&mut Vec::new()).is_err(), "len {len} lba {lba}");
+    }
+    assert!(mark_record(9, 9, 12288).encode(&mut Vec::new()).is_err());
+    // A header patched to a non-zero len or lba is refused before the CRC.
+    for (at, v) in [(32usize, 1u8), (24, 1)] {
+        let mut b = g.clone();
+        b[at] = v;
+        assert!(matches!(Record::decode(&b), Err(FormatError::Range { .. })));
+    }
+    // An unknown kind stays refused.
+    let mut b = g.clone();
+    b[5] = 4;
+    assert!(Record::decode(&b).is_err());
+}
+
+/// The mark ring writes one mark per batch; the normative reader finds them.
+#[test]
+fn marks_in_a_file_are_read_back() {
+    let mut a = BatchBuilder::new(GEN, 4096)
+        .unwrap()
+        .with_flushed(WriteSeq(3));
+    a.push_mark(WriteSeq(4), 0).unwrap();
+    let a = a.finish();
+    let mut b = BatchBuilder::new(GEN, 8192)
+        .unwrap()
+        .with_flushed(WriteSeq(7));
+    b.push_mark(WriteSeq(8), 0).unwrap();
+    let b = b.finish();
+    assert_eq!((a.len(), b.len()), (4096, 4096));
+    let file = file_of(&[&a, &b]);
+    let scan = scan_file(&file, WriteSeq(0)).unwrap();
+    let got: Vec<(RecordKind, u64, u64)> = scan
+        .records
+        .iter()
+        .map(|r| (r.header.kind, r.header.write_seq.0, r.header.flushed.0))
+        .collect();
+    assert_eq!(got, [(RecordKind::Mark, 4, 3), (RecordKind::Mark, 8, 7)]);
+    assert!(scan.damaged.is_empty());
+}
+
+/// DELTA regions (and the memfd sink) never carry a mark.
+#[test]
+fn a_delta_region_refuses_a_mark() {
+    let m = Record {
+        header: RecordHeader {
+            gen: 0,
+            off: 0,
+            flushed: WriteSeq(0),
+            ..mark_record(9, 0, 0).header
+        },
+        data: &[],
+    };
+    assert!(encode_delta_region(&[m], &mut Vec::new()).is_err());
+    let mut v = Vec::new();
+    m.encode(&mut v).unwrap();
+    assert!(decode_delta_region(&v).is_err());
 }
