@@ -77,6 +77,23 @@ enum Lifecycle {
     Deleted,
 }
 
+/// Where an attached device is in its life, as the daemon's shutdown walk
+/// needs it (M12a re-review R3): only a stopping or deleted device has no
+/// started request left to quiesce.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeviceLifecycle {
+    /// Serving I/O.
+    Serving,
+    /// `QUIESCE_DEV` was sent (or may be pending): the device refuses new I/O;
+    /// a quiesce may be retried.
+    Quiescing,
+    /// `TRY_STOP_DEV` succeeded: the queues drain and end; no stop command
+    /// was or will be sent by this process.
+    Stopping,
+    /// `DEL_DEV` completed.
+    Deleted,
+}
+
 struct Shared {
     ctl: Arc<dyn ControlPlane>,
     dev_id: u32,
@@ -631,6 +648,16 @@ impl UblkDevice {
     /// The kernel's device id (`/dev/ublkbN`).
     pub fn dev_id(&self) -> u32 {
         self.shared.dev_id
+    }
+
+    /// The device's lifecycle state.
+    pub fn lifecycle(&self) -> DeviceLifecycle {
+        match *lock(&self.shared.life) {
+            Lifecycle::Serving => DeviceLifecycle::Serving,
+            Lifecycle::Quiescing => DeviceLifecycle::Quiescing,
+            Lifecycle::Stopping => DeviceLifecycle::Stopping,
+            Lifecycle::Deleted => DeviceLifecycle::Deleted,
+        }
     }
 
     /// `/dev/ublkbN`.
