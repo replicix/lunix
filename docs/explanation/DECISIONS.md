@@ -207,7 +207,7 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   and no flush marker; `fsck` warns about valid records beyond the gap.
 - **What `on_journal_damage = refuse` refuses: the flushed watermark
   (maintainer, 2026-11-14, after the M12a re-review; the record layout part
-  is pending the `FREEZE.md` re-sign).** Every journal record carries
+  re-signed in `FREEZE.md` on 2026-11-14).** Every journal record carries
   `flushed`, the highest `write_seq` a completed group flush had made durable
   on every lane when the record was appended (on-disk-formats §5.2).
   Recovery reports the highest value any surviving record carries. A FLUSH
@@ -217,17 +217,34 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   - a gap at or below the watermark, or a damaged range whose next valid
     record in its lane is at or below it, is loss of durable data, and
     `refuse` refuses it (the volume stays offline for `fsck`);
-  - everything above the watermark is crash residue no acknowledged flush
-    covered, whatever its shape: a torn last record, a gap across lanes (a
-    record still in its lane's open batch at a kill while another lane's
-    later record landed), a torn batch followed by a later batch of the same
-    lane (two batches in flight). It is logged at warn and wiped.
+  - a `write_seq` found twice (a wipe that did not happen) is never residue
+    and is refused at any watermark;
+  - everything above the watermark is treated as crash residue, whatever its
+    shape: a torn last record, a gap across lanes (a record still in its
+    lane's open batch at a kill while another lane's later record landed), a
+    torn batch followed by a later batch of the same lane (two batches in
+    flight). It is logged at warn and wiped, with every record after the
+    first gap;
+  - a ring file left by a reinitialisation interrupted between its header
+    write and its rename (valid header of a higher ordinal, zero body) is
+    not damage (on-disk-formats §5.1): a kill during journal reclaim opens.
   This replaces the rule of 2026-11-13 (refuse on any gap or any damage with
-  a later record), which refused ordinary crashes of multi-queue volumes,
-  and closes the other direction too: medium damage to a flushed record is
-  refused as soon as a later record witnessed the flush. Damage to the
-  newest flushed records that no later record witnessed still reads as
-  residue; nothing on disk can tell it apart.
+  a later record), which refused ordinary crashes of multi-queue volumes.
+  **The unwitnessed window.** A completed flush is witnessed only by a record
+  appended after it completed. Every record above the highest watermark a
+  surviving record carries is in the window; after a burst of writes, one
+  FLUSH and no later write, that is the whole burst. A crash alone cannot
+  damage those records (they were durable), but medium damage to one of
+  them is indistinguishable from residue: `refuse` opens, and the damaged
+  record and every record after it are wiped although their flush was
+  acknowledged. Inside the window this rule is weaker than the rule of
+  2026-11-13, which refused any records beyond a gap; outside it (a later
+  record witnessed the flush) it is stronger, since damage to a flushed
+  record with no later record in its lane is refused too. The window closes
+  when a later record lands or a cut moves the floor past the records.
+  Shrinking it (a witness written when a group flush completes on an idle
+  journal, or the watermark in the checkpoint slot) is format work, not
+  taken; the maintainer confirms the trade (review M2, 2026-11-14).
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes

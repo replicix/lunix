@@ -337,8 +337,13 @@ File length: exactly 64 MiB (67 108 864 bytes). **Reinitialising a file**
 with the next ordinal and a new `generation`, `fdatasync`, rename to the new
 name, directory `fsync`. A file whose header is valid is therefore zero
 beyond its last write. A file whose header fails its CRC or does not match
-its name (a crash during reinitialisation) holds no valid records and is
-reinitialised again at open. **Authenticated by:** nothing (checksum only).
+its name holds no valid records and is reinitialised again at open. When
+the header is a valid header of the same lane and volume with a higher
+ordinal than the name and everything from byte 4096 on is zero, the file is
+a reinitialisation interrupted between its header write and its rename: it
+held no record since its zeroing was synced, and recovery does not report
+it as damage. Any other such file is reported as a damaged range (fsck, and
+`on_journal_damage` below). **Authenticated by:** nothing (checksum only).
 
 ### 5.2 Record header (64 bytes)
 
@@ -355,7 +360,7 @@ reinitialised again at open. **Authenticated by:** nothing (checksum only).
 | `crc32c` | 36 | 4 | u32 | see below | |
 | `gen` | 40 | 8 | u64 | the container generation | journal: the file header's `generation`; memfd sink: the buffer generation; DELTA: 0 |
 | `off` | 48 | 8 | u64 | the record's own offset | journal: byte offset of this header in the file; memfd: offset in the ring; DELTA: offset in the decoded records region |
-| `flushed` | 56 | 8 | u64 (`WriteSeq`) | `< write_seq` | the flushed watermark (amendment 2026-11-14, **pending re-sign**): the highest `write_seq` a completed group flush had made durable on every lane when the record was appended (after a restart, the last recovered record once the first lane open synced them); 0 when none is known; DELTA and memfd: 0. Formerly reserved: a record with zeros here reads as watermark 0 |
+| `flushed` | 56 | 8 | u64 (`WriteSeq`) | `< write_seq` | the flushed watermark (amendment 2026-11-14, re-signed 2026-11-14): the highest `write_seq` a completed group flush had made durable on every lane when the record was appended (after a restart, the last recovered record once the first lane open synced them); 0 when none is known; DELTA and memfd: 0. Formerly reserved: a record with zeros here reads as watermark 0 |
 | data | 64 | `len × 4096` for `write`, 0 for `hole` | bytes | | the written data |
 
 `crc32c` = `crc32c(header bytes 0..64 with the crc32c field set to zero ‖
@@ -450,8 +455,8 @@ Bytes 56-63 of the record header hold the flushed watermark (amendment of
 `write_seq` and `len` of a record whose data is damaged), offered as optional
 by the A0 review, is not taken; the resync rule does not need it.
 
-**The flushed watermark at recovery** (amendment 2026-11-14, pending
-re-sign). Recovery reports `flushed`, the highest watermark of any record it
+**The flushed watermark at recovery** (amendment 2026-11-14, re-signed
+2026-11-14). Recovery reports `flushed`, the highest watermark of any record it
 accepted. Every record with `write_seq` at or below it was on stable
 storage, on every lane, before a record carrying it was written (a group
 flush completes only after every lane's records up to its `upto` are
@@ -461,15 +466,28 @@ is at or below `flushed` is the loss of durable data, and
 `on_journal_damage = refuse` refuses it; anything above `flushed` (a torn
 last record, a gap across lanes from a record still in its lane's open
 batch, a torn batch followed by a later batch of the same lane) is crash
-residue that no acknowledged flush covered: logged and wiped. Damage to the
-newest flushed records that no later record witnessed reads as residue.
+residue: logged and wiped, with every record after the first gap. A
+`write_seq` found in two valid records stops recovery like a gap but is
+never residue (a wipe did not happen); `refuse` refuses it at any
+watermark. An interrupted reinitialisation (§5.1) is not damage.
+
+The unwitnessed window: a completed flush is witnessed only by a record
+appended after it completed. Every record above the highest watermark a
+surviving record carries is in the window; after a burst of writes, one
+FLUSH and no later write, that is the whole burst. A crash alone cannot
+damage those records, but medium damage to one of them is
+indistinguishable from residue: under `refuse` the volume opens, and the
+damaged record and every record after it are wiped although the flush that
+covered them was acknowledged. The window closes when a later record lands
+or a cut moves the floor past the records.
 
 ### 5.4 Reuse of the framing
 
 - **DELTA inline records** ([§10.4](#104-delta-body-kind-2)): the decoded
   records region holds records back to back at 8-byte-aligned offsets with
-  no padding and no zero magic; `gen` = 0, `off` = offset in the region; the
-  region ends at its length.
+  no padding and no zero magic; `gen` = 0, `off` = offset in the region,
+  `flushed` = 0 (the strict decoder rejects any other value); the region
+  ends at its length.
 - **memfd write buffer** (ADR-26, phase 3): the same record header; `gen` is
   the buffer generation of the keeper-held header, `off` the ring offset.
   The buffer header itself is defined in phase 3 (it is not a phase 1

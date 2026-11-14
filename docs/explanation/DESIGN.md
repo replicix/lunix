@@ -305,20 +305,26 @@ journal):
        watermark shows it: every record carries the highest `write_seq` a
        completed group flush had made durable (on-disk-formats §5.2), and
        recovery reports the highest one found. A gap or damage at or below
-       it is refused; everything above it (a torn last record, a gap across
-       lanes, a torn batch followed by a later one) is residue of writes no
-       acknowledged flush covered, logged and wiped (ADR-4). A clean
-       restart writes nothing to the journal.
+       it is refused, and so is a `write_seq` found twice; everything above
+       it (a torn last record, a gap across lanes, a torn batch followed by
+       a later one) is treated as crash residue, logged and wiped (ADR-4).
+       A flush is witnessed only by a record appended after it completed:
+       records above the highest witnessed watermark (after a burst and one
+       FLUSH, the whole burst) are in the unwitnessed window, where medium
+       damage reads as residue and is wiped with every record after it
+       (ADR-4). A ring file left by an interrupted reinitialisation is not
+       damage (on-disk-formats §5.1). A clean restart writes nothing to the
+       journal.
   3. Merge the lanes by `write_seq` and accept records in contiguous
      order. This global contiguity, not file position, decides what is
      kept, so resync is safe: a damaged record at or below the floor costs
      nothing, and a damaged record above it is a missing `write_seq` and
      stops recovery exactly where step 4 says.
   4. Stop at the first gap or torn record and ignore everything after it.
-     A torn tail is legal, because those writes were never flushed. No
-     marker of the last flushed `write_seq` exists on disk, and none is
-     added; `fsck` reports valid records beyond the first gap as a warning
-     with their `write_seq` range.
+     A torn tail is legal, because those writes were never flushed. The
+     only marker of the last flushed `write_seq` is the watermark later
+     records carry (step 2); `fsck` reports valid records beyond the first
+     gap as a warning with their `write_seq` range.
   - The checkpoint's per-lane tails only say which files may be skipped. A
     lost or stale checkpoint changes the cost of recovery, not its result.
     The tails are used only if the checkpoint's `last_commit_seq` is at
@@ -414,8 +420,9 @@ Recovery is idempotent: a crash during it is another recovery.
 7. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1).
    `ignored_after_gap` and `damaged` are logged before any lane is opened,
    and `on_journal_damage = refuse` stops the open here with a typed error
-   when a gap or damage lies at or below the flushed watermark (§4.1);
-   anything above it is crash residue, logged and wiped. The stale-tail wipe has not run yet. Rebuild the overlay from
+   when a gap or damage lies at or below the flushed watermark, or a
+   `write_seq` is found twice (§4.1); anything above it is treated as crash
+   residue, logged and wiped (the unwitnessed window, ADR-4). The stale-tail wipe has not run yet. Rebuild the overlay from
    the records and set the next `write_seq`.
 8. Raise the local floor to the tip when it is absent or lower, and
    charge the space ledger with the bytes found. Lanes are opened after
