@@ -437,6 +437,15 @@ impl VolumeDir for TStore {
     fn rollback_floor(&self) -> Result<Option<RollbackFloor>> {
         Ok(lock(&self.st).floor)
     }
+    fn reset_rollback_floor(
+        &self,
+        _floor: &RollbackFloor,
+        _why: lunix_iface::store::FloorReset,
+    ) -> Result<Option<RollbackFloor>> {
+        Err(Error::Refused {
+            why: "offline repair is not enabled",
+        })
+    }
     fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()> {
         let mut st = lock(&self.st);
         if let Some(cur) = st.floor {

@@ -402,6 +402,30 @@ pub struct Leftover {
     pub size_bytes: u64,
 }
 
+/// Why the rollback floor is reset (see [`VolumeDir::reset_rollback_floor`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub enum FloorReset {
+    /// `fsck --repair --truncate-tip`: the new tip is the previous commit.
+    TruncateTip,
+    /// `fsck --repair --reset-floor`: the operator's explicit reset (for
+    /// example a DR steal from a lagging mirror, phase 5).
+    OperatorReset,
+    /// `fsck --repair --repair-pins`: replaces a rejected `state/pins`.
+    RepairPins,
+}
+
+impl FloorReset {
+    /// The word written to the audit record.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::TruncateTip => "truncate_tip",
+            Self::OperatorReset => "operator_reset",
+            Self::RepairPins => "repair_pins",
+        }
+    }
+}
+
 /// The volume directory. Opening it takes the exclusive `LOCK` (with stale-lock
 /// takeover); the lock is held until the value is dropped.
 pub trait VolumeDir: Send + Sync {
@@ -462,6 +486,43 @@ pub trait VolumeDir: Send + Sync {
     /// `Refused` for a lower `max_commit_seq` or an equal one with another
     /// hash (nothing changes); `Io`.
     fn raise_rollback_floor(&self, floor: &RollbackFloor) -> Result<()>;
+
+    /// Sets the rollback floor to `floor`, **lowering** it when the recorded
+    /// one is higher (or has another hash at that height), and returns the
+    /// floor that was recorded before (`None`: none, or a rejected file for
+    /// [`FloorReset::RepairPins`]). ADR-31 names exactly the offline callers:
+    /// `fsck --repair --truncate-tip`, the operator's explicit reset and the
+    /// repair of a rejected `state/pins`, all in `lunix-fsck`. The engine and the
+    /// daemon never call it.
+    ///
+    /// The store checks what it can before it changes anything: the commit at
+    /// `floor.max_commit_seq` must exist and its stored bytes must hash
+    /// (BLAKE3-256) to `floor.tip_hash`, so a caller with stale facts cannot
+    /// record a floor that makes the volume unmountable. For
+    /// [`FloorReset::TruncateTip`] the new height must also be **below** the
+    /// recorded one. For [`FloorReset::RepairPins`] `state/pins` must really be
+    /// rejected; it is then replaced by a fresh file (zero `max_keyring_seq`
+    /// and `max_epoch`, no pin, the new floor), and those three values are
+    /// given up.
+    ///
+    /// Every reset appends one line (time, reason, old and new floor) to
+    /// `state/floor-resets.log` and makes it durable **before** `state/pins`
+    /// changes. The write of `state/pins` is durable as for
+    /// [`raise_rollback_floor`](Self::raise_rollback_floor), and the rest of
+    /// the file is kept.
+    ///
+    /// # Errors
+    /// `Refused` unless the store was opened with offline repair enabled
+    /// (`StoreOptions::allow_floor_reset` in `lunix-store`; only `lunix-fsck`
+    /// sets it), when the commit at the new height is missing or hashes to
+    /// something else, for the height rule above, or when `RepairPins` finds
+    /// a readable `state/pins`; `Corrupt` for a rejected `state/pins` (not
+    /// `RepairPins`); `Io`.
+    fn reset_rollback_floor(
+        &self,
+        floor: &RollbackFloor,
+        why: FloorReset,
+    ) -> Result<Option<RollbackFloor>>;
 
     /// The shared object-id allocator.
     fn ids(&self) -> Arc<dyn IdAllocator>;

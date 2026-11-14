@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use lunix_format::ids::hex_lower;
 use lunix_format::local::{DeviceRecord, LocalPins, LocalPinsFile, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
 use lunix_format::segment::ContainerKind;
@@ -16,7 +17,7 @@ use lunix_format::volume::VolumeDescriptor;
 use lunix_format::{ObjId, VolumeUuid};
 use lunix_iface::crypto::MetaCodec;
 use lunix_iface::store::{
-    CheckpointStore, IdAllocator, Leftover, SweepReport, SweepRequest, VolumeDir,
+    CheckpointStore, FloorReset, IdAllocator, Leftover, SweepReport, SweepRequest, VolumeDir,
 };
 use lunix_iface::{Error, Result};
 use replicix_platform_lite::{open_lock_file, FileLock, FlockLock, LockGuard};
@@ -26,6 +27,9 @@ use crate::fsops::{
     io_err, io_or_missing, list_hex_ids, publish, read_capped, read_dir_names, unlink_durable,
     FsOps, Publish, RealFs, STATE_POINTS,
 };
+
+/// The durable record of every floor reset, relative to the volume directory.
+pub const FLOOR_AUDIT: &str = "state/floor-resets.log";
 
 /// Target size of a segment: the writer reports full from here on (DESIGN §6).
 pub const SEGMENT_TARGET: u64 = 16 << 20;
@@ -68,6 +72,10 @@ pub struct StoreOptions {
     /// not on descriptors: an `ExtentLocation` keeps its descriptor alive past
     /// eviction and delete.
     pub max_open_files: usize,
+    /// Allow [`VolumeDir::reset_rollback_floor`], which lowers the rollback
+    /// floor. Off. Only `lunix-fsck` sets it (offline repair); `tools/ci.sh`
+    /// fails when any other crate does, so a daemon cannot lower its own floor.
+    pub allow_floor_reset: bool,
 }
 
 impl Default for StoreOptions {
@@ -77,6 +85,7 @@ impl Default for StoreOptions {
             allow_tmpfs: std::env::var_os("LUNIX_ALLOW_TMPFS_FOR_TESTS").is_some(),
             segment_target: SEGMENT_TARGET,
             max_open_files: 256,
+            allow_floor_reset: false,
         }
     }
 }
@@ -166,6 +175,7 @@ pub(crate) struct Inner {
     pub(crate) ids: Arc<IdCounter>,
     pub(crate) segment_target: u64,
     pub(crate) max_open_files: usize,
+    pub(crate) allow_floor_reset: bool,
     pub(crate) cache: Mutex<ContainerCache>,
     warnings: Mutex<Warnings>,
     /// Serialises replace-style writes (one shared temp name per file).
@@ -444,6 +454,7 @@ impl LocalVolume {
                 ids: Arc::new(IdCounter::default()),
                 segment_target: opts.segment_target,
                 max_open_files: opts.max_open_files,
+                allow_floor_reset: opts.allow_floor_reset,
                 cache: Mutex::new(ContainerCache::default()),
                 warnings: Mutex::new(Warnings::default()),
                 replace_lock: Mutex::new(()),
@@ -524,6 +535,64 @@ impl LocalVolume {
         let mut b = Vec::with_capacity(LocalPinsFile::LEN);
         file.encode(&mut b)?;
         self.replace_state_file(&lpath::state_pins(), &b)
+    }
+
+    /// The state of an absent `state/pins` (zero floors, no pin), with the
+    /// identity the file needs.
+    fn fresh_pins_file(&self) -> Result<LocalPinsFile> {
+        let desc = VolumeDescriptor::decode(&read_volume_file(&self.inner.dir)?)?;
+        Ok(LocalPinsFile {
+            pins: LocalPins {
+                volume_uuid: self.inner.uuid,
+                family_id: desc.family_id,
+                max_keyring_seq: 0,
+                max_epoch: 0,
+                pin: None,
+            },
+            floor: None,
+        })
+    }
+
+    /// Appends one line to `state/floor-resets.log` and makes it durable.
+    fn audit_floor_reset(
+        &self,
+        why: FloorReset,
+        old: Option<RollbackFloor>,
+        new: &RollbackFloor,
+    ) -> Result<()> {
+        use std::io::Write as _;
+        let show = |f: Option<RollbackFloor>| {
+            f.map_or_else(
+                || "none".to_owned(),
+                |f| format!("{}:{}", f.max_commit_seq.0, hex_lower(&f.tip_hash)),
+            )
+        };
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let line = format!(
+            "{ms} {} old={} new={}:{}\n",
+            why.word(),
+            show(old),
+            new.max_commit_seq.0,
+            hex_lower(&new.tip_hash)
+        );
+        let path = self.inner.path(FLOOR_AUDIT);
+        let existed = path.exists();
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)
+            .map_err(io_err)?;
+        f.write_all(line.as_bytes()).map_err(io_err)?;
+        self.inner.fs.fdatasync(&f).map_err(io_err)?;
+        if !existed {
+            self.inner
+                .fs
+                .fsync_dir(&self.inner.path("state"))
+                .map_err(io_err)?;
+        }
+        Ok(())
     }
 
     fn replace_state_file(&self, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -654,21 +723,7 @@ impl VolumeDir for LocalVolume {
         let _serial = lock(&self.inner.pins_lock);
         let mut file = match self.read_pins_file()? {
             Some(f) => f,
-            None => {
-                // No pins yet: the same state as an absent file (zero floors,
-                // no pin), with the identity the file needs.
-                let desc = VolumeDescriptor::decode(&read_volume_file(&self.inner.dir)?)?;
-                LocalPinsFile {
-                    pins: LocalPins {
-                        volume_uuid: self.inner.uuid,
-                        family_id: desc.family_id,
-                        max_keyring_seq: 0,
-                        max_epoch: 0,
-                        pin: None,
-                    },
-                    floor: None,
-                }
-            }
+            None => self.fresh_pins_file()?,
         };
         if let Some(cur) = file.floor {
             if floor.max_commit_seq < cur.max_commit_seq {
@@ -687,6 +742,67 @@ impl VolumeDir for LocalVolume {
         }
         file.floor = Some(*floor);
         self.write_pins_file(&file)
+    }
+
+    fn reset_rollback_floor(
+        &self,
+        floor: &RollbackFloor,
+        why: FloorReset,
+    ) -> Result<Option<RollbackFloor>> {
+        if !self.inner.allow_floor_reset {
+            return Err(Error::Refused {
+                why: "the rollback floor is reset only by an offline repair",
+            });
+        }
+        // The commit at the new height must exist and be the one named.
+        let bytes = match lunix_iface::store::CommitStore::get(self, floor.max_commit_seq) {
+            Ok(b) => b,
+            Err(e) if e.kind() == lunix_iface::ErrorKind::NotFound => {
+                return Err(Error::Refused {
+                    why: "no commit exists at the new floor's height",
+                })
+            }
+            Err(e) => return Err(e),
+        };
+        if *blake3::hash(&bytes).as_bytes() != floor.tip_hash {
+            return Err(Error::Refused {
+                why: "the commit at the new floor's height does not hash to the floor's tip_hash",
+            });
+        }
+        let _serial = lock(&self.inner.pins_lock);
+        let current = self.read_pins_file();
+        let (mut file, old) = match (why, current) {
+            (FloorReset::RepairPins, Ok(_)) => {
+                return Err(Error::Refused {
+                    why: "state/pins is not rejected; nothing to repair",
+                })
+            }
+            (FloorReset::RepairPins, Err(e)) if e.kind() == lunix_iface::ErrorKind::Corrupt => {
+                (self.fresh_pins_file()?, None)
+            }
+            (_, Err(e)) => return Err(e),
+            (_, Ok(Some(f))) => {
+                let old = f.floor;
+                (f, old)
+            }
+            (_, Ok(None)) => (self.fresh_pins_file()?, None),
+        };
+        if why == FloorReset::TruncateTip
+            && !old.is_some_and(|o| floor.max_commit_seq < o.max_commit_seq)
+        {
+            return Err(Error::Refused {
+                why: "a truncate-tip reset must lower the recorded floor",
+            });
+        }
+        self.audit_floor_reset(why, old, floor)?;
+        file.floor = Some(*floor);
+        self.write_pins_file(&file)?;
+        self.inner.warn(format!(
+            "rollback floor reset ({}): now commit {}",
+            why.word(),
+            floor.max_commit_seq.0
+        ));
+        Ok(old)
     }
 
     fn ids(&self) -> Arc<dyn IdAllocator> {

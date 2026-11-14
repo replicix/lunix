@@ -218,6 +218,7 @@ macro_rules! contract_store_suite {
                     condemned_list_round_trips,
                     sweep_deletes_only_unnamed_orphans_above_the_mark,
                     rollback_floor_is_raise_only,
+                    reset_rollback_floor_is_refused_without_the_option,
                 ]
             );
         }

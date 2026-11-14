@@ -987,3 +987,151 @@ fn the_lock_file_names_the_holder() {
     assert_eq!(crate::lock_holder_pid(dir.path()), Some(std::process::id()));
     assert_eq!(crate::lock_holder_pid(&dir.path().join("nope")), None);
 }
+
+// ---------------------------------------------------------------------------
+// reset_rollback_floor
+
+fn reset_opts() -> StoreOptions {
+    StoreOptions {
+        allow_floor_reset: true,
+        ..test_opts()
+    }
+}
+
+fn commit_hash(bytes: &[u8]) -> [u8; 32] {
+    *blake3::hash(bytes).as_bytes()
+}
+
+/// A volume with commits 0..=3 (arbitrary bytes: the store only hashes them).
+fn with_commits(dir: &std::path::Path) -> (LocalVolume, Vec<[u8; 32]>) {
+    let vol = create(dir, MODE, 16 * 1024, reset_opts());
+    let mut hashes = Vec::new();
+    for s in 0..=3u64 {
+        let bytes = format!("commit {s}").into_bytes();
+        vol.put(CommitSeq(s), &bytes).expect("put");
+        hashes.push(commit_hash(&bytes));
+    }
+    (vol, hashes)
+}
+
+fn at(seq: u64, h: [u8; 32]) -> RollbackFloor {
+    RollbackFloor {
+        max_commit_seq: CommitSeq(seq),
+        tip_hash: h,
+    }
+}
+
+#[test]
+fn a_floor_reset_is_refused_without_the_option() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    vol.put(CommitSeq(1), b"x").expect("put");
+    vol.raise_rollback_floor(&at(1, commit_hash(b"x")))
+        .expect("raise");
+    for why in [
+        lunix_iface::store::FloorReset::TruncateTip,
+        lunix_iface::store::FloorReset::OperatorReset,
+        lunix_iface::store::FloorReset::RepairPins,
+    ] {
+        let e = vol
+            .reset_rollback_floor(&at(1, commit_hash(b"x")), why)
+            .expect_err("refused");
+        assert_eq!(e.kind(), ErrorKind::Refused);
+    }
+    assert!(!dir.path().join("state/floor-resets.log").exists());
+}
+
+#[test]
+fn a_floor_reset_lowers_audits_and_verifies_the_commit() {
+    use lunix_iface::store::FloorReset;
+    let dir = tempdir();
+    let (vol, h) = with_commits(dir.path());
+    vol.raise_rollback_floor(&at(3, h[3])).expect("raise");
+
+    // The commit must exist and hash to the named value.
+    let e = vol
+        .reset_rollback_floor(&at(2, [9; 32]), FloorReset::TruncateTip)
+        .expect_err("wrong hash");
+    assert_eq!(e.kind(), ErrorKind::Refused);
+    let e = vol
+        .reset_rollback_floor(&at(7, h[2]), FloorReset::OperatorReset)
+        .expect_err("no such commit");
+    assert_eq!(e.kind(), ErrorKind::Refused);
+    assert_eq!(vol.rollback_floor().expect("floor"), Some(at(3, h[3])));
+    assert!(
+        !dir.path().join("state/floor-resets.log").exists(),
+        "a refusal leaves no record"
+    );
+
+    // TruncateTip must go down.
+    let e = vol
+        .reset_rollback_floor(&at(3, h[3]), FloorReset::TruncateTip)
+        .expect_err("not lower");
+    assert_eq!(e.kind(), ErrorKind::Refused);
+
+    let old = vol
+        .reset_rollback_floor(&at(2, h[2]), FloorReset::TruncateTip)
+        .expect("lower");
+    assert_eq!(old, Some(at(3, h[3])));
+    assert_eq!(vol.rollback_floor().expect("floor"), Some(at(2, h[2])));
+    assert_eq!(read_pins(dir.path()).floor, Some(at(2, h[2])));
+
+    // The operator reset may also raise, or set what is there.
+    vol.reset_rollback_floor(&at(3, h[3]), FloorReset::OperatorReset)
+        .expect("raise");
+    vol.reset_rollback_floor(&at(3, h[3]), FloorReset::OperatorReset)
+        .expect("same");
+    let log = std::fs::read_to_string(dir.path().join("state/floor-resets.log")).expect("audit");
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 3, "{log}");
+    assert!(
+        lines[0].contains("truncate_tip")
+            && lines[0].contains("old=3:")
+            && lines[0].contains("new=2:")
+    );
+    assert!(lines[1].contains("operator_reset"));
+    drop(vol);
+    let vol = open(dir.path(), MODE, reset_opts()).expect("reopen");
+    assert_eq!(
+        vol.rollback_floor().expect("floor"),
+        Some(at(3, h[3])),
+        "durable"
+    );
+}
+
+#[test]
+fn a_rejected_pins_file_is_replaced_only_by_the_repair_reason() {
+    use lunix_iface::store::FloorReset;
+    let dir = tempdir();
+    let (vol, h) = with_commits(dir.path());
+    vol.raise_rollback_floor(&at(3, h[3])).expect("raise");
+    // A readable file is not repaired.
+    let e = vol
+        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins)
+        .expect_err("not rejected");
+    assert_eq!(e.kind(), ErrorKind::Refused);
+    let path = dir.path().join("state/pins");
+    let mut bytes = std::fs::read(&path).expect("read");
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&path, &bytes).expect("damage");
+    for why in [FloorReset::TruncateTip, FloorReset::OperatorReset] {
+        let e = vol
+            .reset_rollback_floor(&at(2, h[2]), why)
+            .expect_err("rejected");
+        assert_eq!(e.kind(), ErrorKind::Corrupt, "never replaced silently");
+    }
+    assert_eq!(std::fs::read(&path).expect("read"), bytes, "untouched");
+    let old = vol
+        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins)
+        .expect("repair");
+    assert_eq!(old, None);
+    let f = read_pins(dir.path());
+    assert_eq!(f.floor, Some(at(3, h[3])));
+    assert_eq!(
+        (f.pins.max_keyring_seq, f.pins.max_epoch, f.pins.pin),
+        (0, 0, None)
+    );
+    let log = std::fs::read_to_string(dir.path().join("state/floor-resets.log")).expect("audit");
+    assert!(log.contains("repair_pins"), "{log}");
+}

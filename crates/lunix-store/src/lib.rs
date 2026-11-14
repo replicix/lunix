@@ -65,5 +65,6 @@ mod tests;
 pub use checkpoint::{tails_usable, CheckpointHint};
 pub use fsops::{FsOps, RealFs};
 pub use volume::{
-    lock_holder_pid, read_volume_file, IdCounter, LocalVolume, StoreOptions, SEGMENT_TARGET,
+    lock_holder_pid, read_volume_file, IdCounter, LocalVolume, StoreOptions, FLOOR_AUDIT,
+    SEGMENT_TARGET,
 };

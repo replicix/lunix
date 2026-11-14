@@ -141,6 +141,9 @@ pub struct MemStoreConfig {
     /// The volume mode: decides the extent layout (`OVH` 68 or 108) the store
     /// parses and sizes, as `LocalVolume` takes it from its `MetaCodec`.
     pub mode: CryptoMode,
+    /// Allow `reset_rollback_floor` (as `StoreOptions::allow_floor_reset` of
+    /// the real store).
+    pub allow_floor_reset: bool,
 }
 
 impl Default for MemStoreConfig {
@@ -151,6 +154,7 @@ impl Default for MemStoreConfig {
             segment_target: 16 << 20,
             capacity_bytes: None,
             mode: CryptoMode::Integrity,
+            allow_floor_reset: false,
         }
     }
 }
@@ -184,6 +188,8 @@ struct Durable {
     /// The rollback floor of `state/pins` v2, kept apart from `local_pins`
     /// as the real store keeps it in the same file but returns it separately.
     floor: Option<RollbackFloor>,
+    /// The durable record of every floor reset.
+    floor_audit: Vec<String>,
     leftovers: Vec<LeftoverFile>,
 }
 
@@ -210,6 +216,7 @@ impl StoreImage {
                 device: None,
                 local_pins: None,
                 floor: None,
+                floor_audit: Vec::new(),
                 leftovers: Vec::new(),
             },
             cfg,
@@ -392,6 +399,11 @@ impl MemStore {
             size,
             id: id_of(name),
         });
+    }
+
+    /// The lines of the floor-reset audit record, oldest first.
+    pub fn floor_audit(&self) -> Vec<String> {
+        lock(&self.0.state).d.floor_audit.clone()
     }
 
     /// Overwrites a stored commit's bytes (corruption injection).
@@ -1160,6 +1172,52 @@ impl VolumeDir for MemStore {
             st.d.floor = Some(*floor);
         }
         self.0.faults.point("pins.floor.after")
+    }
+
+    fn reset_rollback_floor(
+        &self,
+        floor: &RollbackFloor,
+        why: lunix_iface::store::FloorReset,
+    ) -> Result<Option<RollbackFloor>> {
+        use lunix_iface::store::FloorReset;
+        if !self.0.cfg.allow_floor_reset {
+            return Err(Error::Refused {
+                why: "the rollback floor is reset only by an offline repair",
+            });
+        }
+        let mut st = self.st()?;
+        let Some(bytes) = st.d.commits.get(&floor.max_commit_seq.0) else {
+            return Err(Error::Refused {
+                why: "no commit exists at the new floor's height",
+            });
+        };
+        if *blake3::hash(bytes).as_bytes() != floor.tip_hash {
+            return Err(Error::Refused {
+                why: "the commit at the new floor's height does not hash to the floor's tip_hash",
+            });
+        }
+        if why == FloorReset::RepairPins {
+            // The memory store never has a rejected pins file.
+            return Err(Error::Refused {
+                why: "state/pins is not rejected; nothing to repair",
+            });
+        }
+        let old = st.d.floor;
+        if why == FloorReset::TruncateTip
+            && !old.is_some_and(|o| floor.max_commit_seq < o.max_commit_seq)
+        {
+            return Err(Error::Refused {
+                why: "a truncate-tip reset must lower the recorded floor",
+            });
+        }
+        st.d.floor_audit.push(format!(
+            "{} old={:?} new={}",
+            why.word(),
+            old.map(|o| o.max_commit_seq.0),
+            floor.max_commit_seq.0
+        ));
+        st.d.floor = Some(*floor);
+        Ok(old)
     }
 
     fn ids(&self) -> Arc<dyn IdAllocator> {
