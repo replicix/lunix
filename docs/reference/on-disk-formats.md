@@ -355,7 +355,7 @@ reinitialised again at open. **Authenticated by:** nothing (checksum only).
 | `crc32c` | 36 | 4 | u32 | see below | |
 | `gen` | 40 | 8 | u64 | the container generation | journal: the file header's `generation`; memfd sink: the buffer generation; DELTA: 0 |
 | `off` | 48 | 8 | u64 | the record's own offset | journal: byte offset of this header in the file; memfd: offset in the ring; DELTA: offset in the decoded records region |
-| reserved | 56 | 8 | | zero | |
+| `flushed` | 56 | 8 | u64 (`WriteSeq`) | `< write_seq` | the flushed watermark (amendment 2026-11-14, **pending re-sign**): the highest `write_seq` a completed group flush had made durable on every lane when the record was appended (after a restart, the last recovered record once the first lane open synced them); 0 when none is known; DELTA and memfd: 0. Formerly reserved: a record with zeros here reads as watermark 0 |
 | data | 64 | `len × 4096` for `write`, 0 for `hole` | bytes | | the written data |
 
 `crc32c` = `crc32c(header bytes 0..64 with the crc32c field set to zero ‖
@@ -401,7 +401,8 @@ for each file of the lane, in ordinal order (a file whose header is invalid hold
 valid(q) = u32 at q is "LXJR", ver = 1, kind in {1, 2}, reserved = 0,
            gen = the file's generation, off = q, len in range,
            q + 64 + data length ≤ file length, crc32c matches,
-           write_seq > prev_write_seq (the last record accepted in this lane)
+           write_seq > prev_write_seq (the last record accepted in this lane),
+           flushed < write_seq
 ```
 
 After every lane has been read, recovery keeps records with `write_seq >
@@ -444,10 +445,24 @@ A stale record (one from a previous pass of the ring) cannot survive
 reinitialisation; if one did, its `gen` differs and the reader resyncs past
 it.
 
-The reserved bytes 56-63 of the record header stay reserved: a separate
-header-only CRC (which would let fsck name the `write_seq` and `len` of a
-record whose data is damaged) was offered as optional by the A0 review and
-is not taken; the resync rule does not need it.
+Bytes 56-63 of the record header hold the flushed watermark (amendment of
+2026-11-14). A separate header-only CRC (which would let fsck name the
+`write_seq` and `len` of a record whose data is damaged), offered as optional
+by the A0 review, is not taken; the resync rule does not need it.
+
+**The flushed watermark at recovery** (amendment 2026-11-14, pending
+re-sign). Recovery reports `flushed`, the highest watermark of any record it
+accepted. Every record with `write_seq` at or below it was on stable
+storage, on every lane, before a record carrying it was written (a group
+flush completes only after every lane's records up to its `upto` are
+written and every touched file is `fdatasync`ed). So a gap (the first
+missing `write_seq`) or a damaged range whose next valid record in its lane
+is at or below `flushed` is the loss of durable data, and
+`on_journal_damage = refuse` refuses it; anything above `flushed` (a torn
+last record, a gap across lanes from a record still in its lane's open
+batch, a torn batch followed by a later batch of the same lane) is crash
+residue that no acknowledged flush covered: logged and wiped. Damage to the
+newest flushed records that no later record witnessed reads as residue.
 
 ### 5.4 Reuse of the framing
 

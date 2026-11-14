@@ -145,6 +145,7 @@ fn single_records_have_goldens() {
             len: 1,
             gen: GEN,
             off: 4096,
+            flushed: WriteSeq(0),
         },
         data: &[0x5a; 4096],
     }
@@ -164,6 +165,7 @@ fn single_records_have_goldens() {
             len: u32::MAX,
             gen: GEN,
             off: 8192,
+            flushed: WriteSeq(0),
         },
         data: &[],
     }
@@ -327,6 +329,7 @@ fn record_rules() {
             len: 2,
             gen: GEN,
             off: 4096,
+            flushed: WriteSeq(0),
         },
         data: &[],
     }
@@ -351,8 +354,9 @@ fn record_rules() {
     b[6] = 1;
     cases.push(("reserved 6", fix(b)));
     let mut b = r.clone();
-    b[60] = 1;
-    cases.push(("reserved 56", fix(b)));
+    let seq = b[8..16].to_vec();
+    b[56..64].copy_from_slice(&seq);
+    cases.push(("flushed watermark not below write_seq", fix(b)));
     let mut b = r.clone();
     b[8..16].fill(0);
     cases.push(("write_seq 0", fix(b)));
@@ -380,6 +384,7 @@ fn record_rules() {
                 len,
                 gen: 1,
                 off: 4096,
+                flushed: WriteSeq(0),
             },
             data,
         }
@@ -405,6 +410,7 @@ fn delta_region_round_trip_and_rules() {
                 len: 1,
                 gen: 99,
                 off: 99,
+                flushed: WriteSeq(0),
             },
             data: &d1,
         },
@@ -417,6 +423,7 @@ fn delta_region_round_trip_and_rules() {
                 len: 3,
                 gen: 0,
                 off: 0,
+                flushed: WriteSeq(0),
             },
             data: &[],
         },
@@ -499,4 +506,54 @@ proptest! {
         prop_assert_eq!(v.len(), 4096);
         prop_assert_eq!(FileHeader::decode(&v).unwrap(), h);
     }
+}
+
+#[test]
+fn the_flushed_watermark_round_trips_and_zero_is_the_v1_reserved_field() {
+    let data = vec![7u8; 4096];
+    let mk = |flushed: u64| {
+        let mut out = Vec::new();
+        Record {
+            header: RecordHeader {
+                kind: RecordKind::Write,
+                write_seq: WriteSeq(10),
+                epoch: 0,
+                lba: 3,
+                len: 1,
+                gen: 0x1234,
+                off: 4096,
+                flushed: WriteSeq(flushed),
+            },
+            data: &data,
+        }
+        .encode(&mut out)
+        .unwrap();
+        out
+    };
+    let zero = mk(0);
+    assert!(
+        zero[56..64].iter().all(|b| *b == 0),
+        "watermark 0 is the old reserved zeros"
+    );
+    let nine = mk(9);
+    assert_eq!(u64::from_le_bytes(nine[56..64].try_into().unwrap()), 9);
+    assert_eq!(Record::decode(&nine).unwrap().header.flushed, WriteSeq(9));
+    let mut bad = Vec::new();
+    let r = Record {
+        header: RecordHeader {
+            kind: RecordKind::Hole,
+            write_seq: WriteSeq(5),
+            epoch: 0,
+            lba: 0,
+            len: 1,
+            gen: 1,
+            off: 4096,
+            flushed: WriteSeq(5),
+        },
+        data: &[],
+    };
+    assert!(
+        r.encode(&mut bad).is_err(),
+        "a record cannot witness its own flush"
+    );
 }

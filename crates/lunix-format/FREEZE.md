@@ -112,3 +112,20 @@ purpose 0x0a, and `14-pins-v2.bin` (§23.9) and `14-pins-v1-read.bin`
 The first sign-off (before the amendment): the maintainer, 2026-11-12.
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-12 (amendment: keyed integrity chunk ids, rollback floor)
+
+**Amendment 2026-11-14 — pending maintainer re-sign** (maintainer decision
+of 2026-11-14 after the M12a re-review, finding R1; on-disk-formats.md §5.2
+and §5.3). Item 2: bytes 56-63 of the journal record header, reserved and
+zero in the signed layout, become `flushed` (u64): the highest `write_seq`
+that a completed group flush had made durable on every lane when the record
+was appended, always below the record's `write_seq`. A record written under
+the signed layout (zeros there) reads as watermark 0, so the existing item 2
+goldens (`a0-journal-batch-two-records.bin`, `02-journal-record-*.bin`,
+`02-journal-torn-batch.bin`, `02-journal-resync.bin`) are unchanged byte for
+byte; the reader no longer requires the bytes to be zero and rejects
+`flushed >= write_seq`. DELTA regions and the memfd sink write 0. Recovery
+reports the highest watermark found; a gap or damage at or below it is
+real loss (what `on_journal_damage = refuse` refuses), everything above it
+is crash residue (ADR-4).
+
+Re-signed by: _pending (the maintainer) — journal flushed watermark_
