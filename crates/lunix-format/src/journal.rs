@@ -134,8 +134,8 @@ pub struct RecordHeader {
     pub gen: u64,
     /// The record's own offset in its container.
     pub off: u64,
-    /// The flushed watermark (maintainer decision of 2026-11-14, pending the
-    /// `FREEZE.md` re-sign): the highest `write_seq` that a completed group
+    /// The flushed watermark (maintainer decision of 2026-11-14, re-signed in
+    /// `FREEZE.md` the same day): the highest `write_seq` that a completed group
     /// flush had made durable on every lane when this record was appended;
     /// 0 when none is known (DELTA regions, the first records after open).
     /// Always below `write_seq`: a flush covering this record cannot complete
@@ -512,8 +512,8 @@ pub fn scan_file(file: &[u8], prev_write_seq: WriteSeq) -> Result<ScanResult<'_>
 }
 
 /// Encodes a DELTA inline-records region: records back to back, `gen` 0,
-/// `off` = offset in the region, no padding and no terminator. The record
-/// headers' `gen` and `off` are overwritten.
+/// `off` = offset in the region, `flushed` 0, no padding and no terminator.
+/// The record headers' `gen`, `off` and `flushed` are overwritten.
 pub fn encode_delta_region(records: &[Record<'_>], out: &mut Vec<u8>) -> Result<()> {
     let start = out.len();
     let mut prev = 0u64;
@@ -526,6 +526,7 @@ pub fn encode_delta_region(records: &[Record<'_>], out: &mut Vec<u8>) -> Result<
             header: RecordHeader {
                 gen: 0,
                 off: (out.len() - start) as u64,
+                flushed: WriteSeq(0),
                 ..rec.header
             },
             data: rec.data,
@@ -542,10 +543,10 @@ pub fn decode_delta_region(region: &[u8]) -> Result<Vec<Record<'_>>> {
     let mut prev = 0u64;
     while p < region.len() {
         let (rec, used) = Record::parse(&region[p..])?;
-        if rec.header.gen != 0 || rec.header.off != p as u64 {
+        if rec.header.gen != 0 || rec.header.off != p as u64 || rec.header.flushed.0 != 0 {
             return Err(FormatError::invalid(
                 WHAT_REC,
-                "gen or off wrong for a DELTA record",
+                "gen, off or flushed wrong for a DELTA record",
             ));
         }
         if rec.header.write_seq.0 <= prev {

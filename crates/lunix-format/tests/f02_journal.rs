@@ -410,7 +410,7 @@ fn delta_region_round_trip_and_rules() {
                 len: 1,
                 gen: 99,
                 off: 99,
-                flushed: WriteSeq(0),
+                flushed: WriteSeq(7),
             },
             data: &d1,
         },
@@ -434,6 +434,11 @@ fn delta_region_round_trip_and_rules() {
     let back = decode_delta_region(&region).unwrap();
     assert_eq!(back.len(), 2);
     assert_eq!(back[0].header.gen, 0);
+    assert_eq!(
+        back[0].header.flushed,
+        WriteSeq(0),
+        "DELTA writes no watermark"
+    );
     assert_eq!(back[1].header.off, 64 + 4096);
     assert_eq!(back[0].data, &d1);
     // a trailing byte, or a journal-style record (gen != 0), is refused
@@ -443,6 +448,29 @@ fn delta_region_round_trip_and_rules() {
     let mut with_gen = Vec::new();
     recs[0].encode(&mut with_gen).unwrap();
     assert!(decode_delta_region(&with_gen).is_err());
+    // a watermark in a DELTA record is refused (on-disk-formats §5.2)
+    let with_wm = Record {
+        header: RecordHeader {
+            gen: 0,
+            off: 0,
+            ..recs[0].header
+        },
+        data: &d1,
+    };
+    let mut v = Vec::new();
+    with_wm.encode(&mut v).unwrap();
+    assert!(decode_delta_region(&v).is_err());
+    let mut v = Vec::new();
+    Record {
+        header: RecordHeader {
+            flushed: WriteSeq(0),
+            ..with_wm.header
+        },
+        data: &d1,
+    }
+    .encode(&mut v)
+    .unwrap();
+    assert_eq!(decode_delta_region(&v).unwrap().len(), 1, "the control");
     assert!(decode_delta_region(&[]).unwrap().is_empty());
     // sequence must rise
     let swapped = [recs[1], recs[0]];
