@@ -1,0 +1,9 @@
+volume           vol1
+floor            10%
+on full          error
+full timeout     1m
+cache max        100 GiB
+headroom         256 MiB
+space used       0 B of 0 B
+host free        0 B
+space by kind    segments 0 B, cache 0 B, map 0 B, index 0 B, commits 0 B, journal 0 B, headroom 0 B

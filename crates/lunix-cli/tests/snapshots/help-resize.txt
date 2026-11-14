@@ -1,0 +1,11 @@
+Grow a volume
+
+Usage: lunix resize [OPTIONS] <NAME> <SIZE>
+
+Arguments:
+  <NAME>  The volume name
+  <SIZE>  The new size (grow only), such as 300G
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help

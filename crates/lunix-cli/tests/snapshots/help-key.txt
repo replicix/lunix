@@ -1,0 +1,12 @@
+List and change the key slots of a detached volume
+
+Usage: lunix key [OPTIONS] <COMMAND>
+
+Commands:
+  ls        List the key slots (a plain volume has none)
+  add-slot  Add a key slot
+  rm-slot   Remove a key slot
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help

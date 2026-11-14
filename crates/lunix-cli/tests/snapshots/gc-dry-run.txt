@@ -1,0 +1,8 @@
+gc dry run for vol1 (nothing changed):
+condemned        3 segments
+map packs        0
+index runs       0
+commits          0
+compacted        0 segments
+would free       5 MiB
+would rewrite    0 B

@@ -1,0 +1,14 @@
+Remove a key slot
+
+Usage: lunix key rm-slot [OPTIONS] --slot <N> <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --slot <N>                   The slot number from `key ls`
+      --socket <PATH>              The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --dir <DIR>                  The directory the volume was created in
+      --unlock-key-file <FILE>     An existing key file that unlocks the volume
+      --unlock-passphrase-fd <FD>  Read the existing passphrase that unlocks the volume from this descriptor
+  -h, --help                       Print help

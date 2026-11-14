@@ -1,0 +1,19 @@
+volume           vol1 (uuid 11111111-2222-3333-4444-555555555555)
+state            attached
+mode             integrity
+size             200 GiB (214748364800 bytes)
+chunk size       64 KiB
+device           /dev/lunix/vol1
+last commit      seq 12, 2026-11-14 10:40:30 UTC
+rollback floor   seq 12, tip abababababababababababababababababababababababababababababababab
+journal          4 KiB of 1 GiB used
+dedup ratio      2.50
+compression      n/a
+reads            0 ops, 0 B
+writes           0 ops, 0 B
+other ops        0 flush, 0 discard, 0 write-zeroes
+chunks           0 total, 0 zero, 0 dedup hits
+commits          0
+space used       0 B of 0 B
+host free        0 B
+space by kind    segments 0 B, cache 0 B, map 0 B, index 0 B, commits 0 B, journal 0 B, headroom 0 B

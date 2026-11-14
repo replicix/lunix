@@ -1,0 +1,11 @@
+Create and list volumes
+
+Usage: lunix volume [OPTIONS] <COMMAND>
+
+Commands:
+  create  Create a volume (integrity mode unless told otherwise)
+  list    List the volumes the daemon knows
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help

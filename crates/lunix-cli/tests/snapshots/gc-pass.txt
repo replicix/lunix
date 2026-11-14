@@ -1,0 +1,9 @@
+gc pass 7 finished for vol1:
+condemned        3 segments
+deleted          2 segments
+map packs        0
+index runs       0
+commits          0
+compacted        0 segments
+freed            5 MiB
+rewrote          0 B

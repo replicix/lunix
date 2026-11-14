@@ -1,0 +1,10 @@
+Detach a volume
+
+Usage: lunix detach [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help

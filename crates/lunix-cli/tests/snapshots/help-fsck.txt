@@ -1,0 +1,20 @@
+Check (and repair) a detached volume offline
+
+Usage: lunix fsck [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --dir <DIR>           The directory the volume was created in (the --dir of `volume create`)
+      --socket <PATH>       The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --deep                Verify every extent, not only the metadata
+      --rebuild-index       Rebuild the chunk index from the segments
+      --repair              Repair what can be repaired (the volume must be detached)
+      --gc                  With --repair: also run garbage collection on condemned files
+      --truncate-tip        With --repair: drop the commits above the last good one (lowers the rollback floor)
+      --key-file <FILE>     A key file to unlock the volume with
+      --passphrase          Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
+      --passphrase-fd <FD>  Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
+      --json                Print JSON instead of text
+  -h, --help                Print help

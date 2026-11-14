@@ -1,0 +1,12 @@
+List the key slots (a plain volume has none)
+
+Usage: lunix key ls [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The volume name
+
+Options:
+      --dir <DIR>      The directory the volume was created in
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --json           Print JSON instead of text
+  -h, --help           Print help

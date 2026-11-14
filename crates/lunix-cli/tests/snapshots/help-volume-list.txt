@@ -1,0 +1,8 @@
+List the volumes the daemon knows
+
+Usage: lunix volume list [OPTIONS]
+
+Options:
+      --json           Print JSON instead of a table
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help

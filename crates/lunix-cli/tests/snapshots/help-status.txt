@@ -1,0 +1,11 @@
+Show one volume's status, or every volume's
+
+Usage: lunix status [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  The volume (every volume when absent)
+
+Options:
+      --json           Print JSON instead of text
+      --socket <PATH>  The control socket of lunixd [default: /run/lunix/ctl.sock]
+  -h, --help           Print help
