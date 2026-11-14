@@ -287,8 +287,19 @@ pub(crate) fn recover(
     // 6. The map, the checkpoint hint, the journal and the overlay.
     let map = d.maps.open(&tip.map_root, tip.size / cs)?;
     let hint = checkpoint.filter(|c| c.last_commit_seq <= tip_seq.0);
+    // A checkpoint whose stats are not exactly `EngineStats::SLOTS` long is
+    // not used at all (it is a hint, never authoritative).
+    let (hint, stats) = match hint {
+        Some(c) => match EngineStats::from_slots(&c.stats) {
+            Ok(s) => (Some(c), Some(s)),
+            Err(e) => {
+                tracing::warn!(error = %e, "checkpoint stats malformed; checkpoint ignored");
+                (None, None)
+            }
+        },
+        None => (None, None),
+    };
     let checkpoint_used = hint.is_some();
-    let stats = hint.as_ref().map(|c| EngineStats::from_slots(&c.stats));
     let rec = d.journal.recover(hint.as_ref(), tip.cut_seq)?;
     if rec.ignored_after_gap.is_some() || !rec.damaged.is_empty() {
         // Logged before any lane opens: the first open_lane wipes them.

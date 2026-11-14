@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 /// `stats` slots (most recent write wins; a lost checkpoint resets them, they
 /// are never authoritative).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct EngineStats {
     /// Bytes the guest wrote.
     pub bytes_written: u64,
@@ -51,6 +50,14 @@ pub struct EngineStats {
     pub stage_ns: [u64; 5],
 }
 
+/// A checkpoint's stats slots are not exactly [`EngineStats::SLOTS`] long.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, thiserror::Error)]
+#[error("checkpoint stats have {got} slots, expected {}", EngineStats::SLOTS)]
+pub struct SlotCountError {
+    /// The number of slots found.
+    pub got: usize,
+}
+
 impl EngineStats {
     /// Number of checkpoint slots this layout uses (`<= 192`).
     pub const SLOTS: usize = 24;
@@ -83,11 +90,17 @@ impl EngineStats {
         v
     }
 
-    /// Rebuilds the counters from checkpoint slots; missing slots read as 0
-    /// (an older layout) and extra slots are ignored (a newer one).
-    pub fn from_slots(slots: &[u64]) -> Self {
-        let g = |i: usize| slots.get(i).copied().unwrap_or(0);
-        Self {
+    /// Rebuilds the counters from checkpoint slots.
+    ///
+    /// # Errors
+    /// [`SlotCountError`] unless `slots` has exactly [`SLOTS`](Self::SLOTS)
+    /// entries.
+    pub fn from_slots(slots: &[u64]) -> Result<Self, SlotCountError> {
+        if slots.len() != Self::SLOTS {
+            return Err(SlotCountError { got: slots.len() });
+        }
+        let g = |i: usize| slots[i];
+        Ok(Self {
             bytes_written: g(0),
             bytes_read: g(1),
             ops_read: g(2),
@@ -108,6 +121,26 @@ impl EngineStats {
             commits: g(17),
             extent_auth_failures: g(18),
             stage_ns: [g(19), g(20), g(21), g(22), g(23)],
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_slots_requires_exactly_slots() {
+        let ok = vec![7u64; EngineStats::SLOTS];
+        assert_eq!(
+            EngineStats::from_slots(&ok).map(|s| s.to_slots()),
+            Ok(ok.clone())
+        );
+        for n in [0, 1, EngineStats::SLOTS - 1, EngineStats::SLOTS + 1] {
+            assert_eq!(
+                EngineStats::from_slots(&vec![0; n]),
+                Err(SlotCountError { got: n })
+            );
         }
     }
 }

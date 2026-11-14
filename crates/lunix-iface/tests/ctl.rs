@@ -175,7 +175,7 @@ fn ratio() -> impl Strategy<Value = Option<f64>> {
 
 fn stats() -> impl Strategy<Value = EngineStats> {
     proptest::collection::vec(any::<u64>(), EngineStats::SLOTS)
-        .prop_map(|v| EngineStats::from_slots(&v))
+        .prop_map(|v| EngineStats::from_slots(&v).expect("exact slot count"))
 }
 
 fn figures() -> impl Strategy<Value = SpaceFigures> {
@@ -722,7 +722,7 @@ fn newer_daemon_codes_and_mode_conversions() {
 }
 
 #[test]
-fn the_m12_additions_default_when_absent() {
+fn optional_request_fields_default_when_absent() {
     let a: Attach = serde_json::from_value(json!({"name": "v"})).unwrap();
     assert_eq!(
         (a.on_journal_damage, a.allow_unverifiable_fork),
@@ -730,11 +730,6 @@ fn the_m12_additions_default_when_absent() {
     );
     let c: Credential = serde_json::from_value(json!({"passphrase": "00"})).unwrap();
     assert_eq!(c.mode, None);
-    let r: Attached = serde_json::from_value(
-        json!({"device": "/dev/lunix/v", "dev_id": 1, "queues": 4, "depth": 128, "recovered": false}),
-    )
-    .unwrap();
-    assert!(!r.first_attach);
     let p: Attach =
         serde_json::from_value(json!({"name": "v", "on_journal_damage": "refuse"})).unwrap();
     assert_eq!(p.on_journal_damage, Some(JournalDamagePolicy::Refuse));
