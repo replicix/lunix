@@ -36,6 +36,9 @@ pub fn small_cfg(dir: PathBuf, lanes: u16, files_per_lane: u64) -> JournalConfig
     c.file_len = SMALL_FILE;
     c.journal_max = u64::from(lanes) * files_per_lane * SMALL_FILE;
     c.pool_buffers = 4;
+    // Marks take sequence numbers at idle moments; the tests that exercise
+    // them turn them on.
+    c.mark_idle = None;
     c
 }
 

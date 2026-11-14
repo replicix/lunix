@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
@@ -18,9 +19,9 @@ use crate::aligned::AlignedBuf;
 use crate::config::JournalConfig;
 use crate::coord;
 use crate::lane::FileLane;
-use crate::ring::{io_err, lock, open_rings, Reinit, Role};
-use crate::scan::{self, Plan};
-use crate::shared::{Coord, LaneFlight, Shared, State, NOT_POISONED};
+use crate::ring::{io_err, lock, open_rings, LaneRing, Reinit, RingKind, Role};
+use crate::scan::{self, LanePlan, Plan};
+use crate::shared::{Coord, LaneFlight, MarkDue, Shared, State, NOT_POISONED};
 use crate::sys::{self, round4k, B, ZERO_LEN};
 
 /// The journal of one volume: lanes over preallocated `O_DIRECT` ring files,
@@ -59,6 +60,9 @@ impl FileJournal {
             rings,
             counter: AtomicU64::new(0),
             flushed: AtomicU64::new(0),
+            witnessed: AtomicU64::new(0),
+            marks_written: AtomicU64::new(0),
+            marks_skipped: AtomicU64::new(0),
             poison_at: AtomicU64::new(NOT_POISONED),
             flights: (0..lanes).map(|_| Mutex::new(LaneFlight::new())).collect(),
             coord: Coord::new(),
@@ -101,8 +105,26 @@ impl FileJournal {
         self.sh.fail_sync.store(true, Ordering::SeqCst);
     }
 
+    /// Marks written since `open`: witnesses of the flushed watermark the
+    /// flush coordinator appended to the mark ring (on-disk-formats §5.3).
+    pub fn marks_written(&self) -> u64 {
+        self.sh.marks_written.load(Ordering::Relaxed)
+    }
+
+    /// Marks skipped since `open` because the mark ring had no free file
+    /// (reclaim frees them at the next cut).
+    pub fn marks_skipped(&self) -> u64 {
+        self.sh.marks_skipped.load(Ordering::Relaxed)
+    }
+
     fn apply_plan(&self, plan: &Plan) {
-        for (ring, lp) in self.sh.rings.lanes.iter().zip(&plan.lanes) {
+        let rings = &self.sh.rings;
+        let pairs = rings
+            .lanes
+            .iter()
+            .zip(&plan.lanes)
+            .chain(std::iter::once((&rings.marks, &plan.marks)));
+        for (ring, lp) in pairs {
             let mut inner = lock(&ring.inner);
             inner.free.clear();
             for fp in &lp.files {
@@ -141,7 +163,13 @@ impl FileJournal {
         };
         let rings = &self.sh.rings;
         let mut renamed = false;
-        for (ring, lp) in rings.lanes.iter().zip(&plan.lanes) {
+        let pairs: Vec<(&LaneRing, &LanePlan)> = rings
+            .lanes
+            .iter()
+            .zip(&plan.lanes)
+            .chain(std::iter::once((&rings.marks, &plan.marks)))
+            .collect();
+        for (ring, lp) in pairs {
             let mut touched: Vec<usize> = Vec::new();
             for fp in &lp.files {
                 let file = &ring.files[fp.slot];
@@ -150,12 +178,12 @@ impl FileJournal {
                     let gen = rings
                         .reinit_slot(
                             &self.sh.cfg,
+                            ring,
                             file,
                             Reinit {
-                                lane: ring.lane,
                                 old_ordinal: fp.ordinal,
                                 new_ordinal,
-                                zero_to: rings.file_len,
+                                zero_to: ring.file_len,
                             },
                             &self.sh.zero,
                         )
@@ -188,9 +216,19 @@ impl FileJournal {
         }
         // Every record that survived recovery is durable now (synced above);
         // no lane is open yet, so the counter is the last recovered number.
-        self.sh
-            .flushed
-            .fetch_max(self.sh.counter.load(Ordering::SeqCst), Ordering::SeqCst);
+        let counter = self.sh.counter.load(Ordering::SeqCst);
+        self.sh.flushed.fetch_max(counter, Ordering::SeqCst);
+        // Witness them too, unless a record already does.
+        if let Some(idle) = self.sh.cfg.mark_idle {
+            if counter > self.sh.witnessed.load(Ordering::SeqCst) {
+                lock(&self.sh.coord.q).mark_due = Some(MarkDue {
+                    flushed: counter,
+                    counter_at: counter,
+                    at: Instant::now() + idle,
+                });
+                self.sh.coord.cv.notify_all();
+            }
+        }
         st.prepared = true;
         Ok(())
     }
@@ -309,6 +347,9 @@ impl Journal for FileJournal {
         // Until prepare syncs the recovered records, only the floor (covered
         // by a durable commit) is known durable.
         self.sh.flushed.store(floor.0, Ordering::SeqCst);
+        // The surviving records carry the recovered watermark.
+        self.sh.witnessed.store(rec.flushed.0, Ordering::SeqCst);
+        lock(&self.sh.coord.q).mark_due = None;
         self.sh.poison_at.store(NOT_POISONED, Ordering::SeqCst);
         for f in &self.sh.flights {
             *lock(f) = LaneFlight::new();
@@ -354,7 +395,14 @@ impl Journal for FileJournal {
         let rings = &self.sh.rings;
         let cut_limit = self.sh.max_cut_asked.load(Ordering::SeqCst);
         let mut report = ReclaimReport::default();
-        for (ring, &tail) in rings.lanes.iter().zip(&upto.lane_ordinals) {
+        // The mark ring has no tail: every mark at or below the cut is
+        // covered, so any of its used files may go (`u32::MAX`).
+        let tails = upto
+            .lane_ordinals
+            .iter()
+            .copied()
+            .chain(std::iter::once(u32::MAX));
+        for (ring, tail) in rings.all().zip(tails) {
             struct Job {
                 slot: usize,
                 old: u32,
@@ -395,9 +443,9 @@ impl Journal for FileJournal {
                 let done = rings
                     .reinit_slot(
                         &self.sh.cfg,
+                        ring,
                         file,
                         Reinit {
-                            lane: ring.lane,
                             old_ordinal: job.old,
                             new_ordinal: job.new,
                             zero_to: job.hi,
@@ -415,8 +463,12 @@ impl Journal for FileJournal {
                         inner.free.push_back(job.slot);
                         drop(inner);
                         file.reset_counters();
-                        report.files += 1;
-                        report.bytes += job.bytes;
+                        // Marks are the journal's own: nothing was charged
+                        // for them, so nothing is released.
+                        if ring.kind == RingKind::Queue {
+                            report.files += 1;
+                            report.bytes += job.bytes;
+                        }
                         lunix_iface::crashpoint!("journal.after_reclaim_delete");
                     }
                     Err(e) => {

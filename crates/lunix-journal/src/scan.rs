@@ -1,5 +1,7 @@
 //! Recovery: scan every ring file with the normative reader, merge the lanes
-//! by `write_seq`, stop at the first gap, and plan how each lane resumes.
+//! and the mark ring by `write_seq`, stop at the first gap, and plan how each
+//! ring resumes. Marks count for contiguity and for the flushed watermark but
+//! are not handed to the caller as records.
 //!
 //! # Why recovery also plans a wipe
 //!
@@ -18,12 +20,13 @@ use std::ops::Range;
 use lunix_format::journal::{scan_file, RecordKind};
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
+use lunix_iface::journal::MARK_RING_LANE;
 use lunix_iface::journal::{
     DamagedRange, JournalLoc, LaneId, RecordInfo, Recovered, RecoveredRecord, WriteSeqRange,
 };
 use lunix_iface::{Error, Result};
 
-use crate::ring::{io_err, lock, Rings, Role};
+use crate::ring::{io_err, lock, LaneRing, Rings, Role};
 use crate::sys::{self, B};
 
 /// One accepted record of a scanned file.
@@ -82,6 +85,8 @@ pub(crate) struct LanePlan {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub lanes: Vec<LanePlan>,
+    /// The mark ring.
+    pub marks: LanePlan,
 }
 
 /// The scan could not use the hint (it skipped the file the lane must resume
@@ -116,12 +121,7 @@ impl From<Error> for RunErr {
     }
 }
 
-fn scan_lane(
-    rings: &Rings,
-    lane: usize,
-    tail: Option<u32>,
-) -> std::result::Result<Vec<ScannedFile>, Error> {
-    let ring = &rings.lanes[lane];
+fn scan_ring(ring: &LaneRing, tail: Option<u32>) -> std::result::Result<Vec<ScannedFile>, Error> {
     let mut order: Vec<(usize, u32, bool, bool)> = {
         let inner = lock(&ring.inner);
         inner
@@ -213,16 +213,25 @@ fn run(
 ) -> std::result::Result<(Recovered, Plan), RunErr> {
     let floor = floor.0;
     let nl = rings.lanes.len();
-    let mut scans: Vec<Vec<ScannedFile>> = Vec::with_capacity(nl);
-    for lane in 0..nl {
+    // The queue lanes, then the mark ring (never skipped: it is small).
+    let mut scans: Vec<Vec<ScannedFile>> = Vec::with_capacity(nl + 1);
+    for (lane, ring) in rings.lanes.iter().enumerate() {
         let tail = hint.and_then(|h| h.lane_tail_ordinals.get(lane)).copied();
-        scans.push(scan_lane(rings, lane, tail)?);
+        scans.push(scan_ring(ring, tail)?);
     }
+    scans.push(scan_ring(&rings.marks, None)?);
+    let lane_of = |i: usize| -> u16 {
+        if i < nl {
+            i as u16
+        } else {
+            MARK_RING_LANE.0
+        }
+    };
 
     // Damage, with the lane's neighbours for fsck.
     let mut damaged = Vec::new();
     for (lane, files) in scans.iter().enumerate() {
-        let lane_id = LaneId(lane as u16);
+        let lane_id = LaneId(lane_of(lane));
         let mut last_seq = 0u64;
         let mut open: Vec<usize> = Vec::new();
         for f in files {
@@ -305,7 +314,7 @@ fn run(
                 if r.seq > floor {
                     all.push(Cand {
                         seq: r.seq,
-                        lane: lane as u16,
+                        lane: lane_of(lane),
                         ordinal: f.ordinal,
                         rec: *r,
                     });
@@ -322,6 +331,8 @@ fn run(
     for c in &all {
         match &mut ignored {
             Some(range) => range.last = WriteSeq(c.seq),
+            // A mark fills its number; it changes no block.
+            None if c.seq == expected && c.rec.kind == RecordKind::Mark => expected += 1,
             None if c.seq == expected => {
                 records.push(RecoveredRecord {
                     record: RecordInfo {
@@ -352,12 +363,13 @@ fn run(
     }
     let next_seq = expected;
 
-    // Plan each lane.
+    // Plan each lane and the mark ring.
     let mut plan = Plan::default();
-    for files in &scans {
+    for files in &scans[..nl] {
         plan.lanes
             .push(plan_lane(files, floor, next_seq, rings.file_len)?);
     }
+    plan.marks = plan_lane(&scans[nl], floor, next_seq, rings.marks.file_len)?;
     Ok((
         Recovered {
             records,

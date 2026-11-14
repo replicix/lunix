@@ -129,6 +129,7 @@ fn random_crash_residue_always_opens_under_refuse() {
     for seed in 0..32u64 {
         let mut v = Vol::create(CS, 64, 2, JournalMode::Mixed(seed));
         v.tweak = refuse;
+        v.marks = seed % 2 == 0;
         let mut r = v.open().map_err(|e| e.0).expect("open");
         let mut blk = 0u64;
         let mut next = || {
@@ -174,4 +175,59 @@ fn random_crash_residue_always_opens_under_refuse() {
     }
     assert!(residue > 8, "too few crash images had residue: {residue}");
     assert!(gaps > 0, "no crash image had a gap");
+}
+
+/// Review M2 (2026-11-14), closed by the mark ring: ten writes, one FLUSH, no
+/// later write, then medium damage to the third record. Without a mark no
+/// surviving record witnesses the flush, so the damage reads as crash
+/// residue and `refuse` opens (the window). With the mark the journal writes
+/// after the flush, the watermark covers the ten records and `refuse` keeps
+/// the volume offline.
+#[test]
+fn the_m2_probe_is_refused_once_the_mark_landed() {
+    for marks in [false, true] {
+        let mut v = Vol::create(CS, 64, 1, JournalMode::Immediate);
+        v.marks = marks;
+        v.tweak = refuse;
+        let mut r = v.open().map_err(|e| e.0).expect("open");
+        let seqs: Vec<WriteSeq> = (0..10).map(|b| put(&v, &mut r, 0, b)).collect();
+        assert!(r.flush(0).is_ok());
+        assert_eq!(r.journal.marks(), usize::from(marks), "one mark per flush");
+        crash_keep_all(&mut v, r);
+        assert!(v.journal.tear(seqs[2]));
+        match (marks, v.open()) {
+            (true, Err((OpenError::JournalDamage, _))) => {}
+            (true, Err((e, _))) => panic!("with the mark: {e}"),
+            (true, Ok(_)) => panic!("with the mark the damage is inside witnessed history"),
+            (false, Ok(r)) => {
+                let rep = r.engine.recovery_report();
+                assert_eq!(rep.flushed, WriteSeq(0), "nothing witnessed the flush");
+                assert_eq!(rep.replayed, 2, "the records after the damage are wiped");
+            }
+            (false, Err((e, _))) => panic!("without a mark the window reads as residue: {e}"),
+        }
+    }
+}
+
+/// A mark takes a `write_seq` of its own: the engine sees numbers it never
+/// issued between its writes, and nothing of the mark reaches the overlay.
+#[test]
+fn marks_take_numbers_and_change_no_block() {
+    let mut v = Vol::create(CS, 64, 2, JournalMode::Immediate);
+    v.marks = true;
+    v.tweak = refuse;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let a = put(&v, &mut r, 0, 0);
+    assert!(r.flush(0).is_ok());
+    let b = put(&v, &mut r, 1, 1);
+    assert_eq!(b.0, a.0 + 2, "the mark took the number between");
+    assert!(r.flush(1).is_ok());
+    let before = r.read_all();
+    crash_keep_all(&mut v, r);
+    let mut r = v.open().map_err(|e| e.0).expect("reopen");
+    let rep = r.engine.recovery_report().clone();
+    assert_eq!(rep.replayed, 2, "two writes; the marks are no records");
+    assert_eq!(rep.next_seq, WriteSeq(b.0 + 2), "the last mark is counted");
+    assert!(rep.ignored_after_gap.is_none() && rep.damaged.is_empty());
+    assert_eq!(r.read_all(), before);
 }

@@ -3,6 +3,7 @@
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lunix_format::journal::{BLOCK, FILE_LEN, MAX_LANES, MAX_WRITE_BLOCKS};
 use lunix_format::VolumeUuid;
@@ -12,6 +13,8 @@ use lunix_iface::{Error, Result};
 pub const MIN_JOURNAL_MAX: u64 = 256 << 20;
 /// Default `journal_max`.
 pub const DEFAULT_JOURNAL_MAX: u64 = 2 << 30;
+/// Default [`JournalConfig::mark_idle`].
+pub const DEFAULT_MARK_IDLE: Duration = Duration::from_millis(50);
 
 /// Bytes of one lane batch buffer: the largest record (64-byte header plus
 /// 256 blocks) rounded up to a block.
@@ -65,6 +68,14 @@ pub enum TraceEvent {
         /// False when a sync failed.
         ok: bool,
     },
+    /// A mark (a witness of the flushed watermark) is durable in the mark
+    /// ring.
+    Mark {
+        /// The mark's `write_seq`.
+        write_seq: u64,
+        /// The watermark it carries.
+        flushed: u64,
+    },
 }
 
 /// The trace callback type.
@@ -99,6 +110,11 @@ pub struct JournalConfig {
     /// `Some(false)` never registers. Registering needs about
     /// `lanes x pool_buffers x (1 MiB + 4 KiB)` of locked memory.
     pub fixed_buffers: Option<bool>,
+    /// How long the flush coordinator waits after a group flush that raised
+    /// the flushed watermark before it writes a mark witnessing it, when no
+    /// later group flush made a witness durable in the meantime (on-disk-
+    /// formats section 5.3). `None` writes no marks.
+    pub mark_idle: Option<Duration>,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
 }
@@ -117,6 +133,7 @@ impl JournalConfig {
             max_inflight: 2,
             direct: true,
             fixed_buffers: None,
+            mark_idle: Some(DEFAULT_MARK_IDLE),
             trace: None,
         }
     }
@@ -175,6 +192,7 @@ impl std::fmt::Debug for JournalConfig {
             .field("pool_buffers", &self.pool_buffers)
             .field("max_inflight", &self.max_inflight)
             .field("direct", &self.direct)
+            .field("mark_idle", &self.mark_idle)
             .finish_non_exhaustive()
     }
 }

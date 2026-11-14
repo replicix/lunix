@@ -345,6 +345,7 @@ impl Queue {
                         .saturating_mul(u64::from(inner.cfg.map_fanout.max(1)))
                         .saturating_mul(inner.cfg.chunk_blocks()),
                 ),
+                RecordKind::Mark => unreachable!("a request never maps to a mark"),
             };
             let blocks32 = u32::try_from(blocks).unwrap_or(u32::MAX);
             let charge = record_bytes(m.record, blocks32);
@@ -423,6 +424,7 @@ impl Queue {
             let range = BlockRange { lba, blocks };
             let data: &[u8] = match m.record {
                 RecordKind::Hole => &[],
+                RecordKind::Mark => unreachable!("a request never maps to a mark"),
                 RecordKind::Write => {
                     let from = usize::try_from((lba - req_lba) * BLOCK).unwrap_or(usize::MAX);
                     let len = usize::try_from(blocks * BLOCK).unwrap_or(usize::MAX);
@@ -631,6 +633,7 @@ impl Queue {
             match p.record {
                 RecordKind::Write => inner.overlay.insert_write(p.range, p.loc, seq),
                 RecordKind::Hole => inner.overlay.insert_hole(p.range, seq),
+                RecordKind::Mark => unreachable!("a request never maps to a mark"),
             }
         } else {
             inner.poison(seq.0, "journal append completion");

@@ -63,10 +63,15 @@
 //! appends afterwards (on-disk-formats §5.2), and [`Journal::recover`]
 //! reports the highest value any surviving record carries as
 //! [`Recovered::flushed`]. A gap or damage at or below it is loss of durable
-//! data; above it, recovery cannot tell crash residue from medium damage,
-//! because a flush is witnessed only by a record appended after it completed
-//! (the unwitnessed window, ADR-4). `upto` is clamped to `last_issued()` at
-//! submission, so the watermark never names a number not yet written.
+//! data; above it, recovery cannot tell crash residue from medium damage. A
+//! flush is witnessed only by a record appended after it completed, so a
+//! journal also writes **marks** of its own (record kind 3, no data, its own
+//! `write_seq`) witnessing a flush that no later flush made a witness
+//! durable for; recovery counts them for contiguity and the watermark and
+//! never lists them in [`Recovered::records`] (ADR-4). `upto` is clamped to
+//! `last_issued()` at submission, so the watermark never names a number not
+//! yet written. `last_issued()` counts marks: the engine sees numbers it
+//! never issued between its own.
 //!
 //! # `JournalReserved` units
 //!
@@ -137,11 +142,12 @@ pub struct RecordInfo {
 }
 
 /// The encoded length of a record, which is what `JournalReserved` is charged
-/// and released in: 64 + `blocks * 4096` for a write, 64 for a hole.
+/// and released in: 64 + `blocks * 4096` for a write, 64 for a hole. A mark
+/// (64 bytes) is the journal's own record; no lane reserves one.
 pub fn record_bytes(kind: RecordKind, blocks: u32) -> u64 {
     match kind {
         RecordKind::Write => 64 + u64::from(blocks) * 4096,
-        RecordKind::Hole => 64,
+        RecordKind::Hole | RecordKind::Mark => 64,
     }
 }
 
@@ -333,10 +339,15 @@ pub struct WriteSeqRange {
     pub last: WriteSeq,
 }
 
+/// The lane id under which recovery reports the journal's mark ring (the
+/// flush coordinator's witnesses of the flushed watermark, on-disk-formats
+/// section 5.1); never a queue lane.
+pub const MARK_RING_LANE: LaneId = LaneId(u16::MAX);
+
 /// A byte range in a ring file that no valid record covers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DamagedRange {
-    /// The lane.
+    /// The lane, or [`MARK_RING_LANE`] for the mark ring.
     pub lane: LaneId,
     /// The ring file ordinal.
     pub ordinal: u32,
@@ -365,7 +376,9 @@ pub struct RecoveredRecord {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Recovered {
     /// Records with `write_seq > floor`, merged across lanes in `write_seq`
-    /// order, ending at the first gap in contiguity.
+    /// order, ending at the first gap in contiguity. Marks (the journal's
+    /// own witnesses of the flushed watermark) fill their numbers for
+    /// contiguity but are not listed: they change no block.
     pub records: Vec<RecoveredRecord>,
     /// The next free `write_seq`: one above the last record kept, or
     /// `floor + 1` when none was kept.

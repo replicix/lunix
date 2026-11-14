@@ -30,6 +30,9 @@
 //! `recover` reports the highest that survived: the model never loses a record
 //! at or below it. [`JournalImage::tear`] and [`JournalImage::lose`] damage or
 //! remove any record, durable or not, as a media error would.
+//! [`MemJournal::set_marks`] adds the mark ring: a mark witnessing the
+//! watermark after every group flush that raises it (at once; the
+//! `FileJournal` waits an idle delay). Marks are durable when written.
 //!
 //! # Test controls
 //!
@@ -51,7 +54,7 @@ use lunix_iface::block::IoStatus;
 use lunix_iface::journal::{
     record_bytes, Appended, DamagedRange, FlushDone, Journal, JournalCompletion, JournalFill,
     JournalLane, JournalLoc, JournalTail, LaneId, ReclaimReport, RecordInfo, Recovered,
-    RecoveredRecord, Slot, SlotOutcome, Token, WriteSeqRange,
+    RecoveredRecord, Slot, SlotOutcome, Token, WriteSeqRange, MARK_RING_LANE,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
@@ -190,6 +193,8 @@ struct RingFile {
 pub struct JournalImage {
     cfg: MemJournalConfig,
     lanes: Vec<BTreeMap<u32, RingFile>>,
+    /// The mark ring: marks are synced when written, so a crash keeps them.
+    marks: Vec<Rec>,
 }
 
 impl JournalImage {
@@ -201,6 +206,7 @@ impl JournalImage {
             .iter_mut()
             .flat_map(|l| l.values_mut())
             .flat_map(|f| f.recs.values_mut())
+            .chain(self.marks.iter_mut())
         {
             if r.seq == seq.0 {
                 r.torn = true;
@@ -214,6 +220,11 @@ impl JournalImage {
     /// Removes the record numbered `seq` as if it had never reached the
     /// file. Returns whether the record existed.
     pub fn lose(&mut self, seq: WriteSeq) -> bool {
+        let before = self.marks.len();
+        self.marks.retain(|m| m.seq != seq.0);
+        if self.marks.len() != before {
+            return true;
+        }
         for f in self.lanes.iter_mut().flat_map(|l| l.values_mut()) {
             let before = f.recs.len();
             f.recs.retain(|_, r| r.seq != seq.0);
@@ -264,11 +275,27 @@ struct State {
     /// The highest `upto` of a completed group flush, or the recovered
     /// records once the first lane open retired the rest.
     flushed: u64,
+    /// Write a mark after every group flush that raises the watermark.
+    marks_on: bool,
+    /// The mark ring (marks are durable once written).
+    marks: Vec<Rec>,
 }
 
 struct Inner {
     state: Mutex<State>,
     cv: Condvar,
+}
+
+/// The damaged range of the torn mark at index `i` of the mark ring.
+fn mark_damage(i: u64, prev: u64, next: Option<u64>) -> DamagedRange {
+    DamagedRange {
+        lane: MARK_RING_LANE,
+        ordinal: 1,
+        start: (i + 1) * BLOCK as u64,
+        end: (i + 2) * BLOCK as u64,
+        prev_seq: WriteSeq(prev),
+        next_seq: next.map(WriteSeq),
+    }
 }
 
 fn token_of(lane: u16, seq: u64) -> u64 {
@@ -347,7 +374,7 @@ impl State {
         let end = begin
             .checked_add(len)
             .ok_or(Error::invalid("length overflow"))?;
-        if rec.kind == RecordKind::Hole || end > rec.data.len() {
+        if rec.kind != RecordKind::Write || end > rec.data.len() {
             return Err(Error::invalid("read outside the record data"));
         }
         if !rec.completed {
@@ -381,7 +408,11 @@ impl MemJournal {
     /// If `cfg.lanes` is zero or `cfg.file_bytes` is below [`MIN_FILE_BYTES`].
     pub fn new(cfg: MemJournalConfig) -> Self {
         let lanes = (0..cfg.lanes).map(|_| BTreeMap::new()).collect();
-        Self::from_image(&JournalImage { cfg, lanes })
+        Self::from_image(&JournalImage {
+            cfg,
+            lanes,
+            marks: Vec::new(),
+        })
     }
 
     /// Opens a crash image as a new journal. The caller runs `recover`.
@@ -437,6 +468,8 @@ impl MemJournal {
                 nospace: false,
                 retire_from: None,
                 flushed: 0,
+                marks_on: false,
+                marks: image.marks.clone(),
             }),
             cv: Condvar::new(),
         });
@@ -454,6 +487,20 @@ impl MemJournal {
     /// The sizes this journal was built with.
     pub fn config(&self) -> MemJournalConfig {
         lock(&self.inner.state).cfg
+    }
+
+    /// While on, every group flush that raises the flushed watermark is
+    /// followed at once by a mark witnessing it (the `FileJournal` waits an
+    /// idle delay first): the mark takes the next `write_seq`, is durable when
+    /// written, and recovery counts it for contiguity and the watermark but
+    /// never lists it as a record. Off by default.
+    pub fn set_marks(&self, on: bool) {
+        lock(&self.inner.state).marks_on = on;
+    }
+
+    /// Marks written into the mark ring so far (including recovered ones).
+    pub fn marks(&self) -> usize {
+        lock(&self.inner.state).marks.len()
     }
 
     /// Changes when appends complete, for appends made from now on.
@@ -601,9 +648,10 @@ impl MemJournal {
             lanes.push(files);
         }
         let cfg = st.cfg;
+        let marks = st.marks.clone();
         drop(st);
         self.inner.cv.notify_all();
-        JournalImage { cfg, lanes }
+        JournalImage { cfg, lanes, marks }
     }
 }
 
@@ -675,8 +723,27 @@ fn coordinator(inner: &Inner) {
                     }
                 }
             }
-            if poisoned.is_none_or(|p| upto < p) {
-                st.flushed = st.flushed.max(upto);
+            if poisoned.is_none_or(|p| upto < p) && upto > st.flushed {
+                st.flushed = upto;
+                if st.marks_on {
+                    // The witness takes the next number and is durable.
+                    let seq = st.next_seq;
+                    st.next_seq += 1;
+                    st.last_issued = seq;
+                    let flushed = st.flushed.min(seq - 1);
+                    st.marks.push(Rec {
+                        seq,
+                        kind: RecordKind::Mark,
+                        lba: 0,
+                        blocks: 0,
+                        data: Vec::new(),
+                        off: 0,
+                        completed: true,
+                        durable: true,
+                        torn: false,
+                        flushed,
+                    });
+                }
             }
             Ok(())
         };
@@ -711,6 +778,7 @@ impl Journal for MemJournal {
                     f.recs.retain(|_, r| r.seq < from);
                 }
             }
+            st.marks.retain(|m| m.seq < from);
             // Every recovered record is durable (an image holds nothing else).
             st.flushed = st.flushed.max(from - 1);
         }
@@ -757,7 +825,8 @@ impl Journal for MemJournal {
         if st.lanes.iter().any(|l| l.opened) {
             return Err(Error::invalid("recover after a lane was opened"));
         }
-        let mut valid: Vec<(u64, RecoveredRecord)> = Vec::new();
+        // `None`: a mark, which fills its number but is no record.
+        let mut valid: Vec<(u64, Option<RecoveredRecord>)> = Vec::new();
         let mut damaged = Vec::new();
         for (lane_no, l) in st.lanes.iter().enumerate() {
             let lane = LaneId(u16::try_from(lane_no).map_err(|_| Error::invalid("lanes"))?);
@@ -782,7 +851,7 @@ impl Journal for MemJournal {
                         if r.seq > floor.0 {
                             valid.push((
                                 r.seq,
-                                RecoveredRecord {
+                                Some(RecoveredRecord {
                                     record: RecordInfo {
                                         kind: r.kind,
                                         write_seq: WriteSeq(r.seq),
@@ -794,7 +863,7 @@ impl Journal for MemJournal {
                                         ordinal,
                                         offset: r.off + HEADER,
                                     },
-                                },
+                                }),
                             ));
                         }
                     }
@@ -814,12 +883,32 @@ impl Journal for MemJournal {
                 });
             }
         }
+        // The mark ring: one mark per block.
+        let mut prev_mark = 0u64;
+        let mut torn_marks: Vec<(u64, u64)> = Vec::new();
+        for (i, m) in st.marks.iter().enumerate() {
+            if m.torn {
+                torn_marks.push((i as u64, prev_mark));
+                continue;
+            }
+            for (j, p) in torn_marks.drain(..) {
+                damaged.push(mark_damage(j, p, Some(m.seq)));
+            }
+            prev_mark = m.seq;
+            if m.seq > floor.0 {
+                valid.push((m.seq, None));
+            }
+        }
+        for (j, p) in torn_marks {
+            damaged.push(mark_damage(j, p, None));
+        }
         // The watermark: the highest any surviving record witnessed.
         let watermark = st
             .lanes
             .iter()
             .flat_map(|l| l.files.values())
             .flat_map(|f| f.recs.values())
+            .chain(st.marks.iter())
             .filter(|r| !r.torn)
             .map(|r| r.flushed)
             .max()
@@ -831,7 +920,7 @@ impl Journal for MemJournal {
         let mut rest = Vec::new();
         for (seq, rec) in valid {
             if rest.is_empty() && seq == expected {
-                records.push(rec);
+                records.extend(rec);
                 expected += 1;
             } else {
                 rest.push(seq);
@@ -903,6 +992,8 @@ impl Journal for MemJournal {
             }
         }
         st.reclaims += 1;
+        // Marks at or below the cut witness nothing recovery still needs.
+        st.marks.retain(|m| m.seq > max_cut);
         let mut report = ReclaimReport::default();
         for (l, &limit) in st.lanes.iter_mut().zip(&upto.lane_ordinals) {
             let limit = limit.min(l.cur);
@@ -963,7 +1054,9 @@ impl JournalLane for MemLane {
                 "an earlier slot of this lane is outstanding",
             ));
         }
-        let malformed = blocks == 0 || (kind == RecordKind::Write && blocks > 256);
+        // Marks are the journal's own; no lane reserves one.
+        let malformed =
+            blocks == 0 || kind == RecordKind::Mark || (kind == RecordKind::Write && blocks > 256);
         if malformed {
             return Err(Error::invalid("malformed reservation"));
         }
@@ -1025,7 +1118,7 @@ impl JournalLane for MemLane {
         st.lanes[idx].outstanding = None;
         let want = match parts.kind {
             RecordKind::Write => parts.blocks as usize * BLOCK,
-            RecordKind::Hole => 0,
+            RecordKind::Hole | RecordKind::Mark => 0,
         };
         let loc = JournalLoc {
             lane: self.id,

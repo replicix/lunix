@@ -671,6 +671,9 @@ pub struct Vol {
     pub collector: Mutex<Option<Box<dyn lunix_iface::gc::Collector>>>,
     pub destage_fault: Arc<Mutex<Option<lunix_engine::Retry>>>,
     pub walk_faults: Arc<AtomicU64>,
+    /// The journal writes a mark after every group flush that raises the
+    /// flushed watermark (`MemJournal::set_marks`).
+    pub marks: bool,
 }
 
 pub fn default_tweak(_: &mut EngineConfig) {}
@@ -739,6 +742,7 @@ impl Vol {
             collector: Mutex::new(None),
             destage_fault: Arc::new(Mutex::new(None)),
             walk_faults: Arc::new(AtomicU64::new(0)),
+            marks: false,
         }
     }
 
@@ -759,6 +763,7 @@ impl Vol {
         let index = Arc::new(MemIndex::from_image(store.mem_ids(), &self.index));
         let journal = Arc::new(MemJournal::from_image(&self.journal));
         journal.set_completion_mode(self.jcfg.mode);
+        journal.set_marks(self.marks);
         *lock(&self.checks.store) = Some(store.clone());
         *lock(&self.checks.index) = Some(Arc::clone(&index));
         let space = MemSpace::new(

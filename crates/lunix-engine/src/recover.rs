@@ -185,15 +185,13 @@ fn check_floor_on_path(
 ///   same lane (two batches in flight). It is logged at warn and wiped, with
 ///   every record after the first gap.
 ///
-/// The unwitnessed window (review M2, 2026-11-14): a completed flush is
-/// witnessed only by a record appended after it completed. Every record above
-/// the highest watermark a surviving record carries is in the window, and
-/// after a burst followed by one FLUSH and no later write that is the whole
-/// burst. A crash alone cannot damage those records (they were durable), but
-/// medium damage to one of them is indistinguishable from residue: it is
-/// wiped, and so is every record after it, although the flush that covered
-/// them was acknowledged. The window closes when a later record lands or a
-/// cut moves the floor past the records.
+/// A completed flush is witnessed only by a record appended after it
+/// completed; the journal writes a mark (a record of its own that changes no
+/// block) when no later flush made such a record durable within its idle
+/// delay, so every flush gets a witness (review M2, 2026-11-14). The window
+/// that remains is a crash within that delay: the last flush is then
+/// unwitnessed, and medium damage to its records reads as residue and is
+/// wiped with every record after it. A crash alone cannot damage them.
 fn refuse_worthy(rec: &lunix_iface::journal::Recovered) -> bool {
     let w = rec.flushed;
     rec.duplicate.is_some()
@@ -342,6 +340,9 @@ pub(crate) fn recover(
         match r.record.kind {
             RecordKind::Write => d.overlay.insert_write(range, r.loc, r.record.write_seq),
             RecordKind::Hole => d.overlay.insert_hole(range, r.record.write_seq),
+            // The journal keeps marks out of `records`; one that slipped in
+            // changes no block and is not the engine's to charge.
+            RecordKind::Mark => continue,
         }
         journal_charged += record_bytes(r.record.kind, r.record.blocks);
     }

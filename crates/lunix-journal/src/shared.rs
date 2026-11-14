@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
+use std::time::Instant;
 
 use lunix_iface::journal::FlushDone;
 use lunix_iface::Error;
@@ -36,9 +37,21 @@ impl LaneFlight {
     }
 }
 
+/// A mark the coordinator owes: the watermark `flushed` became durable when
+/// the counter stood at `counter_at`; unless a later group flush with `upto
+/// > counter_at` completes first (it makes a record carrying the watermark
+/// durable), a mark is written at `at`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MarkDue {
+    pub flushed: u64,
+    pub counter_at: u64,
+    pub at: Instant,
+}
+
 pub(crate) struct CoordQ {
     pub queue: Vec<(u64, FlushDone)>,
     pub shutdown: bool,
+    pub mark_due: Option<MarkDue>,
 }
 
 /// The flush coordinator's mailbox.
@@ -55,6 +68,7 @@ impl Coord {
             q: Mutex::new(CoordQ {
                 queue: Vec::new(),
                 shutdown: false,
+                mark_due: None,
             }),
             cv: Condvar::new(),
             epoch: AtomicU64::new(0),
@@ -91,6 +105,12 @@ pub(crate) struct Shared {
     /// or the recovered records once `prepare` made them durable. Written
     /// into every record appended (on-disk-formats §5.2).
     pub flushed: AtomicU64,
+    /// The highest watermark a durable record or mark is known to carry.
+    pub witnessed: AtomicU64,
+    /// Marks written since `open` (a metric).
+    pub marks_written: AtomicU64,
+    /// Marks skipped because the mark ring had no free file (a metric).
+    pub marks_skipped: AtomicU64,
     /// The lowest sequence number of a failed append, dropped slot or failed
     /// sync; `NOT_POISONED` when healthy.
     pub poison_at: AtomicU64,
