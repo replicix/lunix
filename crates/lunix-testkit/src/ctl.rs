@@ -1,6 +1,10 @@
 //! [`FakeCtlServer`]: a control-protocol server on a Unix socket, for testing
 //! `lunix` (M13) without a daemon.
 //!
+//! `Drop` connects to the socket path to wake the accept loop, so drop the
+//! server before the directory that holds the socket: a `TempDir` field
+//! declared before the server removes the socket first and the drop hangs.
+//!
 //! It speaks the real framing and message types of [`lunix_iface::ctl`]: it
 //! reads length-prefixed JSON frames, checks the protocol version, runs
 //! [`Request::validate`], records the request and answers from a script.
