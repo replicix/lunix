@@ -56,6 +56,9 @@ step "lunix-ublk with crashpoints: clippy and unit tests (lead, M10; root cells 
 cargo clippy -j "$jobs" -p lunix-ublk --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-ublk --features crashpoints
 
+step "lunix-gc with crashpoints: clippy (lead, M17.A)"
+cargo clippy -j "$jobs" -p lunix-gc --all-targets --features crashpoints -- -D warnings
+
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 
