@@ -677,7 +677,7 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
             .lock()
             .unwrap()
             .iter()
-            .any(|l| l.contains("torn last record")),
+            .any(|l| l.contains("treated as crash residue")),
         "the torn tail is logged"
     );
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
