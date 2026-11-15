@@ -2,7 +2,8 @@
 //!
 //! The binary is a thin `main`; everything lives here so tests can reach it.
 //! Socket subcommands talk to `lunixd` over the control protocol of
-//! [`lunix_iface::ctl`]; `fsck` and `key` are built in M13b.
+//! [`lunix_iface::ctl`]; `fsck` and `key` work offline on a volume directory
+//! through `lunix-fsck` and `lunix-crypto`.
 
 #![forbid(unsafe_code)]
 

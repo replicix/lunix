@@ -16,6 +16,7 @@ Options:
       --truncate-tip        With --repair: set aside a tip that does not authenticate and make its predecessor the tip (drops that one commit)
       --reset-floor         With --repair: accept this copy as the trusted one and lower the rollback floor to its tip (only after you verified the copy; loses nothing, but disables rollback detection for the older history)
       --delete-orphans      With --repair: delete orphaned files above the tip
+      --repair-pins         With --repair: replace a rejected `state/pins` by a fresh file whose floor is the verified tip (gives up the recorded keyring and epoch floors and the pin; audited)
       --key-file <FILE>     A key file to unlock the volume with
       --passphrase          Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
       --passphrase-fd <FD>  Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed

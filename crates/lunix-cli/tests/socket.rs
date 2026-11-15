@@ -779,32 +779,8 @@ fn a_daemon_that_hangs_up_is_a_generic_error() {
 }
 
 #[test]
-fn fsck_and_key_are_stubs_until_m13b() {
+fn fsck_repair_flags_need_repair() {
     let env = Env::new();
-    for args in [
-        &["fsck", "vol1"][..],
-        &[
-            "fsck",
-            "vol1",
-            "--deep",
-            "--repair",
-            "--gc",
-            "--truncate-tip",
-            "--json",
-        ],
-        &["key", "ls", "vol1"],
-        &["key", "add-slot", "vol1", "--passphrase-fd", "3"],
-        &["key", "rm-slot", "vol1", "--slot", "2"],
-    ] {
-        let o = env.run(args);
-        assert_eq!(o.code, 2, "{args:?}");
-        assert!(o.stderr.contains("built in M13b"), "{args:?}");
-        assert_eq!(o.stdout, "");
-    }
-    assert!(
-        env.server.requests().is_empty(),
-        "stubs must not touch the socket"
-    );
     // --gc needs --repair.
     assert_eq!(env.run(&["fsck", "vol1", "--gc"]).code, 2);
     assert_eq!(env.run(&["fsck", "vol1", "--reset-floor"]).code, 2);

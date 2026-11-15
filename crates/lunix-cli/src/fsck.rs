@@ -64,9 +64,10 @@ pub struct FsckArgs {
     #[arg(long, requires = "repair")]
     pub delete_orphans: bool,
 
-    /// With --repair: replace a rejected `state/pins` (hidden until the help
-    /// snapshots are regenerated).
-    #[arg(long, requires = "repair", hide = true)]
+    /// With --repair: replace a rejected `state/pins` by a fresh file whose
+    /// floor is the verified tip (gives up the recorded keyring and epoch
+    /// floors and the pin; audited).
+    #[arg(long, requires = "repair")]
     pub repair_pins: bool,
 
     /// A key file to unlock the volume with.
