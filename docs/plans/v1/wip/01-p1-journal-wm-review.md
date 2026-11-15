@@ -177,3 +177,146 @@ copy and the remote source and target directories are deleted.
   - probe 2 (m1): `upto` above `last_issued()`: a record claims an unwritten number durable;
   - probe 3 (M2): flushed, unwitnessed, one record damaged: not refused, 8 acknowledged records wiped;
   - probe 4: the same image after a restart and one append: refused, as designed.
+
+# Mark ring review (2026-11-14)
+
+- Reviewed: `lead/p1-journal-wm` from `09ae91a` to `12f7e95`: `bf6dcd1` (format), `1e19b30` (journal, iface, engine,
+  testkit), `d4ea229` (docs), `12f7e95` (note). Targeted at the mark ring (the maintainer's answer to M2 above).
+- Read in full: `coord.rs` (the mark scheduling and `write_mark`), the diffs of `journal.rs`, `scan.rs`, `ring.rs`,
+  `shared.rs`, `lane.rs`, `config.rs`, the format and iface diffs, the engine's `wanted` and `commit` (C1) and where
+  it calls `tail_after`, the `MemJournal` mark model, `tests/marks.rs`, the engine tests, FREEZE.md amendment (b).
+- Under the no-compatibility rule I raise nothing about older layouts.
+
+## Verdict
+
+**Merge after fixes.** No blocker. Two majors need a code change (K1, K2). The record layout (kind 3, the mark
+file, the golden) is right and can be re-signed as it is; item 4 of amendment (b) should be reworded first (k3).
+
+## What I checked and found right
+
+- **A mark never witnesses more than is durable.** The watermark a mark carries is `Shared::flushed`, which is
+  raised only after a group's `fdatasync`s succeeded with the poison point above `upto`. The coordinator thread
+  writes the mark between groups, so no group runs while it does. A poison that comes later does not undo a
+  completed sync, so a mark already written stays true; a poisoned journal writes no further mark.
+- **A mark is not written before its flush's sync.** The mark is scheduled after the group's sync and written in
+  the coordinator loop after the group returned. After `prepare` it is scheduled after the last file sync.
+- **The number of a mark leaves no gap and no duplicate.**
+  - It is taken only after a place in the ring is found, so a full ring consumes nothing.
+  - It is in no lane's pending set, but no group can run while the coordinator writes it, so no flush completes
+    over it unwritten.
+  - A failed encode or write poisons at the number.
+  - A kill between taking the number and the write leaves a gap above the watermark, with only unflushed lane
+    records after it: residue.
+  - `resume_off` moves only after a successful sync, and a failure stops all later marks, so no block is written
+    twice.
+  - Stale marks at or above the new `next_seq` are zeroed by `prepare` with the lanes.
+- **Mark ring reclaim against the cut is safe.** A mark file goes only when it is `Used` and its highest number is
+  at or below `max_cut_asked`. The engine calls `tail_after(c)` only after C6 (`coord.rs:513`), so that value never
+  exceeds the durable cut. The active mark file is never reclaimed. Nothing is released from the ledger for marks.
+- **"A later flush makes the mark unnecessary" is sound.** `counter_at` is read after the watermark was raised, so
+  every number above it was reserved and encoded after the raise and carries at least that watermark. A later
+  group that completed unpoisoned with `upto > counter_at` made number `counter_at + 1` durable, whether it is a
+  lane record or a mark. A stream of flushes cannot defer the mark for ever: a group that neither settles nor
+  raises leaves the timer alone.
+- **A lost or torn mark is residue.** Marks are written one at a time, each synced, so a torn mark is the last one
+  and has no later mark behind it; a missing mark number with lane records after it is above the watermark.
+- **A full ring behaves.** Probe: 1 020 marks, then `marks_skipped` counts, no number is taken, flushes keep
+  completing, a cut frees the files, marks resume with the next flush, and recovery sees every number once.
+- **The engine copes with numbers it never issued**: the cut takes `last_issued()`, marks are never listed, replay
+  skips kind 3.
+
+## Majors
+
+### K1. The witness of the recovered watermark can be wiped by `prepare`, and no mark replaces it
+
+`crates/lunix-journal/src/journal.rs:351` (`witnessed` is set to `rec.flushed`) and `:223` (the mark after
+`prepare` is scheduled only when `counter > witnessed`).
+
+- `rec.flushed` is the maximum over **all** scanned records, including those beyond the first gap. `prepare` wipes
+  those. When the wiped record was the only witness and the watermark equals the last kept number, `counter ==
+  witnessed`, no mark is scheduled, and nothing on disk witnesses the flush any more.
+- This is the ordinary multi-queue crash: records 1 and 2 flushed, lane 0's record 3 still in its open batch, lane
+  1's record 4 landed carrying watermark 2.
+- Probe (real `FileJournal`, 5 ms idle delay): that image; first recovery gives `next_seq = 3`, `flushed = 2`,
+  residue; lanes opened; 500 ms idle; `marks_written = 0`. Then the data of record 1 damaged: second recovery gives
+  `flushed = 0`, `gap_at = 1`, `ignored = 2..2`, `refuse_worthy = false`. An acknowledged record is wiped as
+  residue, a hundred idle delays after the open. The window stays open until the next write lands.
+- This is outside the "crash within the idle delay" window the docs and amendment (b) name.
+
+Fix: set `witnessed` to the highest watermark carried by a record that survives the wipe (number below
+`next_seq`), computed in the scan, or set it after the wipe in `prepare`. Add the probe as a test (a gap across
+lanes whose only witness is beyond the gap, then idle, then damage).
+
+### K2. Every attach of a clean journal takes a number, which makes the engine commit an empty cut
+
+`crates/lunix-journal/src/journal.rs:219-231`, `crates/lunix-engine/src/coord.rs:235` (`wanted`) and `:265-271`.
+
+- After `prepare` on a journal with nothing above the floor, `counter == floor` and `witnessed` is the watermark of
+  an old mark below it, so a mark is scheduled. It takes number `floor + 1` and witnesses `floor`, which a durable
+  commit already covers.
+- Probe: empty journal, `recover(floor = 7)`, lane opened, no write: `last_issued = 8`, `marks_written = 1`. A
+  second attach with floor 8: `last_issued = 9`, one more mark.
+- The engine half, by reading (the engine tests use `MemJournal`, which writes no mark at open): `wanted` sees
+  `last_issued() > tip.cut_seq`, and after `commit_interval` `commit` finds `c > prev` and runs C2 to C10 with an
+  empty cut. So each attach of an idle volume costs one mark and one FULL commit that changes nothing. The plan's
+  "an idle volume cuts nothing" no longer holds.
+- The same happens once when a cut lands inside the idle delay after a flush: the mark follows the cut, takes the
+  next number, and the next interval commits it alone.
+
+Fix: write no mark for a watermark the cut already covers. In `prepare`, schedule only when records above the
+floor were recovered; in `write_mark`, return when the watermark is at or below `max_cut_asked`. A test at the
+engine level needs a `MemJournal` that models the mark at open, or a check through `lunixd`.
+
+## Minors
+
+- **k1. Ring full: the window reopens with a counter only, and stays open after the cut.** `coord.rs:275-279`.
+  Is it acceptable: yes for merge, if it is said. Reaching it needs more than 765 to 1 020 idle flushes between
+  two cuts, which at the default delay is at least 38 s of flush-then-idle traffic with no successful commit, in
+  practice a store outage. Three things to do:
+  - the skipped watermark is dropped, not retried: in the probe no mark came in the 100 ms after reclaim freed the
+    files, only with the next flush that raised the watermark. Keep the due mark and write it when reclaim frees a
+    file;
+  - log once at warn when skipping starts, and export `marks_skipped` (the note lists the export as a follow-up);
+  - add a test (the probe runs in under 8 s with a 1 ms delay).
+- **k2. A damaged durable mark: refusing is right; under `wipe` it costs data although a mark holds none.**
+  `scan.rs:335`. Probe: records 1 to 3, flush, mark 4, records 5 to 7, flush, mark 8; mark 4 damaged. Recovery:
+  3 records, `gap_at = 4`, `flushed = 7`, refuse-worthy; the damage is reported under lane 65535. Under `refuse`
+  that is the right, conservative answer: the journal has medium damage inside witnessed history and recovery
+  cannot prove the missing number was a mark. Under `wipe` (the default) records 5 to 7, acknowledged data, are
+  wiped because a block without data was lost. Each idle flush adds one such block. A decision for the
+  maintainer: either say so in ADR-4, or let recovery bridge missing numbers that lie between `prev_seq` and
+  `next_seq` of a damaged range in the mark ring when their count is at most the number of damaged blocks (the
+  mark ring holds only marks). I would not put the bridge in this branch.
+- **k3. FREEZE.md amendment (b).**
+  - Item 4 says "The remaining window is a crash within the idle delay". Also open: the ring-full case (k1),
+    `mark_idle = None`, and K1 until it is fixed. Name the ring-full case, or move the "when" rules out of the
+    format freeze into ADR-4 and keep only the layout and the reader's rules in FREEZE.md.
+  - Item 4 says "after a restart, once the first lane open made the recovered records durable". After K2's fix
+    that is "when records above the floor were recovered".
+  - Item 3 says marks exist only in the mark ring. The reader does not enforce it: the scan accepts kind 3 in a
+    `q` file and kinds 1 and 2 in an `m` file (the latter would reach the engine with lane 65535). Not reachable
+    without forging a CRC and the generation, but the normative text and the reader should agree: treat a record
+    of the wrong kind for its ring as damage.
+  - A mark file's header is a lane-0 header; only the name tells it from `q00`. Worth one sentence.
+- **k4. An empty FLUSH after a mark writes another mark** (by reading, `coord.rs:229`): the group's `upto` is the
+  mark's number, which raises the watermark and schedules a mark that witnesses only the previous mark. One per
+  empty FLUSH, harmless; skip it when every number in `(before, upto]` is a mark.
+- **k5. Costs to state in the docs.** A failed mark write poisons the volume (necessary, the number is taken). The
+  mark is a synchronous write and `fdatasync` on the coordinator thread, so a FLUSH that arrives during it waits
+  for one extra sync.
+- **k6. Nits.** A due mark is dropped at shutdown (a clean stop without a final cut leaves the last flush
+  unwitnessed). A failed allocation of the mark buffer disables marks with no counter. `recover` on a live object
+  now also races a mark in flight (m6 above).
+- **k7. Tests.** `MemJournal` writes the mark at once and keeps every mark through a crash, so the engine's seeded
+  test never sees a missing mark with lane records behind it, the idle delay, the mark at open (K2) or a full
+  ring. The journal's kill tests cover the first; the others are untested.
+
+## What I ran
+
+Same host and rules as above (scratch copy, one test thread, no root, one cargo job at a time; scratch copy and the
+remote directories deleted).
+
+- `cargo test -p lunix-journal -p lunix-engine -p lunix-format -p lunix-testkit` at `12f7e95`: exit 0, 491 passed,
+  0 failed, 0 ignored. This run does not build the `crashpoints` feature, so the kill tests were not run by me.
+- Four probes against the real `FileJournal` (scratch only): K2 (a number per attach), K1 (witness wiped by
+  `prepare`), the full ring with reclaim (passes), k2 (damaged durable mark).

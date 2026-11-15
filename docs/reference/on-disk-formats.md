@@ -313,7 +313,7 @@ The journal is local, plaintext (ADR-11 F11) and checksummed, not
 authenticated. A lane owns a ring of preallocated, zero-filled 64 MiB files
 `journal/q<lane:02x>-<ordinal:08x>.j`, opened `O_DIRECT`. The flush
 coordinator owns one more ring, the **mark ring** `journal/m00-<ordinal:08x>.j`
-(amendment 2026-11-14 (b), pending re-sign), which holds only marks
+(amendment 2026-11-14 (b)), which holds only marks
 ([§5.2](#52-record-header-64-bytes), [§5.3](#53-batch-packing-and-how-a-reader-finds-records)).
 
 ### 5.1 Journal file header (block 0)
@@ -346,7 +346,7 @@ held no record since its zeroing was synced, and recovery does not report
 it as damage. Any other such file is reported as a damaged range (fsck, and
 `on_journal_damage` below). **Authenticated by:** nothing (checksum only).
 
-**Mark ring files** (amendment 2026-11-14 (b), pending re-sign):
+**Mark ring files** (amendment 2026-11-14 (b)):
 `m00-<ordinal:08x>.j`, the same header with `lane` 0, 1 MiB each in phase 1
 (a reader takes any length that is a multiple of 4096), four files per
 journal. They hold only marks, one per 4 KiB block (the mark at offset
@@ -364,7 +364,7 @@ against `q00-`) tells a mark file from lane 0's.
 |---|---|---|---|---|---|
 | `magic` | 0 | 4 | bytes | `"LXJR"` | a zero `u32` here means "no record" ([§5.3](#53-batch-packing-and-how-a-reader-finds-records)) |
 | `ver` | 4 | 1 | u8 | 1 | |
-| `kind` | 5 | 1 | u8 | 1 `write`, 2 `hole`, 3 `mark` | `hole` = DISCARD or WRITE_ZEROES; `mark` = a witness of the flushed watermark (amendment 2026-11-14 (b), pending re-sign): only in the mark ring, changes no block |
+| `kind` | 5 | 1 | u8 | 1 `write`, 2 `hole`, 3 `mark` | `hole` = DISCARD or WRITE_ZEROES; `mark` = a witness of the flushed watermark (amendment 2026-11-14 (b)): only in the mark ring, changes no block |
 | reserved | 6 | 2 | | zero | |
 | `write_seq` | 8 | 8 | u64 | ≥ 1 | strictly increasing within a lane, across its files in ordinal order |
 | `epoch` | 16 | 8 | u64 | 0 in phase 1 | the owner epoch (D7) |

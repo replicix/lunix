@@ -21,7 +21,7 @@
   (`Recovered::flushed`), so the engine refuses only gaps or damage at or below it, and a
   `write_seq` found twice (`Recovered::duplicate`). `submit_group_flush` clamps `upto` to
   `last_issued()`, so no watermark names an unwritten number.
-- Marks (on-disk-formats §5.1 and §5.3, amendment 2026-11-14 (b), pending re-sign): after a group flush
+- Marks (on-disk-formats §5.1 and §5.3, amendment 2026-11-14 (b)): after a group flush
   that raised the watermark, unless a later group with `upto` above the counter at the raise completes
   within `JournalConfig::mark_idle` (default 50 ms; `None` disables), the coordinator appends one mark
   (kind 3, 64 bytes in its own 4 KiB block) carrying the watermark to the mark ring `m00-<ordinal>.j`
