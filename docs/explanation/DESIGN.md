@@ -104,6 +104,18 @@ A **volume** is a thin block device of a given size. Its data path is:
   per-volume attach option, default 1 MiB, minimum 256 KiB), so a volume
   pins `queues × 128 × max_io_buf_bytes` in copy mode. The daemon runs with
   `PR_SET_IO_FLUSHER` and in its own mount namespace (libublk issue #50).
+- **Locked memory (maintainer, 2026-11-15; no `mlockall`):** the daemon
+  locks what the I/O path and the keys need, region by region: every
+  queue's tag buffers and its thread stack, the journal's lane batch
+  buffers, zero-fill buffer, mark buffer and flush-thread stack, and the
+  key arena. A lock failure fails the start (the daemon checks
+  `CAP_IPC_LOCK` or an unlimited `RLIMIT_MEMLOCK` first) or the attach,
+  with an error naming `RLIMIT_MEMLOCK`; `VolumeStatus` reports a volume's
+  locked bytes. The rest of the heap (map nodes, overlay, index, caches)
+  may be paged under memory pressure: that costs latency, not a deadlock,
+  because swap never lives on a device the daemon serves (W7) and the
+  queue threads run with `PR_SET_IO_FLUSHER`. Freed memory, a detached
+  volume's included, goes back to the system.
 - **Data path mode:** the copy path is the default. `USER_COPY` and
   `BATCH_IO` are opt-in per volume. `USER_COPY` wins at 64 KiB and above
   and loses about 10% at 4 KiB; `BATCH_IO` showed no gain. `BATCH_IO` is
