@@ -127,4 +127,4 @@ short or long checkpoint `stats` slot lists by the engine (an exact
 change) and edits the text of on-disk-formats.md §20, §24 items 45-46 and
 attach-matrix.md Table E (rule E-a, row 120).
 
-Re-signed by: _pending (the maintainer) — drop pins v1_
+Re-signed by: the maintainer (Attila Nagy) on 2026-11-15 (amendment: no backward compatibility, drop pins v1)
