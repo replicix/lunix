@@ -1,5 +1,5 @@
-//! The ring files of every lane: naming, creation, per-file bookkeeping and
-//! recycling. All blocking.
+//! The ring files of every lane and of the mark ring: naming, creation,
+//! per-file bookkeeping and recycling. All blocking.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use lunix_format::journal::{FileHeader, BLOCK};
+use lunix_format::journal::{FileHeader, BLOCK, MARK_FILE_LEN};
 use lunix_iface::{Error, Result};
 
 use crate::aligned::AlignedBuf;
@@ -20,20 +20,43 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub(crate) fn file_name(lane: u16, ordinal: u32) -> String {
-    format!("q{lane:02x}-{ordinal:08x}.j")
+/// Mark ring files kept by a journal (on-disk-formats section 5.1).
+pub(crate) const MARK_FILES: usize = 4;
+
+/// Which ring a file belongs to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RingKind {
+    /// A queue lane's ring: `q<lane:02x>-<ordinal:08x>.j`.
+    Queue,
+    /// The flush coordinator's mark ring: `m00-<ordinal:08x>.j`, header lane 0.
+    Mark,
 }
 
-/// `q<lane:02x>-<ordinal:08x>.j` to `(lane, ordinal)`.
-pub(crate) fn parse_name(name: &str) -> Option<(u16, u32)> {
-    let rest = name.strip_prefix('q')?.strip_suffix(".j")?;
+pub(crate) fn file_name(kind: RingKind, lane: u16, ordinal: u32) -> String {
+    match kind {
+        RingKind::Queue => format!("q{lane:02x}-{ordinal:08x}.j"),
+        RingKind::Mark => format!("m00-{ordinal:08x}.j"),
+    }
+}
+
+/// `q<lane:02x>-<ordinal:08x>.j` to `(Queue, lane, ordinal)` and
+/// `m00-<ordinal:08x>.j` to `(Mark, 0, ordinal)`.
+pub(crate) fn parse_name(name: &str) -> Option<(RingKind, u16, u32)> {
+    let (kind, rest) = match name.strip_prefix('q') {
+        Some(r) => (RingKind::Queue, r),
+        None => (RingKind::Mark, name.strip_prefix('m')?),
+    };
+    let rest = rest.strip_suffix(".j")?;
     let (l, o) = rest.split_once('-')?;
     if l.len() != 2 || o.len() != 8 {
         return None;
     }
     let lane = u16::from_str_radix(l, 16).ok()?;
+    if kind == RingKind::Mark && lane != 0 {
+        return None;
+    }
     let ordinal = u32::from_str_radix(o, 16).ok()?;
-    (ordinal >= 1).then_some((lane, ordinal))
+    (ordinal >= 1).then_some((kind, lane, ordinal))
 }
 
 pub(crate) fn io_err(e: io::Error) -> Error {
@@ -65,6 +88,12 @@ pub(crate) struct SlotInfo {
     /// The header failed its checks (or does not match the name): the file
     /// holds no records and is re-initialised before use.
     pub bad: bool,
+    /// `bad` because the header is a valid header of this lane and volume
+    /// with a higher ordinal than the name: a re-initialisation
+    /// ([`Rings::reinit_slot`]) interrupted between its header write and its
+    /// rename. The scan does not report such a file as damage when its body
+    /// is zero (on-disk-formats §5.1).
+    pub reinit: bool,
 }
 
 /// One physical file. The descriptor lives as long as the journal; a recycle
@@ -123,22 +152,35 @@ impl RingInner {
     }
 }
 
-/// All files of one lane.
+/// All files of one lane, or of the mark ring.
 pub(crate) struct LaneRing {
+    pub kind: RingKind,
+    /// The lane in the file names and headers (0 for the mark ring).
     pub lane: u16,
+    /// Length of each of its files.
+    pub file_len: u64,
     pub files: Vec<Arc<RingFile>>,
     pub inner: Mutex<RingInner>,
 }
 
 pub(crate) struct Rings {
     pub dir: PathBuf,
+    /// The queue lanes, indexed by lane.
     pub lanes: Vec<LaneRing>,
+    /// The flush coordinator's mark ring.
+    pub marks: LaneRing,
+    /// Length of a queue lane's file.
     pub file_len: u64,
 }
 
 impl Rings {
-    pub(crate) fn path(&self, lane: u16, ordinal: u32) -> PathBuf {
-        self.dir.join(file_name(lane, ordinal))
+    pub(crate) fn path(&self, ring: &LaneRing, ordinal: u32) -> PathBuf {
+        self.dir.join(file_name(ring.kind, ring.lane, ordinal))
+    }
+
+    /// The queue lanes, then the mark ring.
+    pub(crate) fn all(&self) -> impl Iterator<Item = &LaneRing> {
+        self.lanes.iter().chain(std::iter::once(&self.marks))
     }
 
     /// The file holding `(lane, ordinal)` if it is in use (not free, not being
@@ -160,21 +202,21 @@ impl Rings {
 fn create_file(
     cfg: &JournalConfig,
     rings_dir: &Path,
-    lane: u16,
-    ordinal: u32,
+    (kind, lane, ordinal): (RingKind, u16, u32),
+    file_len: u64,
     zero: &AlignedBuf,
 ) -> io::Result<(File, u64)> {
-    let final_path = rings_dir.join(file_name(lane, ordinal));
-    let tmp = rings_dir.join(format!("{}.tmp", file_name(lane, ordinal)));
+    let final_path = rings_dir.join(file_name(kind, lane, ordinal));
+    let tmp = rings_dir.join(format!("{}.tmp", file_name(kind, lane, ordinal)));
     let _ = std::fs::remove_file(&tmp);
     let file = sys::open_file(&tmp, cfg.direct, true)?;
     sys::set_nocow(&file);
-    match rustix::fs::fallocate(&file, rustix::fs::FallocateFlags::empty(), 0, cfg.file_len) {
+    match rustix::fs::fallocate(&file, rustix::fs::FallocateFlags::empty(), 0, file_len) {
         Ok(()) => {}
         Err(e) if e == rustix::io::Errno::OPNOTSUPP => {}
         Err(e) => return Err(e.into()),
     }
-    sys::zero_range(&file, B, cfg.file_len, zero)?;
+    sys::zero_range(&file, B, file_len, zero)?;
     file.sync_data()?;
     let gen = sys::random_nonzero()?;
     let hdr = FileHeader {
@@ -190,7 +232,7 @@ fn create_file(
 }
 
 /// Opens the journal directory: validates existing files, creates the missing
-/// ones. Existing files are never modified.
+/// ones (queue lanes and the mark ring). Existing files are never modified.
 pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings> {
     let existed = cfg.dir.is_dir();
     std::fs::create_dir_all(&cfg.dir).map_err(io_err)?;
@@ -199,105 +241,141 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
             sys::fsync_dir(parent).map_err(io_err)?;
         }
     }
-    let want = cfg.files_per_lane();
     let mut found: Vec<Vec<u32>> = vec![Vec::new(); usize::from(cfg.lanes)];
+    let mut marks_found: Vec<u32> = Vec::new();
     for entry in std::fs::read_dir(&cfg.dir).map_err(io_err)? {
         let entry = entry.map_err(io_err)?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if name.starts_with('q') && name.ends_with(".j.tmp") {
+        if (name.starts_with('q') || name.starts_with('m')) && name.ends_with(".j.tmp") {
             // An interrupted creation or re-initialisation: nothing in it is
             // referenced by anything.
             let _ = std::fs::remove_file(entry.path());
             continue;
         }
-        let Some((lane, ordinal)) = parse_name(name) else {
-            continue;
-        };
-        match found.get_mut(usize::from(lane)) {
-            Some(v) => v.push(ordinal),
-            None => {
-                return Err(Error::Unsupported {
-                    what: "journal files of a lane beyond the configured lane count",
-                })
-            }
+        match parse_name(name) {
+            Some((RingKind::Mark, _, ordinal)) => marks_found.push(ordinal),
+            Some((RingKind::Queue, lane, ordinal)) => match found.get_mut(usize::from(lane)) {
+                Some(v) => v.push(ordinal),
+                None => {
+                    return Err(Error::Unsupported {
+                        what: "journal files of a lane beyond the configured lane count",
+                    })
+                }
+            },
+            None => {}
         }
     }
     let mut created_any = false;
     let mut lanes = Vec::with_capacity(found.len());
-    for (lane_idx, mut ordinals) in found.into_iter().enumerate() {
+    for (lane_idx, ordinals) in found.into_iter().enumerate() {
         let lane = u16::try_from(lane_idx).map_err(|_| Error::invalid("lane overflow"))?;
-        ordinals.sort_unstable();
-        let mut files = Vec::new();
-        let mut slots = Vec::new();
-        for &ordinal in &ordinals {
-            let path = cfg.dir.join(file_name(lane, ordinal));
-            let file = sys::open_file(&path, cfg.direct, false).map_err(io_err)?;
-            let head = sys::read_aligned(&file, 0, BLOCK)
-                .ok()
-                .and_then(|b| FileHeader::decode(b.as_slice()).ok());
-            let (gen, bad) = match head {
-                Some(h) if h.lane == lane && h.ordinal == ordinal => {
-                    if h.volume_uuid != cfg.volume_uuid {
-                        // Re-initialising it would destroy another volume's
-                        // records: refuse instead.
-                        return Err(Error::Corrupt {
-                            what: "journal file",
-                            detail: "belongs to another volume",
-                        });
-                    }
-                    (h.generation, false)
-                }
-                _ => (0, true),
-            };
-            files.push(Arc::new(RingFile::new(file)));
-            slots.push(SlotInfo {
-                ordinal,
-                gen,
-                role: Role::Used,
-                bad,
-            });
-        }
-        let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
-        while files.len() < want {
-            let (file, gen) =
-                create_file(cfg, &cfg.dir, lane, next_ordinal, zero).map_err(io_err)?;
-            created_any = true;
-            files.push(Arc::new(RingFile::new(file)));
-            slots.push(SlotInfo {
-                ordinal: next_ordinal,
-                gen,
-                role: Role::Free,
-                bad: false,
-            });
-            next_ordinal += 1;
-        }
-        lanes.push(LaneRing {
-            lane,
-            files,
-            inner: Mutex::new(RingInner {
-                slots,
-                free: VecDeque::new(),
-                active: None,
-                resume_off: B,
-                next_ordinal,
-            }),
-        });
+        lanes.push(load_ring(
+            cfg,
+            (RingKind::Queue, lane),
+            ordinals,
+            (cfg.files_per_lane(), cfg.file_len),
+            zero,
+            &mut created_any,
+        )?);
     }
+    let marks = load_ring(
+        cfg,
+        (RingKind::Mark, 0),
+        marks_found,
+        (MARK_FILES, MARK_FILE_LEN as u64),
+        zero,
+        &mut created_any,
+    )?;
     if created_any {
         sys::fsync_dir(&cfg.dir).map_err(io_err)?;
     }
     Ok(Rings {
         dir: cfg.dir.clone(),
         lanes,
+        marks,
         file_len: cfg.file_len,
+    })
+}
+
+/// Opens the existing files of one ring (`ordinals`) and creates the missing
+/// ones up to `want` files of `file_len` bytes.
+fn load_ring(
+    cfg: &JournalConfig,
+    (kind, lane): (RingKind, u16),
+    mut ordinals: Vec<u32>,
+    (want, file_len): (usize, u64),
+    zero: &AlignedBuf,
+    created_any: &mut bool,
+) -> Result<LaneRing> {
+    ordinals.sort_unstable();
+    let mut files = Vec::new();
+    let mut slots = Vec::new();
+    for &ordinal in &ordinals {
+        let path = cfg.dir.join(file_name(kind, lane, ordinal));
+        let file = sys::open_file(&path, cfg.direct, false).map_err(io_err)?;
+        let head = sys::read_aligned(&file, 0, BLOCK)
+            .ok()
+            .and_then(|b| FileHeader::decode(b.as_slice()).ok());
+        let reinit = head.as_ref().is_some_and(|h| {
+            h.lane == lane && h.ordinal > ordinal && h.volume_uuid == cfg.volume_uuid
+        });
+        let (gen, bad) = match head {
+            Some(h) if h.lane == lane && h.ordinal == ordinal => {
+                if h.volume_uuid != cfg.volume_uuid {
+                    // Re-initialising it would destroy another volume's
+                    // records: refuse instead.
+                    return Err(Error::Corrupt {
+                        what: "journal file",
+                        detail: "belongs to another volume",
+                    });
+                }
+                (h.generation, false)
+            }
+            _ => (0, true),
+        };
+        files.push(Arc::new(RingFile::new(file)));
+        slots.push(SlotInfo {
+            ordinal,
+            gen,
+            role: Role::Used,
+            bad,
+            reinit,
+        });
+    }
+    let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
+    while files.len() < want {
+        let (file, gen) = create_file(cfg, &cfg.dir, (kind, lane, next_ordinal), file_len, zero)
+            .map_err(io_err)?;
+        *created_any = true;
+        files.push(Arc::new(RingFile::new(file)));
+        slots.push(SlotInfo {
+            ordinal: next_ordinal,
+            gen,
+            role: Role::Free,
+            bad: false,
+            reinit: false,
+        });
+        next_ordinal += 1;
+    }
+    Ok(LaneRing {
+        kind,
+        lane,
+        file_len,
+        files,
+        inner: Mutex::new(RingInner {
+            slots,
+            free: VecDeque::new(),
+            active: None,
+            resume_off: B,
+            next_ordinal,
+        }),
     })
 }
 
 /// What [`Rings::reinit_slot`] is asked to do.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Reinit {
-    pub lane: u16,
     pub old_ordinal: u32,
     pub new_ordinal: u32,
     /// End of the region that may hold non-zero bytes.
@@ -311,25 +389,25 @@ impl Rings {
     pub(crate) fn reinit_slot(
         &self,
         cfg: &JournalConfig,
+        ring: &LaneRing,
         file: &RingFile,
         r: Reinit,
         zero: &AlignedBuf,
     ) -> io::Result<u64> {
         let Reinit {
-            lane,
             old_ordinal,
             new_ordinal,
             zero_to,
         } = r;
         let len = file.file.metadata()?.len();
-        if len != self.file_len {
-            file.file.set_len(self.file_len)?;
+        if len != ring.file_len {
+            file.file.set_len(ring.file_len)?;
         }
-        sys::zero_range(&file.file, B, zero_to.min(self.file_len), zero)?;
+        sys::zero_range(&file.file, B, zero_to.min(ring.file_len), zero)?;
         file.file.sync_data()?;
         let gen = sys::random_nonzero()?;
         let hdr = FileHeader {
-            lane,
+            lane: ring.lane,
             ordinal: new_ordinal,
             volume_uuid: cfg.volume_uuid,
             generation: gen,
@@ -337,7 +415,10 @@ impl Rings {
         file.file
             .write_all_at(sys::header_block(&hdr)?.as_slice(), 0)?;
         file.file.sync_data()?;
-        std::fs::rename(self.path(lane, old_ordinal), self.path(lane, new_ordinal))?;
+        // The file now has a valid header that does not match its name; the
+        // scan recognises the state (`SlotInfo::reinit`).
+        lunix_iface::crashpoint!("journal.reinit.before_rename");
+        std::fs::rename(self.path(ring, old_ordinal), self.path(ring, new_ordinal))?;
         Ok(gen)
     }
 }
@@ -348,10 +429,13 @@ mod tests {
 
     #[test]
     fn names_round_trip() {
-        assert_eq!(file_name(0, 1), "q00-00000001.j");
-        assert_eq!(file_name(255, 0xabcd), "qff-0000abcd.j");
-        assert_eq!(parse_name("q00-00000001.j"), Some((0, 1)));
-        assert_eq!(parse_name("qff-0000abcd.j"), Some((255, 0xabcd)));
+        use RingKind::{Mark, Queue};
+        assert_eq!(file_name(Queue, 0, 1), "q00-00000001.j");
+        assert_eq!(file_name(Queue, 255, 0xabcd), "qff-0000abcd.j");
+        assert_eq!(file_name(Mark, 0, 7), "m00-00000007.j");
+        assert_eq!(parse_name("q00-00000001.j"), Some((Queue, 0, 1)));
+        assert_eq!(parse_name("qff-0000abcd.j"), Some((Queue, 255, 0xabcd)));
+        assert_eq!(parse_name("m00-00000007.j"), Some((Mark, 0, 7)));
         for bad in [
             "q00-00000000.j",
             "q0-00000001.j",
@@ -360,6 +444,8 @@ mod tests {
             "x00-00000001.j",
             "q00_00000001.j",
             "q00-0000000g.j",
+            "m01-00000001.j",
+            "m00-00000000.j",
         ] {
             assert_eq!(parse_name(bad), None, "{bad}");
         }

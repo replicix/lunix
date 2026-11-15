@@ -205,28 +205,61 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   the floor, merges them and stops at the first gap. The checkpoint only
   says which files may be skipped. There is no mid-ring corruption error
   and no flush marker; `fsck` warns about valid records beyond the gap.
-- **What `on_journal_damage = refuse` refuses (lead, 2026-11-13, after the
-  M12a review).** Only mid-journal damage: a damaged range with a later
-  valid record in its lane, or valid records beyond the first gap. A torn
-  **last** record of a lane with nothing valid after it is crash residue:
-  it cannot be a write acknowledged as durable, because a FLUSH or FUA
-  completes only after the group flush that covers it (`fdatasync` of the
-  lane file) has finished, so every such record is on stable storage before
-  its acknowledgement and a crash cannot tear it. What a torn tail can hold
-  is a write never flushed, which block semantics allow to lose. It is
-  logged at warn and wiped; refusing it would keep every volume offline
-  after an ordinary crash.
-  **Interim limit (M12a re-review R1, 2026-11-14).** The same durability
-  argument makes a gap across lanes, and a damaged batch followed by a later
-  batch of the same lane (two batches in flight), ordinary residue of a crash
-  under load: no flush covering the later records was acknowledged. Until
-  the flushed watermark is in the journal format (maintainer decision of
-  2026-11-14, pending the `FREEZE.md` re-sign), `refuse` still refuses those
-  shapes, so it is meant for **single-queue volumes or setups that run
-  `fsck` after every crash**; `wipe` stays the default. With the watermark,
-  recovery refuses only damage or a gap at or below the highest flushed
-  `write_seq` a surviving record witnessed, and treats everything above it
-  as residue.
+- **What `on_journal_damage = refuse` refuses: the flushed watermark
+  (maintainer, 2026-11-14, after the M12a re-review; the record layout part
+  re-signed in `FREEZE.md` on 2026-11-14).** Every journal record carries
+  `flushed`, the highest `write_seq` a completed group flush had made durable
+  on every lane when the record was appended (on-disk-formats §5.2).
+  Recovery reports the highest value any surviving record carries. A FLUSH
+  or FUA completes only after the group flush covering it has written and
+  `fdatasync`ed every lane's records up to its `upto`, so every record at or
+  below the watermark was durable before a later record witnessed it:
+  - a gap at or below the watermark, or a damaged range whose next valid
+    record in its lane is at or below it, is loss of durable data, and
+    `refuse` refuses it (the volume stays offline for `fsck`);
+  - a `write_seq` found twice (a wipe that did not happen) is never residue
+    and is refused at any watermark;
+  - everything above the watermark is treated as crash residue, whatever its
+    shape: a torn last record, a gap across lanes (a record still in its
+    lane's open batch at a kill while another lane's later record landed), a
+    torn batch followed by a later batch of the same lane (two batches in
+    flight). It is logged at warn and wiped, with every record after the
+    first gap;
+  - a ring file left by a reinitialisation interrupted between its header
+    write and its rename (valid header of a higher ordinal, zero body) is
+    not damage (on-disk-formats §5.1): a kill during journal reclaim opens.
+  This replaces the rule of 2026-11-13 (refuse on any gap or any damage with
+  a later record), which refused ordinary crashes of multi-queue volumes.
+  **Marks close the unwitnessed window (maintainer, 2026-11-14, review M2;
+  the format part, kind 3 and the mark ring, is pending the `FREEZE.md`
+  re-sign).** A completed flush is witnessed only by a record appended after
+  it completed; without one, every record above the highest surviving
+  watermark (after a burst, one FLUSH and no later write, the whole burst)
+  would read as residue under medium damage. So the flush coordinator
+  writes a witness itself: when no later group flush makes a record
+  carrying the watermark durable within the idle delay (default 50 ms), it
+  appends a **mark** (record kind 3, 64 bytes, no data) carrying the
+  watermark to its own mark ring `m00-<ordinal>.j` and syncs it. A mark
+  takes the next `write_seq`, so it leaves no gap; recovery counts it for
+  contiguity and the watermark and never hands it to the engine (it changes
+  no block); at most one mark per group flush that raised the watermark, and
+  a metric counts them. No mark is written for a watermark the last durable
+  cut covers (a clean attach takes no number, so an idle volume still cuts
+  nothing). With the mark ring full the mark is retried once reclaim frees a
+  file. The window that remains is a crash within the idle delay, a full
+  mark ring until reclaim frees a file, and `mark_idle = None`: the last
+  flush is then unwitnessed, and medium damage to its records reads as
+  crash residue and is wiped with every record after it (a crash alone
+  cannot damage them). Costs accepted: a failed mark write poisons the
+  journal (its number is taken); the mark's write and `fdatasync` run on
+  the flush coordinator, so a FLUSH arriving meanwhile waits for one more
+  sync; and a damaged durable mark below the watermark is refused under
+  `refuse` but under `wipe` takes the acknowledged records after it,
+  although the mark held no data (bridging such a gap in the mark ring is a
+  possible later change). Inside that window the rule is weaker
+  than the rule of 2026-11-13, which refused any records beyond a gap;
+  everywhere else it is stronger, since damage to a flushed record with no
+  later record in its lane is refused too. A lost or torn mark is residue.
 - **Resync after damage (maintainer, 2026-11-12, M1.A0 review).** On a
   header or CRC failure at `p` the reader does not end the lane: it scans
   forward from `p + 8` in 8-byte steps for the next header that passes

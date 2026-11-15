@@ -362,6 +362,7 @@ fn guest_data_that_imitates_a_record_is_not_accepted_by_resync() {
                 len: 1,
                 gen: g,
                 off,
+                flushed: WriteSeq(0),
             },
             data: &[0xAB; 4096],
         }

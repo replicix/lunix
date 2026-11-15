@@ -311,7 +311,10 @@ needing the re-sign of [FREEZE.md](../../crates/lunix-format/FREEZE.md).
 
 The journal is local, plaintext (ADR-11 F11) and checksummed, not
 authenticated. A lane owns a ring of preallocated, zero-filled 64 MiB files
-`journal/q<lane:02x>-<ordinal:08x>.j`, opened `O_DIRECT`.
+`journal/q<lane:02x>-<ordinal:08x>.j`, opened `O_DIRECT`. The flush
+coordinator owns one more ring, the **mark ring** `journal/m00-<ordinal:08x>.j`
+(amendment 2026-11-14 (b), pending re-sign), which holds only marks
+([§5.2](#52-record-header-64-bytes), [§5.3](#53-batch-packing-and-how-a-reader-finds-records)).
 
 ### 5.1 Journal file header (block 0)
 
@@ -322,7 +325,7 @@ the file is initialised; records start at offset 4096.
 |---|---|---|---|---|---|
 | `magic` | 0 | 8 | bytes | `"LUNIXJNL"` | |
 | `ver` | 8 | 2 | u16 | 1 | |
-| `lane` | 10 | 2 | u16 | 0 ..= 255 | equals the `<lane>` of the file name |
+| `lane` | 10 | 2 | u16 | 0 ..= 255 | equals the `<lane>` of the file name; 0 in a mark ring file |
 | `ordinal` | 12 | 4 | u32 | ≥ 1 | equals the `<ordinal>` of the file name; rises each time the lane takes a file into use |
 | `volume_uuid` | 16 | 16 | bytes | the volume's uuid | |
 | `generation` | 32 | 8 | u64 | ≠ 0 | a fresh random value each time the file is (re)initialised; never visible to the guest |
@@ -335,8 +338,25 @@ File length: exactly 64 MiB (67 108 864 bytes). **Reinitialising a file**
 with the next ordinal and a new `generation`, `fdatasync`, rename to the new
 name, directory `fsync`. A file whose header is valid is therefore zero
 beyond its last write. A file whose header fails its CRC or does not match
-its name (a crash during reinitialisation) holds no valid records and is
-reinitialised again at open. **Authenticated by:** nothing (checksum only).
+its name holds no valid records and is reinitialised again at open. When
+the header is a valid header of the same lane and volume with a higher
+ordinal than the name and everything from byte 4096 on is zero, the file is
+a reinitialisation interrupted between its header write and its rename: it
+held no record since its zeroing was synced, and recovery does not report
+it as damage. Any other such file is reported as a damaged range (fsck, and
+`on_journal_damage` below). **Authenticated by:** nothing (checksum only).
+
+**Mark ring files** (amendment 2026-11-14 (b), pending re-sign):
+`m00-<ordinal:08x>.j`, the same header with `lane` 0, 1 MiB each in phase 1
+(a reader takes any length that is a multiple of 4096), four files per
+journal. They hold only marks, one per 4 KiB block (the mark at offset
+`4096 · k`, the rest of the block zero), written and `fdatasync`ed one at a
+time by the flush coordinator, never by a lane. They are reinitialised,
+reported (lane id `u16::MAX` in a damaged range) and recovered like a lane's
+files; the checkpoint's lane tails do not cover them, and recovery always
+reads them whole. Reclaim reinitialises a mark file once every mark in it is
+at or below the cut. The header is a lane-0 header: only the name (`m00-`
+against `q00-`) tells a mark file from lane 0's.
 
 ### 5.2 Record header (64 bytes)
 
@@ -344,17 +364,17 @@ reinitialised again at open. **Authenticated by:** nothing (checksum only).
 |---|---|---|---|---|---|
 | `magic` | 0 | 4 | bytes | `"LXJR"` | a zero `u32` here means "no record" ([§5.3](#53-batch-packing-and-how-a-reader-finds-records)) |
 | `ver` | 4 | 1 | u8 | 1 | |
-| `kind` | 5 | 1 | u8 | 1 `write`, 2 `hole` | `hole` = DISCARD or WRITE_ZEROES |
+| `kind` | 5 | 1 | u8 | 1 `write`, 2 `hole`, 3 `mark` | `hole` = DISCARD or WRITE_ZEROES; `mark` = a witness of the flushed watermark (amendment 2026-11-14 (b), pending re-sign): only in the mark ring, changes no block |
 | reserved | 6 | 2 | | zero | |
 | `write_seq` | 8 | 8 | u64 | ≥ 1 | strictly increasing within a lane, across its files in ordinal order |
 | `epoch` | 16 | 8 | u64 | 0 in phase 1 | the owner epoch (D7) |
-| `lba` | 24 | 8 | u64 | `lba + len` ≤ device size in blocks | in 4096-byte **blocks** |
-| `len` | 32 | 4 | u32 | `write`: 1 ..= 256; `hole`: 1 ..= 2^32 − 1 | in 4096-byte blocks; a write is at most 1 MiB (`max_sectors`) |
+| `lba` | 24 | 8 | u64 | `lba + len` ≤ device size in blocks; `mark`: 0 | in 4096-byte **blocks** |
+| `len` | 32 | 4 | u32 | `write`: 1 ..= 256; `hole`: 1 ..= 2^32 − 1; `mark`: 0 | in 4096-byte blocks; a write is at most 1 MiB (`max_sectors`) |
 | `crc32c` | 36 | 4 | u32 | see below | |
 | `gen` | 40 | 8 | u64 | the container generation | journal: the file header's `generation`; memfd sink: the buffer generation; DELTA: 0 |
 | `off` | 48 | 8 | u64 | the record's own offset | journal: byte offset of this header in the file; memfd: offset in the ring; DELTA: offset in the decoded records region |
-| reserved | 56 | 8 | | zero | |
-| data | 64 | `len × 4096` for `write`, 0 for `hole` | bytes | | the written data |
+| `flushed` | 56 | 8 | u64 (`WriteSeq`) | `< write_seq` | the flushed watermark (amendment 2026-11-14, re-signed 2026-11-14): the highest `write_seq` a completed group flush had made durable on every lane when the record was appended (after a restart, the last recovered record once the first lane open synced them); 0 when none is known; DELTA and memfd: 0. In a `mark`, the watermark it witnesses |
+| data | 64 | `len × 4096` for `write`, 0 for `hole` and `mark` | bytes | | the written data |
 
 `crc32c` = `crc32c(header bytes 0..64 with the crc32c field set to zero ‖
 data)`. The record occupies `align8(64 + data length)` bytes; with v1 record
@@ -396,15 +416,20 @@ for each file of the lane, in ordinal order (a file whose header is invalid hold
             if found: report the damaged range [p, q); p = q; continue
             else: report [p, file length); next file
 
-valid(q) = u32 at q is "LXJR", ver = 1, kind in {1, 2}, reserved = 0,
-           gen = the file's generation, off = q, len in range,
+valid(q) = u32 at q is "LXJR", ver = 1, kind in {1, 2, 3}, reserved = 0,
+           gen = the file's generation, off = q, len in range
+           (a mark: len = 0 and lba = 0),
            q + 64 + data length ≤ file length, crc32c matches,
-           write_seq > prev_write_seq (the last record accepted in this lane)
+           write_seq > prev_write_seq (the last record accepted in this lane),
+           flushed < write_seq
 ```
 
-After every lane has been read, recovery keeps records with `write_seq >
-floor`, merges the lanes by `write_seq` and stops at the first gap (DESIGN
-§4.1). A damaged record above the floor is a missing `write_seq`, so the
+After every lane and the mark ring have been read, recovery keeps records
+with `write_seq > floor`, merges them by `write_seq` and stops at the first
+gap (DESIGN §4.1). A mark fills its `write_seq` for this contiguity and
+counts for the watermark, but it is not handed to the engine: it changes no
+block. A record of the wrong kind for its ring (kind 3 in a lane file, kind
+1 or 2 in a mark file) is damage, never a record. A damaged record above the floor is a missing `write_seq`, so the
 merge stops exactly where D12 stopped before; a damaged record at or below
 the floor costs nothing, because the records after it in the lane are still
 read. Valid records after the first gap are ignored and reported
@@ -442,19 +467,69 @@ A stale record (one from a previous pass of the ring) cannot survive
 reinitialisation; if one did, its `gen` differs and the reader resyncs past
 it.
 
-The reserved bytes 56-63 of the record header stay reserved: a separate
-header-only CRC (which would let fsck name the `write_seq` and `len` of a
-record whose data is damaged) was offered as optional by the A0 review and
-is not taken; the resync rule does not need it.
+Bytes 56-63 of the record header hold the flushed watermark (amendment of
+2026-11-14). A separate header-only CRC (which would let fsck name the
+`write_seq` and `len` of a record whose data is damaged), offered as optional
+by the A0 review, is not taken; the resync rule does not need it.
+
+**The flushed watermark at recovery** (amendment 2026-11-14, re-signed
+2026-11-14). Recovery reports `flushed`, the highest watermark of any record it
+accepted. Every record with `write_seq` at or below it was on stable
+storage, on every lane, before a record carrying it was written (a group
+flush completes only after every lane's records up to its `upto` are
+written and every touched file is `fdatasync`ed). So a gap (the first
+missing `write_seq`) or a damaged range whose next valid record in its lane
+is at or below `flushed` is the loss of durable data, and
+`on_journal_damage = refuse` refuses it; anything above `flushed` (a torn
+last record, a gap across lanes from a record still in its lane's open
+batch, a torn batch followed by a later batch of the same lane) is crash
+residue: logged and wiped, with every record after the first gap. A
+`write_seq` found in two valid records stops recovery like a gap but is
+never residue (a wipe did not happen); `refuse` refuses it at any
+watermark. An interrupted reinitialisation (§5.1) is not damage.
+
+**Marks: every flush gets a witness** (amendment 2026-11-14 (b), pending
+re-sign). A completed flush is witnessed only by a record appended after it
+completed. A record appended after the watermark rose to `W` carries at
+least `W`; every number above the counter at the rise belongs to such a
+record, so the first later group flush whose `upto` is above that counter
+makes a witness of `W` durable. When no such group completes within the
+idle delay (default 50 ms, configurable), the flush coordinator appends a
+**mark** carrying `W` to the mark ring and `fdatasync`s it: at most one mark
+per group flush that raised the watermark, written only while no flush is
+queued, none for a watermark at or below the last durable cut (a cut inside
+the idle delay cancels it) and none for a group whose only new number is the
+last mark. The mark takes the next `write_seq` from the journal's counter,
+so it leaves no gap; a mark that fails to be written poisons the journal at
+its number, as a failed append does. The mark is a synchronous write and
+`fdatasync` on the coordinator thread: a FLUSH arriving meanwhile waits for
+it. After a restart the recovered records, synced by the first lane open,
+are witnessed the same way when any lie above the floor (a clean attach
+takes no number). With the ring full the mark is retried as soon as reclaim
+frees a mark file; the skipped watermarks are counted and logged.
+
+The remaining window: a crash within the idle delay, before the mark is
+durable, leaves the last flush unwitnessed; so does a full mark ring until
+reclaim frees a file, and `mark_idle = None`. Medium damage to its records is
+then indistinguishable from crash residue and is wiped with every record
+after it; a crash alone cannot damage them, since they were durable. A lost
+or torn mark is a missing number above the watermark the surviving records
+carry: crash residue. A damaged mark below the watermark is loss like
+damage in a lane: `refuse` refuses it (recovery cannot prove the missing
+number was a mark), and under `wipe` the acknowledged records after it are
+wiped although the mark held no data. That cost is accepted for now
+(ADR-4).
 
 ### 5.4 Reuse of the framing
 
 - **DELTA inline records** ([§10.4](#104-delta-body-kind-2)): the decoded
   records region holds records back to back at 8-byte-aligned offsets with
-  no padding and no zero magic; `gen` = 0, `off` = offset in the region; the
-  region ends at its length.
+  no padding and no zero magic; `gen` = 0, `off` = offset in the region,
+  `flushed` = 0 (the strict decoder rejects any other value), never a
+  `mark` (rejected); the region ends at its length.
 - **memfd write buffer** (ADR-26, phase 3): the same record header; `gen` is
-  the buffer generation of the keeper-held header, `off` the ring offset.
+  the buffer generation of the keeper-held header, `off` the ring offset;
+  never a `mark`.
   The buffer header itself is defined in phase 3 (it is not a phase 1
   freeze item).
 

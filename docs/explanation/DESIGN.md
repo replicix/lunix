@@ -301,28 +301,35 @@ journal):
        **before** the first `open_lane`, and a mount option chooses
        `on_journal_damage = wipe` (default, availability first) or `refuse`
        (the volume stays offline for `fsck`, which reads but never opens a
-       lane). `refuse` applies to mid-journal damage only: a damaged range
-       with a later valid record in its lane, or valid records beyond the
-       first gap. A torn last record of a lane with nothing valid after it
-       is the residue of a crash during an unflushed batch and is logged and
-       wiped: a record acknowledged by a FLUSH or FUA is durable (`fdatasync`
-       of its lane file in the group flush) before the acknowledgement, so a
-       crash cannot tear it (ADR-4). Until the flushed watermark is in the
-       journal format, `refuse` also refuses a gap across lanes and a
-       damaged batch followed by a later one, which a crash under load
-       leaves too: use it for single-queue volumes or with `fsck` after
-       every crash (ADR-4, interim limit). A clean restart writes nothing to
-       the journal.
+       lane). `refuse` applies to loss of durable data only, as the flushed
+       watermark shows it: every record carries the highest `write_seq` a
+       completed group flush had made durable (on-disk-formats §5.2), and
+       recovery reports the highest one found. A gap or damage at or below
+       it is refused, and so is a `write_seq` found twice; everything above
+       it (a torn last record, a gap across lanes, a torn batch followed by
+       a later one) is treated as crash residue, logged and wiped (ADR-4).
+       A flush is witnessed only by a record appended after it completed,
+       so the flush coordinator appends a mark (record kind 3, no data, a
+       `write_seq` of its own) to its mark ring `m00-<ordinal>.j` when no
+       later flush made a witness durable within the idle delay (default
+       50 ms); marks count for contiguity and the watermark and never reach
+       the overlay or the map. The window that remains is a crash within the
+       idle delay, where medium damage to the last flush's records reads as
+       residue and is wiped with every record after it (ADR-4,
+       on-disk-formats §5.3). A ring file left by an interrupted
+       reinitialisation is not damage (on-disk-formats §5.1). A clean
+       restart writes nothing to the lanes; the coordinator may write one
+       mark witnessing the recovered records.
   3. Merge the lanes by `write_seq` and accept records in contiguous
      order. This global contiguity, not file position, decides what is
      kept, so resync is safe: a damaged record at or below the floor costs
      nothing, and a damaged record above it is a missing `write_seq` and
      stops recovery exactly where step 4 says.
   4. Stop at the first gap or torn record and ignore everything after it.
-     A torn tail is legal, because those writes were never flushed. No
-     marker of the last flushed `write_seq` exists on disk, and none is
-     added; `fsck` reports valid records beyond the first gap as a warning
-     with their `write_seq` range.
+     A torn tail is legal, because those writes were never flushed. The
+     only marker of the last flushed `write_seq` is the watermark later
+     records carry (step 2); `fsck` reports valid records beyond the first
+     gap as a warning with their `write_seq` range.
   - The checkpoint's per-lane tails only say which files may be skipped. A
     lost or stale checkpoint changes the cost of recovery, not its result.
     The tails are used only if the checkpoint's `last_commit_seq` is at
@@ -418,9 +425,10 @@ Recovery is idempotent: a crash during it is another recovery.
 7. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1).
    `ignored_after_gap` and `damaged` are logged before any lane is opened,
    and `on_journal_damage = refuse` stops the open here with a typed error
-   when the damage is mid-journal (a later valid record in the lane, or
-   records beyond the gap); a torn last record of a lane is crash residue,
-   logged and wiped (§4.1). The stale-tail wipe has not run yet. Rebuild the overlay from
+   when a gap or damage lies at or below the flushed watermark, or a
+   `write_seq` is found twice (§4.1); anything above it is treated as crash
+   residue, logged and wiped (after the mark idle delay every flush is
+   witnessed; ADR-4). Marks are not among the records. The stale-tail wipe has not run yet. Rebuild the overlay from
    the records and set the next `write_seq`.
 8. Raise the local floor to the tip when it is absent or lower, and
    charge the space ledger with the bytes found. Lanes are opened after

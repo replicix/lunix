@@ -59,7 +59,10 @@ fn fail(msg: String) -> TestCaseError {
 impl Model {
     fn new(cs: u32, seed: u64) -> Self {
         let chunks = 8;
-        let vol = Vol::create(cs, chunks, 2, JournalMode::Mixed(seed));
+        let mut vol = Vol::create(cs, chunks, 2, JournalMode::Mixed(seed));
+        // Half the workloads run with journal marks: write_seq numbers the
+        // engine never issued, interleaved with its own.
+        vol.marks = seed % 2 == 1;
         let run = vol.open().map_err(|e| e.0).expect("open");
         let size = chunks * u64::from(cs);
         Self {

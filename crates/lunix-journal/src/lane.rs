@@ -530,6 +530,8 @@ impl JournalLane for FileLane {
         let well_formed = match kind {
             RecordKind::Write => (1..=lunix_format::journal::MAX_WRITE_BLOCKS).contains(&blocks),
             RecordKind::Hole => blocks >= 1,
+            // Marks are the flush coordinator's, written to the mark ring.
+            RecordKind::Mark => false,
         };
         if !well_formed {
             return Err(Error::invalid("block count out of range"));
@@ -594,7 +596,7 @@ impl JournalLane for FileLane {
         };
         let want = match o.kind {
             RecordKind::Write => o.blocks as usize * 4096,
-            RecordKind::Hole => 0,
+            RecordKind::Hole | RecordKind::Mark => 0,
         };
         if data.len() != want || lba.checked_add(u64::from(o.blocks)).is_none() {
             return Err(self.abort(&o, Error::invalid("data does not match the slot")));
@@ -618,6 +620,15 @@ impl JournalLane for FileLane {
                 len: o.blocks,
                 gen: o.gen,
                 off: o.file_off,
+                // A flush covering this record cannot complete before the
+                // record is written, so the watermark is below its number;
+                // the clamp only guards that invariant.
+                flushed: WriteSeq(
+                    self.sh
+                        .flushed
+                        .load(Ordering::Acquire)
+                        .min(o.seq.saturating_sub(1)),
+                ),
             },
             data,
         };

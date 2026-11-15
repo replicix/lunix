@@ -132,7 +132,7 @@ impl JournalLane for Lane {
     }
 
     fn try_reserve(&mut self, kind: RecordKind, blocks: u32) -> Result<SlotOutcome> {
-        if blocks == 0 || (kind == RecordKind::Write && blocks > 256) {
+        if blocks == 0 || kind == RecordKind::Mark || (kind == RecordKind::Write && blocks > 256) {
             return Err(Error::invalid("bad record length"));
         }
         let mut st = lock(&self.state);
@@ -174,7 +174,7 @@ impl JournalLane for Lane {
         }
         let want = match slot.kind {
             RecordKind::Write => slot.blocks as usize * 4096,
-            RecordKind::Hole => 0,
+            RecordKind::Hole | RecordKind::Mark => 0,
         };
         if data.len() != want {
             poison(&mut st, slot.write_seq.0);
@@ -325,6 +325,8 @@ impl Journal for TJournal {
             ignored_after_gap: ignored,
             gap_at,
             damaged: Vec::new(),
+            flushed: WriteSeq(0),
+            duplicate: None,
         })
     }
 

@@ -449,6 +449,13 @@ fn the_crash_model_produces_gaps_and_damage_and_recovery_copes() {
         let r = j2.recover(None, WriteSeq(0)).expect("recover");
         let got = seqs(&r);
         assert!(got.len() >= 2, "flushed records survive (seed {seed})");
+        // Records 3-8 witness the recovered 1-2; nothing below that is lost.
+        assert!(
+            r.flushed == WriteSeq(2) || r.flushed == WriteSeq(0),
+            "seed {seed}: {:?}",
+            r.flushed
+        );
+        assert!(r.gap_at.is_none_or(|g| g > r.flushed), "seed {seed}");
         assert_eq!(got, (1..=got.len() as u64).collect::<Vec<_>>());
         assert_eq!(r.next_seq, WriteSeq(got.len() as u64 + 1));
         match (r.ignored_after_gap, r.gap_at) {
@@ -585,6 +592,16 @@ fn random_workloads_keep_everything_a_completed_flush_covered() {
             got.len() as u64 >= flushed,
             "seed {seed}: {} < {flushed}",
             got.len()
+        );
+        // The watermark never claims more than a completed flush, and
+        // nothing at or below it is ever lost.
+        assert!(r.flushed.0 <= flushed, "seed {seed}");
+        assert!(r.gap_at.is_none_or(|g| g > r.flushed), "seed {seed}");
+        assert!(
+            r.damaged
+                .iter()
+                .all(|d| d.next_seq.is_none_or(|n| n > r.flushed)),
+            "seed {seed}"
         );
         assert_eq!(
             got,

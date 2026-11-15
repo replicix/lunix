@@ -14,12 +14,12 @@ pub enum OnJournalDamage {
     /// Log and continue; the first `open_lane` wipes (availability first).
     #[default]
     Wipe,
-    /// Refuse to open, so `fsck` can read the journal untouched, when the
-    /// damage is mid-journal: a damaged range with a later valid record in
-    /// its lane, or valid records beyond the first gap. A torn last record of
-    /// a lane with nothing valid after it is crash residue of a write never
-    /// acknowledged as durable (a flushed or FUA record is on stable storage
-    /// before its acknowledgement); it is logged and wiped as under `Wipe`.
+    /// Refuse to open, so `fsck` can read the journal untouched, when a gap
+    /// or damage lies at or below the flushed watermark (a durable record is
+    /// gone or damaged). Everything above the watermark (a torn last record,
+    /// a gap across lanes, a torn batch followed by a later one) is crash
+    /// residue of writes no acknowledged flush covered; it is logged and
+    /// wiped as under `Wipe` (ADR-4, maintainer decision of 2026-11-14).
     Refuse,
 }
 

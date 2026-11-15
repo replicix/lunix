@@ -1,5 +1,7 @@
 //! Recovery: scan every ring file with the normative reader, merge the lanes
-//! by `write_seq`, stop at the first gap, and plan how each lane resumes.
+//! and the mark ring by `write_seq`, stop at the first gap, and plan how each
+//! ring resumes. Marks count for contiguity and for the flushed watermark but
+//! are not handed to the caller as records.
 //!
 //! # Why recovery also plans a wipe
 //!
@@ -18,12 +20,13 @@ use std::ops::Range;
 use lunix_format::journal::{scan_file, RecordKind};
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
+use lunix_iface::journal::MARK_RING_LANE;
 use lunix_iface::journal::{
     DamagedRange, JournalLoc, LaneId, RecordInfo, Recovered, RecoveredRecord, WriteSeqRange,
 };
 use lunix_iface::{Error, Result};
 
-use crate::ring::{io_err, lock, Rings, Role};
+use crate::ring::{io_err, lock, LaneRing, RingKind, Rings, Role};
 use crate::sys::{self, B};
 
 /// One accepted record of a scanned file.
@@ -35,6 +38,8 @@ struct ScRec {
     blocks: u32,
     off: u64,
     enc: u64,
+    /// The record's flushed watermark.
+    flushed: u64,
 }
 
 #[derive(Debug, Default)]
@@ -43,6 +48,10 @@ struct ScannedFile {
     ordinal: u32,
     len: u64,
     bad: bool,
+    /// A bad file that is an interrupted re-initialisation: a valid header
+    /// for a higher ordinal over a zero body. It held no record since its
+    /// zeroing was synced, so it is not damage.
+    reinit: bool,
     skipped: bool,
     recs: Vec<ScRec>,
     damaged: Vec<Range<u64>>,
@@ -76,6 +85,12 @@ pub(crate) struct LanePlan {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Plan {
     pub lanes: Vec<LanePlan>,
+    /// The mark ring.
+    pub marks: LanePlan,
+    /// The highest watermark carried by a record that survives the wipe
+    /// (numbered below `next_seq`): what is still witnessed on disk once the
+    /// first lane open has run.
+    pub kept_flushed: u64,
 }
 
 /// The scan could not use the hint (it skipped the file the lane must resume
@@ -110,26 +125,21 @@ impl From<Error> for RunErr {
     }
 }
 
-fn scan_lane(
-    rings: &Rings,
-    lane: usize,
-    tail: Option<u32>,
-) -> std::result::Result<Vec<ScannedFile>, Error> {
-    let ring = &rings.lanes[lane];
-    let mut order: Vec<(usize, u32, bool)> = {
+fn scan_ring(ring: &LaneRing, tail: Option<u32>) -> std::result::Result<Vec<ScannedFile>, Error> {
+    let mut order: Vec<(usize, u32, bool, bool)> = {
         let inner = lock(&ring.inner);
         inner
             .slots
             .iter()
             .enumerate()
-            .map(|(i, s)| (i, s.ordinal, s.bad))
+            .map(|(i, s)| (i, s.ordinal, s.bad, s.reinit))
             .collect()
     };
-    order.sort_by_key(|&(_, o, _)| o);
+    order.sort_by_key(|&(_, o, _, _)| o);
     let highest_valid = order.iter().rev().find(|e| !e.2).map(|e| e.0);
     let mut out = Vec::with_capacity(order.len());
     let mut prev = 0u64;
-    for (slot, ordinal, bad) in order {
+    for (slot, ordinal, bad, reinit) in order {
         let file = &ring.files[slot].file;
         let len = floor4k_len(file.metadata().map_err(io_err)?.len());
         let mut sf = ScannedFile {
@@ -141,6 +151,18 @@ fn scan_lane(
         };
         if bad || len < B {
             sf.bad = true;
+            // `reinit_slot` syncs the zeroed body before it writes the new
+            // header, so a re-initialisation interrupted before its rename
+            // leaves a zero body; anything else in the file is damage.
+            if reinit && len >= B {
+                let buf = sys::read_aligned(
+                    file,
+                    0,
+                    usize::try_from(len).map_err(|_| Error::invalid("file length"))?,
+                )
+                .map_err(io_err)?;
+                sf.reinit = sys::nonzero_end(buf.as_slice()) == B;
+            }
             out.push(sf);
             continue;
         }
@@ -159,8 +181,18 @@ fn scan_lane(
         match scan_file(buf.as_slice(), WriteSeq(prev)) {
             Err(_) => sf.bad = true,
             Ok(res) => {
+                let mut wrong_kind: Vec<Range<u64>> = Vec::new();
                 for r in &res.records {
                     prev = r.header.write_seq.0;
+                    // Marks live only in the mark ring, writes and holes only
+                    // in lane files (on-disk-formats §5.3): a record of the
+                    // other kind is damage, never a record.
+                    let is_mark = r.header.kind == RecordKind::Mark;
+                    if is_mark != (ring.kind == RingKind::Mark) {
+                        let off = r.header.off;
+                        wrong_kind.push(off..off + r.encoded_len() as u64);
+                        continue;
+                    }
                     sf.recs.push(ScRec {
                         seq: prev,
                         kind: r.header.kind,
@@ -168,13 +200,16 @@ fn scan_lane(
                         blocks: r.header.len,
                         off: r.header.off,
                         enc: r.encoded_len() as u64,
+                        flushed: r.header.flushed.0,
                     });
                 }
                 sf.damaged = res
                     .damaged
                     .iter()
                     .map(|d| d.start as u64..d.end as u64)
+                    .chain(wrong_kind)
                     .collect();
+                sf.damaged.sort_by_key(|d| d.start);
                 sf.nz_end = sys::nonzero_end(buf.as_slice());
             }
         }
@@ -194,20 +229,34 @@ fn run(
 ) -> std::result::Result<(Recovered, Plan), RunErr> {
     let floor = floor.0;
     let nl = rings.lanes.len();
-    let mut scans: Vec<Vec<ScannedFile>> = Vec::with_capacity(nl);
-    for lane in 0..nl {
+    // The queue lanes, then the mark ring (never skipped: it is small).
+    let mut scans: Vec<Vec<ScannedFile>> = Vec::with_capacity(nl + 1);
+    for (lane, ring) in rings.lanes.iter().enumerate() {
         let tail = hint.and_then(|h| h.lane_tail_ordinals.get(lane)).copied();
-        scans.push(scan_lane(rings, lane, tail)?);
+        scans.push(scan_ring(ring, tail)?);
     }
+    scans.push(scan_ring(&rings.marks, None)?);
+    let lane_of = |i: usize| -> u16 {
+        if i < nl {
+            i as u16
+        } else {
+            MARK_RING_LANE.0
+        }
+    };
 
     // Damage, with the lane's neighbours for fsck.
     let mut damaged = Vec::new();
     for (lane, files) in scans.iter().enumerate() {
-        let lane_id = LaneId(lane as u16);
+        let lane_id = LaneId(lane_of(lane));
         let mut last_seq = 0u64;
         let mut open: Vec<usize> = Vec::new();
         for f in files {
             if f.skipped {
+                continue;
+            }
+            if f.reinit {
+                // An interrupted re-initialisation (reclaim, or a bad file
+                // at open): no record was lost, nothing to report.
                 continue;
             }
             if f.bad {
@@ -256,6 +305,17 @@ fn run(
         }
     }
 
+    // The flushed watermark: the highest any surviving record witnessed.
+    // Every record at or below it was durable on every lane before that
+    // record was written, so a gap at or below it is real loss and a gap
+    // above it is crash residue (ADR-4, 2026-11-14).
+    let watermark = scans
+        .iter()
+        .flatten()
+        .flat_map(|f| f.recs.iter().map(|r| r.flushed))
+        .max()
+        .unwrap_or(0);
+
     // Merge by write_seq, stop at the first gap (or duplicate).
     struct Cand {
         seq: u64,
@@ -270,7 +330,7 @@ fn run(
                 if r.seq > floor {
                     all.push(Cand {
                         seq: r.seq,
-                        lane: lane as u16,
+                        lane: lane_of(lane),
                         ordinal: f.ordinal,
                         rec: *r,
                     });
@@ -283,9 +343,12 @@ fn run(
     let mut records = Vec::new();
     let mut ignored: Option<WriteSeqRange> = None;
     let mut gap_at = None;
+    let mut duplicate = None;
     for c in &all {
         match &mut ignored {
             Some(range) => range.last = WriteSeq(c.seq),
+            // A mark fills its number; it changes no block.
+            None if c.seq == expected && c.rec.kind == RecordKind::Mark => expected += 1,
             None if c.seq == expected => {
                 records.push(RecoveredRecord {
                     record: RecordInfo {
@@ -303,6 +366,9 @@ fn run(
                 expected += 1;
             }
             None => {
+                if c.seq < expected {
+                    duplicate = Some(WriteSeq(c.seq));
+                }
                 gap_at = Some(WriteSeq(expected));
                 ignored = Some(WriteSeqRange {
                     first: WriteSeq(c.seq),
@@ -313,12 +379,21 @@ fn run(
     }
     let next_seq = expected;
 
-    // Plan each lane.
+    // Plan each lane and the mark ring.
     let mut plan = Plan::default();
-    for files in &scans {
+    for files in &scans[..nl] {
         plan.lanes
             .push(plan_lane(files, floor, next_seq, rings.file_len)?);
     }
+    plan.marks = plan_lane(&scans[nl], floor, next_seq, rings.marks.file_len)?;
+    plan.kept_flushed = scans
+        .iter()
+        .flatten()
+        .flat_map(|f| f.recs.iter())
+        .filter(|r| r.seq < next_seq)
+        .map(|r| r.flushed)
+        .max()
+        .unwrap_or(0);
     Ok((
         Recovered {
             records,
@@ -326,6 +401,8 @@ fn run(
             ignored_after_gap: ignored,
             gap_at,
             damaged,
+            flushed: WriteSeq(watermark),
+            duplicate,
         },
         plan,
     ))

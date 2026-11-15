@@ -15,12 +15,30 @@
 - Flush coordinator: one thread, its own ring; waits for every lane's pending set to clear
   below `upto`, then fdatasyncs every dirty file in parallel. Poison = lowest failed or
   abandoned `write_seq`; flushes at or above it fail.
+- Flushed watermark (on-disk-formats §5.2, amendment re-signed 2026-11-14): a completed group flush
+  raises `Shared::flushed` to its `upto`; every record appended carries it (bytes 56-63). `prepare` raises it
+  to the last recovered record once those are synced. Recovery reports the highest watermark found
+  (`Recovered::flushed`), so the engine refuses only gaps or damage at or below it, and a
+  `write_seq` found twice (`Recovered::duplicate`). `submit_group_flush` clamps `upto` to
+  `last_issued()`, so no watermark names an unwritten number.
+- Marks (on-disk-formats §5.1 and §5.3, amendment 2026-11-14 (b), pending re-sign): after a group flush
+  that raised the watermark, unless a later group with `upto` above the counter at the raise completes
+  within `JournalConfig::mark_idle` (default 50 ms; `None` disables), the coordinator appends one mark
+  (kind 3, 64 bytes in its own 4 KiB block) carrying the watermark to the mark ring `m00-<ordinal>.j`
+  (4 files of 1 MiB) and `fdatasync`s it; also once after `prepare` when records above the floor were
+  recovered. No mark for a watermark at or below the last cut asked for (`tail_after`), none for a group
+  whose only new number is the last mark. The mark takes the next `write_seq`; a failed mark poisons at its
+  number. With the ring full the mark is retried (reclaim of a mark file wakes it); a warning is logged once
+  per episode. `FileJournal::marks_written()` and `marks_skipped()` (watermarks skipped) are the metrics;
+  exporting them from `lunixd` is a follow-up. Recovery treats a record of the wrong kind for its ring as
+  damage. Lanes cannot reserve kind 3.
 - Recovery (`scan.rs`): normative reader `lunix_format::journal::scan_file` per file, merge,
   stop at the first gap or duplicate. It also plans a **wipe**: everything a lane holds after
   its last record below `next_seq` is zeroed by the first `open_lane` (not by `recover`), so
   stale valid records beyond the stop point cannot return when sequence numbers are reused.
   The wipe, re-initialisation of bad-header files and an fdatasync of every file holding
-  records run there too.
+  records run there too. A file left by an interrupted re-initialisation (valid header of a
+  higher ordinal than its name, zero body) is not reported as damage.
 - Not supported: reducing the lane count over existing files (`Unsupported`); files shorter
   than expected are scanned as they are and fixed on reuse.
 - Tests: `tests/` (contract, model, recovery, flush, align, reclaim, crashpoints with

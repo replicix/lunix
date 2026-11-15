@@ -2,7 +2,9 @@
 //!
 //! [`FileJournal`] implements [`lunix_iface::journal::Journal`] over
 //! preallocated, zero-filled 64 MiB ring files opened `O_DIRECT`, one ring per
-//! ublk queue ("lane"), written through `io_uring`. The `lunix-iface` journal
+//! ublk queue ("lane"), written through `io_uring`, plus a small mark ring the
+//! flush coordinator writes witnesses of the flushed watermark into. The
+//! `lunix-iface` journal
 //! module documentation is the contract; this crate's own decisions are
 //! recorded in the crate README.
 
@@ -18,7 +20,9 @@ mod scan;
 mod shared;
 mod sys;
 
-pub use config::{JournalConfig, TraceEvent, TraceFn, DEFAULT_JOURNAL_MAX, MIN_JOURNAL_MAX};
+pub use config::{
+    JournalConfig, TraceEvent, TraceFn, DEFAULT_JOURNAL_MAX, DEFAULT_MARK_IDLE, MIN_JOURNAL_MAX,
+};
 pub use journal::FileJournal;
 
 use lunix_format::local::CheckpointSlot;
