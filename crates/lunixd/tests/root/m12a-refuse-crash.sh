@@ -39,6 +39,18 @@ for c in $(seq 1 "$CYCLES"); do
   t0=$(date +%s%N)
   start_lunixd || wedged "lunixd did not restart after the kill (cycle $c)"
   say "- restart to ready: $(( ($(date +%s%N) - t0) / 1000000 )) ms"
+  if ! grep -q 'volume recovered at start.*recovered=true' "$DLOG"; then
+    # A refused volume: the device is QUIESCED with fio waiting. Record the finding, then recover with wipe
+    # (the refusing daemon holds no device: SIGTERM is safe), let fio finish, and tear down.
+    fail "cycle $c: the new lunixd did not recover the volume under refuse"
+    grep -h -E 'journal recovery stopped|not recovered at start' "$DLOG" | cut -c1-420 | sed 's/^/    log: /' | tee -a "$R"
+    stop_lunixd || wedged "the refusing lunixd did not exit"
+    sed -i 's/^on_journal_damage = .*/on_journal_damage = "wipe"/' "$ST/lunixd.toml"
+    start_lunixd || wedged "lunixd (wipe) did not start"
+    grep -q 'volume recovered at start.*recovered=true' "$DLOG"; expect "cycle $c: recovery with wipe brings the device back" $?
+    for p in "${PIDS[@]}"; do wait_fio "$p" 180; expect "cycle $c: fio job finished after the wipe recovery (rc $?)" $?; done
+    break
+  fi
   grep -q 'volume recovered at start.*recovered=true' "$DLOG"; expect "cycle $c: the new lunixd opened and recovered the volume under refuse ($(grep -o 'stall_ms=[0-9]*' "$DLOG" | head -1))" $?
   ! grep -q -i 'journal damage\|JournalDamage\|not recovered at start' "$DLOG"; expect "cycle $c: no journal-damage refusal in the log" $?
   grep -h -E 'volume opened|journal recovery stopped|crash residue' "$DLOG" | cut -c1-420 | sed 's/^/    log: /' | tee -a "$R"
