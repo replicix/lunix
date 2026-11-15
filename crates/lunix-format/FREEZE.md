@@ -130,7 +130,7 @@ is crash residue (ADR-4).
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-14 (amendment: journal flushed watermark; merge gated on an independent review and the four-queue kill -9 + refuse cell)
 
-**Amendment 2026-11-14 (b) — pending maintainer re-sign** (maintainer
+**Amendment 2026-11-14 (b)** (maintainer
 decision of 2026-11-14 on finding M2 of the watermark review: close the
 unwitnessed window with a witness; on-disk-formats.md §5 intro, §5.1, §5.2,
 §5.3 and §5.4). Item 2:
@@ -175,4 +175,4 @@ time to drop its compatibility reasoning (maintainer rule of 2026-11-14:
 no backward compatibility while Lunix is in progress); its layout is
 unchanged.
 
-Re-signed by: _pending (the maintainer) — mark ring, kind 3_
+Re-signed by: the maintainer (Attila Nagy) on 2026-11-15 (amendment (b): journal mark ring, record kind 3)
