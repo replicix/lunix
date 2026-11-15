@@ -1,13 +1,22 @@
-//! Process settings of the daemon (DESIGN §3, W7): `mlockall`,
-//! `PR_SET_IO_FLUSHER` and a private mount namespace (libublk issue 50).
+//! Process settings of the daemon (DESIGN §3, W7): the memory-lock check,
+//! `PR_SET_IO_FLUSHER` and a private mount namespace (libublk issue 50), and
+//! the helpers that lock the I/O path's memory.
+//!
+//! The daemon does not `mlockall` (maintainer, 2026-11-15, M12a memory gate):
+//! what must never be paged is locked region by region — every queue's I/O
+//! buffers and its thread stack (here), the journal's batch buffers and flush
+//! thread stack (`lunix-journal`), the key arena (`lunix-crypto`). The rest of
+//! the heap may be paged under memory pressure, which costs latency, not a
+//! deadlock: swap never lives on a device the daemon serves (W7).
 
 use crate::error::Result;
 
 /// Which settings to apply.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Harden {
-    /// `mlockall(MCL_CURRENT | MCL_FUTURE)`: the daemon's own memory is never
-    /// reclaimed through a device it serves.
+    /// Check that this process may lock what the I/O path needs
+    /// (`CAP_IPC_LOCK`, or an unlimited `RLIMIT_MEMLOCK`); the regions
+    /// themselves are locked when they are created.
     pub mlock: bool,
     /// `prctl(PR_SET_IO_FLUSHER)` on the calling thread (queue threads set it
     /// themselves).
@@ -59,10 +68,7 @@ pub fn harden_process(h: Harden) -> Result<()> {
         }
     }
     if h.mlock {
-        // SAFETY: mlockall with constant flags.
-        if unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        check_memlock()?;
     }
     if h.io_flusher {
         const PR_SET_IO_FLUSHER: libc::c_int = 57;
@@ -72,6 +78,123 @@ pub fn harden_process(h: Harden) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Whether this process may lock memory without a byte limit: it has
+/// `CAP_IPC_LOCK` (root has it) or `RLIMIT_MEMLOCK` is unlimited.
+///
+/// # Errors
+/// [`crate::UblkError::Io`] naming `RLIMIT_MEMLOCK` and the current limit.
+pub fn check_memlock() -> Result<()> {
+    let cap_ipc_lock = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            let hex = s
+                .lines()
+                .find(|l| l.starts_with("CapEff:"))?
+                .split_whitespace()
+                .nth(1)?
+                .to_owned();
+            u64::from_str_radix(&hex, 16).ok()
+        })
+        .is_some_and(|caps| caps & (1 << 14) != 0);
+    let mut lim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit writes one `rlimit`.
+    let got = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) } == 0;
+    if cap_ipc_lock || (got && lim.rlim_cur == libc::RLIM_INFINITY) {
+        return Ok(());
+    }
+    Err(std::io::Error::other(format!(
+        "cannot lock the I/O path's memory: no CAP_IPC_LOCK and RLIMIT_MEMLOCK is {} bytes (run as root, or raise RLIMIT_MEMLOCK to unlimited)",
+        lim.rlim_cur
+    ))
+    .into())
+}
+
+/// Memory a thread of the I/O path holds locked: regions (populated) and,
+/// optionally, the thread's own stack (locked as touched, `MLOCK_ONFAULT`).
+/// Dropping it unlocks everything, on the thread that locked its stack:
+/// a freed region the allocator keeps, or a stack the C library caches,
+/// would otherwise stay locked.
+#[derive(Debug, Default)]
+pub struct LockedMemory {
+    regions: Vec<(usize, usize)>,
+    bytes: u64,
+}
+
+impl LockedMemory {
+    /// Locks `len` bytes at `ptr`.
+    ///
+    /// # Errors
+    /// The `mlock` error, with a hint at `RLIMIT_MEMLOCK`.
+    ///
+    /// # Safety
+    /// `ptr .. ptr + len` must lie inside one live mapping of this process
+    /// that outlives `self`.
+    pub unsafe fn lock_region(&mut self, ptr: *const u8, len: usize) -> std::io::Result<()> {
+        // SAFETY: the caller's contract.
+        if unsafe { libc::mlock(ptr.cast(), len) } != 0 {
+            let e = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(
+                e.kind(),
+                format!("mlock of {len} bytes failed: {e} (RLIMIT_MEMLOCK, CAP_IPC_LOCK)"),
+            ));
+        }
+        self.regions.push((ptr as usize, len));
+        self.bytes += len as u64;
+        Ok(())
+    }
+
+    /// Locks the calling thread's stack as it is touched: a thread of the
+    /// I/O path never waits for a stack page to come back from swap.
+    ///
+    /// # Errors
+    /// The failing call.
+    pub fn lock_own_stack(&mut self) -> std::io::Result<()> {
+        // SAFETY: a zeroed attr is filled by pthread_getattr_np and destroyed
+        // after use; the range it reports is this thread's own stack.
+        unsafe {
+            let mut attr: libc::pthread_attr_t = std::mem::zeroed();
+            if libc::pthread_getattr_np(libc::pthread_self(), &mut attr) != 0 {
+                return Err(std::io::Error::other("pthread_getattr_np failed"));
+            }
+            let mut addr: *mut libc::c_void = std::ptr::null_mut();
+            let mut size: libc::size_t = 0;
+            let r = libc::pthread_attr_getstack(&attr, &mut addr, &mut size);
+            libc::pthread_attr_destroy(&mut attr);
+            if r != 0 {
+                return Err(std::io::Error::other("pthread_attr_getstack failed"));
+            }
+            if libc::mlock2(addr, size, libc::MLOCK_ONFAULT) != 0 {
+                let e = std::io::Error::last_os_error();
+                return Err(std::io::Error::new(
+                    e.kind(),
+                    format!("mlock2 of the thread stack ({size} bytes) failed: {e} (RLIMIT_MEMLOCK, CAP_IPC_LOCK)"),
+                ));
+            }
+            self.regions.push((addr as usize, size));
+            self.bytes += size as u64;
+        }
+        Ok(())
+    }
+
+    /// Bytes locked (a stack counts with its full size).
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+}
+
+impl Drop for LockedMemory {
+    fn drop(&mut self) {
+        for &(a, l) in &self.regions {
+            // SAFETY: munlock of a range this value locked; munlock never
+            // touches the memory itself.
+            unsafe { libc::munlock(a as *const libc::c_void, l) };
+        }
+    }
 }
 
 #[cfg(test)]

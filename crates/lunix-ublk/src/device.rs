@@ -693,6 +693,14 @@ impl UblkDevice {
         &self.engine
     }
 
+    /// Bytes the device's queues locked (I/O buffers and thread stacks).
+    pub fn locked_bytes(&self) -> u64 {
+        self.counters
+            .iter()
+            .map(|c| c.snapshot().locked_bytes)
+            .sum()
+    }
+
     /// Per-queue counters.
     pub fn queue_counters(&self) -> Vec<QueueSnapshot> {
         self.counters.iter().map(|c| c.snapshot()).collect()
