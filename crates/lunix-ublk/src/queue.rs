@@ -37,7 +37,8 @@
 //! # Fault hook (test only)
 //!
 //! In a `crashpoints` build, when `LUNIX_UBLK_FAULT_HOLD` names a file, every
-//! request that arrives while that file exists is **held**: started (it counts
+//! request that arrives while that file (or `<file>.<dev_id>`, for one device
+//! only) exists is **held**: started (it counts
 //! as in flight, so `QUIESCE_DEV` waits for it) but not handed to the engine.
 //! When the file is removed, or the queue goes down, the held requests are
 //! handed on in arrival order. A watcher thread signals the wake fd every
@@ -406,7 +407,7 @@ fn run_queue(a: QueueArgs) {
     let stop_fd = a.stop.raw_fd();
     let cdev_fd = a.dev.tgt.fds[0];
     let mut lp = Loop {
-        hold: Hold::from_env(wake_fd),
+        hold: Hold::from_env(wake_fd, a.dev.dev_info.dev_id),
         handler,
         c: CompState {
             qid,
@@ -495,6 +496,8 @@ struct Loop {
 /// The fault hook's state (see the module docs).
 struct Hold {
     path: std::path::PathBuf,
+    /// `<path>.<dev_id>`: holds this device only.
+    dev_path: std::path::PathBuf,
     held: Vec<u16>,
     count: Arc<std::sync::atomic::AtomicUsize>,
     stop: Arc<std::sync::atomic::AtomicBool>,
@@ -503,20 +506,24 @@ struct Hold {
 
 impl Hold {
     /// The hook, when this build has it and `LUNIX_UBLK_FAULT_HOLD` is set.
-    fn from_env(wake_fd: RawFd) -> Option<Self> {
+    fn from_env(wake_fd: RawFd, dev_id: u32) -> Option<Self> {
         if !cfg!(feature = "crashpoints") {
             return None;
         }
         let path = std::path::PathBuf::from(std::env::var_os("LUNIX_UBLK_FAULT_HOLD")?);
+        let mut dev_path = path.clone().into_os_string();
+        dev_path.push(format!(".{dev_id}"));
+        let dev_path = std::path::PathBuf::from(dev_path);
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (c, st, p) = (Arc::clone(&count), Arc::clone(&stop), path.clone());
+        let (c, st) = (Arc::clone(&count), Arc::clone(&stop));
+        let (p, dp) = (path.clone(), dev_path.clone());
         let watcher = std::thread::Builder::new()
             .name("ublk-fault-hold".into())
             .spawn(move || {
                 while !st.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(10));
-                    if c.load(Ordering::Acquire) > 0 && !p.exists() {
+                    if c.load(Ordering::Acquire) > 0 && !p.exists() && !dp.exists() {
                         let one = 1u64.to_ne_bytes();
                         // SAFETY: an 8-byte write to the handler's eventfd,
                         // which outlives this thread (joined in `drop`).
@@ -527,6 +534,7 @@ impl Hold {
             .ok()?;
         Some(Self {
             path,
+            dev_path,
             held: Vec::new(),
             count,
             stop,
@@ -535,7 +543,7 @@ impl Hold {
     }
 
     fn active(&self) -> bool {
-        self.path.exists()
+        self.path.exists() || self.dev_path.exists()
     }
 }
 
