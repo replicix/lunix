@@ -69,6 +69,45 @@ pub fn arena_stats() -> ArenaStats {
     }
 }
 
+impl ArenaStats {
+    /// Key bytes held in locked chunks.
+    pub fn locked_bytes(&self) -> u64 {
+        self.locked_chunks * CHUNK_BYTES as u64
+    }
+
+    /// True when every chunk is locked and no secret lives on the heap.
+    pub fn all_locked(&self) -> bool {
+        self.locked_chunks == self.chunks && self.heap_fallbacks == 0
+    }
+}
+
+/// Maps the first chunk of the arena now and checks that every key byte
+/// is in locked memory, for a daemon that must not run otherwise (DESIGN
+/// §3, W7: the daemon locks region by region, the key arena included).
+/// Later chunks are locked the same way; a failure there is counted in
+/// [`arena_stats`], which the daemon reports.
+///
+/// # Errors
+/// A message naming what is not locked (`RLIMIT_MEMLOCK`, `CAP_IPC_LOCK`).
+pub fn require_locked() -> Result<ArenaStats, String> {
+    if !cfg!(miri) {
+        let a = arena();
+        let mut free = a.free.lock().unwrap_or_else(PoisonError::into_inner);
+        if a.chunks.load(Ordering::Relaxed) == 0 {
+            a.grow(&mut free);
+        }
+    }
+    let st = arena_stats();
+    if st.chunks > 0 && st.all_locked() {
+        Ok(st)
+    } else {
+        Err(format!(
+            "the key arena is not locked: {} of {} chunks locked, {} secrets on the heap (RLIMIT_MEMLOCK, CAP_IPC_LOCK)",
+            st.locked_chunks, st.chunks, st.heap_fallbacks
+        ))
+    }
+}
+
 fn arena() -> &'static Arena {
     static ARENA: OnceLock<Arena> = OnceLock::new();
     ARENA.get_or_init(|| Arena {

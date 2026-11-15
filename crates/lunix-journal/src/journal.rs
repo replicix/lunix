@@ -52,7 +52,12 @@ impl FileJournal {
     /// files of a lane beyond `lanes`, `NoSpace` or `Io` while creating files.
     pub fn open(cfg: JournalConfig) -> Result<Self> {
         cfg.validate()?;
-        let zero = AlignedBuf::zeroed(ZERO_LEN).map_err(Error::Io)?;
+        let mut zero = AlignedBuf::zeroed(ZERO_LEN).map_err(Error::Io)?;
+        let zero_locked = if cfg.lock_memory {
+            zero.lock().map_err(Error::Io)?
+        } else {
+            0
+        };
         let rings = open_rings(&cfg, &zero)?;
         let lanes = usize::from(cfg.lanes);
         let sh = Arc::new(Shared {
@@ -66,6 +71,7 @@ impl FileJournal {
             mark_skipped_at: AtomicU64::new(0),
             mark_ring_full: AtomicBool::new(false),
             last_mark: AtomicU64::new(0),
+            locked: AtomicU64::new(zero_locked),
             poison_at: AtomicU64::new(NOT_POISONED),
             flights: (0..lanes).map(|_| Mutex::new(LaneFlight::new())).collect(),
             coord: Coord::new(),
@@ -83,14 +89,30 @@ impl FileJournal {
             fail_sync: AtomicBool::new(false),
         });
         let worker = Arc::clone(&sh);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let handle = std::thread::Builder::new()
             .name("lunix-journal-flush".into())
-            .spawn(move || coord::run(worker))
+            .spawn(move || coord::run(worker, ready_tx))
             .map_err(Error::Io)?;
-        Ok(Self {
+        let j = Self {
             sh,
             thread: Mutex::new(Some(handle)),
-        })
+        };
+        // The flush thread locks its own memory first (lock_memory).
+        match ready_rx.recv() {
+            Ok(Ok(())) => Ok(j),
+            Ok(Err(e)) => Err(Error::Io(e)),
+            Err(_) => Err(Error::Io(std::io::Error::other(
+                "the journal flush thread ended at start",
+            ))),
+        }
+    }
+
+    /// Bytes the journal holds locked (`JournalConfig::lock_memory`): the
+    /// open lanes' batch buffers, the zero-fill buffer, the flush thread's
+    /// stack (locked as touched) and its mark buffer.
+    pub fn locked_bytes(&self) -> u64 {
+        self.sh.locked.load(Ordering::Acquire)
     }
 
     /// Test hook: the next `append` on `lane` fails with an I/O error after

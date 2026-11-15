@@ -41,9 +41,32 @@ use crate::sys::{round4k, B};
 
 const WAIT_SLICE: Duration = Duration::from_millis(50);
 
-pub(crate) fn run(sh: Arc<Shared>) {
+pub(crate) fn run(sh: Arc<Shared>, ready: std::sync::mpsc::SyncSender<std::io::Result<()>>) {
     let mut ring = IoUring::new(64).ok();
     let mut mark_buf = AlignedBuf::zeroed(BLOCK).ok();
+    // Unlocked when this function returns (the C library caches stacks).
+    let mut _stack_lock = None;
+    if sh.cfg.lock_memory {
+        let locked = crate::sys::StackLock::new().and_then(|st| {
+            let buf = match mark_buf.as_mut() {
+                Some(b) => b.lock()?,
+                None => 0,
+            };
+            let n = st.bytes() + buf;
+            _stack_lock = Some(st);
+            Ok(n)
+        });
+        match locked {
+            Ok(n) => {
+                sh.locked.fetch_add(n, Ordering::AcqRel);
+            }
+            Err(e) => {
+                let _ = ready.send(Err(e));
+                return;
+            }
+        }
+    }
+    let _ = ready.send(Ok(()));
     loop {
         let flushes = {
             let mut q = lock(&sh.coord.q);

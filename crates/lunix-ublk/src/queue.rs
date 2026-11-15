@@ -90,6 +90,8 @@ pub struct QueueCounters {
     rejected: AtomicU64,
     drain_commits: AtomicU64,
     drain_cqes: AtomicU64,
+    /// Bytes this queue locked: its I/O buffers and its thread stack.
+    locked: AtomicU64,
 }
 
 /// A copy of [`QueueCounters`].
@@ -119,6 +121,9 @@ pub struct QueueSnapshot {
     pub drain_commits: u64,
     /// Completions the driver returned for those commits.
     pub drain_cqes: u64,
+    /// Bytes locked by the queue: its I/O buffers (populated) and its thread
+    /// stack (locked as it is touched).
+    pub locked_bytes: u64,
 }
 
 impl QueueCounters {
@@ -142,6 +147,7 @@ impl QueueCounters {
             write_zeroes: l(&self.write_zeroes),
             rejected: l(&self.rejected),
             drain_commits: l(&self.drain_commits),
+            locked_bytes: l(&self.locked),
             drain_cqes: l(&self.drain_cqes),
         }
     }
@@ -389,9 +395,25 @@ fn run_queue(a: QueueArgs) {
         .map(|_| IoBuf::<u8>::new(a.buf_bytes as usize))
         .collect();
     for b in &mut bufs {
-        // Pre-fault (and, with mlockall, pin) every page now.
+        // Pre-fault every page now.
         b.zero_buf();
     }
+    // Lock the I/O path's memory (DESIGN §3): every tag buffer, populated,
+    // and this thread's stack as it is touched. A failure fails the attach.
+    // Declared after `bufs`, so an early return unlocks before the buffers
+    // are freed; the normal path drops it explicitly below.
+    let mut locks = crate::harden::LockedMemory::default();
+    for b in &bufs {
+        // SAFETY: the buffer is a live allocation of `buf_bytes` bytes that
+        // outlives `locks`.
+        if let Err(e) = unsafe { locks.lock_region(b.as_mut_ptr(), a.buf_bytes as usize) } {
+            return report(Err(format!("queue {qid} buffers: {e}")));
+        }
+    }
+    if let Err(e) = locks.lock_own_stack() {
+        return report(Err(format!("queue {qid}: {e}")));
+    }
+    a.counters.locked.store(locks.bytes(), Ordering::Release);
     report(Ok(()));
     if !a.gate.wait() {
         return; // the attach was abandoned; `queue` and `handler` drop
@@ -462,6 +484,8 @@ fn run_queue(a: QueueArgs) {
     }
     drop(lp);
     drop(queue);
+    a.counters.locked.store(0, Ordering::Release);
+    drop(locks);
     drop(bufs);
 }
 

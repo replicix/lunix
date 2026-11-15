@@ -129,6 +129,7 @@ pub fn status_body(name: &str, mode: VolumeMode) -> VolumeStatusBody {
         journal_capacity: 1 << 30,
         journal_marks_written: 0,
         journal_marks_skipped: 0,
+        locked_bytes: 0,
         last_commit_seq: 12,
         last_commit_ms: Some(1_794_652_830_000),
         dedup_ratio: Some(2.5),

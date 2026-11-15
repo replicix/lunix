@@ -218,7 +218,12 @@ independent review; no milestone has run.
    - **W6.** `BATCH_IO` is never combined with `QUIESCE`; copy mode is the
      default. `USER_COPY` is opt-in per volume (ADR-17).
    - **W7.** The daemon's own files, log and swap are never on a device it
-     serves (`mlockall`, `PR_SET_IO_FLUSHER`).
+     serves. Swap on a served device is never allowed: that is what makes
+     paging of the daemon's ordinary heap safe (latency, not deadlock).
+     What the I/O path needs is locked region by region, not with
+     `mlockall` (maintainer, 2026-11-15): queue tag buffers and thread
+     stacks, the journal's buffers and flush-thread stack, the key arena
+     (DESIGN §3); queue threads run with `PR_SET_IO_FLUSHER`.
    - **W8.** Every root script runs under an outer timeout (the wrapper
      in `tools/remote.sh root` enforces a default per script and the script
      states its own cap). The timeout signals the **script** (`TERM`), whose
@@ -1896,7 +1901,8 @@ and the scripts `run-crash-loop.sh`, `run-features.sh`, `run-resize.sh`,
    and harmless. A volume tag is stored in `ublksrv_flags` at `ADD_DEV`
    (step 5).
 4. **Queue threads:** one pinned thread per queue (CPU list from the
-   caller), `mlockall`, `prctl(PR_SET_IO_FLUSHER)`, `unshare(CLONE_NEWNS)`
+   caller), the tag buffers and the thread stack locked (W7; no
+   `mlockall`), `prctl(PR_SET_IO_FLUSHER)`, `unshare(CLONE_NEWNS)`
    for the daemon (libublk issue 50), preallocated buffers. Each thread
    builds its `QueueHandler`, translates ublk requests into `IoRequest`,
    and completes through the eventfd-woken `poll`. No `run_target()`.
@@ -2273,7 +2279,10 @@ untouched.
    level. Registry `<state_dir>/volumes.json` (name → uuid, directory),
    atomic replace, rebuildable by scanning volume directories (D8).
 2. **Startup hardening:** `forbid_core_dumps` (platform-lite),
-   `PR_SET_DUMPABLE 0`, `mlockall`, `PR_SET_IO_FLUSHER`, own mount
+   `PR_SET_DUMPABLE 0`, the memory-lock check (`CAP_IPC_LOCK` or an
+   unlimited `RLIMIT_MEMLOCK`) and the key arena locked (W7; no
+   `mlockall`: the I/O path's regions are locked as they are created),
+   `PR_SET_IO_FLUSHER`, own mount
    namespace; the tokio runtime exists only for the control server and
    metrics; queue threads are spawned by `lunix-ublk`.
 3. **Control server** over the socket: framing from `lunix-iface::ctl`,

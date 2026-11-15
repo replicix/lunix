@@ -983,8 +983,9 @@ Evidence: [crypto-kat](../../bench/crypto-kat/RESULTS.md),
   - The local journal, the dirty overlay and the keeper-held memfd hold
     plaintext. ADR-11 protects the bucket and the extents cached from it.
     dm-crypt or LUKS on the local directory is recommended.
-  - Keys live in `Zeroizing` memory. The daemon already runs `mlockall`
-    for ublk. Core dumps are off (`PR_SET_DUMPABLE 0`, `RLIMIT_CORE 0`,
+  - Keys live in `Zeroizing` memory in the locked key arena (the daemon
+    locks region by region and refuses to start if the arena cannot be
+    locked; DESIGN §3). Core dumps are off (`PR_SET_DUMPABLE 0`, `RLIMIT_CORE 0`,
     `MADV_DONTDUMP`).
   - A Lunix KMK must never be shared with Constellation. The labels differ,
     so an accidental share still yields unrelated keys.
