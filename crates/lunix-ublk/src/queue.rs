@@ -33,6 +33,17 @@
 //!   `poll` has drained the eventfd, so a signal that lands while the thread
 //!   is blocked in `io_uring_enter`, or between the drain and the re-arm,
 //!   completes the poll at once.
+//!
+//! # Fault hook (test only)
+//!
+//! In a `crashpoints` build, when `LUNIX_UBLK_FAULT_HOLD` names a file, every
+//! request that arrives while that file exists is **held**: started (it counts
+//! as in flight, so `QUIESCE_DEV` waits for it) but not handed to the engine.
+//! When the file is removed, or the queue goes down, the held requests are
+//! handed on in arrival order. A watcher thread signals the wake fd every
+//! 10 ms while requests are held, so the release is noticed. This lets the
+//! root harness make a quiesce time out on a real device (a second
+//! `QUIESCE_DEV`, the `QuiesceAll` retry). Production builds compile it out.
 
 use std::os::fd::{AsRawFd, RawFd};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -395,6 +406,7 @@ fn run_queue(a: QueueArgs) {
     let stop_fd = a.stop.raw_fd();
     let cdev_fd = a.dev.tgt.fds[0];
     let mut lp = Loop {
+        hold: Hold::from_env(wake_fd),
         handler,
         c: CompState {
             qid,
@@ -412,6 +424,7 @@ fn run_queue(a: QueueArgs) {
     lp.arm(&queue, STOP_TAG, stop_fd);
     loop {
         if lp.c.down {
+            lp.release_held(&queue);
             // Drain: no blocking wait in libublk any more. Reap what is there
             // and submit our commits; leave when nothing is in flight.
             drain_flush(
@@ -471,9 +484,68 @@ struct CompState {
 }
 
 struct Loop {
+    /// Declared first: it drops (and joins its watcher, which writes to the
+    /// handler's wake fd) before the handler.
+    hold: Option<Hold>,
     handler: Box<dyn QueueHandler>,
     c: CompState,
     wake_fd: RawFd,
+}
+
+/// The fault hook's state (see the module docs).
+struct Hold {
+    path: std::path::PathBuf,
+    held: Vec<u16>,
+    count: Arc<std::sync::atomic::AtomicUsize>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    watcher: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Hold {
+    /// The hook, when this build has it and `LUNIX_UBLK_FAULT_HOLD` is set.
+    fn from_env(wake_fd: RawFd) -> Option<Self> {
+        if !cfg!(feature = "crashpoints") {
+            return None;
+        }
+        let path = std::path::PathBuf::from(std::env::var_os("LUNIX_UBLK_FAULT_HOLD")?);
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (c, st, p) = (Arc::clone(&count), Arc::clone(&stop), path.clone());
+        let watcher = std::thread::Builder::new()
+            .name("ublk-fault-hold".into())
+            .spawn(move || {
+                while !st.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    if c.load(Ordering::Acquire) > 0 && !p.exists() {
+                        let one = 1u64.to_ne_bytes();
+                        // SAFETY: an 8-byte write to the handler's eventfd,
+                        // which outlives this thread (joined in `drop`).
+                        unsafe { libc::write(wake_fd, one.as_ptr().cast(), one.len()) };
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self {
+            path,
+            held: Vec::new(),
+            count,
+            stop,
+            watcher: Some(watcher),
+        })
+    }
+
+    fn active(&self) -> bool {
+        self.path.exists()
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(w) = self.watcher.take() {
+            let _ = w.join();
+        }
+    }
 }
 
 /// The [`Completer`] handed to the engine: commits only from the queue thread.
@@ -542,6 +614,7 @@ impl Loop {
         }
         match tag {
             WAKE_TAG => {
+                self.release_held(q);
                 let Loop { handler, c, .. } = self;
                 handler.poll(&mut Comp { q, c: &mut *c });
                 self.arm(q, WAKE_TAG, self.wake_fd);
@@ -568,14 +641,47 @@ impl Loop {
         handler.poll(&mut Comp { q, c: &mut *c });
     }
 
+    /// Hands held requests on once the hold file is gone or the queue is
+    /// down (fault hook).
+    fn release_held(&mut self, q: &UblkQueue<'_>) {
+        let down = self.c.down;
+        let tags = match self.hold.as_mut() {
+            Some(h) if !h.held.is_empty() && (down || !h.active()) => {
+                h.count.store(0, Ordering::Release);
+                std::mem::take(&mut h.held)
+            }
+            _ => return,
+        };
+        for tag in tags {
+            self.dispatch(q, tag);
+        }
+    }
+
     fn on_request(&mut self, q: &UblkQueue<'_>, tag: u16) {
+        let t = usize::from(tag);
+        if t >= self.c.meta.len() || self.c.meta[t] != Meta::Idle {
+            fatal(
+                self.c.qid,
+                "the driver delivered a tag that is already started",
+            );
+        }
+        self.c.counters.started.fetch_add(1, Ordering::AcqRel);
+        lunix_iface::crashpoint!("ublk.after_fetch");
+        let down = self.c.down;
+        if let Some(h) = self.hold.as_mut() {
+            if !down && h.active() {
+                h.held.push(tag);
+                h.count.store(h.held.len(), Ordering::Release);
+                return;
+            }
+        }
+        self.dispatch(q, tag);
+    }
+
+    /// Decodes a started request and hands it to the engine.
+    fn dispatch(&mut self, q: &UblkQueue<'_>, tag: u16) {
         let Loop { handler, c, .. } = self;
         let t = usize::from(tag);
-        if t >= c.meta.len() || c.meta[t] != Meta::Idle {
-            fatal(c.qid, "the driver delivered a tag that is already started");
-        }
-        c.counters.started.fetch_add(1, Ordering::AcqRel);
-        lunix_iface::crashpoint!("ublk.after_fetch");
 
         let iod = q.get_iod(tag);
         let decoded = decode_request(iod.op_flags, iod.start_sector, iod.nr_sectors, c.buf_bytes);

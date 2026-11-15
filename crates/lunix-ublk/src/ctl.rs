@@ -411,6 +411,15 @@ impl ControlPlane for RingControl {
 
     fn start_dev(&self, dev_id: u32, pid: i32) -> Result<()> {
         let op = CtlOp::StartDev;
+        // Fault hook (test only, `crashpoints` builds): while the file named
+        // by `LUNIX_UBLK_FAULT_START_DEV` exists, `START_DEV` fails with EIO
+        // without reaching the kernel, as a refused start would.
+        if cfg!(feature = "crashpoints")
+            && std::env::var_os("LUNIX_UBLK_FAULT_START_DEV")
+                .is_some_and(|p| std::path::Path::new(&p).exists())
+        {
+            return Self::check(op, -libc::EIO).map(|_| ());
+        }
         let r = self.exec_plain(op, dev_id, pid as u64, self.watchdog(op))?;
         Self::check(op, r).map(|_| ())
     }
