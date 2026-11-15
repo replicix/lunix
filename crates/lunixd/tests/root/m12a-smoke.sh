@@ -230,6 +230,15 @@ measure() { # name queues
   cpu=$(awk -v a="$s1" -v b="$s2" -v t="$tck" 'BEGIN { printf "%.3f", (b - a) / t / 30 * 100 }')
   say "- $q queues x depth $d x 1 MiB: buffers $bufs MiB; VmRSS $((rss / 1024)) MiB; idle CPU $cpu % of one core over 30 s"
   echo "$q $bufs $((rss / 1024)) $cpu" >> "$OUT/idle.txt"
+  # Locked memory (no mlockall): the volume's queue buffers and journal buffers are locked and
+  # counted, and the daemon's VmLck covers them (it also holds the key arena and thread stacks).
+  local lk vmlck want
+  lk=$(ctl "{\"method\":\"volume_status\",\"params\":{\"name\":\"$n\"}}" | jq -r '.ok.locked_bytes')
+  vmlck=$(awk '/^VmLck/ {print $2}' "/proc/$DPID/status")
+  want=$((q * d * b + q * 8 * ((1 << 20) + 4096)))
+  say "- locked: volume status $((lk / 1048576)) MiB (queue and journal buffers alone: $((want / 1048576)) MiB); daemon VmLck $((vmlck / 1024)) MiB"
+  [ "$lk" -ge "$want" ]; expect "$q queues: every queue and journal buffer is locked and counted" $?
+  [ "$((vmlck * 1024))" -ge "$lk" ]; expect "$q queues: VmLck covers the locked bytes the status reports" $?
   ctl "{\"method\":\"detach\",\"params\":{\"name\":\"$n\"}}" >/dev/null || fail "detach $n"
 }
 # Maintainer decision 2026-11-13: the memory gate is measured AFTER a workload, on the daemon that

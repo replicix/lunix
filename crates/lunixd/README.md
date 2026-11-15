@@ -27,6 +27,8 @@ lunixd check --dir VOLDIR       offline store self-check of a detached volume (u
 - `on_journal_damage = refuse` refuses only loss at or below the witnessed flushed watermark;
   crash residue is wiped (ADR-4). `VolumeStatus` reports the journal's marks. After `idle_trim_ms`
   of idleness the read caches (`read_cache_max`) are emptied and the heap is trimmed.
+- No `mlockall`: queue and journal I/O memory and the key arena are locked (`locked_bytes` in
+  `VolumeStatus`); without `CAP_IPC_LOCK` or an unlimited `RLIMIT_MEMLOCK` the daemon does not start.
 - After a reboot, a volume that was attached (its `state/device` is from another boot) is
   attached again at start with a new device.
 - Tests: `tests/*.rs` without root (`LUNIXD_MEMDIAG=1` makes `memory_diag` print the heap after a

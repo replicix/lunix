@@ -629,6 +629,7 @@ impl Daemon {
                     journal_capacity: fill.capacity_bytes,
                     journal_marks_written: s.journal.marks_written(),
                     journal_marks_skipped: s.journal.marks_skipped(),
+                    locked_bytes: l.device.locked_bytes() + s.journal.locked_bytes(),
                     last_commit_seq: tip.0,
                     last_commit_ms: Some(s.engine.tip_created_at().0),
                     dedup_ratio: ratio(written, written.saturating_sub(stats.dedup_hits)),
@@ -667,6 +668,7 @@ impl Daemon {
                     journal_capacity: 0,
                     journal_marks_written: 0,
                     journal_marks_skipped: 0,
+                    locked_bytes: 0,
                     last_commit_seq: pk.tip.map_or(0, |t| t.0),
                     last_commit_ms: None,
                     dedup_ratio: None,
@@ -712,6 +714,11 @@ impl Daemon {
                     recovered,
                     first_attach,
                 };
+                tracing::info!(
+                    volume = %name,
+                    locked_bytes = live.device.locked_bytes() + live.stack.journal.locked_bytes(),
+                    "attached; queue and journal I/O memory locked"
+                );
                 *g = Slot::Attached(Box::new(live));
                 Ok(Response::Attached(resp))
             }
@@ -824,6 +831,7 @@ impl Daemon {
         op.credential = o.credential;
         op.max_io_buf_bytes = Some(max_buf);
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
+        op.lock_memory = self.cfg.harden;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
         if o.allow_unverifiable_fork {
             tracing::warn!(

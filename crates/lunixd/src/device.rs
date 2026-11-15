@@ -99,6 +99,15 @@ pub struct Started {
 }
 
 impl Device {
+    /// Bytes the device's queues hold locked (tag buffers and thread stacks;
+    /// 0 for the null device).
+    pub fn locked_bytes(&self) -> u64 {
+        match self {
+            Self::Ublk(d) => d.locked_bytes(),
+            Self::Null(_) => 0,
+        }
+    }
+
     /// The ublk id (`None` for the null device).
     pub fn dev_id(&self) -> Option<u32> {
         match self {

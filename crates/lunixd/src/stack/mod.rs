@@ -468,6 +468,9 @@ pub struct OpenParams {
     pub destage_workers: Option<usize>,
     /// Operator override of `ForkUnverifiable` (ADR-31); the caller audits it.
     pub allow_unverifiable_fork: bool,
+    /// Lock the journal's I/O memory (DESIGN §3, W7); the daemon sets it when
+    /// it runs hardened. A failed lock fails the open.
+    pub lock_memory: bool,
 }
 
 impl OpenParams {
@@ -482,6 +485,7 @@ impl OpenParams {
             tweak: None,
             destage_workers: None,
             allow_unverifiable_fork: false,
+            lock_memory: false,
         }
     }
 }
@@ -709,12 +713,9 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
 
     let uuid = desc.volume_uuid;
     let cs = desc.chunk_size;
-    let journal = Arc::new(FileJournal::open(JournalConfig::new(
-        voldir.join("journal"),
-        uuid,
-        p.queues,
-        json.journal_max,
-    ))?);
+    let mut jcfg = JournalConfig::new(voldir.join("journal"), uuid, p.queues, json.journal_max);
+    jcfg.lock_memory = p.lock_memory;
+    let journal = Arc::new(FileJournal::open(jcfg)?);
     let overlay = Arc::new(ShardedOverlay::new(u64::from(cs) / 4096));
     let index = Arc::new(LsmIndex::open(&voldir, store.ids(), desc.id_len)?);
     let report = index.open_report();

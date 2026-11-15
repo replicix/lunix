@@ -106,15 +106,29 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     let cfg = DaemonConfig::load(&path, explicit)?;
     StderrLog::install(cfg.log_level);
     // Before any other thread exists: the mount namespace and the I/O-flusher
-    // flag are inherited, mlockall covers what follows. Core dumps are off in
-    // every build (a dump keeps /dev/ublkcN open and holds key material).
+    // flag are inherited. Core dumps are off in every build (a dump keeps
+    // /dev/ublkcN open and holds key material). No mlockall (maintainer,
+    // 2026-11-15): the I/O path's regions are locked as they are created
+    // (queue buffers and stacks, journal buffers and flush-thread stack), the
+    // key arena here; a process that cannot lock them does not start.
     harden_process(Harden {
         mlock: cfg.harden,
         io_flusher: cfg.harden,
         private_mount_ns: cfg.harden,
         no_core_dumps: true,
     })
-    .context("process hardening")?;
+    .context(
+        "process hardening (memory locking needs CAP_IPC_LOCK or an unlimited RLIMIT_MEMLOCK)",
+    )?;
+    if cfg.harden {
+        let arena = lunix_crypto::require_locked()
+            .map_err(|e| anyhow::anyhow!(e))
+            .context("key arena")?;
+        tracing::info!(
+            key_arena_locked_bytes = arena.locked_bytes(),
+            "memory locking: key arena locked; queue and journal buffers are locked at attach"
+        );
+    }
     if cfg.metrics.is_some() {
         tracing::warn!(
             "metrics are deferred in phase 1 (plan M12a step 9); the address is ignored"

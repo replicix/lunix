@@ -6,14 +6,13 @@
 //! top of each heap and what `madvise` can release.
 //!
 //! The allocator keeps glibc's defaults (M12a re-review R6): a fixed mmap
-//! threshold would turn every chunk-size allocation into an `mmap`, which under
-//! `mlockall` is populated and locked at once and whose `munmap` sends TLB
-//! shootdowns to the queue threads, and fewer arenas would make the queue
-//! threads share them. Whether more than the idle trim is needed is decided by
-//! the memory gate after a workload (root, old host), and the throughput effect
-//! of any further measure by M16. Note that under `mlockall` the kernel ignores
-//! `MADV_DONTNEED` on locked pages, so the trim may release less than it would
-//! without it; the gate's reading says how much.
+//! threshold would turn every chunk-size allocation into an `mmap` whose
+//! `munmap` sends TLB shootdowns to the queue threads, and fewer arenas would
+//! make the queue threads share them. The daemon does not `mlockall`
+//! (maintainer, 2026-11-15): locked pages cannot be given back by the trim
+//! (`MADV_DONTNEED` is refused on them, `tests/mlock_trim.rs`), so only the
+//! I/O path's regions and the key arena are locked, and the trim can return
+//! the rest of the heap, a detached volume's included.
 //!
 //! Outside glibc the trim is a no-op.
 #![allow(unsafe_code)]
