@@ -183,3 +183,4 @@ lead records the re-sign on the final text.
 - **Mark ring, `d4ea229`** (scratch under a milestone id of its own, after a shared scratch directory lost a test's
   template mid-run): `ci: all green`, 1 446 tests passed, 0 failed (ownership skipped). An earlier run at the same
   head failed `cargo fmt --check` on empty files a local `touch` had created on the build host; it was not the branch.
+- **Mark ring review fixes, `d39d514`:** `ci: all green`, 1 451 tests passed, 0 failed (ownership skipped).
