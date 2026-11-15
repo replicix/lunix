@@ -19,7 +19,7 @@
 //! needs_copy::<lunix_crypto::MetaKey>();
 //! ```
 
-pub use crate::arena::{arena_stats, ArenaStats, Secret};
+pub use crate::arena::{arena_stats, require_locked, ArenaStats, Secret};
 
 use lunix_format::keyring::RootKind;
 use lunix_format::CryptoMode;

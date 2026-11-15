@@ -310,6 +310,7 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                     journal_capacity,
                     journal_marks_written: journal_used % 7,
                     journal_marks_skipped: journal_capacity % 3,
+                    locked_bytes: journal_used.wrapping_mul(3),
                     last_commit_seq,
                     last_commit_ms,
                     dedup_ratio,
