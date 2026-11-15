@@ -295,30 +295,29 @@ impl Case {
             Err(StackError::JournalDamage)
                 if self.vol.builder.on_journal_damage == OnJournalDamage::Refuse =>
             {
-                // Defect E1 (lunix-engine `refuse_worthy`, M12b report): damage
-                // at or below the floor (the tip's cut), left in a lane before
-                // a later record, is refused once the watermark passes it,
-                // although it costs nothing. Anything else is a failure.
+                // Defect E1 (lunix-engine `refuse_worthy`, M12b report): a
+                // damaged range whose `next_seq` is at or below the watermark
+                // is refused even when recovery found every number above the
+                // floor (no gap), so the range can only hold numbers at or
+                // below the floor or numbers another lane holds: it costs
+                // nothing. A refusal with a gap at or below the watermark is
+                // a real one and fails the test.
                 let s = self
                     .vol
                     .open_with(|p| p.on_journal_damage = OnJournalDamage::Wipe)
                     .unwrap_or_else(|e| panic!("{} reopen under wipe failed: {e}", self.ctx()));
                 let rep = s.engine.recovery_report();
                 let w = rep.flushed.0;
-                let floor = rep.cut_seq.0;
-                let worthy: Vec<_> = rep
+                let range_rule = rep
                     .damaged
                     .iter()
-                    .filter(|d| d.next_seq.is_some_and(|n| n.0 <= w))
-                    .collect();
-                let e1 = !worthy.is_empty()
-                    && worthy
-                        .iter()
-                        .all(|d| d.next_seq.is_some_and(|n| n.0 <= floor + 1))
-                    && rep.ignored_after_gap.is_none_or(|g| g.first.0 > w);
+                    .any(|d| d.next_seq.is_some_and(|n| n.0 <= w));
+                // With a gap, recovery stops at it: `next_seq` is the gap.
+                let gap_rule = rep.ignored_after_gap.is_some() && rep.next_seq.0 <= w;
+                let e1 = range_rule && !gap_rule;
                 assert!(
                     e1,
-                    "{} refused damage that is not below the floor: {rep:?}; last crash {:?}",
+                    "{} refused with a gap at or below the watermark: {rep:?}; last crash {:?}",
                     self.ctx(),
                     self.last_crash
                 );
