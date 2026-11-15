@@ -602,3 +602,144 @@ on the hot paths are the usual answer.
 The smoke at the final head with the memory gate after the workload, the two-volume quiesce cell on real
 devices, and m3/m4 on real devices. Add for R1: a four-queue write load, `kill -9`, then attach with
 `on_journal_damage = refuse`; I expect `journal_damage`.
+
+---
+
+# Final review (2026-11-15)
+
+- Reviewed: `lead/p1-m12a-hooks` at `7396df2` (eleven commits on `main` `18e73ad`) and `p1/m12a` at `0a2ec47`,
+  with the report's root-run sections.
+- Scope: the five points the lead named. Reading, plus the non-root tests of the changed crates from a scratch
+  copy of `p1/m12a` on the host the lead named, one test thread. Result: exit 0, 115 tests passed, 0 failed, no `SKIP` line (lib tests of the five crates, the `locked` tests, and lunixd `control`, `shutdown`, `wiring`).
+
+## Verdicts
+
+| branch | verdict |
+|---|---|
+| `lead/p1-m12a-hooks` | **Merge.** The locking code, the hooks and the cache release are correct. F1 is a statement the docs make that the code does not keep; fix the wording now and the code as a follow-up (or accept it in ADR-11). |
+| `p1/m12a` | **Merge.** Nothing blocks. F2 and F3 are small follow-ups. |
+
+## The five points
+
+### 1. Are all key bytes and all I/O-path buffers locked for their whole life?
+
+**I/O-path buffers: yes**, for what the decision names. Each is locked before first use and unlocked just before
+it is freed:
+
+- queue tag buffers and the queue thread's stack (`lunix-ublk/src/queue.rs`, `harden.rs`);
+- lane batch buffers, the zero-fill buffer, the mark buffer and the flush thread's stack (`lunix-journal`);
+- a failed lock fails the attach or the journal open; the root run shows the daemon's count equal to `VmLck`.
+
+Everything is page-aligned and whole pages (4 KiB alignment, lengths a multiple of 4 KiB), so no lock or unlock
+touches a neighbour's page.
+
+**Long-lived keys: yes.** Roots, DEKs, metadata and MAC keys live in arena slots; the first chunk is checked at
+start.
+
+**Key material in use: no.** This is finding F1.
+
+### F1 (`lead/p1-m12a-hooks`, major for the claim, not for the merge). Secrets pass through memory that can now be paged
+
+ADR-11 now says "Keys live in `Zeroizing` memory in the locked key arena". With `mlockall` every copy was
+locked. Without it only the arena is. These copies are on the ordinary heap or on stacks that are not locked:
+
+| what | where | how long |
+|---|---|---|
+| The passphrase | The request frame (`Zeroizing<Vec>`), `ctl::Secret` (heap), and a second copy in the request cloned for the audit (`daemon.rs`, `handle`) | The whole attach or create: Argon2, the engine open, journal replay, the device start. Seconds to minutes. |
+| The root key (KMK or integrity key) in the clear | `keyring.rs` `open_slot`: `joined` and `plain` are `Zeroizing<Vec>` on the heap; the result and the KEK are `Zeroizing<[u8; 32]>` on the stack of the `lunixd-call` thread | Short, zeroized. |
+| A key file's bytes | `KeyFile::read`: a `Zeroizing<Vec>` of 33 bytes on the heap | Short, zeroized. |
+| Argon2 working memory | 64 MiB of heap, derived from the passphrase | The derivation. |
+| Per-extent AEAD keys and AES key schedules | `extent.rs:240-254` and `:355`: `kdf::extent_key` on the stack, the schedule in aws-lc's heap context | Per chunk, on destage workers and read helpers, whose stacks are not locked. |
+| Older-generation DEKs | `keys.rs` `DekRef::Older`, derived on demand on the reader's stack | Per read. |
+| Keyed BLAKE3 and HMAC states | `mac.rs`, `extent.rs:424`, `meta.rs`: on the caller's stack. `blake3` is built without its `zeroize` feature, so the keyed state is not wiped | Until the frame is overwritten. An idle worker's stack keeps it. |
+
+The realistic leak is the last three under memory pressure: a destage or read thread goes idle with key-equivalent
+residue in dead stack frames, and idle pages are what the kernel swaps first. The passphrase is the other one,
+because it lives longest and unlocks the keyring that sits on the same disk.
+
+Why it matters: swap is on a local disk. A reader of that disk who finds a KMK or a passphrase can open the
+bucket copy, which is what ADR-11 protects. Local plaintext is a different matter (ADR-11 already says the
+journal holds it).
+
+Also: only the first arena chunk is checked. A later chunk whose `mlock` fails is used unlocked, and a failed
+`mmap` puts the secret in a heap box; both are only counted, and `lunixd` reads the counters once, at start.
+"A lock failure is fatal" therefore holds for the first 2 048 keys.
+
+Options, cheapest first:
+
+1. Correct the claim in ADR-11 and DESIGN §3: long-lived keys are locked, keys in use are zeroized but may be
+   paged; recommend encrypted swap or no swap on hosts with encrypted volumes.
+2. Lock the stacks of every thread that touches a key (destage workers, read helpers, the coordinator, the call
+   threads) with the same `MLOCK_ONFAULT` helper. Stacks are small and this closes most of the table.
+3. Enable `blake3`'s `zeroize` feature; hold the passphrase and the slot plaintext in arena-style locked buffers;
+   drop the audit clone's credential before the call; make arena growth fail closed when `harden` is on.
+
+I recommend 1 before the merge (it is a doc line) and 2 and 3 as a tracked follow-up before any release that
+advertises encrypted volumes.
+
+### 2. `LockedMemory` and unlock-before-free
+
+Correct. I checked every path:
+
+- **Queue thread.** `locks` is declared after `bufs`, so every early return and an unwind drop it first; the
+  normal path drops `lp`, `queue`, `locks`, `bufs` in that order. The lane's pool (owned by the handler in `lp`)
+  is unlocked and freed before the stack is unlocked. No region is used after its unlock except the stack, on
+  which the thread only finishes.
+- **Flush thread.** Locals drop in reverse: the stack lock, then the mark buffer (unlock, free), then the ring.
+  A mark-buffer lock failure after the stack lock drops the stack lock inside the closure.
+- **`AlignedBuf`.** `lock` is idempotent, `Drop` unlocks only when locked and before `dealloc`.
+- **No double unlock** that matters: each region is recorded once, and `munlock` is not counted by the kernel.
+- **Thread stacks** are locked on fault and unlocked by the thread itself before it exits, so a stack glibc
+  caches is not left locked.
+
+Two nits: the queue's `locked` counter is not reset on the unwind path, and `LockedMemory::lock_region` trusts
+its caller for page alignment (say so in its safety section; an unaligned region would unlock a shared page).
+
+### 3. The hooks and release builds
+
+They cannot be in a build that does not ask for them. All three sit behind `cfg!(feature = "crashpoints")` of
+`lunix-ublk`; no crate has that feature in its defaults, and only `lunixd`'s own `crashpoints` feature forwards
+it. In a normal build `Hold::from_env` returns `None` and the `START_DEV` branch is constant-false.
+
+They are in a release-profile build made with `--features crashpoints`, which is what the root cells use, and
+that binary lands at the same path, `target/release/lunixd`, as a production build. Nothing at run time says
+which one it is except `--list-crashpoints`. See F2.
+
+### 4. The read-cache release and readers
+
+No race. `clear`, `get` and `insert` all run under the cache's one mutex; entries are `Arc<[u8]>`, so a reader
+that got a chunk keeps it alive after the clear; a reader that missed inserts into the emptied cache. No index
+into `slots` survives outside the lock.
+
+Two remarks, neither blocking:
+
+- `clear` drops up to `read_cache_max` (128 MiB, about 2 000 buffers) while it holds the mutex that queue
+  threads take in `get` (`lunix-engine/src/queue.rs:569`). It runs only when idle, so the exposure is a read
+  that arrives during the release. Take the maps out under the lock and drop them after it.
+- The release fires after 10 s without I/O. A workload with pauses longer than that reads cold after every
+  pause. That is a cost of the memory gate; M16 should measure a bursty read cell, and the idle time may want to
+  be longer than the trim's.
+
+### 5. Anything else
+
+### F2 (`p1/m12a`, minor). A crashpoints build is indistinguishable at run time
+
+Add one warn line at daemon start when built with `crashpoints` ("test build: crash points and fault hooks are
+compiled in"), and have the release packaging step (when one exists) refuse a binary whose `--list-crashpoints`
+succeeds.
+
+### F3 (`p1/m12a`, minor, a run). The "latency, not deadlock" argument rests on dirty limits
+
+Without `mlockall` a queue or flush thread can fault on a paged heap page (overlay, map nodes). The fault needs
+a free page. `PR_SET_IO_FLUSHER` stops the allocation from recursing into I/O; it does not give access to
+reserves. If most reclaimable memory is dirty pages waiting for the daemon's own device, the daemon waits for
+memory that only it can free. The kernel's dirty limits normally prevent that state, and I do not ask to reopen
+the decision. It deserves one root cell before M15 leans on it: a memory cgroup tight enough to page the
+daemon's heap, with buffered writes to the device at full speed, run for minutes, with the hang watchdog as the
+assertion.
+
+### Confirmed from the re-review
+
+R3 (lifecycle from `lunix-ublk`), R4 (the exit channel is read while startup runs), R5 (re-attach after a
+reboot; housekeeping behind `LOCK`), R6 (glibc defaults), the override's intent line and the orphan abort are in
+the code as the report describes. The refuse-crash cell (6 of 6 at four queues) settles R1 with the watermark.

@@ -108,7 +108,8 @@ A **volume** is a thin block device of a given size. Its data path is:
   locks what the I/O path and the keys need, region by region: every
   queue's tag buffers and its thread stack, the journal's lane batch
   buffers, zero-fill buffer, mark buffer and flush-thread stack, and the
-  key arena. A lock failure fails the start (the daemon checks
+  key arena (long-lived keys only; key material in use is not yet all
+  locked, see ADR-11: run with no swap or encrypted swap until it is). A lock failure fails the start (the daemon checks
   `CAP_IPC_LOCK` or an unlimited `RLIMIT_MEMLOCK` first) or the attach,
   with an error naming `RLIMIT_MEMLOCK`; `VolumeStatus` reports a volume's
   locked bytes. The rest of the heap (map nodes, overlay, index, caches)
