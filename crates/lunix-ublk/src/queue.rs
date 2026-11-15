@@ -40,8 +40,9 @@
 //! request that arrives while that file (or `<file>.<dev_id>`, for one device
 //! only) exists is **held**: started (it counts
 //! as in flight, so `QUIESCE_DEV` waits for it) but not handed to the engine.
-//! When the file is removed, or the queue goes down, the held requests are
-//! handed on in arrival order. A watcher thread signals the wake fd every
+//! Only removing the file releases them, in arrival order: they stay held
+//! when the queue goes down (the first `ABORT` of a quiesce), so the drain
+//! waits for them and the quiesce times out while the test keeps the file. A watcher thread signals the wake fd every
 //! 10 ms while requests are held, so the release is noticed. This lets the
 //! root harness make a quiesce time out on a real device (a second
 //! `QUIESCE_DEV`, the `QuiesceAll` retry). Production builds compile it out.
@@ -649,12 +650,11 @@ impl Loop {
         handler.poll(&mut Comp { q, c: &mut *c });
     }
 
-    /// Hands held requests on once the hold file is gone or the queue is
-    /// down (fault hook).
+    /// Hands held requests on once the hold file is gone (fault hook); the
+    /// queue being down does not release them.
     fn release_held(&mut self, q: &UblkQueue<'_>) {
-        let down = self.c.down;
         let tags = match self.hold.as_mut() {
-            Some(h) if !h.held.is_empty() && (down || !h.active()) => {
+            Some(h) if !h.held.is_empty() && !h.active() => {
                 h.count.store(0, Ordering::Release);
                 std::mem::take(&mut h.held)
             }
@@ -675,9 +675,8 @@ impl Loop {
         }
         self.c.counters.started.fetch_add(1, Ordering::AcqRel);
         lunix_iface::crashpoint!("ublk.after_fetch");
-        let down = self.c.down;
         if let Some(h) = self.hold.as_mut() {
-            if !down && h.active() {
+            if h.active() {
                 h.held.push(tag);
                 h.count.store(h.held.len(), Ordering::Release);
                 return;
