@@ -627,6 +627,8 @@ impl Daemon {
                     space: SpaceFigures::from(&s.space.snapshot()),
                     journal_used: fill.used_bytes,
                     journal_capacity: fill.capacity_bytes,
+                    journal_marks_written: s.journal.marks_written(),
+                    journal_marks_skipped: s.journal.marks_skipped(),
                     last_commit_seq: tip.0,
                     last_commit_ms: Some(s.engine.tip_created_at().0),
                     dedup_ratio: ratio(written, written.saturating_sub(stats.dedup_hits)),
@@ -663,6 +665,8 @@ impl Daemon {
                     space: SpaceFigures::default(),
                     journal_used: 0,
                     journal_capacity: 0,
+                    journal_marks_written: 0,
+                    journal_marks_skipped: 0,
                     last_commit_seq: pk.tip.map_or(0, |t| t.0),
                     last_commit_ms: None,
                     dedup_ratio: None,
@@ -1369,6 +1373,20 @@ impl Daemon {
         (sum, true)
     }
 
+    /// Empties the read cache of every attached volume whose slot is free
+    /// (a slot busy with a control call is skipped); returns the bytes.
+    fn release_read_caches(&self) -> u64 {
+        let slots: Vec<Arc<Mutex<Slot>>> = lock(&self.slots).values().cloned().collect();
+        let mut bytes = 0u64;
+        for s in slots {
+            let Ok(g) = s.try_lock() else { continue };
+            if let Slot::Attached(l) = &*g {
+                bytes = bytes.saturating_add(l.stack.engine.release_read_cache());
+            }
+        }
+        bytes
+    }
+
     /// Starts the idle-trim thread (decision 2 of 2026-11-13): once every
     /// volume has been idle for `idle_trim_ms`, the heap is trimmed once, off
     /// the queue threads; activity re-arms it.
@@ -1400,9 +1418,18 @@ impl Daemon {
                     }
                     if !trimmed && last.1.elapsed() >= idle {
                         let before = crate::trim::rss_bytes();
+                        // The read caches are what a workload leaves behind
+                        // (M12a memory gate, 2026-11-15): release them first,
+                        // the trim then returns the pages.
+                        let released = d.release_read_caches();
                         crate::trim::trim();
                         let after = crate::trim::rss_bytes();
-                        tracing::debug!(before = ?before, after = ?after, "idle: heap trimmed");
+                        tracing::debug!(
+                            before = ?before,
+                            after = ?after,
+                            read_cache_released = released,
+                            "idle: read caches released, heap trimmed"
+                        );
                         trimmed = true;
                     }
                 }

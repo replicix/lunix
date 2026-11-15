@@ -201,6 +201,8 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         Response::VolumeStatus(s) => {
             assert_eq!(s.state, VolumeState::Attached);
             assert!(s.journal_capacity >= 256 << 20, "{s:?}");
+            // A fresh attach recovers nothing above the floor: no mark.
+            assert_eq!((s.journal_marks_written, s.journal_marks_skipped), (0, 0));
             assert!(s.space.limit > 0);
             assert!(s.device.is_some());
         }

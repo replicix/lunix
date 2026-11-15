@@ -27,7 +27,7 @@
 //! | `dev_dir` | `/dev/lunix` | where the `<name>` symlinks go |
 //! | `volume_roots` | none | comma-separated directories to scan when the registry is rebuilt |
 //! | `max_locked_buffers` | 4 GiB | cap on queues × depth × `max_io_buf_bytes` of one attach |
-//! | `idle_trim_ms` | 10000 | trim the heap once every volume has been idle this long (0: never) |
+//! | `idle_trim_ms` | 10000 | once every volume has been idle this long, empty the read caches and trim the heap (0: never) |
 //! | `conn_idle_timeout_ms` | 60000 | close a control connection idle this long |
 
 use std::path::{Path, PathBuf};
