@@ -86,17 +86,22 @@ DA=$(attached_dev a)
 start_fio f2a "$DA" 0 1g --bs=64k --iodepth=8 --time_based --runtime=30 --rate=4m; FA=$LAST_FIO
 sleep 3
 touch "$HOLD"; sleep 1
+T0=$(date +%s%N)
 ( ctl '{"method":"quiesce_all"}' > "$OUT/f2.reply" 2>&1; echo $? > "$OUT/f2.rc" ) &
 QP=$!
 sleep 0.8   # past the first QUIESCE_DEV's 500 ms
 rm -f "$HOLD"
 wait "$QP"
+F2MS=$(( ($(date +%s%N) - T0) / 1000000 ))
+say "- quiesce_all took $F2MS ms (the hold was released at about 800 ms)"
 say "- quiesce_all reply (rc $(cat "$OUT/f2.rc")): $(cat "$OUT/f2.reply")"
 grep -q '"quiesced"' "$OUT/f2.reply"; expect "QuiesceAll succeeded after the retry" $?
 wait_daemon_exit 30; expect "the daemon exited by itself (rc $DRC)" $?
 [ "$DRC" = 0 ]; expect "exit code 0" $?
 grep -E 'quiesce failed|retrying once|aborting for recovery|quiesced; exiting' "$DLOG" | cut -c1-260 | sed 's/^/    log: /' | tee -a "$R"
-grep -q 'retrying once' "$DLOG"; expect "the log shows the failed QUIESCE_DEV and the retry" $?
+# One device: the retry is inside the device's quiesce (a second QUIESCE_DEV), which logs nothing; the held
+# request must have kept the call waiting until the hold was released.
+[ "$F2MS" -ge 700 ]; expect "the held request made the quiesce wait ($F2MS ms >= 700 ms: QUIESCE_DEV timed out, the retry succeeded after the release)" $?
 sleep 2
 start_lunixd || wedged "lunixd did not restart after F2"
 grep -q 'volume recovered at start.*recovered=true' "$DLOG"; expect "the new daemon recovered a" $?
