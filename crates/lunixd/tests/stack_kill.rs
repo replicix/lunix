@@ -651,17 +651,20 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
             runs += 1;
             let mut p = prepare(&cfg, &dir);
             let mut end = run_child(&cfg, &p, Some(&format!("{point}:{hit}")));
-            if let ChildEnd::Exited(c2) = &end {
-                // Timing (journal marks, background flushes) changed the
-                // count: retry once at this run's last hit.
+            // Timing (journal marks) changes some counts from run to run: a
+            // run that is not killed is retried at its own last hit, up to
+            // three times.
+            for _ in 0..3 {
+                let ChildEnd::Exited(c2) = &end else { break };
                 let c2 = c2.get(*point).copied().unwrap_or(0);
-                if c2 > 0 && c2 < hit {
-                    drop(p);
-                    std::fs::remove_dir_all(&dir).expect("cleanup");
-                    hit = c2;
-                    p = prepare(&cfg, &dir);
-                    end = run_child(&cfg, &p, Some(&format!("{point}:{hit}")));
+                if c2 == 0 || c2 >= hit {
+                    break;
                 }
+                drop(p);
+                std::fs::remove_dir_all(&dir).expect("cleanup");
+                hit = c2;
+                p = prepare(&cfg, &dir);
+                end = run_child(&cfg, &p, Some(&format!("{point}:{hit}")));
             }
             let what = format!("{mode:?} {} KiB, {point}:{hit}", cs >> 10);
             match end {
