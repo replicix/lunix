@@ -26,7 +26,7 @@ use lunix_iface::journal::{
 };
 use lunix_iface::{Error, Result};
 
-use crate::ring::{io_err, lock, LaneRing, Rings, Role};
+use crate::ring::{io_err, lock, LaneRing, RingKind, Rings, Role};
 use crate::sys::{self, B};
 
 /// One accepted record of a scanned file.
@@ -87,6 +87,10 @@ pub(crate) struct Plan {
     pub lanes: Vec<LanePlan>,
     /// The mark ring.
     pub marks: LanePlan,
+    /// The highest watermark carried by a record that survives the wipe
+    /// (numbered below `next_seq`): what is still witnessed on disk once the
+    /// first lane open has run.
+    pub kept_flushed: u64,
 }
 
 /// The scan could not use the hint (it skipped the file the lane must resume
@@ -177,8 +181,18 @@ fn scan_ring(ring: &LaneRing, tail: Option<u32>) -> std::result::Result<Vec<Scan
         match scan_file(buf.as_slice(), WriteSeq(prev)) {
             Err(_) => sf.bad = true,
             Ok(res) => {
+                let mut wrong_kind: Vec<Range<u64>> = Vec::new();
                 for r in &res.records {
                     prev = r.header.write_seq.0;
+                    // Marks live only in the mark ring, writes and holes only
+                    // in lane files (on-disk-formats §5.3): a record of the
+                    // other kind is damage, never a record.
+                    let is_mark = r.header.kind == RecordKind::Mark;
+                    if is_mark != (ring.kind == RingKind::Mark) {
+                        let off = r.header.off;
+                        wrong_kind.push(off..off + r.encoded_len() as u64);
+                        continue;
+                    }
                     sf.recs.push(ScRec {
                         seq: prev,
                         kind: r.header.kind,
@@ -193,7 +207,9 @@ fn scan_ring(ring: &LaneRing, tail: Option<u32>) -> std::result::Result<Vec<Scan
                     .damaged
                     .iter()
                     .map(|d| d.start as u64..d.end as u64)
+                    .chain(wrong_kind)
                     .collect();
+                sf.damaged.sort_by_key(|d| d.start);
                 sf.nz_end = sys::nonzero_end(buf.as_slice());
             }
         }
@@ -370,6 +386,14 @@ fn run(
             .push(plan_lane(files, floor, next_seq, rings.file_len)?);
     }
     plan.marks = plan_lane(&scans[nl], floor, next_seq, rings.marks.file_len)?;
+    plan.kept_flushed = scans
+        .iter()
+        .flatten()
+        .flat_map(|f| f.recs.iter())
+        .filter(|r| r.seq < next_seq)
+        .map(|r| r.flushed)
+        .max()
+        .unwrap_or(0);
     Ok((
         Recovered {
             records,

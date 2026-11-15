@@ -25,10 +25,13 @@
   that raised the watermark, unless a later group with `upto` above the counter at the raise completes
   within `JournalConfig::mark_idle` (default 50 ms; `None` disables), the coordinator appends one mark
   (kind 3, 64 bytes in its own 4 KiB block) carrying the watermark to the mark ring `m00-<ordinal>.j`
-  (4 files of 1 MiB) and `fdatasync`s it; also once after `prepare`. The mark takes the next `write_seq`;
-  a failed mark poisons at its number. `FileJournal::marks_written()` and `marks_skipped()` (the ring was
-  full until the next cut) are the metrics; exporting them from `lunixd` is a follow-up. Lanes cannot
-  reserve kind 3.
+  (4 files of 1 MiB) and `fdatasync`s it; also once after `prepare` when records above the floor were
+  recovered. No mark for a watermark at or below the last cut asked for (`tail_after`), none for a group
+  whose only new number is the last mark. The mark takes the next `write_seq`; a failed mark poisons at its
+  number. With the ring full the mark is retried (reclaim of a mark file wakes it); a warning is logged once
+  per episode. `FileJournal::marks_written()` and `marks_skipped()` (watermarks skipped) are the metrics;
+  exporting them from `lunixd` is a follow-up. Recovery treats a record of the wrong kind for its ring as
+  damage. Lanes cannot reserve kind 3.
 - Recovery (`scan.rs`): normative reader `lunix_format::journal::scan_file` per file, merge,
   stop at the first gap or duplicate. It also plans a **wipe**: everything a lane holds after
   its last record below `next_seq` is zeroed by the first `open_lane` (not by `recover`), so

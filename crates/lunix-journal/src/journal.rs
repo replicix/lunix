@@ -63,6 +63,9 @@ impl FileJournal {
             witnessed: AtomicU64::new(0),
             marks_written: AtomicU64::new(0),
             marks_skipped: AtomicU64::new(0),
+            mark_skipped_at: AtomicU64::new(0),
+            mark_ring_full: AtomicBool::new(false),
+            last_mark: AtomicU64::new(0),
             poison_at: AtomicU64::new(NOT_POISONED),
             flights: (0..lanes).map(|_| Mutex::new(LaneFlight::new())).collect(),
             coord: Coord::new(),
@@ -218,9 +221,11 @@ impl FileJournal {
         // no lane is open yet, so the counter is the last recovered number.
         let counter = self.sh.counter.load(Ordering::SeqCst);
         self.sh.flushed.fetch_max(counter, Ordering::SeqCst);
-        // Witness them too, unless a record already does.
+        // Witness them too, unless a surviving record already does. Nothing
+        // above the floor recovered: a durable commit covers it all, and a
+        // mark would only take a number (and make the engine cut nothing).
         if let Some(idle) = self.sh.cfg.mark_idle {
-            if counter > self.sh.witnessed.load(Ordering::SeqCst) {
+            if counter > st.floor && counter > self.sh.witnessed.load(Ordering::SeqCst) {
                 lock(&self.sh.coord.q).mark_due = Some(MarkDue {
                     flushed: counter,
                     counter_at: counter,
@@ -347,8 +352,9 @@ impl Journal for FileJournal {
         // Until prepare syncs the recovered records, only the floor (covered
         // by a durable commit) is known durable.
         self.sh.flushed.store(floor.0, Ordering::SeqCst);
-        // The surviving records carry the recovered watermark.
-        self.sh.witnessed.store(rec.flushed.0, Ordering::SeqCst);
+        // Only what survives the wipe still witnesses anything: a witness
+        // beyond the first gap is zeroed by the first lane open.
+        self.sh.witnessed.store(plan.kept_flushed, Ordering::SeqCst);
         lock(&self.sh.coord.q).mark_due = None;
         self.sh.poison_at.store(NOT_POISONED, Ordering::SeqCst);
         for f in &self.sh.flights {
@@ -395,6 +401,7 @@ impl Journal for FileJournal {
         let rings = &self.sh.rings;
         let cut_limit = self.sh.max_cut_asked.load(Ordering::SeqCst);
         let mut report = ReclaimReport::default();
+        let mut freed_mark_file = false;
         // The mark ring has no tail: every mark at or below the cut is
         // covered, so any of its used files may go (`u32::MAX`).
         let tails = upto
@@ -468,6 +475,8 @@ impl Journal for FileJournal {
                         if ring.kind == RingKind::Queue {
                             report.files += 1;
                             report.bytes += job.bytes;
+                        } else {
+                            freed_mark_file = true;
                         }
                         lunix_iface::crashpoint!("journal.after_reclaim_delete");
                     }
@@ -477,6 +486,15 @@ impl Journal for FileJournal {
                     }
                 }
             }
+        }
+        if freed_mark_file {
+            // A mark owed while the ring was full can be written now.
+            let mut q = lock(&self.sh.coord.q);
+            if let Some(d) = q.mark_due.as_mut() {
+                d.at = Instant::now();
+            }
+            drop(q);
+            self.sh.coord.cv.notify_all();
         }
         Ok(report)
     }

@@ -109,8 +109,16 @@ pub(crate) struct Shared {
     pub witnessed: AtomicU64,
     /// Marks written since `open` (a metric).
     pub marks_written: AtomicU64,
-    /// Marks skipped because the mark ring had no free file (a metric).
+    /// Watermarks a mark could not be written for because the mark ring had
+    /// no free file (a metric).
     pub marks_skipped: AtomicU64,
+    /// The last watermark counted in `marks_skipped`.
+    pub mark_skipped_at: AtomicU64,
+    /// The mark ring was full at the last attempt (the warning is logged
+    /// once per episode).
+    pub mark_ring_full: AtomicBool,
+    /// The `write_seq` of the last mark written.
+    pub last_mark: AtomicU64,
     /// The lowest sequence number of a failed append, dropped slot or failed
     /// sync; `NOT_POISONED` when healthy.
     pub poison_at: AtomicU64,

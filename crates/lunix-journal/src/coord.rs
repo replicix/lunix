@@ -60,10 +60,23 @@ pub(crate) fn run(sh: Arc<Shared>) {
                 if now >= due.at {
                     q.mark_due = None;
                     drop(q);
-                    if let Some(buf) = mark_buf.as_mut() {
-                        write_mark(&sh, due, buf);
-                    }
+                    let retry = match mark_buf.as_mut() {
+                        Some(buf) => write_mark(&sh, due, buf),
+                        None => {
+                            sh.marks_skipped.fetch_add(1, Ordering::Relaxed);
+                            false
+                        }
+                    };
                     q = lock(&sh.coord.q);
+                    if retry && q.mark_due.is_none() {
+                        // The ring is full: try again after another idle
+                        // delay, or as soon as reclaim frees a mark file.
+                        let idle = sh.cfg.mark_idle.unwrap_or(Duration::from_millis(50));
+                        q.mark_due = Some(MarkDue {
+                            at: Instant::now() + idle,
+                            ..due
+                        });
+                    }
                     continue;
                 }
                 q = sh
@@ -226,7 +239,10 @@ fn schedule_mark(sh: &Shared, upto: u64, before: u64) {
             q.mark_due = None;
         }
     }
-    if upto > before && upto > sh.witnessed.load(Ordering::SeqCst) {
+    // A group whose only new number is the last mark (an empty FLUSH after
+    // it) needs no mark of its own: nothing but the mark lies above `before`.
+    let only_a_mark = upto == before + 1 && upto == sh.last_mark.load(Ordering::SeqCst);
+    if upto > before && !only_a_mark && upto > sh.witnessed.load(Ordering::SeqCst) {
         q.mark_due = Some(MarkDue {
             flushed: upto,
             counter_at: counter,
@@ -236,14 +252,17 @@ fn schedule_mark(sh: &Shared, upto: u64, before: u64) {
 }
 
 /// Appends one mark carrying the current watermark to the mark ring and syncs
-/// it, unless a durable record already witnesses the watermark.
-fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) {
+/// it, unless a durable record already witnesses the watermark or a durable
+/// cut covers it. Returns true when the ring was full and the mark is still
+/// owed.
+fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) -> bool {
     let w = sh.flushed.load(Ordering::SeqCst).max(due.flushed);
     if w <= sh.witnessed.load(Ordering::SeqCst)
+        || w <= sh.max_cut_asked.load(Ordering::SeqCst)
         || sh.poisoned_at().is_some()
         || sh.closed.load(Ordering::SeqCst)
     {
-        return;
+        return false;
     }
     let ring = &sh.rings.marks;
     // Place it: the active mark file, or the next free one.
@@ -273,11 +292,21 @@ fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) {
         }
     };
     let Some((slot, off, gen, file)) = placed else {
-        // The watermark stays unwitnessed until the next cut frees a mark
-        // file; the metric shows it.
-        sh.marks_skipped.fetch_add(1, Ordering::Relaxed);
-        return;
+        // The watermark stays unwitnessed until reclaim frees a mark file
+        // (the next cut); counted once per watermark, logged once per
+        // episode, retried.
+        if sh.mark_skipped_at.swap(w, Ordering::SeqCst) != w {
+            sh.marks_skipped.fetch_add(1, Ordering::Relaxed);
+        }
+        if !sh.mark_ring_full.swap(true, Ordering::SeqCst) {
+            tracing::warn!(
+                flushed = w,
+                "journal mark ring full: the last flush stays unwitnessed until a cut frees a mark file"
+            );
+        }
+        return true;
     };
+    sh.mark_ring_full.store(false, Ordering::SeqCst);
     // A number of its own: no lane holds it, and no group runs while the
     // coordinator writes it, so no flush can complete over it unwritten.
     let seq = sh.counter.fetch_add(1, Ordering::SeqCst) + 1;
@@ -297,7 +326,7 @@ fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) {
     };
     if rec.encode(&mut enc).is_err() {
         sh.poison(seq);
-        return;
+        return false;
     }
     let block = buf.as_mut_slice();
     block.fill(0);
@@ -316,7 +345,7 @@ fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) {
         // The number is taken and will never hold a record: every flush at
         // or above it must fail, as after a failed append.
         sh.poison(seq);
-        return;
+        return false;
     }
     {
         let mut inner = lock(&ring.inner);
@@ -325,11 +354,13 @@ fn write_mark(sh: &Shared, due: MarkDue, buf: &mut AlignedBuf) {
         }
     }
     sh.witnessed.fetch_max(w, Ordering::SeqCst);
+    sh.last_mark.store(seq, Ordering::SeqCst);
     sh.marks_written.fetch_add(1, Ordering::Relaxed);
     sh.cfg.emit(|| TraceEvent::Mark {
         write_seq: seq,
         flushed: w,
     });
+    false
 }
 
 /// `fdatasync`s every item in parallel; true when all succeeded.
