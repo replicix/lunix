@@ -62,7 +62,7 @@ pub use ctl::{ControlPlane, CtlOp, DevInfo, Params, RingControl};
 pub use device::{DeviceLifecycle, Persist, Quiesced, UblkDevice};
 pub use error::{Errno, Result, SizeError, UblkError};
 pub use features::{check_flag_rules, flag, Features, KERNEL_FLOOR};
-pub use harden::{harden_process, Harden};
+pub use harden::{check_memlock, harden_process, Harden, LockedMemory};
 pub use identity::{
     check_identity, current_boot_id, other_process_alive, process_alive, volume_tag,
     IdentityMismatch, KernelView,

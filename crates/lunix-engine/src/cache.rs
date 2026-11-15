@@ -111,6 +111,18 @@ impl ChunkCache {
         st.used += len;
     }
 
+    /// Drops every cached chunk (an idle volume returns the memory; the cache
+    /// refills from the store on the next reads). Returns the bytes released.
+    pub(crate) fn clear(&self) -> u64 {
+        let mut st = lock(&self.st);
+        let used = st.used;
+        st.index = HashMap::new();
+        st.slots = Vec::new();
+        st.hand = 0;
+        st.used = 0;
+        used
+    }
+
     #[cfg(test)]
     pub(crate) fn used(&self) -> u64 {
         lock(&self.st).used
@@ -131,6 +143,19 @@ mod tests {
             },
             IdPrefix::from_slice(IdLen::Zero, &[]).expect("prefix"),
         )
+    }
+
+    #[test]
+    fn clear_releases_everything_and_the_cache_refills() {
+        let c = ChunkCache::new(4 * 4096);
+        for n in 0..3 {
+            c.insert(key(n), Arc::from(vec![n as u8; 4096]));
+        }
+        assert_eq!(c.clear(), 3 * 4096);
+        assert_eq!(c.used(), 0);
+        assert!(c.get(&key(1)).is_none());
+        c.insert(key(1), Arc::from(vec![1u8; 4096]));
+        assert!(c.get(&key(1)).is_some());
     }
 
     #[test]

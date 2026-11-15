@@ -115,6 +115,11 @@ pub struct JournalConfig {
     /// later group flush made a witness durable in the meantime (on-disk-
     /// formats section 5.3). `None` writes no marks.
     pub mark_idle: Option<Duration>,
+    /// Lock the journal's I/O memory (DESIGN §3, W7): every lane's batch
+    /// buffers (populated), the zero-fill buffer, the flush thread's stack
+    /// and its mark buffer. A failed lock fails `open` or `open_lane`. The
+    /// daemon sets it; tests under a small `RLIMIT_MEMLOCK` leave it off.
+    pub lock_memory: bool,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
 }
@@ -134,6 +139,7 @@ impl JournalConfig {
             direct: true,
             fixed_buffers: None,
             mark_idle: Some(DEFAULT_MARK_IDLE),
+            lock_memory: false,
             trace: None,
         }
     }
@@ -193,6 +199,7 @@ impl std::fmt::Debug for JournalConfig {
             .field("max_inflight", &self.max_inflight)
             .field("direct", &self.direct)
             .field("mark_idle", &self.mark_idle)
+            .field("lock_memory", &self.lock_memory)
             .finish_non_exhaustive()
     }
 }

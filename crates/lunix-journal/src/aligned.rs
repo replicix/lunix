@@ -12,6 +12,9 @@ pub(crate) const ALIGN: usize = 4096;
 pub(crate) struct AlignedBuf {
     ptr: NonNull<u8>,
     len: usize,
+    /// Locked by [`AlignedBuf::lock`]: unlocked before it is freed, since a
+    /// freed range the allocator keeps would otherwise stay locked.
+    locked: bool,
 }
 
 // SAFETY: the buffer is uniquely owned heap memory with no interior sharing;
@@ -33,7 +36,23 @@ impl AlignedBuf {
         let raw = unsafe { alloc_zeroed(layout) };
         let ptr = NonNull::new(raw)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::OutOfMemory))?;
-        Ok(Self { ptr, len })
+        Ok(Self {
+            ptr,
+            len,
+            locked: false,
+        })
+    }
+
+    /// Locks (and populates) the buffer until it is dropped. Returns the
+    /// bytes locked.
+    pub(crate) fn lock(&mut self) -> std::io::Result<u64> {
+        if self.locked {
+            return Ok(0);
+        }
+        // SAFETY: `ptr .. ptr + len` is this live allocation.
+        let n = unsafe { crate::sys::lock_region(self.ptr.as_ptr(), self.len) }?;
+        self.locked = true;
+        Ok(n)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -61,6 +80,10 @@ impl AlignedBuf {
 
 impl Drop for AlignedBuf {
     fn drop(&mut self) {
+        if self.locked {
+            // SAFETY: munlock of this live allocation, which was locked.
+            unsafe { libc::munlock(self.ptr.as_ptr().cast(), self.len) };
+        }
         // The layout was valid at construction, so it is valid again.
         if let Ok(layout) = Layout::from_size_align(self.len, ALIGN) {
             // SAFETY: allocated in `zeroed` with this exact layout.

@@ -68,7 +68,8 @@ pub use keyring::{
 pub use keys::VolumeKeys;
 pub use meta::{lease_is_stale, MetaSuite};
 pub use secret::{
-    arena_stats, AddressingKey, ArenaStats, Dek, Ik, Kmk, MacKey, MetaKey, Root, Secret, TagKey,
+    arena_stats, require_locked, AddressingKey, ArenaStats, Dek, Ik, Kmk, MacKey, MetaKey, Root,
+    Secret, TagKey,
 };
 pub use tripwire::ENABLED as TRIPWIRE_ENABLED;
 pub use volume::VolumeCrypto;

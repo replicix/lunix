@@ -738,6 +738,16 @@ pub struct VolumeStatusBody {
     pub journal_used: u64,
     /// Journal capacity.
     pub journal_capacity: u64,
+    /// Journal marks written since the attach: the journal's own witnesses
+    /// of the flushed watermark (ADR-4, on-disk-formats §5.3).
+    pub journal_marks_written: u64,
+    /// Watermarks the full mark ring could not take a mark for since the
+    /// attach (until a cut frees a mark file).
+    pub journal_marks_skipped: u64,
+    /// Bytes this volume holds locked (DESIGN §3, W7): its queues' I/O
+    /// buffers and thread stacks and its journal's buffers and flush thread
+    /// stack. 0 when detached.
+    pub locked_bytes: u64,
     /// The tip's `commit_seq`.
     pub last_commit_seq: u64,
     /// The tip's `created_at`, milliseconds since the epoch.

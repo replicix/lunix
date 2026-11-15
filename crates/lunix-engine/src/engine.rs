@@ -359,6 +359,15 @@ impl Engine {
         self.inner.journal_charged.load(Ordering::Acquire)
     }
 
+    /// Empties the decoded-chunk read cache (bounded by `read_cache_max`) and
+    /// returns the bytes it held. For an idle volume: the daemon calls it
+    /// before it trims the heap, so a volume that ran a workload comes back
+    /// to its fresh resident size (M12a memory gate); the next reads refill
+    /// the cache from the store. Never blocks on I/O.
+    pub fn release_read_cache(&self) -> u64 {
+        self.inner.cache.clear()
+    }
+
     fn stop_threads(&self) {
         if let Some((stop, h)) = lock(&self.bg).take() {
             *lock(&stop.0) = true;
