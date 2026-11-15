@@ -357,7 +357,8 @@ time by the flush coordinator, never by a lane. They are reinitialised,
 reported (lane id `u16::MAX` in a damaged range) and recovered like a lane's
 files; the checkpoint's lane tails do not cover them, and recovery always
 reads them whole. Reclaim reinitialises a mark file once every mark in it is
-at or below the cut.
+at or below the cut. The header is a lane-0 header: only the name (`m00-`
+against `q00-`) tells a mark file from lane 0's.
 
 ### 5.2 Record header (64 bytes)
 
@@ -429,7 +430,8 @@ After every lane and the mark ring have been read, recovery keeps records
 with `write_seq > floor`, merges them by `write_seq` and stops at the first
 gap (DESIGN §4.1). A mark fills its `write_seq` for this contiguity and
 counts for the watermark, but it is not handed to the engine: it changes no
-block. A damaged record above the floor is a missing `write_seq`, so the
+block. A record of the wrong kind for its ring (kind 3 in a lane file, kind
+1 or 2 in a mark file) is damage, never a record. A damaged record above the floor is a missing `write_seq`, so the
 merge stops exactly where D12 stopped before; a damaged record at or below
 the floor costs nothing, because the records after it in the lane are still
 read. Valid records after the first gap are ignored and reported
@@ -497,18 +499,28 @@ makes a witness of `W` durable. When no such group completes within the
 idle delay (default 50 ms, configurable), the flush coordinator appends a
 **mark** carrying `W` to the mark ring and `fdatasync`s it: at most one mark
 per group flush that raised the watermark, written only while no flush is
-queued. The mark takes the next `write_seq` from the journal's counter, so
-it leaves no gap; a mark that fails to be written poisons the journal at
-its number, as a failed append does. After a restart the recovered records,
-synced by the first lane open, are witnessed the same way.
+queued, none for a watermark at or below the last durable cut (a cut inside
+the idle delay cancels it) and none for a group whose only new number is the
+last mark. The mark takes the next `write_seq` from the journal's counter,
+so it leaves no gap; a mark that fails to be written poisons the journal at
+its number, as a failed append does. The mark is a synchronous write and
+`fdatasync` on the coordinator thread: a FLUSH arriving meanwhile waits for
+it. After a restart the recovered records, synced by the first lane open,
+are witnessed the same way when any lie above the floor (a clean attach
+takes no number). With the ring full the mark is retried as soon as reclaim
+frees a mark file; the skipped watermarks are counted and logged.
 
 The remaining window: a crash within the idle delay, before the mark is
-durable, leaves the last flush unwitnessed. Medium damage to its records is
+durable, leaves the last flush unwitnessed; so does a full mark ring until
+reclaim frees a file, and `mark_idle = None`. Medium damage to its records is
 then indistinguishable from crash residue and is wiped with every record
 after it; a crash alone cannot damage them, since they were durable. A lost
 or torn mark is a missing number above the watermark the surviving records
 carry: crash residue. A damaged mark below the watermark is loss like
-damage in a lane.
+damage in a lane: `refuse` refuses it (recovery cannot prove the missing
+number was a mark), and under `wipe` the acknowledged records after it are
+wiped although the mark held no data. That cost is accepted for now
+(ADR-4).
 
 ### 5.4 Reuse of the framing
 

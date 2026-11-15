@@ -83,6 +83,44 @@ Tests:
   counts that case. fsck listing marks is M14's follow-up; exporting the two metrics from `lunixd` is a follow-up
   for M12.
 
+## Mark ring review fixes (2026-11-15)
+
+The review ("Mark ring review (2026-11-14)") is "merge after fixes"; the maintainer re-signed amendment (b) and the
+lead records the re-sign on the final text.
+
+- **K1:** `witnessed` after recovery is the highest watermark carried by a record that survives the wipe (numbered
+  below `next_seq`, `Plan::kept_flushed`), not the maximum over all scanned records. Test
+  `a_witness_beyond_the_gap_is_replaced_by_a_mark_after_open` (the review's probe).
+- **K2:** no mark for a watermark at or below the last durable cut (`max_cut_asked`): a clean attach takes no
+  number, a cut inside the idle delay cancels the owed mark. `prepare` schedules a mark only when records above the
+  floor were recovered. Test `a_clean_attach_or_a_cut_inside_the_delay_writes_no_mark` (two clean attaches leave
+  `last_issued` unchanged).
+- **k1, ring full:** the owed mark is kept and retried every idle delay, and at once when reclaim frees a mark file;
+  `marks_skipped` counts each skipped watermark once; a warning is logged once per episode (lunix-journal now depends
+  on `tracing`). Test `a_full_mark_ring_retries_after_reclaim` (1 020 marks, one skipped, written after reclaim
+  without a new flush).
+- **k3, item 3 enforced:** recovery treats a kind-3 record in a lane file, or a kind 1/2 record in a mark file, as
+  damage. Test `a_record_of_the_wrong_kind_for_its_ring_is_damage`.
+- **k4:** no mark for a group whose only new number is the last mark. Test
+  `an_empty_flush_after_a_mark_writes_no_mark`.
+- **k2:** a damaged durable mark costs the later acknowledged records under `wipe`; documented in ADR-4 and
+  on-disk-formats §5.3 as a known cost. No bridge in this branch.
+- **k5:** the costs (a failed mark poisons; the mark's sync delays a FLUSH arriving meanwhile) are stated in ADR-4
+  and §5.3.
+- **k6 (part):** a failed allocation of the mark buffer now counts in `marks_skipped`.
+- **FREEZE amendment (b):** item 4 reworded (above the last durable cut; no mark for a mark-only group; after a
+  restart only when records above the floor were recovered; retried when the ring is full; the remaining window is a
+  crash within the idle delay, a full ring until reclaim, and `mark_idle = None`); item 2 says the mark file's
+  header is a lane-0 header; item 3 says recovery treats a wrong-kind record as damage. Layout unchanged; "Re-signed
+  by" left pending for the lead.
+- **Listed, not fixed:**
+  - k6: a due mark is dropped at shutdown (a clean stop without a final cut leaves the last flush unwitnessed);
+    `recover` on a live object races a mark in flight (as m6).
+  - k7: `MemJournal` writes its mark at once and keeps every mark through a crash; it does not model the idle delay,
+    the mark at open, a full ring or a lost mark behind lane records. The journal's own tests cover those.
+  - k2 bridge (recovery bridging missing numbers inside a damaged mark range): a maintainer decision.
+  - Exporting the two metrics from `lunixd` (M12a) and fsck listing marks (M14).
+
 ## Format status
 
 - The watermark (bytes 56-63) is re-signed (`2d877db`). 0 means no watermark known; the reader rejects

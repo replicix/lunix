@@ -243,10 +243,20 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   takes the next `write_seq`, so it leaves no gap; recovery counts it for
   contiguity and the watermark and never hands it to the engine (it changes
   no block); at most one mark per group flush that raised the watermark, and
-  a metric counts them. The window that remains is a crash within the idle
-  delay: the last flush is then unwitnessed, and medium damage to its
-  records reads as crash residue and is wiped with every record after it
-  (a crash alone cannot damage them). Inside that window the rule is weaker
+  a metric counts them. No mark is written for a watermark the last durable
+  cut covers (a clean attach takes no number, so an idle volume still cuts
+  nothing). With the mark ring full the mark is retried once reclaim frees a
+  file. The window that remains is a crash within the idle delay, a full
+  mark ring until reclaim frees a file, and `mark_idle = None`: the last
+  flush is then unwitnessed, and medium damage to its records reads as
+  crash residue and is wiped with every record after it (a crash alone
+  cannot damage them). Costs accepted: a failed mark write poisons the
+  journal (its number is taken); the mark's write and `fdatasync` run on
+  the flush coordinator, so a FLUSH arriving meanwhile waits for one more
+  sync; and a damaged durable mark below the watermark is refused under
+  `refuse` but under `wipe` takes the acknowledged records after it,
+  although the mark held no data (bridging such a gap in the mark ring is a
+  possible later change). Inside that window the rule is weaker
   than the rule of 2026-11-13, which refused any records beyond a gap;
   everywhere else it is stronger, since damage to a flushed record with no
   later record in its lane is refused too. A lost or torn mark is residue.

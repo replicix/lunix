@@ -148,15 +148,25 @@ unwitnessed window with a witness; on-disk-formats.md §5 intro, §5.1, §5.2,
    reinitialised, reclaimed (once every mark in a file is at or below the
    cut) and recovered like lane files; recovery merges their marks with the
    lanes for `write_seq` contiguity and the watermark, never hands a mark
-   to the engine, and reports damage in them under lane id `u16::MAX`.
+   to the engine, and reports damage in them under lane id `u16::MAX`. A
+   mark file's header is a lane-0 header: only the file name (`m00-` against
+   `q00-`) tells the two apart.
 3. Marks exist only in the mark ring: DELTA regions and the memfd sink
-   never carry kind 3, and the strict DELTA decoder rejects it.
+   never carry kind 3, and the strict DELTA decoder rejects it. Recovery
+   treats a record of the wrong kind for its ring (kind 3 in a lane file,
+   kind 1 or 2 in a mark file) as damage, never as a record.
 4. When a mark is written (§5.3): after a group flush that raised the
-   watermark, unless a later group flush whose `upto` is above the counter
-   at that raise completes within the idle delay (default 50 ms,
-   configurable), at most one mark per such flush, only while no flush is
-   queued; after a restart, once the first lane open made the recovered
-   records durable. The remaining window is a crash within the idle delay.
+   watermark above the last durable cut, unless a later group flush whose
+   `upto` is above the counter at that raise completes within the idle
+   delay (default 50 ms, configurable): at most one mark per such flush,
+   only while no flush is queued, none for a group whose only new number is
+   the last mark; after a restart only when records above the floor were
+   recovered (once the first lane open made them durable). A mark the full
+   ring cannot take is retried as soon as reclaim frees a mark file. The
+   last flush stays unwitnessed (medium damage to its records reads as
+   crash residue) after a crash within the idle delay, while the ring is
+   full until reclaim frees a file, and when marks are off (`mark_idle`
+   `None`).
 5. New golden: `02-journal-record-mark.bin` (a mark: `write_seq` 9,
    `flushed` 8, `off` 12288). The other item 2 goldens are unchanged.
 
