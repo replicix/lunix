@@ -335,7 +335,6 @@ impl DeviceRecord {
 }
 
 const PIN: &str = "local pins";
-const PIN_V1_LEN: usize = 96;
 const PIN_V2_LEN: usize = 136;
 
 /// The trust-on-first-use pin of a volume's mode and fingerprint.
@@ -362,9 +361,8 @@ pub struct RollbackFloor {
 
 /// `state/pins`: monotonic floors and the pin.
 ///
-/// This is the part of the file that existed in version 1. The version 2
-/// rollback anchor is in [`LocalPinsFile`]; encoding a `LocalPins` writes
-/// version 2 **without** a floor, and decoding one drops the floor. A caller
+/// The rollback anchor is in [`LocalPinsFile`]; encoding a `LocalPins` writes
+/// the file **without** a floor, and decoding one drops the floor. A caller
 /// that keeps the anchor must read and write [`LocalPinsFile`] instead.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LocalPins {
@@ -381,10 +379,10 @@ pub struct LocalPins {
 }
 
 impl LocalPins {
-    /// Longest encoded length (version 2).
+    /// Encoded length.
     pub const LEN: usize = PIN_V2_LEN;
 
-    /// Appends the version 2 file with no floor.
+    /// Appends the file with no floor.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<()> {
         LocalPinsFile {
             pins: self.clone(),
@@ -393,20 +391,19 @@ impl LocalPins {
         .encode(out)
     }
 
-    /// Decodes a version 1 or version 2 file, dropping any floor.
+    /// Decodes the file, dropping any floor.
     pub fn decode(buf: &[u8]) -> Result<Self> {
         Ok(LocalPinsFile::decode(buf)?.pins)
     }
 }
 
-/// `state/pins` as a whole: the pins of [`LocalPins`] and, from version 2,
-/// the rollback anchor.
+/// `state/pins` as a whole: the pins of [`LocalPins`] and the rollback
+/// anchor.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LocalPinsFile {
     /// Floors and the pin.
     pub pins: LocalPins,
-    /// The rollback anchor; `None` is `floor_present` = 0, which is also what
-    /// a version 1 file means.
+    /// The rollback anchor; `None` is `floor_present` = 0.
     pub floor: Option<RollbackFloor>,
 }
 
@@ -420,10 +417,8 @@ fn check_crc(buf: &[u8], len: usize) -> Result<()> {
 }
 
 impl LocalPinsFile {
-    /// Length of a version 2 file.
+    /// Length of the file.
     pub const LEN: usize = PIN_V2_LEN;
-    /// Length of a version 1 file, which is only read.
-    pub const V1_LEN: usize = PIN_V1_LEN;
 
     fn validate(&self) -> Result<()> {
         if let Some(p) = &self.pins.pin {
@@ -458,63 +453,48 @@ impl LocalPinsFile {
         Ok(())
     }
 
-    /// Decodes a version 1 file (96 bytes, read as "no floor") or a version 2
-    /// file (136 bytes). Any other length or version is an error; the caller
-    /// treats a rejected file as absent.
+    /// Decodes the 136-byte version 2 file. Any other length or version is an
+    /// error; the caller treats a rejected file as absent.
     pub fn decode(buf: &[u8]) -> Result<Self> {
-        let v2 = match buf.len() {
-            PIN_V1_LEN => false,
-            PIN_V2_LEN => true,
-            n => {
-                return Err(FormatError::Truncated {
-                    what: PIN,
-                    need: if n < PIN_V1_LEN {
-                        PIN_V1_LEN
-                    } else {
-                        PIN_V2_LEN
-                    },
-                    have: n,
-                })
-            }
-        };
+        if buf.len() != PIN_V2_LEN {
+            return Err(FormatError::Truncated {
+                what: PIN,
+                need: PIN_V2_LEN,
+                have: buf.len(),
+            });
+        }
         check_crc(buf, buf.len())?;
         let mut r = Reader::new(&buf[..buf.len() - 4], PIN);
         r.magic(b"LUNIXPIN")?;
-        r.version_u16(if v2 { 2 } else { 1 })?;
+        r.version_u16(2)?;
         let present = r.u8()?;
         let mode = r.u8()?;
-        let floor_present = if v2 { r.u8()? } else { 0 };
-        r.reserved(if v2 { 3 } else { 4 })?;
+        let floor_present = r.u8()?;
+        r.reserved(3)?;
         let volume_uuid = VolumeUuid(r.array()?);
         let family_id = FamilyId(r.array()?);
         let max_keyring_seq = r.u64()?;
         let max_epoch = r.u64()?;
         let fp: [u8; 16] = r.array()?;
-        let mut floor = None;
-        if v2 {
-            let seq = r.u64()?;
-            let hash: [u8; 32] = r.array()?;
-            match floor_present {
-                0 => {
-                    if seq != 0 || hash != [0u8; 32] {
-                        return Err(FormatError::invalid(
-                            PIN,
-                            "floor fields set without a floor",
-                        ));
-                    }
+        let seq = r.u64()?;
+        let hash: [u8; 32] = r.array()?;
+        let floor = match floor_present {
+            0 => {
+                if seq != 0 || hash != [0u8; 32] {
+                    return Err(FormatError::invalid(
+                        PIN,
+                        "floor fields set without a floor",
+                    ));
                 }
-                1 => {
-                    floor = Some(RollbackFloor {
-                        max_commit_seq: CommitSeq(seq),
-                        tip_hash: hash,
-                    });
-                }
-                v => return Err(FormatError::range(PIN, "floor_present", u64::from(v))),
+                None
             }
-            r.reserved(12)?;
-        } else {
-            r.reserved(12)?;
-        }
+            1 => Some(RollbackFloor {
+                max_commit_seq: CommitSeq(seq),
+                tip_hash: hash,
+            }),
+            v => return Err(FormatError::range(PIN, "floor_present", u64::from(v))),
+        };
+        r.reserved(12)?;
         r.finish()?;
         let pin = match present {
             0 => {

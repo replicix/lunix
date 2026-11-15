@@ -281,7 +281,7 @@ its stored bytes), the tip's `chain_floor`, and the floor `F` =
 
 Rules, in order:
 
-- E-a. No floor (`state/pins` absent, version 1, or `floor_present` = 0;
+- E-a. No floor (`state/pins` absent or `floor_present` = 0;
   the orchestrator path, which keeps no pin store, is always here) → the
   stage passes; a host with a pin store records `F` = `T`.
 - E-b. `T.commit_seq < F.max_commit_seq` → `Rollback`.
@@ -297,7 +297,7 @@ Rules, in order:
 
 | # | floor | tip height against `F.max_commit_seq` | commit at the floor's height | result | rule |
 |---|---|---|---|---|---|
-| 120 | absent (no file, version 1, or `floor_present` = 0) | any | — | pass; record `F` = `T` | E-a |
+| 120 | absent (no file, or `floor_present` = 0) | any | — | pass; record `F` = `T` | E-a |
 | 121 | present | below | any | `Rollback` | E-b |
 | 122 | present | equal | hash = `tip_hash` | pass | E-e |
 | 123 | present | equal | hash ≠ `tip_hash` | `Fork` | E-d |

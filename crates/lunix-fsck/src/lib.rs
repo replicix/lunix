@@ -11,8 +11,8 @@
 //!
 //! 1. **Volume and keys.** `volume` parses and its MAC (or checksum, for a
 //!    plain volume) verifies; the keyring parses and, with a credential,
-//!    unwraps; `volume.json` and `state/*` parse. `state/pins` is version 1 or
-//!    2 and a rejected file is an error, never "no floor".
+//!    unwraps; `volume.json` and `state/*` parse. `state/pins` is version 2 and
+//!    a rejected file is an error, never "no floor".
 //! 2. **Commit chain** from the tip down to `chain_floor`: contiguous
 //!    `commit_seq`, `parent_hash`, non-decreasing `epoch`, the MAC or AEAD of
 //!    every commit, `chain_floor` against `retain_last`. Rule R4 follows:

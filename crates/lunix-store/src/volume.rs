@@ -522,7 +522,7 @@ impl LocalVolume {
         }
     }
 
-    /// `state/pins` as a whole (version 1 or 2); `None` when absent.
+    /// `state/pins` as a whole (version 2); `None` when absent.
     fn read_pins_file(&self) -> Result<Option<LocalPinsFile>> {
         match self.read_state_file(&lpath::state_pins(), 4096)? {
             Some(b) => Ok(Some(LocalPinsFile::decode(&b)?)),
