@@ -117,6 +117,8 @@ pub(crate) struct FileLane {
     inflight_writes: usize,
     inflight_reads: usize,
     next_token: u64,
+    /// Bytes of the pool this lane locked.
+    locked: u64,
 }
 
 impl FileLane {
@@ -130,6 +132,14 @@ impl FileLane {
         let mut pool = Vec::with_capacity(sh.cfg.pool_buffers);
         for _ in 0..sh.cfg.pool_buffers {
             pool.push(AlignedBuf::zeroed(BATCH_CAP).map_err(Error::Io)?);
+        }
+        let mut locked = 0u64;
+        if sh.cfg.lock_memory {
+            for b in &mut pool {
+                // Unlocked again when the buffer is dropped with the lane.
+                locked += b.lock().map_err(Error::Io)?;
+            }
+            sh.locked.fetch_add(locked, Ordering::AcqRel);
         }
         let iovs: Vec<libc::iovec> = pool
             .iter()
@@ -207,6 +217,7 @@ impl FileLane {
             inflight_writes: 0,
             inflight_reads: 0,
             next_token: 1,
+            locked,
         })
     }
 
@@ -772,5 +783,7 @@ impl Drop for FileLane {
         if let Some(open) = lock(&self.sh.st).lane_open.get_mut(usize::from(self.id)) {
             *open = false;
         }
+        // The pool is freed (and unmapped) with the lane.
+        self.sh.locked.fetch_sub(self.locked, Ordering::AcqRel);
     }
 }

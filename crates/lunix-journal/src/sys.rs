@@ -20,6 +20,82 @@ pub(crate) fn floor4k(x: u64) -> u64 {
     x & !(B - 1)
 }
 
+/// Locks `len` bytes at `ptr`, populating them (the I/O path's memory never
+/// waits for swap; DESIGN §3, W7). Returns the bytes locked.
+///
+/// # Safety
+/// `ptr .. ptr + len` must lie inside one live mapping of this process.
+pub(crate) unsafe fn lock_region(ptr: *const u8, len: usize) -> io::Result<u64> {
+    // SAFETY: the caller's contract.
+    if unsafe { libc::mlock(ptr.cast(), len) } != 0 {
+        let e = io::Error::last_os_error();
+        return Err(io::Error::new(
+            e.kind(),
+            format!("mlock of {len} journal bytes failed: {e} (RLIMIT_MEMLOCK, CAP_IPC_LOCK)"),
+        ));
+    }
+    Ok(len as u64)
+}
+
+/// The calling thread's stack: its lowest address and size.
+fn own_stack() -> io::Result<(*mut libc::c_void, usize)> {
+    // SAFETY: a zeroed attr is filled by pthread_getattr_np and destroyed
+    // after use.
+    unsafe {
+        let mut attr: libc::pthread_attr_t = std::mem::zeroed();
+        if libc::pthread_getattr_np(libc::pthread_self(), &mut attr) != 0 {
+            return Err(io::Error::other("pthread_getattr_np failed"));
+        }
+        let mut addr: *mut libc::c_void = std::ptr::null_mut();
+        let mut size: libc::size_t = 0;
+        let r = libc::pthread_attr_getstack(&attr, &mut addr, &mut size);
+        libc::pthread_attr_destroy(&mut attr);
+        if r != 0 {
+            return Err(io::Error::other("pthread_attr_getstack failed"));
+        }
+        Ok((addr, size))
+    }
+}
+
+/// Holds the calling thread's stack locked (as touched, `MLOCK_ONFAULT`)
+/// and unlocks it when dropped on that thread: the C library caches thread
+/// stacks, and a cached stack would stay locked.
+pub(crate) struct StackLock {
+    addr: usize,
+    size: usize,
+}
+
+impl StackLock {
+    /// Locks the calling thread's stack.
+    pub(crate) fn new() -> io::Result<Self> {
+        let (addr, size) = own_stack()?;
+        // SAFETY: the range is this thread's own stack mapping.
+        if unsafe { libc::mlock2(addr, size, libc::MLOCK_ONFAULT) } != 0 {
+            let e = io::Error::last_os_error();
+            return Err(io::Error::new(
+                e.kind(),
+                format!("mlock2 of the journal flush thread's stack failed: {e} (RLIMIT_MEMLOCK, CAP_IPC_LOCK)"),
+            ));
+        }
+        Ok(Self {
+            addr: addr as usize,
+            size,
+        })
+    }
+
+    /// The stack's size.
+    pub(crate) fn bytes(&self) -> u64 {
+        self.size as u64
+    }
+}
+
+impl Drop for StackLock {
+    fn drop(&mut self) {
+        // SAFETY: munlock of the stack range locked in `new`.
+        unsafe { libc::munlock(self.addr as *const libc::c_void, self.size) };
+    }
+}
+
 /// Bytes of the shared zero buffer used for zero fills (1 MiB).
 pub(crate) const ZERO_LEN: usize = 1 << 20;
 

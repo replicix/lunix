@@ -119,6 +119,8 @@ pub(crate) struct Shared {
     pub mark_ring_full: AtomicBool,
     /// The `write_seq` of the last mark written.
     pub last_mark: AtomicU64,
+    /// Bytes the journal holds locked (`JournalConfig::lock_memory`).
+    pub locked: AtomicU64,
     /// The lowest sequence number of a failed append, dropped slot or failed
     /// sync; `NOT_POISONED` when healthy.
     pub poison_at: AtomicU64,
