@@ -147,7 +147,7 @@ fn a_number_held_twice_is_an_error_at_any_watermark() {
 }
 
 #[test]
-fn a_flip_in_a_record_at_or_below_the_floor_is_a_warning() {
+fn a_flip_in_a_record_at_or_below_the_floor_is_a_note() {
     for mode in ALL_MODES {
         let b = build(&spec(mode));
         let (seq, off) = journal_records(&b.dir, 0)
@@ -157,7 +157,7 @@ fn a_flip_in_a_record_at_or_below_the_floor_is_a_warning() {
         assert_eq!(seq, 100);
         b.flip(&lane_file(0), off + 80);
         let r = b.fsck(&b.opts());
-        assert_eq!(r.exit_code(), 1, "{}", r.render_text());
+        assert_eq!(r.exit_code(), 0, "{}", r.render_text());
         assert!(
             r.has(code::JOURNAL_DAMAGE_BELOW_FLOOR),
             "{}",

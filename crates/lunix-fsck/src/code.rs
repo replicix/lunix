@@ -158,7 +158,7 @@ codes! {
     /// Damage above the floor with valid records after it in its lane.
     JOURNAL_RESIDUE = "journal_residue", Note, "journal damage above the floor with valid records after it in its lane: it holds no durable record unless a number at or below the flushed watermark is missing, which journal_loss reports (ADR-4, E1 sign-off 2026-11-16); recovery wipes from the first gap";
     /// Damage at or below the floor.
-    JOURNAL_DAMAGE_BELOW_FLOOR = "journal_damage_below_floor", Warning, "journal damage at or below the floor (covered by the commit)";
+    JOURNAL_DAMAGE_BELOW_FLOOR = "journal_damage_below_floor", Note, "journal damage at or below the floor: covered by the commit, costs nothing (a commit does not sync the journal, so a crash can tear such records; E1)";
     /// A torn tail.
     JOURNAL_TAIL = "journal_tail", Note, "a torn last record of a lane: crash residue, legal";
     /// The merge stops at or below the watermark.
