@@ -56,6 +56,10 @@ step "lunix-ublk with crashpoints: clippy and unit tests (lead, M10; root cells 
 cargo clippy -j "$jobs" -p lunix-ublk --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-ublk --features crashpoints
 
+step "lunix-index with crashpoints: clippy and the rebuild kill tests (lead, M17.B review B-3)"
+cargo clippy -j "$jobs" -p lunix-index --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-index --features crashpoints --test rebuild_crash
+
 step "lunix-gc with crashpoints: clippy (lead, M17.A)"
 cargo clippy -j "$jobs" -p lunix-gc --all-targets --features crashpoints -- -D warnings
 
