@@ -366,6 +366,9 @@ struct Capture {
     lines: Mutex<Vec<String>>,
 }
 
+/// Records every event. Each use rebuilds the callsite interest cache inside
+/// its scope: an event site first hit by another test thread (no subscriber)
+/// can otherwise keep a cached "never" and skip this scoped subscriber.
 struct CaptureSub(Arc<Capture>);
 
 struct Msg(String);
@@ -456,7 +459,10 @@ fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
 
     let cap = Arc::new(Capture::default());
     let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || open(&v, mode));
+    let s = tracing::subscriber::with_default(sub, || {
+        tracing::callsite::rebuild_interest_cache();
+        open(&v, mode)
+    });
     // The damaged range, with its sequence bounds, and the records beyond
     // the gap: in the report and in the log line written before any lane
     // opened.
@@ -672,8 +678,11 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
     p.on_journal_damage = OnJournalDamage::Refuse;
     let cap = Arc::new(Capture::default());
     let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || open_volume(p))
-        .expect("a torn tail is crash residue: refuse opens");
+    let s = tracing::subscriber::with_default(sub, || {
+        tracing::callsite::rebuild_interest_cache();
+        open_volume(p)
+    })
+    .expect("a torn tail is crash residue: refuse opens");
     let rep = s.engine.recovery_report();
     assert_eq!(rep.damaged.len(), 1, "{rep:?}");
     assert_eq!(
