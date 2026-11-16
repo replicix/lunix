@@ -87,8 +87,12 @@ fn a_dead_segment_waits_for_every_unnamed_output_its_ids_moved_to() {
     for ci in 2..5 {
         v.discard(ci);
     }
-    v.commit().expect("commit");
-    v.commit().expect("commit");
+    // Enough FULLs that the one with all five chunks is no root under any
+    // retention rule (GC keeps every FULL from the lowest chain_floor a
+    // retained FULL records).
+    for _ in 0..3 {
+        v.commit().expect("commit");
+    }
 
     // Compaction of S (live fraction 0.4) into T1; the moves are held back.
     v.passes(1).expect("pass");
