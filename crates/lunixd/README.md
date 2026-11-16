@@ -33,4 +33,9 @@ lunixd check --dir VOLDIR       offline store self-check of a detached volume (u
   attached again at start with a new device.
 - Tests: `tests/*.rs` without root (`LUNIXD_MEMDIAG=1` makes `memory_diag` print the heap after a
   workload); `tests/root/m12a-*.sh` through `tools/remote.sh root` (`m12a-faults.sh` needs a
-  `crashpoints` build). `tests/stack_*.rs` and the body of `src/testsupport.rs` are M12b's.
+  `crashpoints` build; `m12a-memcg-paging.sh` needs swap and cgroup v2: the daemon in a memory cgroup
+  that pages its heap under full-speed buffered writes, the hang watchdog as the assertion; run it
+  with `tools/remote.sh root env LUNIX_ROOT_TESTS=1 LUNIX_SPIKE_DIR=.. LUNIXD=.. TESTD=.. bash
+  crates/lunixd/tests/root/m12a-memcg-paging.sh`, knobs in its header; not run in CI). `tests/stack_*.rs` and the body of `src/testsupport.rs` are M12b's.
+- `lunixd ctl` takes the request as an argument (visible in the process list): do not pass a
+  passphrase through it until M13a.
