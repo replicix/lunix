@@ -32,7 +32,7 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
 7. The floor is lowered only through `VolumeDir::reset_rollback_floor`
    (store opened with `allow_floor_reset` only for `--truncate-tip`,
    `--reset-floor` and `--repair-pins`; audited in `state/floor-resets.log`).
-8. Memory is about 270 bytes per distinct chunk (see the crate docs).
+8. Memory: about 270 bytes per distinct chunk, plus about 30 per mapped one (crate docs).
 9. Taking the lock rewrites `LOCK` with the pid: that is the one write a check
    makes, and a read-only medium cannot be checked.
 10. A keyed volume without a credential gets no check at all.

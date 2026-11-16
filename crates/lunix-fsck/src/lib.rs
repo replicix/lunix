@@ -60,6 +60,16 @@
 //! about 18 GiB, plus the scratch copy of the index on disk and one
 //! container's extent region (16 MiB) in memory. The entries of the tip
 //! (64 bytes per mapped chunk) are the largest remaining term.
+//!
+//! The GC hook (`gc.rs`, M17.B) adds, one after the other: `lunix-gc`'s mark
+//! (24 bytes per reference until a segment is finished, then per live
+//! extent), fsck's liveness recount (8 bytes per reference of one root, then
+//! per live extent) and the dry run's mark, plus a 32 MiB map cache and a
+//! second scratch copy of the index. Measured with it on the merged tree
+//! (`p1/m17b-r2`): 320 000 distinct and 400 000 mapped chunks, peak RSS
+//! 82 MiB, **269 bytes per distinct chunk** (unchanged); 1 048 576 mapped
+//! chunks of 64 distinct extents, peak RSS 112 MiB (84 MiB without the hook),
+//! about 30 bytes more per mapped chunk.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
