@@ -73,8 +73,9 @@ pub(crate) struct Recovered {
     pub(crate) stats: Option<EngineStats>,
     pub(crate) report: RecoveryReport,
     pub(crate) journal_charged: u64,
-    pub(crate) index_charged: u64,
     pub(crate) upto_seg: Option<SegId>,
+    /// The catch-up's entries could not be persisted: the first cut retries.
+    pub(crate) index_unpersisted: bool,
 }
 
 /// The raw value of the highest object id any of `commits` names.
@@ -302,6 +303,20 @@ pub(crate) fn recover(
     let mut segs: Vec<SegId> = named_segments.iter().copied().collect();
     segs.sort_unstable();
     let catch_up = d.index.catch_up(&segs, &Footers(&*d.segments))?;
+    // Persisted now (N13, M12b F2): every segment it covers is named by a
+    // retained FULL, and an idle volume may not cut before that FULL leaves
+    // the retained window (or before the next crash). A failure is retried
+    // by the first cut, which writes nothing until it succeeds.
+    let upto_seg = segs.last().copied();
+    let mut index_unpersisted = false;
+    if catch_up.inserted > 0 {
+        if let Some(upto) = upto_seg {
+            if let Err(e) = d.index.persist(upto) {
+                tracing::warn!(error = %e, inserted = catch_up.inserted, "index catch-up not persisted; the first commit retries it");
+                index_unpersisted = true;
+            }
+        }
+    }
     points.hit("engine.recover.caught_up")?;
     lunix_iface::crashpoint!("engine.recover.caught_up");
 
@@ -390,7 +405,6 @@ pub(crate) fn recover(
             d.space.charge(kind, bytes)?;
         }
     }
-    let upto_seg = named_segments.iter().copied().max();
     let report = RecoveryReport {
         tip: tip_seq,
         cut_seq: tip.cut_seq,
@@ -413,8 +427,8 @@ pub(crate) fn recover(
         stats,
         report,
         journal_charged,
-        index_charged,
         upto_seg,
+        index_unpersisted,
     })
 }
 
