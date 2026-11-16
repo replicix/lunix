@@ -269,3 +269,33 @@ fn a_damaged_ring_file_header_is_at_least_a_warning() {
         assert!(r.has(code::JOURNAL_FILE), "{}", r.render_text());
     }
 }
+
+/// Rewrites the header of `rel` with `ordinal`, keeping lane and generation.
+fn renumber(b: &Built, rel: &str, ordinal: u32) {
+    let mut f = b.read(rel);
+    let old = lunix_format::journal::FileHeader::decode(&f[..4096]).expect("header");
+    let mut h = Vec::new();
+    lunix_format::journal::FileHeader { ordinal, ..old }
+        .encode(&mut h)
+        .expect("encode");
+    f[..h.len()].copy_from_slice(&h);
+    b.write(rel, &f);
+}
+
+#[test]
+fn an_interrupted_reinitialisation_is_silent_and_a_mismatched_header_is_not() {
+    let b = build(&spec(CryptoMode::Integrity));
+    let u = b.desc.volume_uuid;
+    // Mark ring file 2 was being reinitialised as ordinal 5: header written,
+    // body zero, rename not done.
+    write_ring_file(&b.dir, u, "m00-00000002.j", 0, &[], 0);
+    renumber(&b, "journal/m00-00000002.j", 5);
+    let r = b.fsck(&b.opts());
+    assert_eq!(r.exit_code(), 0, "{}", r.render_text());
+    // The same header over a file that still holds a record is reported.
+    let (l0, _, _) = lanes_and_marks(&[]);
+    write_ring_file(&b.dir, u, "q00-00000001.j", 0, &l0, 0);
+    renumber(&b, "journal/q00-00000001.j", 5);
+    let r = b.fsck(&b.opts());
+    assert!(r.has(code::JOURNAL_FILE), "{}", r.render_text());
+}

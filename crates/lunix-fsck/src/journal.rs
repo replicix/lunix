@@ -146,6 +146,15 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
                             "the file belongs to another volume",
                         ));
                         bad = true;
+                    } else if res.header.lane == header_lane
+                        && res.header.ordinal > *ord
+                        && whole[BLOCK..].iter().all(|b| *b == 0)
+                    {
+                        // A reinitialisation interrupted between its header
+                        // write and its rename: it held no record since its
+                        // zeroing was synced, not damage (on-disk-formats
+                        // §5.1).
+                        continue;
                     } else if res.header.lane != header_lane || res.header.ordinal != *ord {
                         sink.push(Finding::new(
                             code::JOURNAL_FILE,
