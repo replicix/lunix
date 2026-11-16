@@ -113,14 +113,29 @@ impl ChunkCache {
 
     /// Drops every cached chunk (an idle volume returns the memory; the cache
     /// refills from the store on the next reads). Returns the bytes released.
+    ///
+    /// The entries are swapped out under the lock and dropped after it: up to
+    /// `read_cache_max` of buffers are freed here, and queue threads take the
+    /// same mutex in `get`.
     pub(crate) fn clear(&self) -> u64 {
+        let (used, taken) = self.take_all();
+        drop(taken);
+        used
+    }
+
+    /// Empties the cache under the lock and hands the entries to the caller.
+    fn take_all(&self) -> (u64, State) {
         let mut st = lock(&self.st);
         let used = st.used;
-        st.index = HashMap::new();
-        st.slots = Vec::new();
+        let taken = State {
+            index: std::mem::take(&mut st.index),
+            slots: std::mem::take(&mut st.slots),
+            hand: 0,
+            used,
+        };
         st.hand = 0;
         st.used = 0;
-        used
+        (used, taken)
     }
 
     #[cfg(test)]
@@ -156,6 +171,21 @@ mod tests {
         assert!(c.get(&key(1)).is_none());
         c.insert(key(1), Arc::from(vec![1u8; 4096]));
         assert!(c.get(&key(1)).is_some());
+    }
+
+    #[test]
+    fn clear_frees_the_entries_after_the_lock_is_released() {
+        let c = ChunkCache::new(4 * 4096);
+        let data: Arc<[u8]> = Arc::from(vec![7u8; 4096]);
+        let weak = Arc::downgrade(&data);
+        c.insert(key(0), data);
+        let (used, taken) = c.take_all();
+        assert_eq!(used, 4096);
+        assert!(c.st.try_lock().is_ok(), "the mutex is free once taken");
+        assert!(weak.upgrade().is_some(), "the entry is still alive");
+        drop(taken);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(c.used(), 0);
     }
 
     #[test]

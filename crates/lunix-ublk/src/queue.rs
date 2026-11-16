@@ -414,6 +414,9 @@ fn run_queue(a: QueueArgs) {
         return report(Err(format!("queue {qid}: {e}")));
     }
     a.counters.locked.store(locks.bytes(), Ordering::Release);
+    // Declared after `locks`, so it resets the count before the unlock on
+    // every exit, an unwind included.
+    let _locked_count = ResetLocked(&a.counters);
     report(Ok(()));
     if !a.gate.wait() {
         return; // the attach was abandoned; `queue` and `handler` drop
@@ -484,9 +487,18 @@ fn run_queue(a: QueueArgs) {
     }
     drop(lp);
     drop(queue);
-    a.counters.locked.store(0, Ordering::Release);
+    drop(_locked_count);
     drop(locks);
     drop(bufs);
+}
+
+/// Sets a queue's locked-byte count to zero when dropped.
+struct ResetLocked<'a>(&'a QueueCounters);
+
+impl Drop for ResetLocked<'_> {
+    fn drop(&mut self) {
+        self.0.locked.store(0, Ordering::Release);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
