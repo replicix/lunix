@@ -143,7 +143,9 @@ fn per_segment_live_bytes_equal_a_model_recount_for_1000_volumes() {
     eprintln!(
         "liveness: {volumes} volumes, {compared} segments compared, {with_candidates} with compaction candidates"
     );
-    assert!(with_candidates > volumes / 10);
+    // GC's retained set reaches one window further down (N24), which keeps
+    // more alive on these short random histories than the engine's window.
+    assert!(with_candidates > volumes / 20);
 }
 
 #[test]

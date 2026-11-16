@@ -25,7 +25,10 @@
 //!   (at or below the highest id the FULLs read since start name, and not an
 //!   unnamed output): the delete-time index invariant; otherwise the delete
 //!   is deferred.
-//! * Commit objects are deleted only below the durable tip's `chain_floor`,
+//! * GC's retained set is every FULL from the lowest `chain_floor` any
+//!   retained FULL records up to the tip (N12 (b)): all of them are roots and
+//!   nothing they name is condemned.
+//! * Commit objects are deleted only below that lowest `chain_floor`,
 //!   below the rollback floor's `max_commit_seq` while a floor exists (an
 //!   unreadable floor defers every commit delete), and never when pinned.
 
@@ -139,22 +142,23 @@ enum Flow {
     PassDone,
 }
 
-/// Objects any currently retained FULL names (rule 12 (ii)).
-fn named_by_retained(view: &GcView<'_>) -> BTreeSet<u64> {
+/// Objects any FULL of GC's retained set names (rule 12 (ii), N12), and
+/// that set's commit seqs.
+fn named_by_retained(view: &GcView<'_>) -> Result<(BTreeSet<u64>, BTreeSet<CommitSeq>)> {
     let mut s = BTreeSet::new();
-    for c in view.retained {
-        if let Commit::Full(f) = c {
-            s.extend(
-                f.new_segments
-                    .iter()
-                    .chain(&f.map_packs)
-                    .chain(&f.index_packs)
-                    .chain(f.map_root.pack.iter())
-                    .map(|id| id.raw()),
-            );
-        }
+    let mut seqs = BTreeSet::new();
+    for f in crate::mark::retained_fulls(view)? {
+        seqs.insert(f.common.commit_seq);
+        s.extend(
+            f.new_segments
+                .iter()
+                .chain(&f.map_packs)
+                .chain(&f.index_packs)
+                .chain(f.map_root.pack.iter())
+                .map(|id| id.raw()),
+        );
     }
-    s
+    Ok((s, seqs))
 }
 
 fn object_bytes(l: &Liveness, obj: ObjectRef) -> Option<u64> {
@@ -186,8 +190,8 @@ struct Facts {
     /// The highest id a durable FULL is known to name (see `Gc::named_high`).
     named_high: u64,
     /// The lowest `chain_floor` of any retained FULL: commit objects from it
-    /// up are kept, so that `fsck --repair --truncate-tip` can mount the
-    /// predecessor (N12).
+    /// up are kept, and so is what those FULLs reach and name, so that
+    /// `fsck --repair --truncate-tip` gives a complete volume (N12 (b)).
     keep_floor: CommitSeq,
     tip: CommitSeq,
     /// `None` when `state/pins` could not be read.
@@ -203,24 +207,13 @@ impl Facts {
                 None
             }
         };
-        let keep_floor = view
-            .retained
-            .iter()
-            .filter_map(|c| match c {
-                Commit::Full(f) => Some(f.chain_floor),
-                _ => None,
-            })
-            .chain(std::iter::once(view.tip.chain_floor))
-            .min()
-            .unwrap_or(view.tip.chain_floor);
+        let keep_floor = crate::mark::keep_floor(view);
+        let (named, mut retained) = named_by_retained(view)?;
+        retained.extend(view.retained.iter().map(|c| c.common().commit_seq));
         Ok(Self {
-            named: named_by_retained(view),
+            named,
             manifest: view.index.runs()?.iter().map(|r| r.id).collect(),
-            retained: view
-                .retained
-                .iter()
-                .map(|c| c.common().commit_seq)
-                .collect(),
+            retained,
             hwm: view.tip.high_water_mark,
             named_high: named_high.max(view.tip.high_water_mark),
             keep_floor,
@@ -634,7 +627,7 @@ impl Gc {
     /// has not seen here first (a commit is condemned only in a pass, after
     /// this ran), so no FULL is missed.
     fn observe_named(&mut self, view: &GcView<'_>) -> Result<()> {
-        let named = named_by_retained(view);
+        let (named, _) = named_by_retained(view)?;
         self.outputs.retain(|o| !named.contains(&o.raw()));
         let Some(last) = view.tip.commit_seq.0.checked_sub(1).map(CommitSeq) else {
             return Ok(());
