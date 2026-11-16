@@ -158,10 +158,11 @@ pub(crate) fn run(
             repair: true,
         };
         let fs = gc::check_gc(&ctx);
-        if !fs.is_empty() {
-            for f in fs {
-                refusals.push(f);
-            }
+        let ran = fs.iter().any(|f| f.code == code::GC_REPAIRED);
+        for f in fs {
+            refusals.push(f);
+        }
+        if ran {
             actions.push(RepairAction {
                 action: "gc",
                 detail: "the GC repair ran".to_owned(),
