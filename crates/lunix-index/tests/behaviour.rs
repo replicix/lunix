@@ -454,10 +454,19 @@ fn rebuild_replaces_runs_and_the_old_ones_stay_for_gc() {
         ix.insert(*i, *h).expect("insert");
     }
     ix.persist(seg(2)).expect("persist");
+    let old = ix.runs().expect("runs");
     ix.rebuild(&[seg(2), seg(1)], &footers).expect("rebuild");
-    assert!(ix.runs().expect("runs").is_empty());
-    assert_eq!(ix.all_runs().expect("all").len(), 1);
+    let new = ix.runs().expect("runs");
+    assert_eq!(new.len(), 1, "one new run, the old one replaced");
+    assert!(old.iter().all(|o| new.iter().all(|n| n.id != o.id)));
+    assert_eq!(ix.all_runs().expect("all").len(), 2);
     let m = all_entries(&ix);
     assert_eq!(m[&cid(2)].0, hint(2, 0), "highest segment wins");
     assert_eq!(m.len(), 3);
+    // Durable without a persist: a reopen sees every entry (R-1).
+    drop(ix);
+    let ix = open(dir.path(), &ids);
+    let m = all_entries(&ix);
+    assert_eq!(m.len(), 3);
+    assert_eq!(m[&cid(2)].0, hint(2, 0));
 }

@@ -422,15 +422,29 @@ impl ChunkIndex for MemIndex {
                             clen: e.clen,
                         },
                         confirm: Confirm::Verified,
-                        dirty: true,
+                        dirty: false,
                     },
                 );
             }
         }
+        // As the real index: the new run first, then one manifest swap (an
+        // interrupted rebuild never leaves an empty manifest); the old run
+        // files stay for GC.
+        let mut entries: Vec<(ChunkId, Hint)> = live.iter().map(|(id, l)| (*id, l.hint)).collect();
+        entries.sort_by_key(|e| e.0);
+        let run = if entries.is_empty() {
+            None
+        } else {
+            let id = self.ids.allocate()?;
+            lock(&self.state)
+                .image
+                .files
+                .insert(id.raw(), RunFile { entries });
+            Some(id.raw())
+        };
         let mut st = lock(&self.state);
         st.live = live;
-        st.image.files.clear();
-        st.image.manifest.clear();
+        st.image.manifest = run.into_iter().collect();
         st.image.dropped.clear();
         Ok(())
     }
