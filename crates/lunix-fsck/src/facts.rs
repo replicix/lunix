@@ -36,6 +36,12 @@ pub(crate) struct Facts {
     pub(crate) tip: Option<Tip>,
     /// The verified chain, ascending; may be partial when a link failed.
     pub(crate) retained: Vec<Retained>,
+    /// GC's retained set below `chain_floor` (N24): the FULLs from the lowest
+    /// `chain_floor` a retained FULL records, ascending, authenticated and
+    /// linked down from the floor commit. Roots like the retained ones.
+    pub(crate) gc_extra: Vec<Retained>,
+    /// The lowest `chain_floor` a retained FULL records.
+    pub(crate) gc_floor: CommitSeq,
     /// Whether the chain from the tip down to `chain_floor` verified.
     pub(crate) chain_ok: bool,
     pub(crate) condemned: Option<Condemned>,

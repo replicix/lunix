@@ -19,7 +19,8 @@
 //!    a tip below the rollback floor is `rollback`, another commit at the
 //!    floor's height is `fork`, and a walk back to the floor that cannot be
 //!    completed is `fork_unverifiable` (ADR-31).
-//! 3. **Map walk** from every retained root (R2): every node is opened with
+//! 3. **Map walk** from every retained root and from the FULLs below
+//!    `chain_floor` that GC's retained set keeps (N24) (R2): every node is opened with
 //!    `kind = node`, must be codec 0, must carry the id its parent names and
 //!    must hash to it. Every entry must resolve to an existing extent through
 //!    its hint or, for a stale hint, through the index confirmed against the
@@ -46,16 +47,19 @@
 //!
 //! # Memory
 //!
-//! The walk streams the nodes, but the checks keep per-chunk state: the tip
-//! root's entries (64 bytes per **mapped** chunk), the footers of every
-//! container (about 48 bytes per extent), and sets of distinct chunk ids
-//! (resolution, index comparison). Measured on a volume with 320 000
-//! distinct and 400 000 mapped chunks: peak RSS 100 MiB, about **330 bytes per
-//! distinct chunk**. A full 1 TiB volume of 64 KiB chunks (16 M chunks) needs
-//! about 5 GiB, one of 16 KiB chunks about 20 GiB, plus the scratch copy of
-//! the index on disk and one container's extent region (16 MiB) in memory.
-//! A streaming rework (resolve per segment and drop, sorted vectors for the
-//! id sets) is a listed follow-up.
+//! The walk streams the nodes, but the checks keep per-chunk state: the
+//! retained roots' entries (64 bytes per **mapped** chunk, freed once they are
+//! resolved), the footers of every container (about 48 bytes per extent), and
+//! sorted vectors for the id sets: one record of 40 bytes per resolved extent
+//! for the distinct-chunk count (sorted and deduplicated, freed at once), and
+//! 32 bytes plus a bit per id of the segments in use for the index
+//! comparison (instead of hash sets). Measured on a volume with 320 000
+//! distinct and 400 000 mapped chunks: peak RSS 81 MiB, about **270 bytes per
+//! distinct chunk** (330 before the sorted vectors). A full 1 TiB volume of
+//! 64 KiB chunks (16 M chunks) needs about 4.5 GiB, one of 16 KiB chunks
+//! about 18 GiB, plus the scratch copy of the index on disk and one
+//! container's extent region (16 MiB) in memory. The entries of the tip
+//! (64 bytes per mapped chunk) are the largest remaining term.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

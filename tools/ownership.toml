@@ -143,6 +143,7 @@ exclude = ["crates/lunix-gc/tests/**"]
 paths = [
   "crates/lunix-gc/tests/**",
   "crates/lunix-fsck/src/gc.rs",
+  "crates/lunix-fsck/tests/gc*.rs",
   "crates/lunixd/tests/stack_gc*.rs",
   "bench/phase1/gc/**",
 ]

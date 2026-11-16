@@ -103,6 +103,7 @@ pub(crate) fn run(
     let index_damaged = [
         code::INDEX_RUN,
         code::INDEX_MISSING,
+        code::INDEX_LOST,
         code::INDEX_STALE,
         code::INDEX_EXTRA,
         code::MAP_ENTRY_UNRESOLVED,
@@ -244,14 +245,12 @@ fn truncate_tip(
             );
             return false;
         }
-    } else if facts.json.as_ref().is_some_and(|j| j.retain_last < 2) {
-        refuse(
-            sink,
-            what,
-            "retain_last is below 2: the previous commit is not a retained root and its data may be gone",
-        );
-        return false;
     }
+    // With retain_last below 2 and a tip that does not authenticate, the
+    // previous commit was not a retained root: the walk below proves whether
+    // its data is still there (M14 re-review R-2), and the action says so.
+    let not_retained =
+        facts.tip.is_none() && facts.json.as_ref().is_some_and(|j| j.retain_last < 2);
     let prev_hash = s.commit_codec().object_hash(&prev_bytes);
     if let Err(why) = previous_root_resolves(s, facts, &prev_commit, prev.seq, prev_hash) {
         refuse(
@@ -307,8 +306,10 @@ fn truncate_tip(
         None => "the journal holds no record above the new cut; writes between the new tip's cut and the old one, if there were any, are lost".to_owned(),
     };
     if let Err(e) = s.vol.set_aside(tip.seq) {
+        // The floor may already be lowered (an action says so): nothing else
+        // runs on a volume whose tip is in question.
         refuse(sink, what, format!("{e}"));
-        return !actions.is_empty();
+        return false;
     }
     if let Err(e) = s.vol.zero() {
         refuse(
@@ -328,8 +329,15 @@ fn truncate_tip(
     actions.push(RepairAction {
         action: "truncate_tip",
         detail: format!(
-            "commit {} moved aside as {:016x}.damaged, commit {} is the tip, both checkpoint slots zeroed; {lost}",
-            tip.seq.0, tip.seq.0, prev.seq.0
+            "commit {} moved aside as {:016x}.damaged, commit {} is the tip, both checkpoint slots zeroed; {lost}{}",
+            tip.seq.0,
+            tip.seq.0,
+            prev.seq.0,
+            if not_retained {
+                "; retain_last is below 2, so the previous commit was not a retained root: its map was walked and resolves completely"
+            } else {
+                ""
+            }
         ),
     });
     true
@@ -392,13 +400,16 @@ fn repair_pins(
         max_commit_seq: tip.seq,
         tip_hash: tip.hash,
     };
-    match s.vol.reset_rollback_floor(&new, FloorReset::RepairPins) {
+    let why = FloorReset::RepairPins {
+        max_keyring_seq: s.keyring_seq,
+    };
+    match s.vol.reset_rollback_floor(&new, why) {
         Ok(_) => {
             actions.push(RepairAction {
                 action: "repair_pins",
                 detail: format!(
-                    "state/pins replaced; floor is commit {}; max_keyring_seq, max_epoch and the pin were reset (the next attach pins again)",
-                    tip.seq.0
+                    "state/pins replaced; floor is commit {}; max_keyring_seq is {} (the keyring that unlocked the volume); max_epoch and the pin were reset (the next attach pins again)",
+                    tip.seq.0, s.keyring_seq
                 ),
             });
             true

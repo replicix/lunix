@@ -89,6 +89,8 @@ codes! {
     ROLLBACK = "rollback", Error, "the tip is below the rollback floor in state/pins";
     /// Another commit at the floor's height.
     FORK = "fork", Error, "the chain has another commit than the one the rollback floor recorded";
+    /// Commits kept below GC's retained set for the rollback floor.
+    FLOOR_WINDOW = "floor_window", Note, "commits between the rollback floor and GC's retained set are kept as chain links only (ADR-31): authenticated and linked, what they name is not checked";
     /// The walk back to the floor cannot be completed.
     FORK_UNVERIFIABLE = "fork_unverifiable", Error, "a link between the tip and the rollback floor is missing or does not authenticate";
 
@@ -144,7 +146,9 @@ codes! {
     /// A named index run or the manifest is damaged.
     INDEX_RUN = "index_run", Error, "an index run or the manifest is damaged (repair: --rebuild-index)";
     /// A footer id has no index entry.
-    INDEX_MISSING = "index_missing", Warning, "chunks in sealed segments have no index entry (mount catches up)";
+    INDEX_MISSING = "index_missing", Warning, "chunks of segments the retained chain names have no index entry (mount's catch-up restores them)";
+    /// The same for segments the retained chain does not name.
+    INDEX_LOST = "index_lost", Error, "chunks of segments in use that the retained chain does not name have no index entry: mount's catch-up does not restore them, only --rebuild-index does";
     /// An index entry names a copy that is not there.
     INDEX_STALE = "index_stale", Warning, "index entries name an extent that is not at that location";
     /// An index entry for no stored chunk.
@@ -175,6 +179,10 @@ codes! {
     REPAIR_REFUSED = "repair_refused", Error, "a requested repair was refused; nothing was changed by it";
     /// A pass pending in `state/gc`.
     GC_PENDING = "gc_pending", Note, "GC work is pending in state/gc";
+    /// fsck's per-segment liveness differs from `lunix-gc`'s mark.
+    GC_LIVENESS = "gc_liveness", Error, "per-segment live bytes recounted by fsck differ from lunix-gc's mark";
+    /// What a GC pass would do now.
+    GC_DRY_RUN = "gc_dry_run", Note, "what a GC pass would condemn, delete and compact now (finish it with --repair --gc)";
 }
 
 /// The documented entry for `code`.
