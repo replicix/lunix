@@ -248,6 +248,10 @@ pub(crate) fn open(
         // opens the store without it.
         allow_floor_reset: opts.repair
             && (opts.truncate_tip || opts.reset_floor || opts.repair_pins),
+        // fsck's own walk keeps at most 32 pack descriptors; the store's
+        // cache of open containers (GC's mark and the map read through it)
+        // stays as small, so a check runs under a low `ulimit -n`.
+        max_open_files: 16,
         ..StoreOptions::default()
     };
     let vol = match LocalVolume::open(dir, meta, store_opts) {
