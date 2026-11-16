@@ -394,9 +394,10 @@ pub struct Recovered {
     pub damaged: Vec<DamagedRange>,
     /// The flushed watermark: the highest `flushed` value of any record found
     /// (at or below it every record was durable on every lane before a later
-    /// record was written). A gap or damage at or below it is real loss; a
-    /// gap above it is crash residue (ADR-4, maintainer decision of
-    /// 2026-11-14). 0 when no record carries one.
+    /// record was written). A gap at or below it is real loss; a gap above it
+    /// is crash residue, and a damaged range with no gap at or below it holds
+    /// nothing durable (ADR-4, maintainer decision of 2026-11-14; rule change
+    /// E1 signed off 2026-11-16). 0 when no record carries one.
     pub flushed: WriteSeq,
     /// A `write_seq` found in two valid records. Recovery stops there like at
     /// a gap, but it is never crash residue (an earlier wipe did not happen):

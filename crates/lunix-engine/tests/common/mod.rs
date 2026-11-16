@@ -504,8 +504,9 @@ impl lunix_engine::Destager for FaultyDestager {
     }
 }
 
-/// The index with the queue-thread rule.
-pub struct GIndex(pub Arc<MemIndex>);
+/// The index with the queue-thread rule; `persist` fails while the counter
+/// is above zero (one failure per unit).
+pub struct GIndex(pub Arc<MemIndex>, pub Arc<AtomicU64>);
 
 impl ChunkIndex for GIndex {
     fn get_for_dedup(&self, id: &ChunkId) -> Result<Option<DedupHit>> {
@@ -541,6 +542,11 @@ impl ChunkIndex for GIndex {
     }
     fn persist(&self, upto_seg: SegId) -> Result<Vec<RunRef>> {
         not_on_queue("index persist");
+        if take_one(&self.1) {
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "injected persist failure",
+            )));
+        }
         self.0.persist(upto_seg)
     }
     fn runs(&self) -> Result<Vec<RunRef>> {
@@ -671,6 +677,8 @@ pub struct Vol {
     pub collector: Mutex<Option<Box<dyn lunix_iface::gc::Collector>>>,
     pub destage_fault: Arc<Mutex<Option<lunix_engine::Retry>>>,
     pub walk_faults: Arc<AtomicU64>,
+    /// `persist` calls of the index that fail.
+    pub persist_faults: Arc<AtomicU64>,
     /// The journal writes a mark after every group flush that raises the
     /// flushed watermark (`MemJournal::set_marks`).
     pub marks: bool,
@@ -742,6 +750,7 @@ impl Vol {
             collector: Mutex::new(None),
             destage_fault: Arc::new(Mutex::new(None)),
             walk_faults: Arc::new(AtomicU64::new(0)),
+            persist_faults: Arc::new(AtomicU64::new(0)),
             marks: false,
         }
     }
@@ -791,7 +800,7 @@ impl Vol {
                 checks: Arc::clone(&self.checks),
             }),
             overlay: Arc::new(FlatOverlay::new(u64::from(self.cs) / BLOCK)),
-            index: Arc::new(GIndex(Arc::clone(&index))),
+            index: Arc::new(GIndex(Arc::clone(&index), Arc::clone(&self.persist_faults))),
             extents: Arc::clone(&ext),
             commit_codec: Arc::new(self.codec),
             space: space.clone(),

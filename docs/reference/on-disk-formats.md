@@ -478,9 +478,16 @@ accepted. Every record with `write_seq` at or below it was on stable
 storage, on every lane, before a record carrying it was written (a group
 flush completes only after every lane's records up to its `upto` are
 written and every touched file is `fdatasync`ed). So a gap (the first
-missing `write_seq`) or a damaged range whose next valid record in its lane
-is at or below `flushed` is the loss of durable data, and
-`on_journal_damage = refuse` refuses it; anything above `flushed` (a torn
+missing `write_seq`) at or below `flushed` is the loss of durable data, and
+`on_journal_damage = refuse` refuses it. A damaged range is not refused for
+itself: without a gap at or below `flushed`, every number above the floor
+is held by a valid record elsewhere, so the range held only records at or
+below the floor (a commit does not sync the journal, so a crash can tear
+them; they cost nothing) or no record at all; and a lost durable record
+always leaves a gap at or below `flushed`, since the record carrying the
+watermark lies above it (rule change E1, maintainer sign-off 2026-11-16
+(rule change, no layout change); it replaces "or a damaged range whose next
+valid record in its lane is at or below `flushed`"). Anything above `flushed` (a torn
 last record, a gap across lanes from a record still in its lane's open
 batch, a torn batch followed by a later batch of the same lane) is crash
 residue: logged and wiped, with every record after the first gap. A

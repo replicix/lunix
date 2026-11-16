@@ -2,13 +2,16 @@
 //! floor (DESIGN section 4.1, D17).
 //!
 //! This is the normative reader (`lunix_format::journal::scan_file`) applied
-//! to every ring file, plus the merge by `write_seq`; it never writes.
+//! to every ring file of every lane and of the mark ring (on-disk-formats
+//! §5.1-5.3), plus the merge by `write_seq` and the flushed watermark
+//! (ADR-4); it never writes.
 
 use std::fs;
 use std::ops::Range;
 
-use lunix_format::journal::{scan_file, BLOCK};
+use lunix_format::journal::{scan_file, RecordKind, BLOCK};
 use lunix_format::WriteSeq;
+use lunix_iface::journal::MARK_RING_LANE;
 
 use crate::code;
 use crate::facts::Facts;
@@ -29,23 +32,44 @@ pub(crate) struct Damage {
 /// Everything one pass over `journal/` finds.
 #[derive(Default, Debug)]
 pub(crate) struct Scan {
-    /// Every valid record's `write_seq`, sorted.
+    /// Every valid record's and mark's `write_seq`, sorted: a mark fills its
+    /// number for the contiguity of the merge (on-disk-formats §5.3).
     pub(crate) seqs: Vec<u64>,
+    /// The marks' `write_seq`s, sorted (a subset of `seqs`).
+    pub(crate) marks: Vec<u64>,
+    /// The flushed watermark: the highest `flushed` of any valid record or
+    /// mark (ADR-4).
+    pub(crate) flushed: u64,
     pub(crate) damaged: Vec<Damage>,
     pub(crate) bytes: u64,
+    /// Queue lanes (highest lane + 1); the mark ring is not one.
     pub(crate) lanes: usize,
 }
 
-/// `q<lane:02x>-<ordinal:08x>.j`.
+/// `q<lane:02x>-<ordinal:08x>.j` to `(lane, ordinal)`, and the mark ring's
+/// `m00-<ordinal:08x>.j` to `(MARK_RING_LANE, ordinal)`, so the mark ring
+/// sorts after every lane.
 fn parse_name(name: &str) -> Option<(u16, u32)> {
-    let rest = name.strip_prefix('q')?.strip_suffix(".j")?;
-    let (l, o) = rest.split_once('-')?;
-    if l.len() != 2 || o.len() != 8 {
+    let rest = name.strip_suffix(".j")?;
+    let (lane, o) = if let Some(o) = rest.strip_prefix("m00-") {
+        (MARK_RING_LANE.0, o)
+    } else {
+        let (l, o) = rest.strip_prefix('q')?.split_once('-')?;
+        if l.len() != 2 {
+            return None;
+        }
+        (u16::from_str_radix(l, 16).ok()?, o)
+    };
+    if o.len() != 8 {
         return None;
     }
-    let lane = u16::from_str_radix(l, 16).ok()?;
     let ordinal = u32::from_str_radix(o, 16).ok()?;
     (ordinal >= 1).then_some((lane, ordinal))
+}
+
+/// The ring a file belongs to, for findings.
+fn is_mark_ring(lane: u16) -> bool {
+    lane == MARK_RING_LANE.0
 }
 
 /// Scans every ring file. Findings about names and owners go to `sink`.
@@ -70,7 +94,12 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
         }
     }
     files.sort();
-    if let Some(max) = files.iter().map(|f| f.0).max() {
+    if let Some(max) = files
+        .iter()
+        .map(|f| f.0)
+        .filter(|l| !is_mark_ring(*l))
+        .max()
+    {
         out.lanes = usize::from(max) + 1;
     }
     let mut lane = None;
@@ -98,6 +127,9 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
         let whole = &buf[..len];
         let mut bad = len < BLOCK;
         let mut header_bad = bad;
+        let mark_ring = is_mark_ring(*l);
+        // A mark ring file's header says lane 0 (on-disk-formats §5.1).
+        let header_lane = if mark_ring { 0 } else { *l };
         let mut recs: Vec<(u64, usize)> = Vec::new();
         let mut damaged: Vec<Range<usize>> = Vec::new();
         if !bad {
@@ -114,7 +146,16 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
                             "the file belongs to another volume",
                         ));
                         bad = true;
-                    } else if res.header.lane != *l || res.header.ordinal != *ord {
+                    } else if res.header.lane == header_lane
+                        && res.header.ordinal > *ord
+                        && whole[BLOCK..].iter().all(|b| *b == 0)
+                    {
+                        // A reinitialisation interrupted between its header
+                        // write and its rename: it held no record since its
+                        // zeroing was synced, not damage (on-disk-formats
+                        // §5.1).
+                        continue;
+                    } else if res.header.lane != header_lane || res.header.ordinal != *ord {
                         sink.push(Finding::new(
                             code::JOURNAL_FILE,
                             &rel,
@@ -122,12 +163,27 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
                         ));
                         bad = true;
                     } else {
-                        recs = res
-                            .records
-                            .iter()
-                            .map(|r| (r.header.write_seq.0, r.header.off as usize))
-                            .collect();
                         damaged = res.damaged;
+                        for r in &res.records {
+                            let seq = r.header.write_seq.0;
+                            let off = r.header.off as usize;
+                            // The reader's rising rule counts it either way.
+                            prev = seq;
+                            // Marks live only in the mark ring, writes and
+                            // holes only in lane files (on-disk-formats
+                            // §5.3): a record of the other kind is damage,
+                            // never a record.
+                            if (r.header.kind == RecordKind::Mark) != mark_ring {
+                                damaged.push(off..off + r.encoded_len());
+                                continue;
+                            }
+                            out.flushed = out.flushed.max(r.header.flushed.0);
+                            if mark_ring {
+                                out.marks.push(seq);
+                            }
+                            recs.push((seq, off));
+                        }
+                        damaged.sort_by_key(|d| d.start);
                     }
                 }
             }
@@ -165,7 +221,6 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
                 out.damaged[i].next_seq = Some(*seq);
             }
             last_seq = *seq;
-            prev = *seq;
             out.seqs.push(*seq);
         }
         while di < damaged.len() {
@@ -174,6 +229,7 @@ pub(crate) fn scan(s: &Session, sink: &mut Sink) -> Scan {
         }
     }
     out.seqs.sort_unstable();
+    out.marks.sort_unstable();
     out
 }
 
@@ -187,28 +243,44 @@ fn push_damage(out: &mut Scan, open: &mut Vec<usize>, rel: &str, r: &Range<usize
     });
 }
 
-/// The first sequence number at or above `floor + 1` that is missing from the
-/// merged order, and the valid records beyond it.
-pub(crate) fn first_gap(seqs: &[u64], floor: u64) -> Option<(u64, u64, u64, u64)> {
+/// Where the merge by `write_seq` above the floor stops (on-disk-formats §5.3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Stop {
+    /// The first missing `write_seq`, or the number found twice.
+    pub(crate) at: u64,
+    /// A `write_seq` held by two valid records (never crash residue).
+    pub(crate) duplicate: bool,
+    /// The valid records and marks the merge ignores: first, last, count.
+    pub(crate) first: u64,
+    pub(crate) last: u64,
+    pub(crate) ignored: u64,
+}
+
+/// The first `write_seq` above `floor` that is missing from the merged order
+/// (or found twice), and the valid records beyond it.
+pub(crate) fn first_gap(seqs: &[u64], floor: u64) -> Option<Stop> {
     let mut expected = floor + 1;
-    let mut gap: Option<u64> = None;
-    let (mut first, mut last, mut n) = (0, 0, 0u64);
+    let mut stop: Option<Stop> = None;
     for &q in seqs.iter().filter(|q| **q > floor) {
-        match gap {
+        match &mut stop {
             None if q == expected => expected += 1,
             None => {
-                gap = Some(expected);
-                first = q;
-                last = q;
-                n = 1;
+                let duplicate = q < expected;
+                stop = Some(Stop {
+                    at: if duplicate { q } else { expected },
+                    duplicate,
+                    first: q,
+                    last: q,
+                    ignored: 1,
+                });
             }
-            Some(_) => {
-                last = q;
-                n += 1;
+            Some(s) => {
+                s.last = q;
+                s.ignored += 1;
             }
         }
     }
-    gap.map(|g| (g, first, last, n))
+    stop
 }
 
 pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
@@ -222,13 +294,27 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         return;
     };
     let floor = tip.full.cut_seq.0;
+    // ADR-4 (E1 sign-off 2026-11-16): everything at or below the watermark
+    // was durable on every lane before a surviving record or mark witnessed
+    // it, so a number missing there is real loss (`journal_loss`); a damaged
+    // range alone is not: without such a gap it held only numbers at or
+    // below the cut, or no record.
+    let wm = sc.flushed;
     for d in &sc.damaged {
         let f = match d.next_seq {
-            Some(n) if n > floor => Finding::new(
-                code::JOURNAL_DAMAGE,
+            Some(n) if n > floor && n <= wm => Finding::new(
+                code::JOURNAL_RESIDUE,
                 &d.file,
                 format!(
-                    "damage after record {} with valid records after it (first {n}), above the cut {floor}: recovery stops here",
+                    "damage after record {} followed by record {n}, above the cut {floor} and at or below the flushed watermark {wm}: nothing durable unless a number at or below the watermark is missing (journal_loss)",
+                    d.prev_seq
+                ),
+            ),
+            Some(n) if n > floor => Finding::new(
+                code::JOURNAL_RESIDUE,
+                &d.file,
+                format!(
+                    "damage after record {} followed by record {n}, above the cut {floor} and the flushed watermark {wm}: crash residue, recovery wipes from here",
                     d.prev_seq
                 ),
             ),
@@ -248,16 +334,77 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         };
         sink.push(f.with_range(d.range.start, d.range.end));
     }
-    let gap = first_gap(&sc.seqs, floor);
-    let above = sc.seqs.iter().filter(|q| **q > floor).count() as u64;
-    facts.stats.journal_records = above - gap.map_or(0, |g| g.3);
-    if let Some((at, first, last, n)) = gap {
-        sink.push(Finding::new(
+    let stop = first_gap(&sc.seqs, floor);
+    let end = stop.map_or(u64::MAX, |g| g.at);
+    let kept = |q: &&u64| **q > floor && **q < end;
+    let marks = sc.marks.iter().filter(kept).count() as u64;
+    facts.stats.journal_records = sc.seqs.iter().filter(kept).count() as u64 - marks;
+    facts.stats.journal_marks = marks;
+    facts.stats.journal_flushed = wm;
+    match stop {
+        None => {}
+        Some(g) if g.duplicate => sink.push(Finding::new(
+            code::JOURNAL_LOSS,
+            "journal/",
+            format!(
+                "write_seq {} is held by two valid records: recovery stops there and ignores {} records ({}..={})",
+                g.at, g.ignored, g.first, g.last
+            ),
+        )),
+        Some(g) if g.at <= wm => sink.push(Finding::new(
+            code::JOURNAL_LOSS,
+            "journal/",
+            format!(
+                "write_seq {} is missing at or below the flushed watermark {wm}: durable records are lost; {} valid records ({}..={}) beyond it are ignored by recovery",
+                g.at, g.ignored, g.first, g.last
+            ),
+        )),
+        Some(g) => sink.push(Finding::new(
             code::IGNORED_AFTER_GAP,
             "journal/",
             format!(
-                "write_seq {at} is missing; {n} valid records ({first}..={last}) beyond it are ignored by recovery"
+                "write_seq {} is missing above the flushed watermark {wm}: crash residue; {} valid records ({}..={}) beyond it are ignored and wiped by recovery",
+                g.at, g.ignored, g.first, g.last
             ),
-        ));
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_and_mark_ring_names_parse_and_the_mark_ring_sorts_last() {
+        assert_eq!(parse_name("q00-00000001.j"), Some((0, 1)));
+        assert_eq!(parse_name("q1f-0000000a.j"), Some((0x1f, 10)));
+        assert_eq!(parse_name("m00-00000004.j"), Some((MARK_RING_LANE.0, 4)));
+        for bad in [
+            "q00-00000000.j",
+            "m00-00000000.j",
+            "m01-00000001.j",
+            "q0-00000001.j",
+            "q00-0000001.j",
+            "m00-00000001",
+            "x00-00000001.j",
+        ] {
+            assert_eq!(parse_name(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_merge_stops_at_a_gap_or_a_duplicate() {
+        assert_eq!(first_gap(&[1, 2, 3, 4], 1), None);
+        let g = first_gap(&[1, 2, 4, 5, 6], 1).expect("gap");
+        assert_eq!(
+            (g.at, g.duplicate, g.first, g.last, g.ignored),
+            (3, false, 4, 6, 3)
+        );
+        let d = first_gap(&[2, 3, 3, 4], 1).expect("duplicate");
+        assert_eq!(
+            (d.at, d.duplicate, d.first, d.last, d.ignored),
+            (3, true, 3, 4, 2)
+        );
+        assert_eq!(first_gap(&[5, 6], 6), None);
     }
 }

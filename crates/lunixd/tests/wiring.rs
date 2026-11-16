@@ -70,6 +70,15 @@ fn open(v: &CreatedVolume, mode: CryptoMode) -> VolumeStack {
     open_volume(params(v, mode)).expect("open")
 }
 
+/// Opens without journal marks: a mark written after a slow cut (a loaded
+/// host) takes a number above the cut, and the close then commits once more,
+/// which shifts the commit numbers the R4 tests count.
+fn open_unmarked(v: &CreatedVolume, mode: CryptoMode) -> VolumeStack {
+    let mut p = params(v, mode);
+    p.journal_tweak = Some(Arc::new(|j| j.mark_idle = None));
+    open_volume(p).expect("open")
+}
+
 fn open_err(v: &CreatedVolume, mode: CryptoMode) -> StackError {
     open_volume(params(v, mode)).expect_err("open must fail")
 }
@@ -226,14 +235,14 @@ fn commits_dir(v: &Path) -> std::path::PathBuf {
 fn rollback_and_fork(mode: CryptoMode) {
     let Some(t) = scratch("r4") else { return };
     let v = create(t.path(), mode, 64 << 10);
-    let s = open(&v, mode);
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(one_commit(&s, &mut d, 1), 1);
     close(s, d);
     // A = the volume at tip 1 (floor 1).
     let a = t.path().join("snap-a");
     copy_dir(&v.voldir, &a);
-    let s = open(&v, mode);
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(one_commit(&s, &mut d, 2), 2);
     assert_eq!(one_commit(&s, &mut d, 3), 3);
@@ -263,7 +272,7 @@ fn rollback_and_fork(mode: CryptoMode) {
     {
         // A has its own state/pins (floor 1); its own volume directory name
         // differs, which the keyring path does not care about (same parent).
-        let s = open(&fork, mode);
+        let s = open_unmarked(&fork, mode);
         let mut d = Driver::new(&s.engine, 2, 1 << 20);
         assert_eq!(one_commit(&s, &mut d, 20), 2);
         assert_eq!(one_commit(&s, &mut d, 30), 3);
@@ -281,7 +290,7 @@ fn rollback_and_fork(mode: CryptoMode) {
     // The fork grows past the floor: the commit at the floor's height (3) is
     // still retained by tip 4 and differs.
     {
-        let s = open(&fork, mode);
+        let s = open_unmarked(&fork, mode);
         let mut d = Driver::new(&s.engine, 2, 1 << 20);
         assert_eq!(one_commit(&s, &mut d, 40), 4);
         close(s, d);
@@ -296,7 +305,7 @@ fn rollback_and_fork(mode: CryptoMode) {
     // other commit (ADR-31 decision of 2026-11-13; the limit the review asked
     // to pin).
     {
-        let s = open(&fork, mode);
+        let s = open_unmarked(&fork, mode);
         let mut d = Driver::new(&s.engine, 2, 1 << 20);
         assert_eq!(one_commit(&s, &mut d, 50), 5);
         close(s, d);
@@ -311,7 +320,7 @@ fn rollback_and_fork(mode: CryptoMode) {
     replace(&honest);
     let pins_at_3 = t.path().join("pins-at-3");
     std::fs::copy(v.voldir.join("state/pins"), &pins_at_3).unwrap();
-    let s = open(&v, mode);
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(d.read(0, 64 << 10), pattern(3, 64 << 10));
     // Two more honest commits, then the floor of tip 3 again with commit 3
@@ -357,6 +366,9 @@ struct Capture {
     lines: Mutex<Vec<String>>,
 }
 
+/// Records every event. Each use rebuilds the callsite interest cache inside
+/// its scope: an event site first hit by another test thread (no subscriber)
+/// can otherwise keep a cached "never" and skip this scoped subscriber.
 struct CaptureSub(Arc<Capture>);
 
 struct Msg(String);
@@ -447,7 +459,10 @@ fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
 
     let cap = Arc::new(Capture::default());
     let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || open(&v, mode));
+    let s = tracing::subscriber::with_default(sub, || {
+        tracing::callsite::rebuild_interest_cache();
+        open(&v, mode)
+    });
     // The damaged range, with its sequence bounds, and the records beyond
     // the gap: in the report and in the log line written before any lane
     // opened.
@@ -611,7 +626,7 @@ fn more_queues_than_lanes_on_an_existing_volume() {
     let mut p = params(&v, CryptoMode::Plain);
     p.queues = 8;
     match open_volume(p) {
-        Err(StackError::Invalid(m)) => assert!(m.contains("128 MiB"), "{m}"),
+        Err(StackError::Invalid(m)) => assert!(m.contains("2 ring files of 64 MiB"), "{m}"),
         Err(e) => panic!("expected the ring-size refusal, got {e:?}"),
         Ok(_) => panic!("8 queues cannot fit a 512 MiB ring"),
     }
@@ -663,8 +678,11 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
     p.on_journal_damage = OnJournalDamage::Refuse;
     let cap = Arc::new(Capture::default());
     let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || open_volume(p))
-        .expect("a torn tail is crash residue: refuse opens");
+    let s = tracing::subscriber::with_default(sub, || {
+        tracing::callsite::rebuild_interest_cache();
+        open_volume(p)
+    })
+    .expect("a torn tail is crash residue: refuse opens");
     let rep = s.engine.recovery_report();
     assert_eq!(rep.damaged.len(), 1, "{rep:?}");
     assert_eq!(
@@ -712,6 +730,61 @@ fn damage_followed_by_a_valid_record_is_refused() {
     );
 }
 
+/// The M12b review's E1 probe on the real journal: one crash tears a record
+/// at or below the cut (a commit does not sync the journal) while a later
+/// record of its lane survives. The first lane open after recovery raises the
+/// watermark past the kept record and marks it, so the torn range, still in
+/// the ring file, lies at or below the watermark with no number missing.
+/// Every later `refuse` open must succeed, the one after a clean close too
+/// (maintainer sign-off 2026-11-16).
+#[test]
+fn a_torn_record_below_the_cut_keeps_no_later_refuse_open_offline() {
+    let Some(t) = scratch("e1") else { return };
+    let mode = CryptoMode::Plain;
+    let v = create(t.path(), mode, 64 << 10);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    let a = pattern(3001, 4096);
+    let b = pattern(3002, 4096);
+    assert!(d.write_on(0, 0, &a).is_ok());
+    assert!(d.write_on(0, 64 << 10, &b).is_ok());
+    s.engine.commit_now(false).expect("commit");
+    // The crash: no final commit, the record of `a` torn.
+    drop(d);
+    drop(s);
+    damage_record(&v.voldir, &a);
+    let refuse = || {
+        let mut p = params(&v, mode);
+        p.on_journal_damage = OnJournalDamage::Refuse;
+        open_volume(p)
+    };
+    let mut saw = false;
+    for round in 0..3u64 {
+        let s = refuse().unwrap_or_else(|e| panic!("round {round}: refuse refused: {e:?}"));
+        let rep = s.engine.recovery_report().clone();
+        assert!(rep.gap_at.is_none() && rep.duplicate.is_none(), "{rep:?}");
+        saw |= rep
+            .damaged
+            .iter()
+            .any(|r| r.next_seq.is_some_and(|n| n <= rep.flushed));
+        let mut d = Driver::new(&s.engine, 2, 1 << 20);
+        assert_eq!(d.read(0, 4096), a, "round {round}: committed data");
+        assert_eq!(d.read(64 << 10, 4096), b, "round {round}");
+        let c = pattern(3100 + round, 4096);
+        assert!(d.write_on(1, (2 + round) * (64 << 10), &c).is_ok());
+        assert!(d.flush().is_ok());
+        if round == 1 {
+            // Another crash.
+            drop(d);
+            drop(s);
+        } else {
+            // A clean close.
+            close(s, d);
+        }
+    }
+    assert!(saw, "the probe never produced the E1 shape");
+}
+
 /// M12a re-review R2: a fork's commits copied over a directory that still holds
 /// the honest commits. The walk back to the floor finds the honest commit at
 /// the floor's height, which the fork's next commit does not name: positive
@@ -721,13 +794,13 @@ fn a_fork_spliced_onto_the_honest_chain_is_a_fork_even_with_the_override() {
     let Some(t) = scratch("splice") else { return };
     let mode = CryptoMode::Integrity;
     let v = create(t.path(), mode, 64 << 10);
-    let s = open(&v, mode);
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(one_commit(&s, &mut d, 1), 1);
     close(s, d);
     let a = t.path().join("fork-a");
     copy_dir(&v.voldir, &a);
-    let s = open(&v, mode);
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(one_commit(&s, &mut d, 2), 2);
     assert_eq!(one_commit(&s, &mut d, 3), 3);
@@ -737,7 +810,7 @@ fn a_fork_spliced_onto_the_honest_chain_is_a_fork_even_with_the_override() {
         voldir: a.clone(),
         generated_key_file: None,
     };
-    let s = open(&fork, mode);
+    let s = open_unmarked(&fork, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     for (seed, want) in [(20u64, 2u64), (30, 3), (40, 4), (50, 5)] {
         assert_eq!(one_commit(&s, &mut d, seed), want);
@@ -762,4 +835,94 @@ fn a_fork_spliced_onto_the_honest_chain_is_a_fork_even_with_the_override() {
         Err(e) => panic!("expected Fork with the override, got {e:?}"),
         Ok(_) => panic!("the override must not accept a fork"),
     }
+}
+
+/// The store's durability calls, counted, then done for real.
+#[derive(Debug, Default)]
+struct CountingFs {
+    renames: std::sync::atomic::AtomicUsize,
+    dir_syncs: std::sync::atomic::AtomicUsize,
+}
+
+impl lunix_store::FsOps for CountingFs {
+    fn fdatasync(&self, file: &std::fs::File) -> std::io::Result<()> {
+        lunix_store::RealFs.fdatasync(file)
+    }
+
+    fn rename(&self, from: &Path, to: &Path, noreplace: bool) -> std::io::Result<()> {
+        self.renames
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        lunix_store::RealFs.rename(from, to, noreplace)
+    }
+
+    fn fsync_dir(&self, dir: &Path) -> std::io::Result<()> {
+        self.dir_syncs
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        lunix_store::RealFs.fsync_dir(dir)
+    }
+
+    fn unlink(&self, path: &Path) -> std::io::Result<()> {
+        lunix_store::RealFs.unlink(path)
+    }
+}
+
+/// The ring files of `voldir`'s lane files, as (name, length).
+fn lane_files(voldir: &Path) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = std::fs::read_dir(voldir.join("journal"))
+        .unwrap()
+        .flatten()
+        .map(|e| {
+            (
+                e.file_name().into_string().unwrap(),
+                e.metadata().unwrap().len(),
+            )
+        })
+        .filter(|(n, _)| n.starts_with('q') && n.ends_with(".j"))
+        .collect();
+    out.sort();
+    out
+}
+
+/// M12b R2/R3: `OpenParams::store_fs` reaches the store and
+/// `OpenParams::journal_tweak` the journal; without them the store uses the
+/// host file system and the journal its 64 MiB ring files.
+#[test]
+fn store_fs_and_journal_tweak_reach_the_store_and_the_journal() {
+    let Some(t) = scratch("hooks") else { return };
+    let mode = CryptoMode::Plain;
+    let v = create(t.path(), mode, 64 << 10);
+    let fs = Arc::new(CountingFs::default());
+    let with_hooks = |fs: &Arc<CountingFs>| {
+        let mut p = params(&v, mode);
+        p.store_fs = Some(fs.clone());
+        p.journal_tweak = Some(Arc::new(|j| {
+            j.file_len = 2 << 20;
+            j.journal_max = 16 << 20;
+        }));
+        p
+    };
+    let s = open_volume(with_hooks(&fs)).expect("open with hooks");
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    one_commit(&s, &mut d, 7);
+    let renames = fs.renames.load(std::sync::atomic::Ordering::Relaxed);
+    let syncs = fs.dir_syncs.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        renames > 0 && syncs > 0,
+        "renames {renames}, dir syncs {syncs}"
+    );
+    // 16 MiB over 2 lanes of 2 MiB files: 4 files per lane.
+    let files = lane_files(&v.voldir);
+    assert_eq!(files.len(), 8, "{files:?}");
+    assert!(files.iter().all(|(_, len)| *len == 2 << 20), "{files:?}");
+    // A crash and a reopen with the same geometry replay nothing lost.
+    assert!(d.write(64 << 10, &pattern(8, 64 << 10), false).is_ok());
+    assert!(d.flush().is_ok());
+    drop(d);
+    drop(s);
+    let s = open_volume(with_hooks(&fs)).expect("reopen with hooks");
+    assert!(s.engine.recovery_report().replayed > 0);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    assert_eq!(d.read(0, 64 << 10), pattern(7, 64 << 10));
+    assert_eq!(d.read(64 << 10, 64 << 10), pattern(8, 64 << 10));
+    close(s, d);
 }
