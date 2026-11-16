@@ -6,82 +6,23 @@
 mod common;
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use common::volume::{
+    create, damage_record, journal_bytes, open, open_err, open_unmarked, params, torn_tail_volume,
+    SIZE,
+};
 use common::{pattern, scratch, Driver};
 use lunix_crypto::Argon2Cost;
 use lunix_engine::OnJournalDamage;
 use lunix_format::volume::CodecPolicy;
 use lunix_format::{CryptoMode, IdLen};
 use lunix_iface::block::{BlockEngine, IoOp};
-use lunix_iface::ctl::Secret;
 use lunix_iface::store::VolumeDir;
 use lunixd::stack::{
-    create_volume, open_volume, AttachCredential, CreateParams, CreatedVolume, OpenParams,
-    StackError, VolumeStack,
+    create_volume, open_volume, AttachCredential, CreateParams, CreatedVolume, StackError,
+    VolumeStack,
 };
-
-const PASS: &[u8] = b"wiring test passphrase";
-const SIZE: u64 = 64 << 20;
-
-fn create(parent: &Path, mode: CryptoMode, cs: u32) -> CreatedVolume {
-    let tweak = |j: &mut lunix_format::local::VolumeJson| {
-        j.journal_max = 256 << 20;
-    };
-    create_volume(&CreateParams {
-        name: "w",
-        parent,
-        size_bytes: SIZE,
-        chunk_size: cs,
-        mode,
-        policy: CodecPolicy::Auto,
-        level: 1,
-        id_len: IdLen::Sixteen,
-        map_fanout: 512,
-        key_file: None,
-        passphrase: (mode == CryptoMode::Encrypted).then_some(PASS),
-        argon2: Argon2Cost {
-            m_kib: 19_456,
-            t: 2,
-            p: 1,
-        },
-        json: Some(&tweak),
-    })
-    .expect("create")
-}
-
-fn params(v: &CreatedVolume, mode: CryptoMode) -> OpenParams {
-    let mut p = OpenParams::new(v.voldir.clone(), 2);
-    if mode == CryptoMode::Encrypted {
-        p.credential = AttachCredential {
-            passphrase: Some(Secret::new(PASS.to_vec())),
-            ..AttachCredential::default()
-        };
-    }
-    p.tweak = Some(Arc::new(|c| {
-        c.background = false;
-        c.read_helpers = 2;
-    }));
-    p.destage_workers = Some(2);
-    p
-}
-
-fn open(v: &CreatedVolume, mode: CryptoMode) -> VolumeStack {
-    open_volume(params(v, mode)).expect("open")
-}
-
-/// Opens without journal marks: a mark written after a slow cut (a loaded
-/// host) takes a number above the cut, and the close then commits once more,
-/// which shifts the commit numbers the R4 tests count.
-fn open_unmarked(v: &CreatedVolume, mode: CryptoMode) -> VolumeStack {
-    let mut p = params(v, mode);
-    p.journal_tweak = Some(Arc::new(|j| j.mark_idle = None));
-    open_volume(p).expect("open")
-}
-
-fn open_err(v: &CreatedVolume, mode: CryptoMode) -> StackError {
-    open_volume(params(v, mode)).expect_err("open must fail")
-}
 
 /// Writes `n` chunks of pattern data starting at chunk `first`, plus a partial
 /// 4 KiB write into chunk `first + n`.
@@ -360,63 +301,12 @@ fn rollback_and_fork_plain() {
     rollback_and_fork(CryptoMode::Plain);
 }
 
-/// Captures log lines and how the journal files looked when each was written.
-#[derive(Default)]
-struct Capture {
-    lines: Mutex<Vec<String>>,
-}
-
-/// Records every event. Each use rebuilds the callsite interest cache inside
-/// its scope: an event site first hit by another test thread (no subscriber)
-/// can otherwise keep a cached "never" and skip this scoped subscriber.
-struct CaptureSub(Arc<Capture>);
-
-struct Msg(String);
-
-impl tracing::field::Visit for Msg {
-    fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
-        self.0.push_str(&format!(" {}={v:?}", f.name()));
-    }
-}
-
-impl tracing::Subscriber for CaptureSub {
-    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
-        true
-    }
-    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-        tracing::span::Id::from_u64(1)
-    }
-    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-    fn event(&self, e: &tracing::Event<'_>) {
-        let mut m = Msg(String::new());
-        e.record(&mut m);
-        self.0.lines.lock().unwrap().push(m.0);
-    }
-    fn enter(&self, _: &tracing::span::Id) {}
-    fn exit(&self, _: &tracing::span::Id) {}
-}
-
-fn journal_bytes(voldir: &Path) -> Vec<(String, Vec<u8>)> {
-    let mut v: Vec<(String, Vec<u8>)> = std::fs::read_dir(voldir.join("journal"))
-        .unwrap()
-        .flatten()
-        .map(|e| {
-            (
-                e.file_name().to_string_lossy().into_owned(),
-                std::fs::read(e.path()).unwrap(),
-            )
-        })
-        .collect();
-    v.sort();
-    v
-}
-
 /// Plan M12 (journal damage at startup): a damaged record above the floor is
-/// logged (with its range) before the first lane open wipes it, and
-/// `on_journal_damage = refuse` leaves the journal untouched.
+/// reported with its range, the first lane open wipes it, and
+/// `on_journal_damage = refuse` leaves the journal untouched. The log line is
+/// asserted in `logging.rs`.
 #[test]
-fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
+fn journal_damage_is_reported_and_wiped_and_refuse_keeps_it() {
     let Some(t) = scratch("jd") else { return };
     let mode = CryptoMode::Integrity;
     let v = create(t.path(), mode, 64 << 10);
@@ -457,12 +347,7 @@ fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
         "refuse touched the journal"
     );
 
-    let cap = Arc::new(Capture::default());
-    let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || {
-        tracing::callsite::rebuild_interest_cache();
-        open(&v, mode)
-    });
+    let s = open(&v, mode);
     // The damaged range, with its sequence bounds, and the records beyond
     // the gap: in the report and in the log line written before any lane
     // opened.
@@ -476,26 +361,6 @@ fn journal_damage_is_logged_before_the_wipe_and_refuse_keeps_it() {
         .ignored_after_gap
         .expect("the third record is beyond the gap");
     assert_eq!((gap.first.0, gap.last.0), (3, 3));
-    let lines = cap.lines.lock().unwrap();
-    let line = lines
-        .iter()
-        .find(|l| l.contains("journal recovery stopped at a gap or skipped damage"))
-        .unwrap_or_else(|| panic!("no damage log line: {lines:?}"));
-    for want in [
-        format!("start: {}", dmg.start),
-        format!("end: {}", dmg.end),
-        "prev_seq: WriteSeq(1)".to_string(),
-        "next_seq: Some(WriteSeq(3))".to_string(),
-    ] {
-        assert!(line.contains(&want), "{want} not in {line}");
-    }
-    drop(lines);
-    // Logged before the wipe: the files are still as they were until the
-    // first lane opens.
-    assert!(
-        journal_bytes(&v.voldir) == before,
-        "wiped before the log line"
-    );
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert!(
         journal_bytes(&v.voldir) != before,
@@ -638,36 +503,7 @@ fn more_queues_than_lanes_on_an_existing_volume() {
 /// record is reported (`next_seq: None`) and wiped, and every record before
 /// it is there. (A flushed record cannot be torn by a crash: it is durable
 /// before its acknowledgement; this test damages one by hand to stand in for
-/// an unflushed batch.)
-fn torn_tail_volume(t: &Path) -> (CreatedVolume, Vec<Vec<u8>>) {
-    let mode = CryptoMode::Plain;
-    let v = create(t, mode, 64 << 10);
-    let s = open(&v, mode);
-    let mut d = Driver::new(&s.engine, 2, 1 << 20);
-    let marks: Vec<Vec<u8>> = (0..3).map(|i| pattern(2000 + i, 4096)).collect();
-    for (i, m) in marks.iter().enumerate() {
-        assert!(d.write_on(0, (i as u64) * (64 << 10), m).is_ok());
-        assert!(d.flush().is_ok());
-    }
-    drop(d);
-    drop(s);
-    (v, marks)
-}
-
-/// Flips a data byte of the record whose data starts with `mark`.
-fn damage_record(voldir: &Path, mark: &[u8]) {
-    let mut hit = false;
-    for e in std::fs::read_dir(voldir.join("journal")).unwrap().flatten() {
-        let mut b = std::fs::read(e.path()).unwrap();
-        if let Some(pos) = b.windows(64).position(|w| w == &mark[..64]) {
-            b[pos + 100] ^= 0xff;
-            std::fs::write(e.path(), &b).unwrap();
-            hit = true;
-        }
-    }
-    assert!(hit, "the record was found in the journal");
-}
-
+/// an unflushed batch.) The log line is asserted in `logging.rs`.
 #[test]
 fn a_torn_last_record_is_crash_residue_under_refuse() {
     let Some(t) = scratch("torn") else { return };
@@ -676,13 +512,7 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
     damage_record(&v.voldir, &marks[2]);
     let mut p = params(&v, mode);
     p.on_journal_damage = OnJournalDamage::Refuse;
-    let cap = Arc::new(Capture::default());
-    let sub = CaptureSub(Arc::clone(&cap));
-    let s = tracing::subscriber::with_default(sub, || {
-        tracing::callsite::rebuild_interest_cache();
-        open_volume(p)
-    })
-    .expect("a torn tail is crash residue: refuse opens");
+    let s = open_volume(p).expect("a torn tail is crash residue: refuse opens");
     let rep = s.engine.recovery_report();
     assert_eq!(rep.damaged.len(), 1, "{rep:?}");
     assert_eq!(
@@ -690,14 +520,6 @@ fn a_torn_last_record_is_crash_residue_under_refuse() {
         "nothing valid after the tail"
     );
     assert!(rep.ignored_after_gap.is_none(), "{rep:?}");
-    assert!(
-        cap.lines
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|l| l.contains("treated as crash residue")),
-        "the torn tail is logged"
-    );
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     assert_eq!(&d.read(0, 4096), &marks[0]);
     assert_eq!(&d.read(64 << 10, 4096), &marks[1]);
