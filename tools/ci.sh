@@ -62,10 +62,14 @@ cargo clippy -j "$jobs" -p lunix-gc --all-targets --features crashpoints -- -D w
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 
-step "allow_floor_reset is set only by lunix-fsck (ADR-31: only offline repair lowers the floor)"
-if grep -rnE 'allow_floor_reset[[:space:]]*(:|=)[[:space:]]*true' crates --include=*.rs \
-    | grep -vE '^crates/(lunix-fsck/|lunix-store/src/tests/|lunix-testkit/)'; then
-  echo "allow_floor_reset must not be enabled outside lunix-fsck and the store and testkit tests" >&2
+step "allow_floor_reset is used only by lunix-fsck (ADR-31: only offline repair lowers the floor)"
+# The identifier itself, in any form (`: true`, `: flag`, a struct update),
+# outside the store that defines it, lunix-fsck and the testkit; doc comments
+# that name it are not uses.
+if grep -rnw 'allow_floor_reset' crates --include=*.rs \
+    | grep -vE '^crates/(lunix-fsck/|lunix-store/src/|lunix-testkit/)' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//'; then
+  echo "allow_floor_reset must not be used outside lunix-store, lunix-fsck and lunix-testkit" >&2
   exit 1
 fi
 
