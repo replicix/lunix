@@ -175,6 +175,10 @@ codes! {
     REPAIR_REFUSED = "repair_refused", Error, "a requested repair was refused; nothing was changed by it";
     /// A pass pending in `state/gc`.
     GC_PENDING = "gc_pending", Note, "GC work is pending in state/gc";
+    /// fsck's per-segment liveness differs from `lunix-gc`'s mark.
+    GC_LIVENESS = "gc_liveness", Error, "per-segment live bytes recounted by fsck differ from lunix-gc's mark";
+    /// What a GC pass would do now.
+    GC_DRY_RUN = "gc_dry_run", Note, "what a GC pass would condemn, delete and compact now (finish it with --repair --gc)";
 }
 
 /// The documented entry for `code`.
