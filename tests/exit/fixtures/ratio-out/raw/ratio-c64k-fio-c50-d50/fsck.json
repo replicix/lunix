@@ -1,0 +1,1 @@
+{"exit":0,"deep":true,"findings":[],"counts":{},"ratios":{"chunk_size":65536,"mapped_chunks":65536,"unique_chunks":32768,"dedup_ratio":2.01,"unique_ulen":2147483648,"unique_clen":1100000000,"compression_ratio":1.95,"bytes":{"segments":1100000000,"map_packs":1000000}}}

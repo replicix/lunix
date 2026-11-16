@@ -52,6 +52,7 @@ harness_init() { # NAME [state-extra]
   # a 32-byte test key for the encrypted cells, made here, only for this run
   head -c 32 /dev/urandom > "$KEYS/enc.key"; chmod 600 "$KEYS/enc.key"
   write_config
+  hostinfo > "$OUT/hostinfo.md"
   trap 'teardown >> "$OUT/teardown.log" 2>&1; cleanup' EXIT INT TERM
 }
 write_config() {
@@ -67,6 +68,21 @@ commit_interval_ms = $COMMIT_INTERVAL_MS
 log_level = "info"
 ${CFG_EXTRA:-}
 CFG
+}
+
+# hostinfo: the benchmark-hygiene header (CONVENTIONS): CPU, kernel (release number only), memory, governor, tools.
+# No host name, address, user, instance type or path of the remote home is printed.
+hostinfo() {
+  echo "- date: $(date -u +%FT%TZ)"
+  echo "- cpu: $(lscpu | sed -n 's/^Model name: *//p' | head -1), $(nproc) cpus online, SMT: $(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo unknown)"
+  echo "- kernel: $(uname -r | cut -d- -f1), distro: $(. /etc/os-release && echo "$NAME $VERSION_ID")"
+  echo "- memory: $(awk '/MemTotal/{printf "%.0f GiB", $2/1048576}' /proc/meminfo)"
+  echo "- governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo 'not exposed (virtual machine, no cpufreq)')"
+  echo "- io_uring_disabled: $(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo unknown)"
+  echo "- fio: $(fio --version 2>&1 | head -1), e2fsprogs: $(e2fsck -V 2>&1 | head -1), xfsprogs: $(mkfs.xfs -V 2>&1)"
+  echo "- lunixd: ${LUNIXD:-unset} $("${LUNIXD:-/nonexistent}" --version 2>&1 | head -1)"
+  echo "- cpu sets: daemon ${DAEMON_CPUS:-}, fio ${FIO_CPUS:-}; queues ${QUEUES:-}; journal_max ${JOURNAL_MAX:-}"
+  echo "- git revision: ${LUNIX_GIT_REV:-uncommitted or unknown (the host copy has no .git)}"
 }
 
 # ---- reporting -------------------------------------------------------------------------------------------------
@@ -296,6 +312,9 @@ teardown() {
     start_lunixd || echo "teardown: lunixd did not start" >&2
   fi
   stop_fio   # only now: a fio on a quiesced device cannot end before a daemon serves it again
+  # PRE_TEARDOWN: a script's own cleanup of things mounted on top of the device (a database, chroot mounts, loop
+  # devices over files on it); it runs while a daemon serves the device
+  [ -n "${PRE_TEARDOWN:-}" ] && eval "$PRE_TEARDOWN" >> "$OUT/teardown.log" 2>&1
   mountpoint -q "$MNT" 2>/dev/null && timeout -k 10 180 umount "$MNT" >> "$OUT/teardown.log" 2>&1
   if daemon_alive; then detach_all; stop_lunixd || { cap_stop; return 1; }; fi
   for d in $(grep -o '/dev/ublkb[0-9]*' "$CREATED_DEVICES" 2>/dev/null | sort -u); do
@@ -306,5 +325,6 @@ teardown() {
   done
   rm -rf "$VOLS" "$KEYS"
   cap_stop
+  bash "$REPO/spikes/common/ublk-leftovers.sh" > "$OUT/leftovers-end.txt" 2>&1
   return 0
 }

@@ -93,11 +93,12 @@ one_run() {
   stop_gc_loop
   if [ "$CRASHED" = 0 ]; then RUN_STATUS=unreached; fi
   # stop the load: it ends by its own runtime (rt) at the latest; TERM it now so the run stays short
-  kill -TERM "$FIO_PID" 2>/dev/null
+  WL_STOPPED=1; kill -TERM "$FIO_PID" 2>/dev/null
   wl_finish "$fs" 600
   detach_vol "$vol"; local drc=$?
   lunix_fsck "$vol" "$label"; local frc=$?
   { wl_ok && [ "$drc" = 0 ] && [ "$frc" = 0 ]; } || RUN_STATUS=fail
+  WL_STOPPED=0
   [ "$CRASHED" = 0 ] && [ "$RUN_STATUS" = fail ] && RUN_STATUS=fail
   RUN_SECS=$((SECONDS - RUN_T0))
   [ $RUN_SECS -gt "$RUN_CAP_S" ] && RUN_NOTES="$RUN_NOTES;exceeded the ${RUN_CAP_S}s cap"

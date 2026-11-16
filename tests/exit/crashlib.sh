@@ -39,7 +39,9 @@ wl_finish() {
 }
 # wl_ok: the verdict of the last wl_finish (fio zero errors and zero verify failures, fsyncer zero bad acknowledged
 # blocks, guest fsck clean)
-wl_ok() { [ "$WL_FIO_RC" = 0 ] && [ "$WL_FIO_ERRS" = 0 ] && [ "$WL_FSCK_RC" = 0 ] && [ "$WL_VERIFY_RC" = 0 ]; }
+# WL_STOPPED=1 (set by a script that stops fio on purpose with TERM) accepts the wrapper's status 124 when fio itself
+# reported zero errors.
+wl_ok() { { [ "$WL_FIO_RC" = 0 ] || { [ "${WL_STOPPED:-0}" = 1 ] && [ "$WL_FIO_RC" = 124 ]; }; } && [ "$WL_FIO_ERRS" = 0 ] && [ "$WL_FSCK_RC" = 0 ] && [ "$WL_VERIFY_RC" = 0 ]; }
 
 # daemon_ms LOG: the stall figure the daemon logged for its recovery (ms), empty when absent
 daemon_ms() { grep -o 'stall_ms=[0-9]*' "$1" | head -1 | cut -d= -f2; }

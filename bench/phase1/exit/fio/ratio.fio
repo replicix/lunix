@@ -1,0 +1,17 @@
+; M15 item 4: a sequential fill of the raw device at bs = chunk size with a given compressibility and duplicate share.
+; Environment: DEV, BS (the chunk size in bytes), SIZE, COMP (--buffer_compress_percentage), DEDUP (--dedupe_percentage),
+; refill_buffers is always on (without it fio repeats a few buffers and the data is not what the knobs say).
+[ratio]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=write
+bs=${BS}
+size=${SIZE}
+iodepth=16
+numjobs=1
+buffer_compress_percentage=${COMP}
+dedupe_percentage=${DEDUP}
+refill_buffers=1
+randseed=42
+end_fsync=1
