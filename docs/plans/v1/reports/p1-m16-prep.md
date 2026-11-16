@@ -127,3 +127,8 @@ The plan asks for three repetitions of the shortest cells and the long cells onc
 10. **Statistics.** Median and min/max over three repetitions for Part A cells; the long Part B cells run once and the
     tables say so; no confidence intervals are computed because three samples do not support them (the plan asks for median
     and min/max).
+
+## Commits and ownership
+
+See `git log p1/m16`; pushed, not merged. `tools/check-ownership.sh` reports only that `m16` may not change
+`docs/plans/v1/reports/p1-m16-prep.md` (the table allows `p1-m16.md`); the file name is the one the brief asked for.
