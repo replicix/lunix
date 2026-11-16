@@ -75,17 +75,20 @@ bash tools/check-features.sh
 step "lunixd with crashpoints: the build warns at start (lead, M12a final review F2; not tested with --all-features)"
 cargo test -j "$jobs" -p lunixd --features crashpoints --test startup
 
-step "lunixd with testsupport: clippy and the stack tests at their default case counts (lead, M12b R1)"
+step "lunixd with testsupport: clippy, then the stack tests in release with lunix-fsck at their default case counts (lead, M12b R1 and review)"
 # `cargo test --workspace` builds lunixd without `testsupport`, so the stack
-# tests compile to nothing there. The kill loops (stack_kill, crashpoints and
-# a release build, minutes) stay out of CI; their command is in the M12b
-# report.
+# tests compile to nothing there. They run in release (the debug profile
+# spends most of its time scanning ring files at every open), with a release
+# lunix-fsck next to them that they must find (LUNIX_STACK_REQUIRE_FSCK). The
+# kill loops (stack_kill, crashpoints, minutes) stay out of CI; their command
+# is in the M12b report.
 cargo clippy -j "$jobs" -p lunixd --all-targets --features testsupport,crashpoints -- -D warnings
+cargo build -j "$jobs" --release -p lunix-fsck
 stack_tests=(--lib)
 for t in stack_support stack_model; do
   [ -f "crates/lunixd/tests/$t.rs" ] && stack_tests+=(--test "$t")
 done
-cargo test -j "$jobs" -p lunixd --features testsupport "${stack_tests[@]}"
+LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features testsupport "${stack_tests[@]}"
 
 if [ "${LUNIX_SKIP_OWNERSHIP:-}" = "1" ]; then
   step "ownership (skipped: not a milestone branch)"
