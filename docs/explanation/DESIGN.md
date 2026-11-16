@@ -438,7 +438,9 @@ Recovery is idempotent: a crash during it is another recovery.
 7. Recover the journal with the tip FULL's `cut_seq` as the floor (§4.1).
    `ignored_after_gap` and `damaged` are logged before any lane is opened,
    and `on_journal_damage = refuse` stops the open here with a typed error
-   when a gap or damage lies at or below the flushed watermark, or a
+   when a gap lies at or below the flushed watermark (a damaged range with
+   no number missing there holds nothing durable; rule change E1, maintainer
+   sign-off 2026-11-16), or a
    `write_seq` is found twice (§4.1); anything above it is treated as crash
    residue, logged and wiped (after the mark idle delay every flush is
    witnessed; ADR-4). Marks are not among the records. The stale-tail wipe has not run yet. Rebuild the overlay from

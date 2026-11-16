@@ -2258,8 +2258,11 @@ device smoke test.
 first `open_lane` of a recovered volume, log `ignored_after_gap` and every
 `damaged` range with seq bounds; honour the mount option
 `on_journal_damage = wipe | refuse` (default `wipe`; `refuse` keeps the
-volume offline for `fsck` when a gap or damage lies at or below the flushed
-watermark the journal records carry, that is a loss of durable data; anything
+volume offline for `fsck` when a gap lies at or below the flushed
+watermark the journal records carry, that is a loss of durable data; a
+damaged range with no number missing at or below it holds nothing durable
+and opens (rule change E1, maintainer sign-off 2026-11-16 (rule change, no
+layout change)); anything
 above it, a torn last record, a gap across lanes or a torn batch followed by
 a later one, is treated as crash residue, logged at warn and wiped; a
 `write_seq` found twice is refused at any watermark; an interrupted ring
