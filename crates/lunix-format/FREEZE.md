@@ -140,9 +140,11 @@ was appended, always below the record's `write_seq`; 0 when none is known
 there). The reader rejects `flushed >= write_seq`. DELTA regions and the
 memfd sink write 0, and the strict DELTA decoder rejects any other value.
 Recovery
-reports the highest watermark found; a gap or damage at or below it is
-real loss (what `on_journal_damage = refuse` refuses), everything above it
-is crash residue (ADR-4).
+reports the highest watermark found; a gap at or below it (or a number
+found twice) is real loss (what `on_journal_damage = refuse` refuses), a
+damaged range with no number missing at or below it holds nothing durable,
+and everything above it is crash residue (ADR-4; rule change E1, maintainer
+sign-off 2026-11-16 (rule change, no layout change)).
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-14 (amendment: journal flushed watermark; merge gated on an independent review and the four-queue kill -9 + refuse cell)
 

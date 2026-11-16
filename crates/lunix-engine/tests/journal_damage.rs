@@ -1,13 +1,15 @@
 //! `on_journal_damage = refuse` against the flushed watermark (ADR-4, maintainer
-//! decision of 2026-11-14): crash residue above the watermark opens, loss at
-//! or below it is refused, and `wipe` opens either way.
+//! decision of 2026-11-14, rule change E1 signed off 2026-11-16): crash residue
+//! above the watermark opens, loss at or below it (a missing or duplicate
+//! number) is refused, a damaged range with no number missing opens, and
+//! `wipe` opens either way.
 
 mod common;
 
 use common::*;
 use lunix_engine::{EngineConfig, OnJournalDamage, OpenError};
 use lunix_format::WriteSeq;
-use lunix_iface::block::IoOp;
+use lunix_iface::block::{BlockEngine, IoOp};
 use lunix_testkit::{CrashModel, JournalMode};
 
 const CS: u32 = 16 << 10;
@@ -230,4 +232,62 @@ fn marks_take_numbers_and_change_no_block() {
     assert_eq!(rep.next_seq, WriteSeq(b.0 + 2), "the last mark is counted");
     assert!(rep.ignored_after_gap.is_none() && rep.damaged.is_empty());
     assert_eq!(r.read_all(), before);
+}
+
+/// The M12b review's E1 probe: one crash tears a record at or below the cut
+/// (the commit does not sync the journal) while a later record of its lane
+/// survives. Recovery keeps that later record, so the torn range stays in the
+/// ring file; once the watermark passes it the range lies "at or below the
+/// watermark" with no number missing. Every later `refuse` open must succeed,
+/// after a clean close as after another crash.
+#[test]
+fn a_torn_record_at_or_below_the_cut_never_keeps_refuse_offline() {
+    let mut v = Vol::create(CS, 64, 2, JournalMode::Immediate);
+    v.marks = true;
+    v.tweak = refuse;
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let torn = put(&v, &mut r, 0, 0);
+    let kept = put(&v, &mut r, 0, 1);
+    r.engine.commit_now(false).expect("commit");
+    assert!(r.engine.tip().1 >= kept);
+    // A FLUSH after the commit and a record witnessing it: the watermark
+    // passes `kept` (the real journal's first lane open after the crash does
+    // the same with its mark, the review's one-crash form).
+    put(&v, &mut r, 1, 5);
+    assert!(r.flush(1).is_ok());
+    put(&v, &mut r, 1, 6);
+    crash_keep_all(&mut v, r);
+    assert!(v.journal.tear(torn));
+    let mut saw_the_e1_shape = false;
+    for round in 0..4u64 {
+        let mut r = v
+            .open()
+            .map_err(|e| e.0)
+            .unwrap_or_else(|e| panic!("round {round}: refuse refused: {e}"));
+        let rep = r.engine.recovery_report().clone();
+        assert!(rep.gap_at.is_none() && rep.duplicate.is_none(), "{rep:?}");
+        // The shape the old range rule refused: damage whose next record of
+        // its lane is at or below the watermark, nothing missing.
+        if rep
+            .damaged
+            .iter()
+            .any(|d| d.next_seq.is_some_and(|n| n <= rep.flushed))
+        {
+            saw_the_e1_shape = true;
+        }
+        assert_eq!(r.read(0, 0, 4096).1, pattern(0, 4096), "round {round}");
+        assert_eq!(r.read(0, 4096, 4096).1, pattern(1, 4096), "round {round}");
+        // Writes on both lanes, a FLUSH (the watermark passes the torn
+        // range), one more write to witness it.
+        put(&v, &mut r, 1, 10 + round);
+        put(&v, &mut r, 0, 20 + round);
+        assert!(r.flush(0).is_ok());
+        put(&v, &mut r, 1, 30 + round);
+        if round % 2 == 0 {
+            // A clean close.
+            r.engine.quiesce().expect("quiesce");
+        }
+        crash_keep_all(&mut v, r);
+    }
+    assert!(saw_the_e1_shape, "the probe never produced the E1 shape");
 }

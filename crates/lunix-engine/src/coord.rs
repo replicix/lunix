@@ -13,9 +13,19 @@
 //! `AfterSpace` fail this attempt (the next trigger retries), `Never` and
 //! `Stop` stop the engine's commits (writes fail, reads continue). Compaction
 //! re-hints run before the destage in their own transaction; a failure there
-//! keeps them for the next cut. A failure after the destage committed its
-//! transaction (C5, C6) stops further commits in this process (the in-memory
-//! map is ahead of the durable state) until the volume is reopened.
+//! keeps them for the next cut; their output segments are named by this
+//! cut's FULL all the same (N10: naming an existing sealed segment is always
+//! safe, and `persist` may then cover their relocations). A failure after the
+//! destage committed its transaction (C5, C6) stops further commits in this
+//! process (the in-memory map is ahead of the durable state) until the
+//! volume is reopened.
+//!
+//! The index (N13): the entries of every segment a durable commit names are
+//! persisted before another FULL is written. A failed `persist` at C8 (or of
+//! the catch-up at open) leaves the commit durable and marks the index
+//! unpersisted; the next cut retries it first and fails, writing nothing,
+//! while it still fails, so the FULL that names those segments cannot leave
+//! the retained window before their entries are in a run.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -57,10 +67,11 @@ pub(crate) struct Coord {
     /// When a tick first saw the volume dirty since the last commit (`T`
     /// counts from there, so an idle period does not fire it at once).
     pub(crate) dirty_since: Option<Duration>,
-    /// Bytes charged to `Index` (the size of every run file).
-    pub(crate) index_charged: u64,
     /// The highest segment a durable commit names (for `persist`).
     pub(crate) upto_seg: Option<SegId>,
+    /// A `persist` failed (at C8 or of the catch-up at open): the next cut
+    /// retries it before anything else and fails while it fails (N13).
+    pub(crate) index_unpersisted: bool,
 }
 
 impl Coord {
@@ -79,8 +90,8 @@ impl Coord {
             last_error: None,
             dirty_since: None,
             collector,
-            index_charged: rec.index_charged,
             upto_seg: rec.upto_seg,
+            index_unpersisted: rec.index_unpersisted,
         }
     }
 }
@@ -229,7 +240,7 @@ impl Inner {
     }
 
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.moved.is_empty() || !co.pending_named.is_empty() {
+        if !co.moved.is_empty() || !co.pending_named.is_empty() || co.index_unpersisted {
             return true;
         }
         let dirty = self.journal.last_issued() > co.tip.cut_seq;
@@ -259,6 +270,9 @@ impl Inner {
                 "the engine stopped committing after a failure",
             )));
         }
+        // N13: no new FULL while index entries of named segments are only
+        // in memory.
+        self.retry_persist(co)?;
         let prev = co.tip.cut_seq.0;
         let size = new_size.unwrap_or(co.tip.size).max(co.tip.size);
         // C1: pick c and wait for the in-flight writes at or below it.
@@ -356,7 +370,7 @@ impl Inner {
         // failure of this cut leaves them applied in memory, pointing at
         // sealed segments, and still to be named (`pending_named`).
         if let Err(e) = self.apply_moved(co) {
-            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut");
+            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
         }
         // C3: destage; every segment sealed before the map transaction
         // commits, index inserts held back.
@@ -416,13 +430,21 @@ impl Inner {
             tracing::warn!(error = %e, "ledger transfer failed");
         }
         acct.seg_bound = 0;
-        // Compaction output is named by the cut that applies its re-hints
-        // (M17 rule 4); until then it is above the high-water mark.
-        for s in &co.pending_named {
-            if !new_segments.contains(s) {
-                new_segments.push(*s);
-            }
-        }
+        // Compaction output is named by the first cut after its seal (M17
+        // rule 4, N10): the outputs of re-hints applied now or earlier
+        // (`pending_named`) and of those deferred by a failed `apply_moved`
+        // (still in `moved`). Naming an existing sealed segment is always
+        // safe; a deferred output is named again by the cut that applies it.
+        let outputs = co
+            .pending_named
+            .iter()
+            .copied()
+            .chain(co.moved.iter().map(|m| m.new.seg));
+        new_segments.extend(outputs);
+        // The commit format wants the ids strictly ascending; an output is
+        // older than this cut's own segments.
+        new_segments.sort_unstable();
+        new_segments.dedup();
         self.points.hit("engine.c4.named").map_err(CutFail::Other)?;
         lunix_iface::crashpoint!("engine.c4.named");
         // C5: grow the map now (a failed destage above leaves it at the
@@ -552,16 +574,22 @@ impl Inner {
         if let Some(e) = first_error {
             tracing::warn!(error = %e, failed_inserts, "index inserts failed: those chunks miss dedup until a rebuild");
         }
-        // `upto_seg` only moves with a cut that wrote segments, so entries
-        // `catch_up` inserted at open wait for such a cut to be persisted.
-        if !new_segments.is_empty() {
+        // Every segment this FULL names gets its entries into a run before
+        // the next FULL (N13); the catch-up at open persisted its own. A
+        // failure keeps this commit (it is durable) and blocks the next cut
+        // until a retry succeeds.
+        if !new_segments.is_empty() || co.index_unpersisted {
             if let Some(upto) = co.upto_seg {
-                if let Err(e) = self.index.persist(upto) {
-                    tracing::warn!(error = %e, "index run not persisted");
+                match self.index.persist(upto) {
+                    Ok(_) => co.index_unpersisted = false,
+                    Err(e) => {
+                        tracing::error!(error = %e, commit = commit_seq.0, "index run not persisted: no further commit until a retry succeeds");
+                        co.index_unpersisted = true;
+                    }
                 }
             }
         }
-        self.true_up_index(co, &mut acct);
+        self.true_up_index(Some(&mut acct));
         point!(self.points, "engine.c8.index");
         // C9: reclaim the journal below the cut, release the overlay.
         match &tail {
@@ -607,20 +635,54 @@ impl Inner {
         Ok((res.root, vec![(sealed.pack, sealed.size_bytes)]))
     }
 
-    /// Keeps the `Index` charge equal to the bytes of every run file.
-    fn true_up_index(&self, co: &mut Coord, acct: &mut Acct) {
-        let Ok(runs) = self.index.all_runs() else {
-            return;
+    /// Keeps the `Index` charge equal to the bytes of every run file,
+    /// against the ledger's own `Index` value: GC releases the bytes of each
+    /// run it deletes (iface `space` walk-through step 6), so a private
+    /// counter would release them a second time. Growth comes out of the
+    /// cut's held headroom when there is one.
+    fn true_up_index(&self, acct: Option<&mut Acct>) {
+        let runs = match self.index.all_runs() {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "index runs not listed; the Index charge is trued up later");
+                return;
+            }
         };
         let total: u64 = runs.iter().map(|r| r.size_bytes).sum();
-        if total >= co.index_charged {
-            let grow = total - co.index_charged;
-            self.settle(acct, SpaceKind::Index, grow, grow);
-        } else {
-            self.space
-                .release(SpaceKind::Index, co.index_charged - total);
+        let charged = self.space.snapshot().by_kind[SpaceKind::Index.index()];
+        match acct {
+            Some(acct) if total > charged => {
+                let grow = total - charged;
+                self.settle(acct, SpaceKind::Index, grow, grow);
+            }
+            _ if total != charged => {
+                if let Err(e) =
+                    self.space
+                        .transfer(SpaceKind::Index, SpaceKind::Index, charged, total)
+                {
+                    tracing::warn!(error = %e, "ledger transfer failed");
+                }
+            }
+            _ => {}
         }
-        co.index_charged = total;
+    }
+
+    /// Retries a `persist` that failed (N13). While it fails the cut fails
+    /// before it writes anything.
+    fn retry_persist(&self, co: &mut Coord) -> Result<()> {
+        if !co.index_unpersisted {
+            return Ok(());
+        }
+        if let Some(upto) = co.upto_seg {
+            if let Err(e) = self.index.persist(upto) {
+                tracing::warn!(error = %e, "index run still not persisted: the cut waits for it");
+                return Err(e);
+            }
+        }
+        co.index_unpersisted = false;
+        self.true_up_index(None);
+        tracing::info!("index run persisted on retry");
+        Ok(())
     }
 
     /// C3, second half: compaction's `moved` records become conditional

@@ -621,6 +621,94 @@ pub fn write_journal_seqs(dir: &Path, uuid: VolumeUuid, lanes: u16, seqs: &[u64]
     }
 }
 
+/// One record of a hand-made journal (on-disk-formats §5).
+#[derive(Clone, Copy, Debug)]
+pub enum JRec {
+    /// A 4 KiB write.
+    Write(u64),
+    /// A mark.
+    Mark(u64),
+}
+
+/// Writes one ring file `journal/<name>` (header lane `header_lane`,
+/// ordinal 1, 1 MiB) holding `recs` in that order, each in a batch of its
+/// own or in batches of up to 10 writes, every batch carrying the watermark
+/// `min(wm, first write_seq - 1)`.
+pub fn write_ring_file(
+    dir: &Path,
+    uuid: VolumeUuid,
+    name: &str,
+    header_lane: u16,
+    recs: &[JRec],
+    wm: u64,
+) {
+    let gen = 0x1234_5678_9abc_def0u64;
+    let mut file = Vec::new();
+    FileHeader {
+        lane: header_lane,
+        ordinal: 1,
+        volume_uuid: uuid,
+        generation: gen,
+    }
+    .encode(&mut file)
+    .expect("header");
+    // Writes in batches of up to 10, a mark in a batch of its own (one per
+    // block, as the mark ring writes them).
+    let mut i = 0;
+    while i < recs.len() {
+        let first = match recs[i] {
+            JRec::Write(s) | JRec::Mark(s) => s,
+        };
+        // A batch never spans `wm`, so the first batch above it carries `wm`.
+        let n = match recs[i] {
+            JRec::Mark(_) => 1,
+            JRec::Write(_) => recs[i..]
+                .iter()
+                .take(10)
+                .take_while(|r| matches!(r, JRec::Write(s) if (*s > wm) == (first > wm)))
+                .count(),
+        };
+        let mut b = BatchBuilder::new(gen, file.len() as u64)
+            .expect("batch")
+            .with_flushed(WriteSeq(wm.min(first - 1)));
+        for r in &recs[i..i + n] {
+            match r {
+                JRec::Write(s) => b.push_write(WriteSeq(*s), 0, *s % 64, &lcg(*s, 4096)),
+                JRec::Mark(s) => b.push_mark(WriteSeq(*s), 0),
+            }
+            .expect("push");
+        }
+        file.extend_from_slice(&b.finish());
+        i += n;
+    }
+    assert!(file.len() <= 1 << 20, "ring file too small for the records");
+    file.resize(1 << 20, 0);
+    std::fs::write(dir.join("journal").join(name), file).expect("write ring file");
+}
+
+/// The mark ring as a new journal leaves it: four 1 MiB files with a lane-0
+/// header and no mark (on-disk-formats §5.1).
+fn write_empty_mark_ring(dir: &Path, uuid: VolumeUuid) {
+    let gen = 0x0fed_cba9_8765_4321u64;
+    for ordinal in 1..=4u32 {
+        let mut file = Vec::new();
+        FileHeader {
+            lane: 0,
+            ordinal,
+            volume_uuid: uuid,
+            generation: gen,
+        }
+        .encode(&mut file)
+        .expect("header");
+        file.resize(1 << 20, 0);
+        std::fs::write(
+            dir.join("journal").join(format!("m00-{ordinal:08x}.j")),
+            file,
+        )
+        .expect("write mark ring file");
+    }
+}
+
 /// Lane `l` gets the records whose `write_seq % lanes == l`, in batches of 10.
 pub fn write_journal(spec: &Spec, dir: &Path, uuid: VolumeUuid) {
     let gen = 0x1234_5678_9abc_def0u64;
@@ -657,6 +745,7 @@ pub fn write_journal(spec: &Spec, dir: &Path, uuid: VolumeUuid) {
         )
         .expect("write journal");
     }
+    write_empty_mark_ring(dir, uuid);
 }
 
 // ---------------------------------------------------------------------------
