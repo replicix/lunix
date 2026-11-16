@@ -13,8 +13,8 @@
 //! 1. Read `volume`, the family keyring and `state/pins` (unlocked reads),
 //!    run `check_attach` (downgrade, wrong key, descriptor MAC).
 //! 2. Open the volume directory with the unlocked `MetaCodec` (takes `LOCK`).
-//! 3. The ring size against the queue count (`journal_max >= queues x 128
-//!    MiB`).
+//! 3. The ring size against the queue count (`journal_max >= queues x 2
+//!    ring files`, 128 MiB per queue with the production 64 MiB files).
 //! 4. Open the journal (lanes = queues), overlay, index, space gate, map
 //!    opener and the M9 destage adapter, then `Engine::open`, which verifies
 //!    the chain, applies R4, sweeps orphans, catches the index up, recovers
@@ -53,7 +53,7 @@ use lunix_journal::{FileJournal, JournalConfig};
 use lunix_map::{MapConfig, RadixMap};
 use lunix_overlay::ShardedOverlay;
 use lunix_space::{LunixSpace, SpaceConfig, StatvfsProbe};
-use lunix_store::{read_volume_file, LocalVolume, StoreOptions};
+use lunix_store::{read_volume_file, FsOps, LocalVolume, StoreOptions};
 
 pub use destage::{map_error, map_outcome, retry_of, PipelineDestager, PressureThresholds};
 pub use floor::DirFloor;
@@ -450,6 +450,10 @@ impl std::fmt::Debug for AttachCredential {
 /// coordinator off and drive `tick`).
 pub type EngineTweak = Arc<dyn Fn(&mut EngineConfig) + Send + Sync>;
 
+/// A change to the journal's settings, applied after the production
+/// geometry (tests: a small `file_len` so each open scans less).
+pub type JournalTweak = Arc<dyn Fn(&mut JournalConfig) + Send + Sync>;
+
 /// What opening a volume needs.
 pub struct OpenParams {
     /// `<dir>/<uuid>`.
@@ -471,6 +475,14 @@ pub struct OpenParams {
     /// Lock the journal's I/O memory (DESIGN §3, W7); the daemon sets it when
     /// it runs hardened. A failed lock fails the open.
     pub lock_memory: bool,
+    /// The store's durability calls (`None`: [`lunix_store::RealFs`]). Tests
+    /// install a recording [`FsOps`] to know what a crash may lose; the
+    /// daemon never sets it.
+    pub store_fs: Option<Arc<dyn FsOps>>,
+    /// Journal settings hook, applied after [`JournalConfig::new`] and
+    /// `lock_memory` (`None`: the production geometry). Tests only; the
+    /// daemon never sets it.
+    pub journal_tweak: Option<JournalTweak>,
 }
 
 impl OpenParams {
@@ -486,6 +498,8 @@ impl OpenParams {
             destage_workers: None,
             allow_unverifiable_fork: false,
             lock_memory: false,
+            store_fs: None,
+            journal_tweak: None,
         }
     }
 }
@@ -693,28 +707,36 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     let crypto = Arc::new(ok.crypto);
     let meta = Arc::clone(crypto.meta());
     let meta_codec: Arc<dyn MetaCodec> = meta.clone();
-    let store = LocalVolume::open(&voldir, meta_codec, StoreOptions::default())?;
+    let mut sopts = StoreOptions::default();
+    if let Some(fs) = &p.store_fs {
+        sopts.fs = Arc::clone(fs);
+    }
+    let store = LocalVolume::open(&voldir, meta_codec, sopts)?;
     for w in store.take_warnings() {
         tracing::warn!(volume = %desc.volume_uuid, warning = %w, "store");
     }
     let json = store.volume_json()?;
     let floor_before = store.rollback_floor()?;
-    // A lane needs two 64 MiB ring files (lunix-journal): refuse a ring that
-    // cannot hold the queues before anything is created.
-    let need = u64::from(p.queues) * 2 * (64 << 20);
-    if json.journal_max < need {
-        return Err(invalid(format!(
-            "journal_max {} MiB is below queues x 128 MiB ({} queues need {} MiB); attach with fewer queues or raise journal_max",
-            json.journal_max >> 20,
-            p.queues,
-            need >> 20
-        )));
-    }
 
     let uuid = desc.volume_uuid;
     let cs = desc.chunk_size;
     let mut jcfg = JournalConfig::new(voldir.join("journal"), uuid, p.queues, json.journal_max);
     jcfg.lock_memory = p.lock_memory;
+    if let Some(t) = &p.journal_tweak {
+        t(&mut jcfg);
+    }
+    // A lane needs two ring files (lunix-journal): refuse a ring that cannot
+    // hold the queues before anything is created.
+    let need = u64::from(p.queues) * 2 * jcfg.file_len;
+    if jcfg.journal_max < need {
+        return Err(invalid(format!(
+            "journal_max {} MiB is below queues x 2 ring files of {} MiB ({} queues need {} MiB); attach with fewer queues or raise journal_max",
+            jcfg.journal_max >> 20,
+            jcfg.file_len >> 20,
+            p.queues,
+            need >> 20
+        )));
+    }
     let journal = Arc::new(FileJournal::open(jcfg)?);
     let overlay = Arc::new(ShardedOverlay::new(u64::from(cs) / 4096));
     let index = Arc::new(LsmIndex::open(&voldir, store.ids(), desc.id_len)?);
