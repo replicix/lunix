@@ -176,7 +176,10 @@ fn quiesce_all_outliving_the_call_timeout_still_replies_and_exits() {
 #[test]
 fn a_slow_quiesce_on_sigterm_exits() {
     let Some(t) = scratch("sds") else { return };
-    let mut d = Daemon::start(t.path(), "call_timeout_ms = 4000");
+    // The quiesce on SIGTERM is not a control call: the call timeout does not
+    // bound it. The harness's long call timeout keeps the attach (journal
+    // creation) from timing out on a loaded host.
+    let mut d = Daemon::start(t.path(), "");
     let a = create(&mut d, "a", &t.path().join("vols"));
     attached(attach(&mut d, "a"));
     std::fs::write(a.join("null-device-quiesce-ms"), b"6000").unwrap();
