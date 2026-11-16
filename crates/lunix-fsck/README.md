@@ -36,3 +36,5 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
 9. Taking the lock rewrites `LOCK` with the pid: that is the one write a check
    makes, and a read-only medium cannot be checked.
 10. A keyed volume without a credential gets no check at all.
+11. `index_lost` after a kill is expected until N13's engine side lands; fix it with
+    `--rebuild-index` (it holds every entry in memory, over 100 B per chunk).

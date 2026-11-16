@@ -10,7 +10,7 @@
 use lunix_format::commit::Commit;
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_iface::store::{
-    CheckpointStore, CommitStore, FloorReset, PackStore, SegmentStore, VolumeDir,
+    CheckpointStore, CommitStore, FloorReset, PackStore, PinSource, SegmentStore, VolumeDir,
 };
 
 use crate::code;
@@ -291,6 +291,47 @@ fn truncate_tip(
             return false;
         }
     }
+    // GC's retained set reaches down to the lowest chain_floor its FULLs
+    // record (N24). Under the old tip that was the previous commit's
+    // chain_floor; under the new one it is one FULL further down, and that
+    // FULL may be half collected already (its data deleted, its commit file
+    // not yet). Nothing needs it (mount verifies down to the new tip's
+    // chain_floor), so it goes before the tip is set aside (M17.B review B-2).
+    let floor_seq = facts
+        .floor
+        .map_or(prev.seq.0, |f| f.max_commit_seq.0.min(prev.seq.0));
+    let pinned: std::collections::HashSet<u64> = s
+        .vol
+        .roots()
+        .map(|r| r.iter().map(|p| p.commit_seq.0).collect())
+        .unwrap_or_default();
+    let mut dropped = Vec::new();
+    for q in window_floor(s, &prev_commit).0..prev_commit.chain_floor.0 {
+        if q >= floor_seq || pinned.contains(&q) {
+            continue;
+        }
+        let q = lunix_format::CommitSeq(q);
+        match CommitStore::delete(&s.vol, q, prev_commit.chain_floor) {
+            Ok(n) if n > 0 => dropped.push(q.0),
+            Ok(_) => {}
+            Err(e) => {
+                refuse(
+                    sink,
+                    what,
+                    format!("commit {} below the new chain_floor: {e}", q.0),
+                );
+                return false;
+            }
+        }
+    }
+    if !dropped.is_empty() {
+        actions.push(RepairAction {
+            action: "drop_old_commits",
+            detail: format!(
+                "commits {dropped:?} below the new tip's chain_floor were outside GC's retained set under the dropped tip and are deleted (GC may already have collected their data)"
+            ),
+        });
+    }
     // What the older cut can no longer cover.
     let mut jn = Sink::default();
     let sc = journal::scan(s, &mut jn);
@@ -343,6 +384,25 @@ fn truncate_tip(
     true
 }
 
+/// The lowest `chain_floor` recorded by a FULL of `prev`'s retained chain
+/// (`prev.chain_floor ..= prev`): the floor of GC's retained set once `prev`
+/// is the tip. Commits that cannot be read count as `prev.chain_floor`.
+fn window_floor(s: &Session, prev: &lunix_format::commit::Full) -> lunix_format::CommitSeq {
+    let mut low = prev.chain_floor;
+    for q in prev.chain_floor.0..prev.common.commit_seq.0 {
+        let q = lunix_format::CommitSeq(q);
+        if let Ok(Commit::Full(f)) = s
+            .vol
+            .get(q)
+            .map_err(|_| ())
+            .and_then(|b| s.commit_codec().open_commit(q, &b).map_err(|_| ()))
+        {
+            low = low.min(f.chain_floor);
+        }
+    }
+    low
+}
+
 /// Walks the previous commit's map completely: nothing may be unresolved.
 fn previous_root_resolves(
     s: &Session,
@@ -351,6 +411,43 @@ fn previous_root_resolves(
     seq: lunix_format::CommitSeq,
     hash: [u8; 32],
 ) -> std::result::Result<(), String> {
+    // The new tip's retained chain: what mount keeps. Everything above its
+    // high-water mark that it does not name is swept at the next mount
+    // (DESIGN 4.4), so a root must not resolve into it (M17.B review B-1).
+    let mut retained = Vec::new();
+    for q in prev.chain_floor.0..seq.0 {
+        let q = lunix_format::CommitSeq(q);
+        let commit = s
+            .vol
+            .get(q)
+            .map_err(|e| format!("commit {} cannot be read: {e}", q.0))
+            .and_then(|b| {
+                s.commit_codec()
+                    .open_commit(q, &b)
+                    .map(|c| (c, s.commit_codec().object_hash(&b)))
+                    .map_err(|e| format!("commit {} does not open: {e}", q.0))
+            })?;
+        retained.push(Retained {
+            seq: q,
+            commit: commit.0,
+            hash: commit.1,
+        });
+    }
+    retained.push(Retained {
+        seq,
+        commit: Commit::Full(prev.clone()),
+        hash,
+    });
+    let mut named = std::collections::HashSet::new();
+    for r in &retained {
+        if let Commit::Full(f) = &r.commit {
+            named.extend(f.new_segments.iter().copied());
+            named.extend(f.map_packs.iter().copied());
+            named.extend(f.index_packs.iter().copied());
+            named.extend(f.map_root.pack);
+        }
+    }
+    let high_water = named.iter().map(|id| id.raw()).max().unwrap_or(0);
     let mut f = Facts {
         segments: facts.segments.clone(),
         packs: facts.packs.clone(),
@@ -359,11 +456,7 @@ fn previous_root_resolves(
             hash,
             full: prev.clone(),
         }),
-        retained: vec![Retained {
-            seq,
-            commit: Commit::Full(prev.clone()),
-            hash,
-        }],
+        retained,
         ..Facts::default()
     };
     let mut sink = Sink::default();
@@ -371,12 +464,26 @@ fn previous_root_resolves(
     let view = indexcheck::open_view(s, &mut sink);
     resolve::run(s, view.as_ref(), &mut sink, &mut f);
     let bad = sink.findings.iter().find(|x| x.severity == Severity::Error);
+    let swept = |id: &lunix_format::ObjId| id.raw() > high_water && !named.contains(id);
+    let into_swept = f
+        .referenced_segments
+        .iter()
+        .chain(f.walk.iter().flat_map(|w| w.used_packs.iter()))
+        .copied()
+        .filter(swept)
+        .min();
     match bad {
         Some(x) => Err(format!("{}: {}", x.code, x.message)),
         None if !f.walk.as_ref().is_some_and(|w| w.tip_complete) => {
             Err("the walk did not complete".to_owned())
         }
-        None => Ok(()),
+        None => match into_swept {
+            Some(id) => Err(format!(
+                "its roots resolve into object {:016x}, which only the dropped tip names: the next mount would delete it",
+                id.raw()
+            )),
+            None => Ok(()),
+        },
     }
 }
 

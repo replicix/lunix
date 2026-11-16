@@ -44,6 +44,8 @@ pub(crate) struct Facts {
     pub(crate) gc_floor: CommitSeq,
     /// Whether the chain from the tip down to `chain_floor` verified.
     pub(crate) chain_ok: bool,
+    /// The error codes of the check pass that made these facts (sorted).
+    pub(crate) error_codes: Vec<&'static str>,
     pub(crate) condemned: Option<Condemned>,
     pub(crate) condemned_ids: HashSet<ObjId>,
     pub(crate) leftovers: Vec<Leftover>,

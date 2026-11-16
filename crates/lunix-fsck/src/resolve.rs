@@ -174,7 +174,10 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
         }
         // The tip's entries are done with: free them before the rest.
         walk.tip_entries = Vec::new();
-        unique.sort_unstable_by_key(|u| u.0);
+        // By (id, clen): one id stored twice with different lengths (a
+        // re-sealed compaction output, a duplicate) counts the same copy on
+        // every run.
+        unique.sort_unstable_by_key(|u| (u.0, u.2));
         unique.dedup_by_key(|u| u.0);
         for &(_, ulen, clen) in &unique {
             ratios.unique_ulen += u64::from(ulen);

@@ -200,6 +200,17 @@ fn run_checks(s: &session::Session, opts: &Options, sink: &mut Sink) -> Facts {
     if let Some(r) = &mut facts.ratios {
         r.bytes = bytes;
     }
+    // What a destructive repair must not run past (`--repair --gc`): every
+    // error code of this pass, the GC hook's own included.
+    let mut errors: Vec<&'static str> = sink
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .map(|f| f.code)
+        .collect();
+    errors.sort_unstable();
+    errors.dedup();
+    facts.error_codes = errors;
     facts
 }
 

@@ -76,7 +76,7 @@ codes! {
     /// A chain link is wrong.
     CHAIN_BROKEN = "chain_broken", Error, "commit_seq, parent_hash or epoch of a link is wrong, or genesis does not name the volume";
     /// A commit below the floor is damaged.
-    COMMIT_BELOW_FLOOR = "commit_below_floor", Warning, "a commit file below chain_floor does not authenticate (legal only while condemned)";
+    COMMIT_BELOW_FLOOR = "commit_below_floor", Warning, "a commit file below chain_floor does not authenticate (legal only while condemned; inside GC's retained set GC stops until the next commit moves the window)";
     /// `chain_floor` disagrees with `retain_last`.
     CHAIN_FLOOR = "chain_floor", Warning, "chain_floor is not the older of the retain_last retained commits";
     /// `chain_floor` is above the tip.
@@ -183,6 +183,10 @@ codes! {
     GC_LIVENESS = "gc_liveness", Error, "per-segment live bytes recounted by fsck differ from lunix-gc's mark";
     /// What a GC pass would do now.
     GC_DRY_RUN = "gc_dry_run", Note, "what a GC pass would condemn, delete and compact now (finish it with --repair --gc)";
+    /// GC's figures could not be computed.
+    GC_UNCHECKED = "gc_unchecked", Warning, "GC's mark, the liveness recount or the dry run failed: the GC checks did not run (--repair --gc refuses)";
+    /// The offline GC pass ran.
+    GC_REPAIRED = "gc_repaired", Note, "--repair --gc finished GC's work offline (passes and bytes freed)";
 }
 
 /// The documented entry for `code`.
