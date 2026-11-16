@@ -1,0 +1,21 @@
+; M16 Part A: sequential write ingest (>= 3 GB/s with `auto` compression on 8 workers): 1M writes, QD 32, 8 jobs, 50 %
+; compressible data. Each job writes its own slice, wrapping around (time_based). Environment as w4k.fio, QD=32.
+[seqw]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=write
+bs=1m
+iodepth=${QD}
+numjobs=${JOBS}
+size=${SLICE}
+offset_increment=${SLICE}
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+ramp_time=${RAMP}
+randseed=${SEED}
+refill_buffers=1
+buffer_compress_percentage=50
+group_reporting=1
+percentile_list=50:90:99:99.9:99.99

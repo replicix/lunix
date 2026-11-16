@@ -1,0 +1,20 @@
+; M16 Part B workload 1a (ADR-5): random write mix on a large file on ext4, QD 32, 30 minutes, 30 % duplicate buffers
+; and 50 % compressible data. Environment: DIR (mount point), SIZE (file size, 20 GiB), RUNTIME (1800), CPUS, SEED.
+[randmix]
+directory=${DIR}
+filename=big.dat
+ioengine=io_uring
+direct=1
+rw=randwrite
+bssplit=4k/40:8k/30:16k/20:64k/10
+iodepth=32
+numjobs=1
+size=${SIZE}
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+refill_buffers=1
+dedupe_percentage=30
+buffer_compress_percentage=50
+randseed=${SEED}
+percentile_list=50:90:99:99.9:99.99

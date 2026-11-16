@@ -1,0 +1,29 @@
+; M16 Part B workload 1b: a sequential write of the file, then a random overwrite pass over it (the churn of a file that
+; is first filled and then updated in place). Environment: DIR, SIZE (16 GiB), RUNTIME (900, the overwrite pass), CPUS, SEED.
+[global]
+directory=${DIR}
+filename=seq.dat
+ioengine=io_uring
+direct=1
+size=${SIZE}
+cpus_allowed=${CPUS}
+refill_buffers=1
+dedupe_percentage=30
+buffer_compress_percentage=50
+randseed=${SEED}
+percentile_list=50:90:99:99.9:99.99
+
+[fill]
+rw=write
+bs=1m
+iodepth=32
+numjobs=1
+
+[overwrite]
+stonewall
+rw=randwrite
+bssplit=4k/40:8k/30:16k/20:64k/10
+iodepth=32
+numjobs=1
+time_based
+runtime=${RUNTIME}
