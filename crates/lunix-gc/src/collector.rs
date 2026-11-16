@@ -199,7 +199,12 @@ struct Facts {
 }
 
 impl Facts {
-    fn read(view: &GcView<'_>, floor_src: &dyn FloorSource, named_high: u64) -> Result<Self> {
+    fn read(
+        view: &GcView<'_>,
+        floor_src: &dyn FloorSource,
+        named_high: u64,
+        by_retained: (BTreeSet<u64>, BTreeSet<CommitSeq>),
+    ) -> Result<Self> {
         let floor = match floor_src.current_floor() {
             Ok(f) => Some(f),
             Err(e) => {
@@ -208,14 +213,16 @@ impl Facts {
             }
         };
         let keep_floor = crate::mark::keep_floor(view);
-        let (named, mut retained) = named_by_retained(view)?;
+        let (named, mut retained) = by_retained;
         retained.extend(view.retained.iter().map(|c| c.common().commit_seq));
         Ok(Self {
             named,
             manifest: view.index.runs()?.iter().map(|r| r.id).collect(),
             retained,
             hwm: view.tip.high_water_mark,
-            named_high: named_high.max(view.tip.high_water_mark),
+            // Only FULLs below the tip count (`observe_named`): a copy the
+            // tip alone names goes with the tip at `--truncate-tip` (B-1).
+            named_high,
             keep_floor,
             tip: view.tip.commit_seq,
             floor,
@@ -362,13 +369,19 @@ pub struct Gc {
     grace: GraceStarts,
     outputs: BTreeSet<SegId>,
     /// The highest id named by a FULL read by `observe_named` that has a
-    /// successor FULL (or the tip's mark). Every segment at or below it was
-    /// named by a durable FULL, except compaction outputs still in `outputs`
-    /// and segments no index entry points into (orphans): ids are allocated
-    /// in order and a cut names everything it wrote.
+    /// successor FULL; the tip's own names never count. Every segment at or
+    /// below it was named by a durable FULL below the tip, except compaction
+    /// outputs still in `outputs` and segments no index entry points into
+    /// (orphans): ids are allocated in order and a cut names everything it
+    /// wrote. A copy only the tip names is not durable for this rule: after
+    /// `fsck --repair --truncate-tip` it is above the new chain's mark and the
+    /// mount sweep deletes it.
     named_high: u64,
     /// The newest commit `observe_named` has read.
     scanned: Option<CommitSeq>,
+    /// [`named_by_retained`] for one tip: the FULLs below the tip's
+    /// `chain_floor` are read from the store once per tip, not every step.
+    retained_cache: Option<(CommitSeq, BTreeSet<u64>, BTreeSet<CommitSeq>)>,
     /// Facts of the current step (`None` between steps).
     facts: Option<Facts>,
     /// Objects whose delete call failed: the file may be gone without its
@@ -421,6 +434,7 @@ impl Gc {
             outputs: BTreeSet::new(),
             named_high: 0,
             scanned: None,
+            retained_cache: None,
             facts: None,
             uncertain: BTreeMap::new(),
             bad_sources: BTreeSet::new(),
@@ -547,9 +561,25 @@ impl Gc {
     }
 
     /// The facts of this step.
+    /// The objects and commit seqs of GC's retained set, cached per tip.
+    fn retained_names(
+        &mut self,
+        view: &GcView<'_>,
+    ) -> Result<(BTreeSet<u64>, BTreeSet<CommitSeq>)> {
+        if let Some((tip, named, seqs)) = &self.retained_cache {
+            if *tip == view.tip.commit_seq {
+                return Ok((named.clone(), seqs.clone()));
+            }
+        }
+        let (named, seqs) = named_by_retained(view)?;
+        self.retained_cache = Some((view.tip.commit_seq, named.clone(), seqs.clone()));
+        Ok((named, seqs))
+    }
+
     fn facts(&mut self, view: &GcView<'_>) -> Result<&Facts> {
         if self.facts.is_none() {
-            self.facts = Some(Facts::read(view, &*self.floor, self.named_high)?);
+            let by = self.retained_names(view)?;
+            self.facts = Some(Facts::read(view, &*self.floor, self.named_high, by)?);
         }
         self.facts
             .as_ref()
@@ -620,14 +650,17 @@ impl Gc {
 
     /// Reads the FULLs committed since the last call that have a successor
     /// (the tip is read once the next FULL exists): every id they name
-    /// raises `named_high`. Requiring a successor is conservative while the
-    /// engine may not persist a FULL's index entries at its own C8 (N13). A
+    /// raises `named_high`. Requiring a successor keeps a copy that only the
+    /// tip names from counting as durable: `--truncate-tip` may drop the tip,
+    /// and the mount sweep then deletes everything above the new chain's mark
+    /// (M17.B review B-1); it also covers an engine that has not persisted a
+    /// FULL's index entries at its own C8 (N13). A
     /// compaction output a retained or read FULL names is no longer pending.
     /// Commit objects are durable when they exist, and GC deletes none it
     /// has not seen here first (a commit is condemned only in a pass, after
     /// this ran), so no FULL is missed.
     fn observe_named(&mut self, view: &GcView<'_>) -> Result<()> {
-        let (named, _) = named_by_retained(view)?;
+        let (named, _) = self.retained_names(view)?;
         self.outputs.retain(|o| !named.contains(&o.raw()));
         let Some(last) = view.tip.commit_seq.0.checked_sub(1).map(CommitSeq) else {
             return Ok(());
@@ -1453,7 +1486,8 @@ impl Collector for Gc {
         self.precheck(view)?;
         self.load(view)?;
         let l = crate::mark::liveness(view, self.cfg)?;
-        let facts = Facts::read(view, &*self.floor, self.named_high)?;
+        let by = self.retained_names(view)?;
+        let facts = Facts::read(view, &*self.floor, self.named_high, by)?;
         let judge = Judge {
             f: &facts,
             l: &l,

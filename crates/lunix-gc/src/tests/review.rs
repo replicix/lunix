@@ -562,3 +562,88 @@ fn a_fault_at_every_point_is_survived() {
         }
     }
 }
+
+/// B-1 of the M17.B review: a compaction source must outlive the FULL that
+/// first names its output. Only the tip names the output; `--truncate-tip`
+/// drops the tip and the mount sweep deletes the output (above the new
+/// chain's mark), so the source is the only copy the older roots have.
+#[test]
+fn a_compaction_source_outlives_the_tip_that_alone_names_its_output() {
+    let mut s = sim();
+    for ci in 0..4 {
+        s.write(ci, 300 + ci);
+    }
+    s.commit().unwrap();
+    let src = s
+        .map
+        .get(ChunkNo(0))
+        .unwrap()
+        .map(|e| lunix_iface::map::entry_hint(&e).seg)
+        .unwrap();
+    for ci in 1..4 {
+        s.write(ci, 400 + ci);
+    }
+    s.commit().unwrap();
+    // Age the FULL that holds all four chunks out of GC's retained set.
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    assert!(!s.moved.is_empty(), "the source was compacted");
+    assert!(s.moved.iter().all(|m| m.old.seg == src));
+    let out = s.moved[0].new.seg;
+    // The tip names the output and re-hints the map; no later commit.
+    s.commit().unwrap();
+    for _ in 0..4 {
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    assert!(
+        segs(&s).contains(&src),
+        "the source stays while only the tip names {out:?}"
+    );
+    // `--truncate-tip`, then the mount.
+    let tip = s.tip.common.commit_seq;
+    s.store.set_aside(tip).unwrap();
+    s.raise_floor = false;
+    s.crash_reopen(11).unwrap();
+    assert!(
+        !segs(&s).contains(&out),
+        "the sweep deleted the unnamed output"
+    );
+    s.check_roots_with(&*s.index).unwrap();
+    // One more FULL names the output below the tip: the source goes.
+    let mut s2 = sim();
+    for ci in 0..4 {
+        s2.write(ci, 300 + ci);
+    }
+    s2.commit().unwrap();
+    let src2 = s2
+        .map
+        .get(ChunkNo(0))
+        .unwrap()
+        .map(|e| lunix_iface::map::entry_hint(&e).seg)
+        .unwrap();
+    for ci in 1..4 {
+        s2.write(ci, 400 + ci);
+    }
+    s2.commit().unwrap();
+    for _ in 0..4 {
+        s2.commit().unwrap();
+    }
+    s2.clock.advance(GRACE * 2);
+    s2.pass().unwrap();
+    assert!(!s2.moved.is_empty());
+    for _ in 0..5 {
+        s2.commit().unwrap();
+        s2.clock.advance(GRACE * 2);
+        s2.pass().unwrap();
+    }
+    s2.quiesce().unwrap();
+    assert!(
+        !segs(&s2).contains(&src2),
+        "the source goes once a FULL below the tip names the output"
+    );
+    s2.check_roots().unwrap();
+}

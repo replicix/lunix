@@ -107,13 +107,21 @@ their map roots are not roots, so their data may go.
    FULL has named (the delete-time index invariant): at or below the highest
    id named by a FULL that has a successor FULL (the collector reads each new
    commit once) and not an unnamed compaction output; otherwise it stays
-   condemned for a later pass. This rule is exact only while the engine
+   condemned for a later pass. **The tip's own names never count**: a copy
+   only the tip names would go with the tip at `fsck --repair --truncate-tip`
+   (the mount sweep deletes what the new chain does not name above its mark),
+   so a compaction source is deleted one commit after the FULL that names its
+   output, and on an idle volume only after the next cut (M17.B review B-1). This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
    them down to the lowest `chain_floor` of a retained FULL, together with
    everything those FULLs reach, so that `fsck --repair --truncate-tip`
-   leaves a complete volume (N24).
+   leaves a complete volume (N24). The truncation itself deletes the commit
+   files below the new tip's `chain_floor` that would join the set only under
+   the new tip (they were outside it under the old one and may be half
+   collected), and refuses when a root of the new chain resolves into an
+   object only the dropped tip names.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
