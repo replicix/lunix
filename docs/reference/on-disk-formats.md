@@ -1529,6 +1529,28 @@ floor in a Kubernetes resource (phase 5) lives outside this format, and a
 write-only notary bucket (a later upgrade) would add a new object kind and
 path, which the reserved kind ids 14 and up allow without a migration.
 
+### 20.1 `state/floor-resets.log`: the audit of floor lowerings
+
+Every `VolumeDir::reset_rollback_floor` (only `lunix-fsck`: `--repair
+--truncate-tip`, `--reset-floor`, `--repair-pins`) appends one line to the
+local file `state/floor-resets.log` and makes it durable (`fdatasync`, then a
+directory `fsync` of `state/` on every append) **before** `state/pins`
+changes, so a failed pins write leaves a line for a reset that did not
+happen, never the reverse. Local only, never uploaded, append-only, no
+checksum (a human-readable audit trail, not an input of any check). One line
+per reset, ASCII, `\n`-terminated, fields separated by one space:
+
+```
+<ms> <reason> old=<floor> new=<seq>:<hash>
+```
+
+| field | encoding |
+|---|---|
+| `ms` | decimal milliseconds since the Unix epoch (wall clock of the repair) |
+| `reason` | `truncate_tip`, `operator_reset` or `repair_pins` |
+| `old=` | the floor recorded before: `<max_commit_seq>:<tip_hash>` (decimal seq, 64 lowercase hex digits), or `none` (no floor, or a rejected `state/pins` for `repair_pins`) |
+| `new=` | the floor written, in the same form |
+
 ## 21. `volume.json` and `volumes.json` (freeze item 14)
 
 These are JSON, not byte layouts. Both carry `"version": 1`; unknown keys
@@ -1599,7 +1621,7 @@ of `[A-Za-z0-9._-]`, not starting with `.`; `<host>` is 1 ..= 64 of
 | `dicts/<id:08x>` | `dicts/<id:08x>` | 11 | |
 | `sync/<backend-id>/progress` | — | — | advisory |
 | `families/<family-id>/keyring` (relative to `<prefix>/lunix/v1/`) | `<dir>/families/<family-id>/keyring` | 13 (MAC only) | |
-| — | `volume.json`, `LOCK`, `journal/q<lane:02x>-<ordinal:08x>.j`, `cache/`, `state/checkpoint`, `state/device`, `state/pins`, `state/gc/condemned` | — | local only |
+| — | `volume.json`, `LOCK`, `journal/q<lane:02x>-<ordinal:08x>.j`, `cache/`, `state/checkpoint`, `state/device`, `state/pins`, `state/floor-resets.log` ([§20.1](#201-statefloor-resetslog-the-audit-of-floor-lowerings)), `state/gc/condemned` | — | local only |
 | — | `integrity.key` (that is `<dir>/<volume-uuid>/integrity.key`) | — | local only, never uploaded: the 32 raw bytes of the auto-created key-file slot (slot kind 2) of an `integrity` volume made by `volume create` without a passphrase; file mode 0600 |
 
 Temporary files end in `.tmp` and are deleted at open. The paths module maps

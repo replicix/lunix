@@ -31,6 +31,9 @@ pub(crate) struct Session {
     pub(crate) volume_hash: [u8; 32],
     /// Where scratch directories go: next to the volume, or `Options::scratch_dir`.
     pub(crate) scratch_base: PathBuf,
+    /// The `keyring_seq` of the keyring that unlocked the volume (0 for a
+    /// plain volume); `--repair-pins` keeps it (P-4).
+    pub(crate) keyring_seq: u64,
 }
 
 impl Session {
@@ -169,6 +172,7 @@ pub(crate) fn open(
     let seen = pins.as_ref().map_or(0, |p| p.pins.max_keyring_seq);
     let mut last_err: Option<AttachError> = None;
     let mut crypto = None;
+    let mut keyring_seq = 0;
     let attempts = if cands.is_empty() { 1 } else { cands.len() };
     for i in 0..attempts {
         let key_holder;
@@ -198,6 +202,7 @@ pub(crate) fn open(
         };
         match check_attach(&desc, keyring.as_deref(), &req) {
             Ok(ok) => {
+                keyring_seq = ok.keyring_seq.unwrap_or(0);
                 crypto = Some(ok.crypto);
                 break;
             }
@@ -238,8 +243,15 @@ pub(crate) fn open(
     let meta: Arc<dyn MetaCodec> = crypto.meta().clone();
     let store_opts = StoreOptions {
         allow_tmpfs: true,
-        // The one place that may lower the rollback floor (offline repair).
-        allow_floor_reset: true,
+        // The one place that may lower the rollback floor (offline repair),
+        // and only for the repairs that do (M14 re-review): a plain check
+        // opens the store without it.
+        allow_floor_reset: opts.repair
+            && (opts.truncate_tip || opts.reset_floor || opts.repair_pins),
+        // fsck's own walk keeps at most 32 pack descriptors; the store's
+        // cache of open containers (GC's mark and the map read through it)
+        // stays as small, so a check runs under a low `ulimit -n`.
+        max_open_files: 16,
         ..StoreOptions::default()
     };
     let vol = match LocalVolume::open(dir, meta, store_opts) {
@@ -264,6 +276,7 @@ pub(crate) fn open(
         desc,
         crypto,
         volume_hash,
+        keyring_seq,
         scratch_base: opts
             .scratch_dir
             .clone()

@@ -1031,7 +1031,7 @@ fn a_floor_reset_is_refused_without_the_option() {
     for why in [
         lunix_iface::store::FloorReset::TruncateTip,
         lunix_iface::store::FloorReset::OperatorReset,
-        lunix_iface::store::FloorReset::RepairPins,
+        lunix_iface::store::FloorReset::RepairPins { max_keyring_seq: 0 },
     ] {
         let e = vol
             .reset_rollback_floor(&at(1, commit_hash(b"x")), why)
@@ -1107,7 +1107,7 @@ fn a_rejected_pins_file_is_replaced_only_by_the_repair_reason() {
     vol.raise_rollback_floor(&at(3, h[3])).expect("raise");
     // A readable file is not repaired.
     let e = vol
-        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins)
+        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins { max_keyring_seq: 0 })
         .expect_err("not rejected");
     assert_eq!(e.kind(), ErrorKind::Refused);
     let path = dir.path().join("state/pins");
@@ -1123,14 +1123,15 @@ fn a_rejected_pins_file_is_replaced_only_by_the_repair_reason() {
     }
     assert_eq!(std::fs::read(&path).expect("read"), bytes, "untouched");
     let old = vol
-        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins)
+        .reset_rollback_floor(&at(3, h[3]), FloorReset::RepairPins { max_keyring_seq: 7 })
         .expect("repair");
     assert_eq!(old, None);
     let f = read_pins(dir.path());
     assert_eq!(f.floor, Some(at(3, h[3])));
     assert_eq!(
         (f.pins.max_keyring_seq, f.pins.max_epoch, f.pins.pin),
-        (0, 0, None)
+        (7, 0, None),
+        "the keyring seq the caller unlocked is kept (P-4)"
     );
     let log = std::fs::read_to_string(dir.path().join("state/floor-resets.log")).expect("audit");
     assert!(log.contains("repair_pins"), "{log}");

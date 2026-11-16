@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use lunix_format::commit::Commit;
 use lunix_format::{ChunkId, ObjId};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::store::{SegmentFooters, VolumeDir};
@@ -182,21 +183,76 @@ pub(crate) fn rebuilt(s: &Session, facts: &Facts) -> Option<IndexView> {
     })
 }
 
-/// Compares the index with the footers of the segments in use.
-pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
-    let in_use = |seg: &ObjId| {
-        facts.named_segments.contains(seg)
-            || facts.referenced_segments.contains(seg)
-            || facts.condemned_ids.contains(seg)
-    };
-    let mut footer_ids: HashSet<ChunkId> = HashSet::new();
-    for (id, c) in &facts.segments {
-        if c.good && in_use(id) {
-            footer_ids.extend(c.exts.iter().map(|e| e.id));
+/// Sorted, deduplicated ids with one "seen" bit each: the id sets of the
+/// comparison (32 bytes and a bit per id instead of a hash set entry).
+struct IdSet {
+    ids: Vec<ChunkId>,
+    seen: Vec<u64>,
+}
+
+impl IdSet {
+    fn new(mut ids: Vec<ChunkId>) -> Self {
+        ids.sort_unstable();
+        ids.dedup();
+        ids.shrink_to_fit();
+        let words = ids.len().div_ceil(64);
+        Self {
+            ids,
+            seen: vec![0; words],
         }
     }
-    let mut all_footer_ids: Option<HashSet<ChunkId>> = None;
-    let mut seen: HashSet<ChunkId> = HashSet::new();
+
+    fn contains(&self, id: &ChunkId) -> bool {
+        self.ids.binary_search(id).is_ok()
+    }
+
+    fn mark(&mut self, id: &ChunkId) {
+        if let Ok(i) = self.ids.binary_search(id) {
+            self.seen[i / 64] |= 1 << (i % 64);
+        }
+    }
+
+    fn is_seen(&self, i: usize) -> bool {
+        self.seen[i / 64] & (1 << (i % 64)) != 0
+    }
+}
+
+/// Compares the index with the footers of the segments in use: the ones GC's
+/// retained set names (the retained chain and the FULLs below it that GC
+/// keeps, N24) or the retained roots reference (M14 re-review R-3).
+pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
+    let mut chain_named: HashSet<ObjId> = HashSet::new();
+    let mut kept_named: HashSet<ObjId> = HashSet::new();
+    for r in &facts.retained {
+        if let Commit::Full(f) = &r.commit {
+            chain_named.extend(f.new_segments.iter().copied());
+        }
+    }
+    for r in &facts.gc_extra {
+        if let Commit::Full(f) = &r.commit {
+            kept_named.extend(f.new_segments.iter().copied());
+        }
+    }
+    let in_use = |seg: &ObjId| {
+        chain_named.contains(seg)
+            || kept_named.contains(seg)
+            || facts.referenced_segments.contains(seg)
+    };
+    // Ids of segments mount's catch-up covers (named by the retained chain)
+    // and of the other segments in use (only a rebuild restores those, R-1).
+    let ids_of = |pick: &dyn Fn(&ObjId) -> bool| {
+        IdSet::new(
+            facts
+                .segments
+                .iter()
+                .filter(|(id, c)| c.good && pick(id))
+                .flat_map(|(_, c)| c.exts.iter().map(|e| e.id))
+                .collect(),
+        )
+    };
+    let mut caught = ids_of(&|id| chain_named.contains(id));
+    let mut lost = ids_of(&|id| in_use(id) && !chain_named.contains(id));
+    let mut all_footer_ids: Option<IdSet> = None;
     let (mut stale, mut extra) = (0u64, 0u64);
     let mut first_stale: Option<String> = None;
     let r = view.idx.iter_entries(&mut |e| {
@@ -205,26 +261,18 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
                 && c.find(e.hint.off)
                     .is_some_and(|x| x.id == e.id && x.clen == e.hint.clen)
         });
-        if at_hint {
-            seen.insert(e.id);
-            return;
-        }
-        // Not at its hint: stale if the chunk is stored somewhere, else extra.
-        let all = all_footer_ids.get_or_insert_with(|| {
-            facts
-                .segments
-                .values()
-                .filter(|c| c.good)
-                .flat_map(|c| c.exts.iter().map(|x| x.id))
-                .collect()
-        });
-        if all.contains(&e.id) {
+        if !at_hint {
+            // Not at its hint: stale if the chunk is stored somewhere, else extra.
+            let all = all_footer_ids.get_or_insert_with(|| ids_of(&|_| true));
+            if !all.contains(&e.id) {
+                extra += 1;
+                return;
+            }
             stale += 1;
             first_stale.get_or_insert_with(|| format!("{}", e.id));
-            seen.insert(e.id);
-        } else {
-            extra += 1;
         }
+        caught.mark(&e.id);
+        lost.mark(&e.id);
     });
     if let Err(e) = r {
         sink.push(Finding::new(
@@ -234,12 +282,27 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
         ));
         return;
     }
-    let missing = footer_ids.iter().filter(|id| !seen.contains(id)).count() as u64;
+    let unseen = |set: &IdSet| (0..set.ids.len()).filter(|&i| !set.is_seen(i)).count() as u64;
+    let missing = unseen(&caught);
     if missing > 0 {
         sink.push(Finding::new(
             code::INDEX_MISSING,
             "index/",
-            format!("{missing} chunks in sealed segments have no index entry"),
+            format!(
+                "{missing} chunks in segments the retained chain names have no index entry (mount's catch-up restores them)"
+            ),
+        ));
+    }
+    let gone = (0..lost.ids.len())
+        .filter(|&i| !lost.is_seen(i) && !caught.contains(&lost.ids[i]))
+        .count() as u64;
+    if gone > 0 {
+        sink.push(Finding::new(
+            code::INDEX_LOST,
+            "index/",
+            format!(
+                "{gone} chunks in segments in use that the retained chain does not name have no index entry: mount's catch-up does not restore them, only --rebuild-index does"
+            ),
         ));
     }
     if stale > 0 {
@@ -261,39 +324,25 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
     }
 }
 
-/// `--rebuild-index`: rewrites the index from the footers of every segment in
-/// use and persists it. Returns the number of entries in the new index.
+/// `--rebuild-index`: rewrites the index from the footers of every segment a
+/// durable commit covers, atomically and durably (`ChunkIndex::rebuild`).
+/// Returns the number of entries in the new index.
 pub(crate) fn rebuild(s: &Session, facts: &Facts) -> lunix_iface::Result<u64> {
     let idx = LsmIndex::open(&s.dir, s.vol.ids(), s.desc.id_len)?;
     // Every good sealed segment at or below the high-water mark (DESIGN 4.4
-    // step 4, M17 rule 7) and the ones the retained roots reach: a stale hint
-    // is resolved only through the index, so a segment left out here would
-    // leave its entries unresolved and look like an orphan.
+    // step 4, M17 rule 7): a stale hint is resolved only through the index,
+    // so a segment left out here would leave its entries unresolved and look
+    // like an orphan. Every segment a retained commit names or a retained
+    // root reaches is at or below it; one above it is not durable and its
+    // entries would never have survived the run (the engine's persist rule).
     let segs: Vec<ObjId> = facts
         .segments
         .iter()
-        .filter(|(id, c)| {
-            c.good
-                && (id.raw() <= facts.high_water
-                    || facts.named_segments.contains(id)
-                    || facts.referenced_segments.contains(id)
-                    || facts.condemned_ids.contains(id))
-        })
+        .filter(|(id, c)| c.good && id.raw() <= facts.high_water)
         .map(|(id, _)| *id)
         .collect();
     let footers: &dyn SegmentFooters = &s.vol;
     idx.rebuild(&segs, footers)?;
-    // Persist what the durable commits cover: every segment up to the highest
-    // one the retained chain names (the engine's own rule, DESIGN 4.4).
-    let upto = facts
-        .segments
-        .keys()
-        .filter(|id| id.raw() <= facts.high_water)
-        .copied()
-        .max();
-    if let Some(upto) = upto {
-        idx.persist(upto)?;
-    }
     let mut n = 0u64;
     idx.iter_entries(&mut |_| n += 1)?;
     Ok(n)

@@ -21,9 +21,17 @@ have changed: a new tip, condemned objects waiting, or different pins.
 
 **Roots** are pinned when a mark starts:
 
-- the retained FULL commits (`retain_last`, default 2: the tip and its
-  predecessor, so an offline `fsck --repair --truncate-tip` can drop a
-  damaged tip; the engine sets `chain_floor` to the older one);
+- GC's **retained set**: every FULL from the lowest `chain_floor` any
+  retained FULL records up to the tip (N24, lead decision of 2026-11-14).
+  With `retain_last` = 2 the engine retains the tip and its predecessor and
+  sets `chain_floor` to the older one; the predecessor's own `chain_floor` is
+  one commit lower, so GC keeps three FULLs. An offline `fsck --repair
+  --truncate-tip` then leaves a complete volume: both roots of the
+  predecessor are readable and every object they name exists. GC reads the
+  FULLs below the tip's `chain_floor` from the commit store (the view
+  carries only the engine's window); a missing one ends that walk (after a
+  truncation the floor commit's own floor may be gone), one that exists but
+  does not open stops the mark;
 - the commits that snapshot, reader and hold pins name. In phase 1 these
   directories are empty, but they are read on every pass, and a pin that
   cannot be read stops the pass.
@@ -35,7 +43,7 @@ An object is **live** when a root reaches it:
 | segment | it holds the live copy of a chunk some root references (below) |
 | map pack | it stores a node of some root (a full node walk of every root) |
 | index run | the index manifest names it |
-| commit | `commit_seq >=` the lowest `chain_floor` any retained FULL records, or a pin names it, or it is in the rollback-floor window (below) |
+| commit | `commit_seq >=` the lowest `chain_floor` any retained FULL records (GC's retained set), or a pin names it, or it is in the rollback-floor window (below) |
 
 **The live copy of a chunk.** A leaf entry resolves through its hint when the
 hint's segment exists and its authenticated footer holds, at exactly that
@@ -56,7 +64,7 @@ Besides liveness, these are never condemned:
 - an object whose id is above the tip's **high-water mark** (the highest id
   any retained commit names): an open segment, sealed but uncommitted
   output or an orphan the open-time sweep will remove;
-- an object a **currently** retained commit names (`new_segments`,
+- an object a FULL of GC's **current** retained set names (`new_segments`,
   `map_packs`, `index_packs`, the root's pack);
 - a compaction output whose moves the engine has not yet named in a FULL.
   The collector keeps that set itself and clears an output when a FULL
@@ -99,12 +107,21 @@ their map roots are not roots, so their data may go.
    FULL has named (the delete-time index invariant): at or below the highest
    id named by a FULL that has a successor FULL (the collector reads each new
    commit once) and not an unnamed compaction output; otherwise it stays
-   condemned for a later pass. This rule is exact only while the engine
+   condemned for a later pass. **The tip's own names never count**: a copy
+   only the tip names would go with the tip at `fsck --repair --truncate-tip`
+   (the mount sweep deletes what the new chain does not name above its mark),
+   so a compaction source is deleted one commit after the FULL that names its
+   output, and on an idle volume only after the next cut (M17.B review B-1). This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
-   them down to the lowest `chain_floor` of a retained FULL, so that `fsck
-   --repair --truncate-tip` can mount the predecessor (N12).
+   them down to the lowest `chain_floor` of a retained FULL, together with
+   everything those FULLs reach, so that `fsck --repair --truncate-tip`
+   leaves a complete volume (N24). The truncation itself deletes the commit
+   files below the new tip's `chain_floor` that would join the set only under
+   the new tip (they were outside it under the old one and may be half
+   collected), and refuses when a root of the new chain resolves into an
+   object only the dropped tip names.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
@@ -261,6 +278,18 @@ skip-set lookup per leaf of the root); the sort of about 262 144 live extents;
 the condemn list (one write); one index flag; one recheck-and-delete decision;
 one compaction copy or seal; the evidence write. The step-wide facts (retained
 names, the index manifest, the rollback floor) are read once per step.
+
+**The cost of the leaf walk grows with the square of the root (N25).** A
+leaf unit resolves only its 32 new leaves, but it reaches them through
+`walk_leaves_skipping`, which traverses the whole root and does one skip-set
+lookup per leaf of the root. A mark therefore costs about `leaves² / 32`
+lookups per root. At 16 KiB chunks and fanout 512 a 1 TiB volume has about
+125 000 leaves: about 4 000 units of about 125 000 lookups each, fine per
+unit at 1 TiB, over the step budget per unit near 8 TiB, and tens of seconds
+of CPU per mark well before that. The fix is a range walk in the map
+interface (walk leaves `from..from + n` of a root, or a resumable cursor), so
+a unit costs its own leaves only; it is a plan item (N25), and M17.B measures
+a 64 M-chunk mark against the budget.
 
 ## What the wiring must do
 
