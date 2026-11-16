@@ -294,17 +294,19 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         return;
     };
     let floor = tip.full.cut_seq.0;
-    // ADR-4: everything at or below the watermark was durable on every lane
-    // before a surviving record or mark witnessed it, so its loss is real;
-    // anything above it is crash residue that recovery wipes.
+    // ADR-4 (E1 sign-off 2026-11-16): everything at or below the watermark
+    // was durable on every lane before a surviving record or mark witnessed
+    // it, so a number missing there is real loss (`journal_loss`); a damaged
+    // range alone is not: without such a gap it held only numbers at or
+    // below the cut, or no record.
     let wm = sc.flushed;
     for d in &sc.damaged {
         let f = match d.next_seq {
             Some(n) if n > floor && n <= wm => Finding::new(
-                code::JOURNAL_DAMAGE,
+                code::JOURNAL_RESIDUE,
                 &d.file,
                 format!(
-                    "damage after record {} with valid records after it (first {n}), above the cut {floor} and at or below the flushed watermark {wm}: durable records are lost, recovery stops here",
+                    "damage after record {} followed by record {n}, above the cut {floor} and at or below the flushed watermark {wm}: nothing durable unless a number at or below the watermark is missing (journal_loss)",
                     d.prev_seq
                 ),
             ),

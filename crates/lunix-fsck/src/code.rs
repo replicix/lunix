@@ -155,10 +155,8 @@ codes! {
     // Journal.
     /// A ring file belongs to another volume.
     JOURNAL_UUID = "journal_uuid", Error, "a journal file belongs to another volume";
-    /// Damage above the floor whose next record is at or below the watermark.
-    JOURNAL_DAMAGE = "journal_damage", Error, "journal damage above the floor followed by a valid record at or below the flushed watermark (ADR-4): durable records are lost, recovery stops there and `on_journal_damage = refuse` refuses";
-    /// Damage above the floor and the watermark.
-    JOURNAL_RESIDUE = "journal_residue", Note, "journal damage above the floor and the flushed watermark with valid records after it: crash residue (a torn batch), recovery wipes from there";
+    /// Damage above the floor with valid records after it in its lane.
+    JOURNAL_RESIDUE = "journal_residue", Note, "journal damage above the floor with valid records after it in its lane: it holds no durable record unless a number at or below the flushed watermark is missing, which journal_loss reports (ADR-4, E1 sign-off 2026-11-16); recovery wipes from the first gap";
     /// Damage at or below the floor.
     JOURNAL_DAMAGE_BELOW_FLOOR = "journal_damage_below_floor", Warning, "journal damage at or below the floor (covered by the commit)";
     /// A torn tail.

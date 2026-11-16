@@ -108,7 +108,7 @@ fn a_record_of_the_wrong_kind_for_its_ring_is_damage() {
     rewrite(&b, &l0, &l1, &marks, 320);
     let r = b.fsck(&b.opts());
     assert_eq!(r.exit_code(), 2, "{}", r.render_text());
-    let f = r.with_code(code::JOURNAL_DAMAGE).next().expect("finding");
+    let f = r.with_code(code::JOURNAL_RESIDUE).next().expect("finding");
     assert!(f.object.ends_with("m00-00000001.j"), "{}", f.object);
     assert!(r.has(code::JOURNAL_LOSS), "{}", r.render_text());
     // A mark in a lane file, followed by a write of the lane.
@@ -121,9 +121,14 @@ fn a_record_of_the_wrong_kind_for_its_ring_is_damage() {
     rewrite(&b, &l0, &l1, &m, 320);
     let r = b.fsck(&b.opts());
     assert_eq!(r.exit_code(), 2, "{}", r.render_text());
-    let f = r.with_code(code::JOURNAL_DAMAGE).next().expect("finding");
+    let f = r.with_code(code::JOURNAL_RESIDUE).next().expect("finding");
     assert!(f.object.ends_with("q00-00000001.j"), "{}", f.object);
     assert!(f.message.contains("312"), "{}", f.message);
+    assert!(
+        r.has(code::JOURNAL_LOSS),
+        "310 is missing: {}",
+        r.render_text()
+    );
 }
 
 #[test]
@@ -158,7 +163,7 @@ fn a_flip_in_a_record_at_or_below_the_floor_is_a_warning() {
             "{}",
             r.render_text()
         );
-        assert!(!r.has(code::JOURNAL_DAMAGE));
+        assert!(!r.has(code::JOURNAL_RESIDUE));
     }
 }
 
@@ -175,7 +180,7 @@ fn the_same_flip_above_the_floor_and_at_or_below_the_watermark_is_an_error_with_
         b.flip(&lane_file(0), off + 80);
         let r = b.fsck(&b.opts());
         assert_eq!(r.exit_code(), 2, "{}", r.render_text());
-        let f = r.with_code(code::JOURNAL_DAMAGE).next().expect("finding");
+        let f = r.with_code(code::JOURNAL_RESIDUE).next().expect("finding");
         let (start, end) = f.range.expect("byte range");
         assert_eq!(start, off as u64, "the range starts at the record");
         assert!(end > start);
@@ -183,6 +188,27 @@ fn the_same_flip_above_the_floor_and_at_or_below_the_watermark_is_an_error_with_
         // Recovery stops at 310, below the watermark: durable loss.
         assert!(r.has(code::JOURNAL_LOSS), "{}", r.render_text());
     }
+}
+
+/// E1 (sign-off 2026-11-16): a torn record at or below the cut followed by a
+/// record of its lane above the cut and at or below the watermark, nothing
+/// missing: a note, the volume is clean.
+#[test]
+fn damage_below_the_watermark_with_no_number_missing_is_a_note() {
+    let b = build(&spec(CryptoMode::Integrity));
+    let (l0, l1, m) = lanes_and_marks(&[]);
+    rewrite(&b, &l0, &l1, &m, 320);
+    let (_, off) = journal_records(&b.dir, 0)
+        .into_iter()
+        .find(|(s, _)| *s == 300)
+        .expect("record 300");
+    b.flip(&lane_file(0), off + 80);
+    let r = b.fsck(&b.opts());
+    assert_eq!(r.exit_code(), 0, "{}", r.render_text());
+    let f = r.with_code(code::JOURNAL_RESIDUE).next().expect("finding");
+    assert!(f.message.contains("302"), "{}", f.message);
+    assert!(!r.has(code::JOURNAL_LOSS), "{}", r.render_text());
+    assert_eq!(r.stats.journal_records, 30);
 }
 
 #[test]
@@ -198,7 +224,7 @@ fn the_same_flip_above_the_watermark_is_crash_residue() {
     assert_eq!(r.exit_code(), 0, "{}", r.render_text());
     assert!(r.has(code::JOURNAL_RESIDUE), "{}", r.render_text());
     assert!(r.has(code::IGNORED_AFTER_GAP), "{}", r.render_text());
-    assert!(!r.has(code::JOURNAL_DAMAGE));
+    assert!(!r.has(code::JOURNAL_LOSS));
 }
 
 #[test]
