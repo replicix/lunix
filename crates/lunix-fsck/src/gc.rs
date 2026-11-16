@@ -13,9 +13,13 @@
 //!   hint and index fallback. Nothing here repeats them.
 //! * **Liveness.** `lunix-gc`'s mark ([`lunix_gc::liveness`]) runs over the
 //!   locked volume (the index is fsck's scratch copy) and fsck recounts the
-//!   live bytes of every segment itself, from the roots GC pins
-//!   ([`lunix_gc::mark::root_set`]), the footers fsck decoded and the same
-//!   index: a mismatch in any segment is the error `gc_liveness`.
+//!   live bytes of every segment: a mismatch in any segment is the error
+//!   `gc_liveness`. The recount is a second writing of the mark's resolution
+//!   rule over fsck's own footer parse and a full walk of every root (the
+//!   mark walks with a skip set, 32 leaves per unit); it shares with the mark
+//!   the root set (the mark's own), the index and the map walker, so a wrong
+//!   root set, a wrong index or a wrong `walk_leaves` is not caught here.
+//!   A mark, recount or dry run that fails is the warning `gc_unchecked`.
 //! * **The dry run.** `Collector::dry_run` of a fresh collector reports what
 //!   a pass would condemn, delete and compact now (`gc_dry_run`, a note).
 //! * **`--repair --gc`** finishes the work offline through the same
@@ -24,8 +28,11 @@
 //!   The grace runs on a manual clock that the repair advances: fsck holds
 //!   the volume lock, so no cut, destage or read is in flight that the grace
 //!   could protect. Compaction is off (its moves need a cut to name the
-//!   output). The repair is refused unless the chain verified, the tip walk
-//!   is complete, the index opens and every entry of every root resolves.
+//!   output). The repair is refused when the check pass before it found any
+//!   error (as `--delete-orphans` is: `rollback`, `fork` and every other
+//!   error), unless the chain verified, the tip walk is complete, the index
+//!   opens and every entry of every root resolves, and when fsck's recount
+//!   and the mark over the real index disagree. Its result is `gc_repaired`.
 //!
 //! `GcContext` gives read access to everything the other checks learned and
 //! to the locked volume.
@@ -144,7 +151,7 @@ struct Kept {
 impl Kept {
     fn new(ctx: &GcContext<'_>) -> Self {
         let mut named = HashSet::new();
-        for r in &ctx.facts.retained {
+        for r in ctx.facts.retained.iter().chain(&ctx.facts.gc_extra) {
             if let Commit::Full(f) = &r.commit {
                 named.extend(f.new_segments.iter().copied());
                 named.extend(f.map_packs.iter().copied());
@@ -181,7 +188,9 @@ fn listed_state(ctx: &GcContext<'_>, obj: ObjectRef, kept: &Kept, l: Option<&Liv
             live(kept.named.contains(&id))
         }
         ObjectRef::Commit(seq) if kept.commits.contains(&seq.0) => {
-            live(f.retained.iter().any(|r| r.seq == seq))
+            // GC keeps every commit from the lowest chain_floor of its
+            // retained set (and the rollback floor window) up.
+            live(seq >= f.gc_floor || f.retained.iter().any(|r| r.seq == seq))
         }
         _ => Listed::Gone,
     }
@@ -361,7 +370,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
         Ok(p) => p,
         Err(e) => {
             out.push(Finding::new(
-                code::GC_DRY_RUN,
+                code::GC_UNCHECKED,
                 "map/",
                 format!("no GC figures: the tip's map does not open: {e}"),
             ));
@@ -373,7 +382,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
         Ok(l) => l,
         Err(e) => {
             out.push(Finding::new(
-                code::GC_DRY_RUN,
+                code::GC_UNCHECKED,
                 "gc",
                 format!("no GC figures: the mark failed: {e}"),
             ));
@@ -383,7 +392,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
     match recount(&view, ctx.facts, &gc_live.roots) {
         Ok(mine) => compare(&mine, &gc_live, out),
         Err(e) => out.push(Finding::new(
-            code::GC_DRY_RUN,
+            code::GC_UNCHECKED,
             "gc",
             format!("no liveness recount: {e}"),
         )),
@@ -396,7 +405,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
             }
         }
         Err(e) => out.push(Finding::new(
-            code::GC_DRY_RUN,
+            code::GC_UNCHECKED,
             "gc",
             format!("no dry run: {e}"),
         )),
@@ -438,54 +447,74 @@ fn footer_id(facts: &Facts, h: &Hint) -> Option<ChunkId> {
 fn recount(view: &GcView<'_>, facts: &Facts, roots: &[Root]) -> Result<BTreeMap<ObjId, u64>> {
     let lean = view.params.id_len == IdLen::Zero;
     let mut live: BTreeMap<ObjId, Vec<(u32, u32)>> = BTreeMap::new();
-    let mut add = |h: Hint| live.entry(h.seg).or_default().push((h.off, h.clen));
-    let mut entries: Vec<DataEntry> = Vec::new();
+    // Resolved in the walk's callback (no per-root entry list); the first
+    // error stops the counting and is returned after the walk.
+    let mut failed: Option<Error> = None;
     for root in roots {
-        entries.clear();
-        view.map
-            .walk_leaves(&root.root, &mut |_, e| entries.push(*e))?;
-        for e in &entries {
-            let hint = entry_hint(e);
-            if lean {
-                if facts.segments.contains_key(&hint.seg) {
-                    add(hint);
-                }
-                continue;
+        view.map.walk_leaves(&root.root, &mut |_, e| {
+            if failed.is_some() {
+                return;
             }
-            match footer_id(facts, &hint).filter(|id| e.prefix.matches(id)) {
-                Some(id) => match view.index.get(&id)? {
-                    Some(c) if c.hint == hint => add(hint),
-                    Some(c) if footer_id(facts, &c.hint) == Some(id) => add(c.hint),
-                    _ => add(hint),
-                },
-                None => {
-                    let cands = match view.index.get_by_prefix(&e.prefix) {
-                        Ok(c) => c,
-                        Err(err) if err.kind() == ErrorKind::Unsupported => Vec::new(),
-                        Err(err) => return Err(err),
-                    };
-                    let mut found = false;
-                    for c in cands {
-                        if footer_id(facts, &c.hint) == Some(c.id) {
-                            found = true;
-                            add(c.hint);
-                        }
-                    }
-                    if !found && facts.segments.contains_key(&hint.seg) {
-                        add(hint);
-                    }
-                }
+            if let Err(err) = resolve_one(view, facts, lean, e, &mut live) {
+                failed = Some(err);
             }
+        })?;
+        if let Some(err) = failed.take() {
+            return Err(err);
+        }
+        // Keep the per-segment vectors small between roots.
+        for v in live.values_mut() {
+            v.sort_unstable();
+            v.dedup();
         }
     }
     Ok(live
         .into_iter()
-        .map(|(seg, mut v)| {
-            v.sort_unstable();
-            v.dedup();
-            (seg, v.iter().map(|&(_, clen)| u64::from(clen)).sum())
-        })
+        .map(|(seg, v)| (seg, v.iter().map(|&(_, clen)| u64::from(clen)).sum()))
         .collect())
+}
+
+/// One entry of [`recount`]: the extents it keeps live.
+fn resolve_one(
+    view: &GcView<'_>,
+    facts: &Facts,
+    lean: bool,
+    e: &DataEntry,
+    live: &mut BTreeMap<ObjId, Vec<(u32, u32)>>,
+) -> Result<()> {
+    let mut add = |h: Hint| live.entry(h.seg).or_default().push((h.off, h.clen));
+    let hint = entry_hint(e);
+    if lean {
+        if facts.segments.contains_key(&hint.seg) {
+            add(hint);
+        }
+        return Ok(());
+    }
+    match footer_id(facts, &hint).filter(|id| e.prefix.matches(id)) {
+        Some(id) => match view.index.get(&id)? {
+            Some(c) if c.hint == hint => add(hint),
+            Some(c) if footer_id(facts, &c.hint) == Some(id) => add(c.hint),
+            _ => add(hint),
+        },
+        None => {
+            let cands = match view.index.get_by_prefix(&e.prefix) {
+                Ok(c) => c,
+                Err(err) if err.kind() == ErrorKind::Unsupported => Vec::new(),
+                Err(err) => return Err(err),
+            };
+            let mut found = false;
+            for c in cands {
+                if footer_id(facts, &c.hint) == Some(c.id) {
+                    found = true;
+                    add(c.hint);
+                }
+            }
+            if !found && facts.segments.contains_key(&hint.seg) {
+                add(hint);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn compare(mine: &BTreeMap<ObjId, u64>, gc: &Liveness, out: &mut Vec<Finding>) {
@@ -515,6 +544,17 @@ fn refuse(out: &mut Vec<Finding>, why: impl Into<String>) {
 fn repair(ctx: &GcContext<'_>, out: &mut Vec<Finding>) {
     let s = ctx.session;
     let f = ctx.facts;
+    // Like --delete-orphans: nothing is deleted past an error (DESIGN 4.4
+    // step 3: nothing changes before R4 passes; M17.B review A-1).
+    if !f.error_codes.is_empty() {
+        return refuse(
+            out,
+            format!(
+                "the check found errors ({}): nothing is collected on such a volume",
+                f.error_codes.join(", ")
+            ),
+        );
+    }
     if f.tip.is_none() || !f.chain_ok {
         return refuse(out, "the retained chain does not verify");
     }
@@ -545,7 +585,7 @@ fn repair(ctx: &GcContext<'_>, out: &mut Vec<Finding>) {
         ..GcConfig::default()
     };
     let view = parts.view(s, &idx);
-    match lunix_gc::liveness(&view, cfg) {
+    let marked = match lunix_gc::liveness(&view, cfg) {
         Ok(l) if l.unresolved > 0 => {
             return refuse(
                 out,
@@ -555,13 +595,29 @@ fn repair(ctx: &GcContext<'_>, out: &mut Vec<Finding>) {
                 ),
             );
         }
-        Ok(_) => {}
+        Ok(l) => l,
         Err(e) => return refuse(out, format!("the mark failed: {e}")),
+    };
+    // The same comparison as the check, over the index the pass will use.
+    let mut differ = Vec::new();
+    match recount(&view, f, &marked.roots) {
+        Ok(mine) => compare(&mine, &marked, &mut differ),
+        Err(e) => return refuse(out, format!("the liveness recount failed: {e}")),
     }
+    if let Some(d) = differ.first() {
+        return refuse(
+            out,
+            format!(
+                "fsck's liveness recount and lunix-gc's mark differ ({}: {})",
+                d.object, d.message
+            ),
+        );
+    }
+    drop(marked);
     let mut gc = Gc::new(floor_source(s), cfg);
     match run_passes(&mut gc, &view, &parts.clock) {
         Ok(freed) => out.push(Finding::new(
-            code::GC_DRY_RUN,
+            code::GC_REPAIRED,
             "gc",
             format!(
                 "--repair --gc: {} offline passes freed {freed} bytes; the condemned list holds {} entries",
