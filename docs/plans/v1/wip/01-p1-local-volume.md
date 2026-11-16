@@ -116,8 +116,8 @@ independent review; no milestone has run.
 | M17.B GC on the real stack: fsck integration, oracle churn test | `crates/lunix-gc/tests/**`, `crates/lunix-fsck/src/gc.rs`, `crates/lunixd/tests/stack_gc*.rs`, `bench/phase1/gc/` | design-heavy | required (with M17.A) | not started |
 | M15 exit tests: fio verify, xfstests, crash loops, ratios | `tests/exit/`, `bench/phase1/exit/` | routine (triage by lead) | n/a | not started |
 | M16 performance gate and the ADR-5 chunk-size benchmark | `tests/perf/`, `bench/phase1/perf/`, `bench/phase1/chunksize/` | routine (analysis reviewed) | n/a | not started |
-| M18a replicix-core: codec id 3, dictionary blob, `replicix-zdict` | `/home/bra/cvs/replicix/replicix-core` (`crates/chunkfmt`, new `crates/zdict`) | design-heavy | required (independent, statistical for the evaluator) | not started |
-| M18b Lunix dictionary study harness and note | `bench/dict-study/lunix/`, `bench/dict-study/constellation-arm/`, `tests/dictstudy/`, `docs/explanation/research/2026-*-zstd-dictionaries-on-block-devices.md` | design-heavy (method, analysis) | required (independent statistical review) | not started |
+| M18a replicix-core: codec id 3, dictionary blob, `replicix-zdict` | `/home/bra/cvs/replicix/replicix-core` (`crates/chunkfmt`, new `crates/zdict`) | design-heavy | required (independent, statistical for the evaluator) | dropped (dictionary study NO-GO, ruling R-D2) |
+| M18b Lunix dictionary study harness and note | `bench/dict-study/lunix/`, `bench/dict-study/constellation-arm/`, `tests/dictstudy/`, `docs/explanation/research/2026-*-zstd-dictionaries-on-block-devices.md` | design-heavy (method, analysis) | required (independent statistical review) | dropped (dictionary study NO-GO, ruling R-D2) |
 
 ## Execution rules for this plan
 
