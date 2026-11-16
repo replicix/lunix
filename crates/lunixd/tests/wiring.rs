@@ -721,6 +721,61 @@ fn damage_followed_by_a_valid_record_is_refused() {
     );
 }
 
+/// The M12b review's E1 probe on the real journal: one crash tears a record
+/// at or below the cut (a commit does not sync the journal) while a later
+/// record of its lane survives. The first lane open after recovery raises the
+/// watermark past the kept record and marks it, so the torn range, still in
+/// the ring file, lies at or below the watermark with no number missing.
+/// Every later `refuse` open must succeed, the one after a clean close too
+/// (maintainer sign-off 2026-11-16).
+#[test]
+fn a_torn_record_below_the_cut_keeps_no_later_refuse_open_offline() {
+    let Some(t) = scratch("e1") else { return };
+    let mode = CryptoMode::Plain;
+    let v = create(t.path(), mode, 64 << 10);
+    let s = open(&v, mode);
+    let mut d = Driver::new(&s.engine, 2, 1 << 20);
+    let a = pattern(3001, 4096);
+    let b = pattern(3002, 4096);
+    assert!(d.write_on(0, 0, &a).is_ok());
+    assert!(d.write_on(0, 64 << 10, &b).is_ok());
+    s.engine.commit_now(false).expect("commit");
+    // The crash: no final commit, the record of `a` torn.
+    drop(d);
+    drop(s);
+    damage_record(&v.voldir, &a);
+    let refuse = || {
+        let mut p = params(&v, mode);
+        p.on_journal_damage = OnJournalDamage::Refuse;
+        open_volume(p)
+    };
+    let mut saw = false;
+    for round in 0..3u64 {
+        let s = refuse().unwrap_or_else(|e| panic!("round {round}: refuse refused: {e:?}"));
+        let rep = s.engine.recovery_report().clone();
+        assert!(rep.gap_at.is_none() && rep.duplicate.is_none(), "{rep:?}");
+        saw |= rep
+            .damaged
+            .iter()
+            .any(|r| r.next_seq.is_some_and(|n| n <= rep.flushed));
+        let mut d = Driver::new(&s.engine, 2, 1 << 20);
+        assert_eq!(d.read(0, 4096), a, "round {round}: committed data");
+        assert_eq!(d.read(64 << 10, 4096), b, "round {round}");
+        let c = pattern(3100 + round, 4096);
+        assert!(d.write_on(1, (2 + round) * (64 << 10), &c).is_ok());
+        assert!(d.flush().is_ok());
+        if round == 1 {
+            // Another crash.
+            drop(d);
+            drop(s);
+        } else {
+            // A clean close.
+            close(s, d);
+        }
+    }
+    assert!(saw, "the probe never produced the E1 shape");
+}
+
 /// M12a re-review R2: a fork's commits copied over a directory that still holds
 /// the honest commits. The walk back to the floor finds the honest commit at
 /// the floor's height, which the fork's next commit does not name: positive

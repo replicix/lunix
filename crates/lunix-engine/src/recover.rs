@@ -48,6 +48,11 @@ pub struct RecoveryReport {
     pub next_seq: WriteSeq,
     /// Valid records beyond the first gap, which the first lane open wipes.
     pub ignored_after_gap: Option<WriteSeqRange>,
+    /// The first missing `write_seq` (or the one found twice), set exactly
+    /// when `ignored_after_gap` is.
+    pub gap_at: Option<WriteSeq>,
+    /// A `write_seq` held by two valid records: never crash residue.
+    pub duplicate: Option<WriteSeq>,
     /// Damaged journal ranges the resync skipped.
     pub damaged: Vec<DamagedRange>,
     /// The journal's flushed watermark: every record at or below it was
@@ -167,8 +172,8 @@ fn check_floor_on_path(
 }
 
 /// Whether journal damage is the kind `on_journal_damage = refuse` keeps the
-/// volume offline for (maintainer decision of 2026-11-14, ADR-4): real loss,
-/// as the flushed watermark shows it.
+/// volume offline for (maintainer decision of 2026-11-14, ADR-4; rule change
+/// E1 signed off 2026-11-16): real loss, as the flushed watermark shows it.
 ///
 /// Every record carries the highest `write_seq` a completed group flush had
 /// made durable on every lane when it was appended; `Recovered::flushed` is
@@ -176,8 +181,16 @@ fn check_floor_on_path(
 /// below it was on stable storage before that later record was written, so:
 ///
 /// * a gap at or below the watermark (`gap_at <= flushed`) is a durable record
-///   that is gone, and a damaged range whose next valid record in its lane is
-///   at or below the watermark is damage inside durable history: refused;
+///   that is gone: refused. Wherever a FLUSH- or FUA-covered record was lost
+///   (a torn record, a zeroed block ending a file's scan, a destroyed file
+///   header, a damaged mark), the record carrying the watermark lies above it
+///   and the merge cannot pass the missing number, so the gap shows it;
+/// * a damaged range alone is not: without a gap at or below the watermark
+///   every number above the floor is held by a valid record elsewhere, so the
+///   range held only numbers at or below the floor (covered by the commit) or
+///   no record at all (M12b E1: a crash tearing a record at or below the cut,
+///   with a later record of its lane surviving, kept every later `refuse` open
+///   offline once the watermark passed it);
 /// * a `write_seq` found twice is never crash residue (an earlier wipe did not
 ///   happen): refused at any watermark;
 /// * everything above the watermark is treated as crash residue, whatever its
@@ -194,13 +207,7 @@ fn check_floor_on_path(
 /// unwitnessed, and medium damage to its records reads as residue and is
 /// wiped with every record after it. A crash alone cannot damage them.
 fn refuse_worthy(rec: &lunix_iface::journal::Recovered) -> bool {
-    let w = rec.flushed;
-    rec.duplicate.is_some()
-        || rec.gap_at.is_some_and(|g| g <= w)
-        || rec
-            .damaged
-            .iter()
-            .any(|d| d.next_seq.is_some_and(|n| n <= w))
+    rec.duplicate.is_some() || rec.gap_at.is_some_and(|g| g <= rec.flushed)
 }
 
 pub(crate) fn recover(
@@ -353,7 +360,7 @@ pub(crate) fn recover(
         if !refuse_worthy(&rec) {
             tracing::warn!(
                 flushed = rec.flushed.0,
-                "the damage and gaps are above the flushed watermark: treated as crash residue (no surviving record witnessed a flush covering them); wiped"
+                "no write_seq at or below the flushed watermark is missing: treated as crash residue (damaged ranges hold records at or below the cut or none; a gap lies above the watermark); wiped"
             );
         }
     }
@@ -412,6 +419,8 @@ pub(crate) fn recover(
         replayed: rec.records.len(),
         next_seq: rec.next_seq,
         ignored_after_gap: rec.ignored_after_gap,
+        gap_at: rec.gap_at,
+        duplicate: rec.duplicate,
         damaged: rec.damaged,
         flushed: rec.flushed,
         first_attach,
@@ -481,9 +490,11 @@ mod tests {
             refuse_worthy(&rec(Vec::new(), true, 3)),
             "gap at the watermark"
         );
+        // A damaged range without a missing number holds nothing durable
+        // (E1): its numbers are at or below the floor or held elsewhere.
         assert!(
-            refuse_worthy(&rec(vec![dmg(Some(4))], false, 4)),
-            "damage inside durable history"
+            !refuse_worthy(&rec(vec![dmg(Some(4))], false, 4)),
+            "damage below the watermark, no gap"
         );
         assert!(
             refuse_worthy(&rec(vec![dmg(None)], true, 5)),
