@@ -15,7 +15,8 @@ use lunix_format::{CryptoMode, WriteSeq};
 use lunix_iface::block::BlockEngine;
 use lunixd::stack::StackError;
 use lunixd::testsupport::{
-    close, damage_journal, payload, DeviceModel, Driver, ModelOp, Scratch, TestRng, VolumeBuilder,
+    close, damage_journal, damage_unsynced, payload, DeviceModel, Driver, ModelOp, Scratch,
+    TestRng, VolumeBuilder,
 };
 
 /// Every record of every journal file: (file, write_seq, flushed, bytes).
@@ -253,4 +254,74 @@ fn refuse_ignores_torn_records_below_the_floor() {
         }
         Err(e) => panic!("open: {e}"),
     }
+}
+
+#[test]
+fn damage_unsynced_touches_only_unsealed_files_outside_journal_and_cache() {
+    let t = Scratch::new("m12b-support-unsynced");
+    let (mut removed, mut truncated, mut kept) = (0, 0, 0);
+    for seed in 0..24u64 {
+        let v = t.path().join(format!("v{seed}"));
+        for d in ["segments", "map", "journal", "cache", "index"] {
+            std::fs::create_dir_all(v.join(d)).unwrap();
+        }
+        let planted = [
+            "segments/0000000000000009.open",
+            "map/0000000000000004.tmp",
+            "index/manifest.tmp",
+        ];
+        let spared = [
+            "journal/q00-00000001.j.tmp",
+            "cache/x.tmp",
+            "segments/0000000000000001.seg",
+        ];
+        for f in planted.iter().chain(spared.iter()) {
+            std::fs::write(v.join(f), vec![7u8; 8192]).unwrap();
+        }
+        let mut rng = TestRng::new(seed);
+        let (r, tr) = damage_unsynced(&v, &mut rng);
+        removed += r;
+        truncated += tr;
+        let mut seen = 0;
+        for f in planted {
+            match std::fs::metadata(v.join(f)) {
+                Err(_) => seen += 1,
+                Ok(m) if m.len() < 8192 => seen += 1,
+                Ok(_) => kept += 1,
+            }
+        }
+        assert_eq!(
+            seen,
+            r + tr,
+            "removed and truncated files are the planted ones"
+        );
+        for f in spared {
+            assert_eq!(
+                std::fs::read(v.join(f)).unwrap(),
+                vec![7u8; 8192],
+                "{f} must not be touched"
+            );
+        }
+    }
+    assert!(
+        removed > 0 && truncated > 0 && kept > 0,
+        "{removed} {truncated} {kept}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "drop every Driver")]
+fn close_refuses_a_stack_with_a_live_driver() {
+    let t = Scratch::new("m12b-support-live");
+    let vol = VolumeBuilder::new(t.path())
+        .manual()
+        .mode(CryptoMode::Plain)
+        .chunk_size(16 << 10)
+        .size_bytes(1 << 20)
+        .create()
+        .expect("create");
+    let s = vol.open().expect("open");
+    let d = Driver::new(&s).expect("driver");
+    let _keep = d;
+    let _ = close(s);
 }

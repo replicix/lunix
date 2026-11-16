@@ -47,11 +47,11 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use lunix_engine::{CommitOutcome, OnJournalDamage};
-use lunix_format::CryptoMode;
+use lunix_format::{CryptoMode, WriteSeq};
 use lunix_iface::block::BlockEngine;
 use lunixd::testsupport::{
-    close, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch, TestRng, TestVolume,
-    VolumeBuilder,
+    close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch,
+    TestRng, TestVolume, VolumeBuilder,
 };
 
 const BLOCK: u64 = 4096;
@@ -277,10 +277,10 @@ fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
         .queues(QUEUES)
 }
 
-/// Appends the durable prefix length to the progress file (no sync: a
-/// `SIGKILL` keeps the page cache).
-fn progress(f: &mut std::fs::File, n: usize) {
-    writeln!(f, "{n}").expect("progress");
+/// Appends the durable prefix length and the driver's durable `write_seq`
+/// to the progress file (no sync: a `SIGKILL` keeps the page cache).
+fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
+    writeln!(f, "{n} {}", d.durable().0).expect("progress");
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
@@ -288,7 +288,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
     let mut stack = vol.open().expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
-    progress(prog, base);
+    progress(prog, base, &d);
     let mut n = base;
     let mut bounds: Vec<u64> = Vec::new();
     for s in steps {
@@ -305,7 +305,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 n += 1;
                 bounds.push(d.issued().0);
                 if fua {
-                    progress(prog, n);
+                    progress(prog, n, &d);
                 }
             }
             Step::Zero {
@@ -325,20 +325,20 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             }
             Step::Flush { q } => {
                 assert!(d.flush(q).is_ok(), "child flush");
-                progress(prog, n);
+                progress(prog, n, &d);
             }
             Step::Commit { force } => {
                 let out = stack.engine.commit_now(force).expect("child commit");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
-                    progress(prog, base + k);
+                    progress(prog, base + k, &d);
                 }
             }
             Step::Tick => {
                 let out = stack.engine.tick().expect("child tick");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
-                    progress(prog, base + k);
+                    progress(prog, base + k, &d);
                 }
             }
             Step::Grow(size) => {
@@ -347,7 +347,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 // The grow's FULL commit covers everything before it.
                 bounds.fill(0);
                 bounds.push(0);
-                progress(prog, n);
+                progress(prog, n, &d);
             }
             Step::Sleep(ms) => std::thread::sleep(Duration::from_millis(ms)),
             Step::Reopen => {
@@ -357,13 +357,14 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 d = Driver::new(&stack).expect("driver");
                 // Every request so far was recovered and synced.
                 bounds.fill(0);
-                progress(prog, n);
+                progress(prog, n, &d);
             }
         }
     }
+    progress(prog, n, &d);
     drop(d);
     close(stack).expect("child close");
-    progress(prog, n);
+    writeln!(prog, "{n} 0").expect("progress");
 }
 
 /// The child entry: does nothing unless this process was started by a kill
@@ -521,12 +522,33 @@ struct Tally {
     /// submitted, or not durable and lost).
     lost_requests: u64,
     fsck_findings: BTreeMap<String, u64>,
-    /// Findings after recovery and a clean close (other than the journal
-    /// file notes), with the runs that produced them.
-    after_recovery: BTreeMap<String, Vec<String>>,
+    /// Findings at rest (after recovery and a clean close), with the runs
+    /// that produced them.
+    at_rest: BTreeMap<String, Vec<String>>,
+    /// Verified runs.
+    runs: u64,
+    /// Journal records damaged above the durable bound after a kill.
+    damaged_records: u64,
 }
 
-fn fsck_clean(vol: &TestVolume, when: &str, what: &str, tally: &mut Tally) {
+/// The `lunix-fsck` findings a phase may show. Anything else, and any
+/// error, fails the run.
+///
+/// * After a kill: what a crash leaves (temporary files, unnamed or
+///   unreferenced containers, an index behind the chain, journal residue).
+/// * At rest (after recovery and a clean close): nothing but notes.
+const ALLOWED_AFTER_KILL: &[&str] = &[
+    "leftover",
+    "crash_leftover",
+    "orphan",
+    "index_missing",
+    "ignored_after_gap",
+    "journal_damage_below_floor",
+    "journal_file",
+];
+const ALLOWED_AT_REST: &[&str] = &["index_missing", "journal_file"];
+
+fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally: &mut Tally) {
     let Some(f) = fsck(vol) else {
         // No binary: the store self-check stands in (closed volumes only).
         return;
@@ -537,11 +559,13 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, tally: &mut Tally) {
         f.text
     );
     for (sev, code) in f.findings {
-        if when == "after-recovery" && code != "journal_file" {
-            let w = tally
-                .after_recovery
-                .entry(format!("{sev}:{code}"))
-                .or_default();
+        assert!(
+            sev == "note" || allowed.contains(&code.as_str()),
+            "{what}: lunix-fsck {when}: unexpected {sev} {code}:\n{}",
+            f.text
+        );
+        if when == "at-rest" && sev != "note" {
+            let w = tally.at_rest.entry(format!("{sev}:{code}")).or_default();
             if !w.contains(&what.to_owned()) {
                 w.push(what.to_owned());
             }
@@ -553,22 +577,39 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, tally: &mut Tally) {
     }
 }
 
-/// The checks after a kill (or a clean end).
+/// The checks after a kill (or a clean end): fsck on the killed volume, the
+/// journal damaged above the child's durable bound (a power loss on top of
+/// the kill), recovery under `refuse` against the oracle, writes and a
+/// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    fsck_clean(&p.vol, "after-kill", what, tally);
-    let durable: usize = std::fs::read_to_string(&p.progress)
+    fsck_clean(&p.vol, "after-kill", what, ALLOWED_AFTER_KILL, tally);
+    let mut durable = 0usize;
+    let mut durable_seq = 0u64;
+    for l in std::fs::read_to_string(&p.progress)
         .unwrap_or_default()
         .lines()
-        .filter_map(|l| l.trim().parse().ok())
-        .max()
-        .unwrap_or(0);
+    {
+        let mut w = l.split_whitespace();
+        if let Some(n) = w.next().and_then(|v| v.parse().ok()) {
+            durable = durable.max(n);
+        }
+        if let Some(q) = w.next().and_then(|v| v.parse().ok()) {
+            durable_seq = durable_seq.max(q);
+        }
+    }
+    if std::env::var_os("LUNIX_KILL_NO_DAMAGE").is_none() {
+        let mut rng = TestRng::new(cfg.seed ^ (tally.runs << 20));
+        let c = damage_journal(&p.vol.voldir, WriteSeq(durable_seq), &mut rng);
+        tally.damaged_records += c.records_damaged as u64;
+    }
+    tally.runs += 1;
     let stack = p
         .vol
         .open_with(|o| o.on_journal_damage = OnJournalDamage::Refuse)
         .unwrap_or_else(|e| panic!("{what}: open after the kill (refuse): {e}"));
     let size = stack.engine.size_bytes();
     let mut d = Driver::new(&stack).expect("driver");
-    let actual = d
+    let mut actual = d
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: full read: {s:?}"));
     let pl = plan(u64::from(cfg.cs), cfg.seed);
@@ -583,12 +624,58 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         );
     };
     tally.lost_requests += (model.len() - n) as u64;
+    // The recovered volume takes writes and reads them back, across a clean
+    // close and a second open.
+    let cs = u64::from(cfg.cs);
+    for i in 0..8u64 {
+        let off = (i * 37 % (size / cs)) * cs + (i % 2) * BLOCK;
+        let data = payload(0xa5a5 ^ i, 2 * BLOCK as usize);
+        assert!(
+            d.write((i % 2) as usize, off, &data, false).is_ok(),
+            "{what}: write after recovery"
+        );
+        actual[off as usize..off as usize + data.len()].copy_from_slice(&data);
+    }
+    assert!(d.flush(0).is_ok(), "{what}: flush after recovery");
+    let back = d
+        .read_all(size)
+        .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
+    assert!(back == actual, "{what}: read-back after recovery differs");
+    drop(d);
+    close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
+    let stack = p
+        .vol
+        .open_with(|o| o.on_journal_damage = OnJournalDamage::Refuse)
+        .unwrap_or_else(|e| panic!("{what}: second open: {e}"));
+    let mut d = Driver::new(&stack).expect("driver");
+    let again = d
+        .read_all(size)
+        .unwrap_or_else(|s| panic!("{what}: second read: {s:?}"));
+    assert!(
+        again == actual,
+        "{what}: the device differs after a clean close and reopen"
+    );
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let r = p.vol.check().expect("store self-check runs");
     assert!(r.is_clean(), "{what}: store self-check: {r:?}");
-    fsck_clean(&p.vol, "after-recovery", what, tally);
+    fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
 }
+
+/// Registered points no phase 1 workload reaches without GC or
+/// `fsck --truncate-tip`: GC's condemn and evidence, and the set-aside of a
+/// tip. Any other unreached point fails the loop (a workload that stops
+/// reaching a point, or `gc.*` points once the collector is wired, M17.B).
+const EXPECTED_UNREACHED: &[&str] = &[
+    "index.after_condemn_flag",
+    "store.evidence.after_dirsync",
+    "store.evidence.after_fdatasync",
+    "store.evidence.after_rename",
+    "store.evidence.before_fdatasync",
+    "store.set_aside.after_dirsync",
+    "store.set_aside.after_rename",
+    "store.set_aside.before_rename",
+];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
     if std::env::var_os("LUNIX_STACK_REQUIRE_FSCK").is_some() {
@@ -701,6 +788,16 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         .filter(|p| counts.get(**p).copied().unwrap_or(0) > 0 && !killed.contains_key(**p))
         .collect();
     assert!(missing.is_empty(), "reached but never killed: {missing:?}");
+    if only.is_empty() {
+        let unexpected: Vec<&&str> = unreached
+            .iter()
+            .filter(|p| !EXPECTED_UNREACHED.contains(p))
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "registered crash points the workload no longer reaches: {unexpected:?}"
+        );
+    }
 }
 
 #[test]

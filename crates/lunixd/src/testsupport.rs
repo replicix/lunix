@@ -75,7 +75,7 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use lunix_crypto::keyring::{Argon2Cost, KeyFile};
@@ -90,7 +90,7 @@ use lunix_iface::block::{
 use lunix_iface::ctl::Secret;
 use lunix_iface::journal::Journal;
 use lunix_iface::Error;
-use lunix_journal::FileJournal;
+use lunix_journal::{FileJournal, DEFAULT_MARK_IDLE};
 use lunix_store::read_volume_file;
 
 use crate::check::{check_volume, CheckReport};
@@ -377,11 +377,17 @@ impl TestVolume {
     /// never synced (see the module docs).
     ///
     /// Without a driver's bound, the flush point is the watermark on disk:
-    /// this waits three mark delays first, so the journal has witnessed every
-    /// completed flush with a mark (ADR-4). A caller with a [`Driver`] uses
-    /// [`crash_driven`](Self::crash_driven), which needs no wait.
+    /// this waits three default mark delays first, so the journal has
+    /// witnessed every completed flush with a mark (ADR-4; a volume opened
+    /// with a longer or no `mark_idle` needs [`crash_with`](Self::crash_with)).
+    /// A caller with a [`Driver`] uses [`crash_driven`](Self::crash_driven),
+    /// which needs no wait.
+    ///
+    /// # Panics
+    /// While a [`Driver`] of `stack` is alive.
     pub fn crash(&self, stack: VolumeStack, seed: u64) -> CrashDamage {
-        std::thread::sleep(Duration::from_millis(150));
+        assert_no_driver(&stack);
+        std::thread::sleep(3 * DEFAULT_MARK_IDLE);
         self.crash_with(stack, WriteSeq(0), seed)
     }
 
@@ -396,7 +402,12 @@ impl TestVolume {
 
     /// A crash with `durable` known to be durable (every record at or below
     /// it was covered by a completed FLUSH or FUA write).
+    ///
+    /// # Panics
+    /// While a [`Driver`] of `stack` is alive (its handlers would keep the
+    /// journal open while its files are damaged).
     pub fn crash_with(&self, stack: VolumeStack, durable: WriteSeq, seed: u64) -> CrashDamage {
+        assert_no_driver(&stack);
         drop(stack);
         let mut rng = TestRng::new(seed);
         let mut d = damage_journal(&self.voldir, durable, &mut rng);
@@ -462,15 +473,43 @@ impl TestVolume {
     }
 }
 
-/// A clean close: the final commit (`quiesce`), then the drop. Drop every
-/// [`Driver`] of the volume first.
+/// A clean close: the final commit (`quiesce`), then the drop.
 ///
 /// # Errors
 /// The final commit's error (the stack is dropped anyway).
+///
+/// # Panics
+/// While a [`Driver`] of `stack` is alive (drop it first: its handlers must
+/// not outlive the close).
 pub fn close(stack: VolumeStack) -> Result<(), Error> {
+    assert_no_driver(&stack);
     let r = stack.engine.quiesce();
     drop(stack);
     r
+}
+
+/// Live [`Driver`]s per engine (keyed by the engine's address), so `close`
+/// and the crashes can refuse a stack whose handlers are still out.
+fn live_drivers() -> &'static Mutex<HashMap<usize, usize>> {
+    static LIVE: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn engine_key(stack: &VolumeStack) -> usize {
+    Arc::as_ptr(&stack.engine) as usize
+}
+
+fn assert_no_driver(stack: &VolumeStack) {
+    let live = live_drivers()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&engine_key(stack))
+        .copied()
+        .unwrap_or(0);
+    assert_eq!(
+        live, 0,
+        "drop every Driver of the volume before closing or crashing it"
+    );
 }
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -612,6 +651,21 @@ pub struct Driver {
     durable: WriteSeq,
     timeout: Duration,
     max_io: u32,
+    key: usize,
+}
+
+impl Drop for Driver {
+    fn drop(&mut self) {
+        let mut live = live_drivers()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(n) = live.get_mut(&self.key) {
+            *n -= 1;
+            if *n == 0 {
+                live.remove(&self.key);
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for Driver {
@@ -654,6 +708,12 @@ impl Driver {
         // on-disk-formats section 5.2): everything below the recovery's next
         // number is durable once the handlers exist.
         let recovered = stack.engine.recovery_report().next_seq.0.saturating_sub(1);
+        let key = engine_key(stack);
+        *live_drivers()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(key)
+            .or_insert(0) += 1;
         Ok(Self {
             queues,
             done: Completions::new(max_io_buf_bytes),
@@ -663,6 +723,7 @@ impl Driver {
             durable: WriteSeq(recovered),
             timeout: Duration::from_secs(120),
             max_io: max_io_buf_bytes,
+            key,
         })
     }
 
@@ -761,9 +822,15 @@ impl Driver {
         if status.is_ok() {
             match op {
                 IoOp::Flush => self.durable = self.durable.max(before),
-                // The FUA write's own number is above `before` (marks may
-                // take numbers in between): `before + 1` is a lower bound.
-                IoOp::Write if fua => self.durable = self.durable.max(WriteSeq(before.0 + 1)),
+                // A FUA write waits for every lower number and its own. Its
+                // number is above `before`, and a mark may take numbers
+                // around it; the journal's counter read now is at or above
+                // it; a number between them is a mark issued after the write,
+                // which this bound only spares from the crash damage.
+                IoOp::Write if fua => {
+                    let after = self.journal.last_issued().max(WriteSeq(before.0 + 1));
+                    self.durable = self.durable.max(after);
+                }
                 _ => {}
             }
         }
@@ -864,6 +931,9 @@ pub struct DeviceModel {
     ops: Vec<ModelOp>,
     cur: Vec<u8>,
     durable: usize,
+    /// The state after the first `snap.0` entries: prefix replays start
+    /// here instead of at the empty device (long runs stay linear).
+    snap: std::cell::RefCell<(usize, Vec<u8>)>,
 }
 
 fn to_usize(v: u64) -> usize {
@@ -881,6 +951,7 @@ impl DeviceModel {
             ops: Vec::new(),
             cur: vec![0; to_usize(size_bytes)],
             durable: 0,
+            snap: std::cell::RefCell::new((0, vec![0; to_usize(size_bytes)])),
         }
     }
 
@@ -971,8 +1042,14 @@ impl DeviceModel {
     /// # Panics
     /// If `n` is past the end of the log.
     pub fn state_after(&self, n: usize) -> Vec<u8> {
-        let mut s = vec![0u8; to_usize(self.initial)];
-        for op in &self.ops[..n] {
+        let snap = self.snap.borrow();
+        let (from, mut s) = if snap.0 <= n {
+            (snap.0, snap.1.clone())
+        } else {
+            (0, vec![0u8; to_usize(self.initial)])
+        };
+        drop(snap);
+        for op in &self.ops[from..n] {
             Self::apply_to(&mut s, op);
         }
         s
@@ -982,6 +1059,8 @@ impl DeviceModel {
     /// after the first `n` entries, size included.
     pub fn first_match(&self, actual: &[u8]) -> Option<usize> {
         let mut cur = self.state_after(self.durable);
+        // The durable prefix never shrinks except by `truncate`: keep it.
+        *self.snap.borrow_mut() = (self.durable, cur.clone());
         let mut bad = count_bad(&cur, actual);
         if bad == 0 {
             return Some(self.durable);
@@ -1021,6 +1100,7 @@ impl DeviceModel {
         self.cur = self.state_after(n);
         self.ops.truncate(n);
         self.durable = n;
+        *self.snap.borrow_mut() = (n, self.cur.clone());
     }
 }
 

@@ -421,6 +421,13 @@ impl Case {
             drop(stack);
             self.last_crash = None;
             self.stats.plain_drops += 1;
+            // Nothing was damaged: every acknowledged request is in the
+            // journal files, so recovery must give back the whole oracle
+            // (and the first lane open syncs it).
+            self.model.all_durable();
+            self.bounds.fill(0);
+            self.reopen(true);
+            return;
         }
         self.reopen(false);
     }
