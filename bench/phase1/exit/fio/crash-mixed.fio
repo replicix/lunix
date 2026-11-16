@@ -1,0 +1,24 @@
+; M15 item 3 workload on a mounted ext4 or xfs: mixed random read/write with crc32c verify of the backlog. The
+; daemon is killed under it; fio must end with zero errors and zero verify failures.
+; Environment: DIR (mount point), RUNTIME (s), SIZE (bytes per job; 1 GiB for the random-kill loop, 256 MiB for the
+; crash-point runs so that blocks are overwritten often and GC has dead segments to compact), NUMJOBS.
+[global]
+directory=${DIR}
+ioengine=io_uring
+direct=1
+time_based
+runtime=${RUNTIME}
+verify=crc32c
+verify_backlog=64
+verify_fatal=1
+verify_dump=1
+do_verify=1
+
+[mixed]
+rw=randrw
+rwmixwrite=70
+bssplit=4k/50:16k/30:64k/20
+iodepth=32
+numjobs=${NUMJOBS}
+size=${SIZE}
+norandommap

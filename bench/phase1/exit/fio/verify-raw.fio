@@ -1,0 +1,49 @@
+; M15 item 1, raw device. One profile = one queue depth and job count over its own region of the device.
+; Environment (fio expands ${VAR}): DEV, BASE (byte offset of the profile's region), PER_JOB (bytes per job),
+; JOBS, QD, RUNTIME (s), SEED, LOOPS, VONLY, TRIM_BASE (byte offset of the trim region), TRIM_SIZE.
+; Total size of one profile is JOBS * PER_JOB <= 12 GiB (plan: --size at most 12 GiB per job group).
+; Run:  fio verify-raw.fio --aux-path=<dir> --output-format=json --output=<file>
+; Re-verify after detach/attach: the same file with VONLY=1 and --section=main (the saved state is in --aux-path).
+[global]
+ioengine=io_uring
+direct=1
+randseed=${SEED}
+verify=crc32c
+verify_fatal=1
+verify_dump=1
+verify_state_save=1
+do_verify=1
+; LOOPS is 1000000 for the write run (it ends by RUNTIME) and 1 for the re-verification. VONLY=1 re-verifies the data of an earlier run from its saved state (after detach and attach)
+verify_only=${VONLY}
+verify_state_load=${VONLY}
+group_reporting=0
+; the cell never runs longer than RUNTIME seconds of writing; the verify phase follows (the shell script's outer
+; timeout is RUNTIME plus a grace)
+runtime=${RUNTIME}
+
+[main]
+filename=${DEV}
+rw=randwrite
+bssplit=4k/20:8k/15:16k/15:64k/15:128k/10:256k/10:512k/8:1m/7
+iodepth=${QD}
+numjobs=${JOBS}
+offset=${BASE}
+offset_increment=${PER_JOB}
+size=${PER_JOB}
+loops=${LOOPS}
+; the trim companion starts with the main job and uses the sync engine (trim needs it); it verifies its own
+; region and checks that trimmed blocks read back as zeros
+[trimmix]
+filename=${DEV}
+ioengine=psync
+rw=randwrite
+bssplit=4k/40:16k/30:64k/20:256k/10
+offset=${TRIM_BASE}
+size=${TRIM_SIZE}
+numjobs=1
+loops=1000000
+verify_backlog=32
+trim_percentage=25
+trim_backlog=32
+trim_backlog_batch=8
+trim_verify_zero=1
