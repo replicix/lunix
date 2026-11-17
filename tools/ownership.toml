@@ -155,7 +155,8 @@ paths = [
 ]
 
 [m15]
-paths = ["tests/exit/**", "bench/phase1/exit/**"]
+# crates/lunixd/src/main.rs: dump_counts on exit (crashpoints build); crates/lunix-ublk/src/queue.rs: the lost-write fault hook (lead, 2026-11-17)
+paths = ["tests/exit/**", "bench/phase1/exit/**", "crates/lunixd/src/main.rs", "crates/lunix-ublk/src/queue.rs"]
 
 [m16]
 paths = ["tests/perf/**", "bench/phase1/perf/**", "bench/phase1/chunksize/**"]

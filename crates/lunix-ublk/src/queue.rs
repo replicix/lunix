@@ -46,6 +46,13 @@
 //! 10 ms while requests are held, so the release is noticed. This lets the
 //! root harness make a quiesce time out on a real device (a second
 //! `QUIESCE_DEV`, the `QuiesceAll` retry). Production builds compile it out.
+//!
+//! A second hook, `LUNIX_UBLK_FAULT_DROP_WRITES` (same file rule, `<file>` or
+//! `<file>.<dev_id>`): while the file exists, WRITE requests are acknowledged
+//! successfully without being handed to the engine. That loses acknowledged
+//! writes on purpose: the M15 negative control that must make a crash-loop
+//! harness fail. FLUSH, DISCARD and reads are untouched. Also compiled out of
+//! production builds.
 
 use std::os::fd::{AsRawFd, RawFd};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -434,6 +441,7 @@ fn run_queue(a: QueueArgs) {
     let cdev_fd = a.dev.tgt.fds[0];
     let mut lp = Loop {
         hold: Hold::from_env(wake_fd, a.dev.dev_info.dev_id),
+        drop_writes: DropWrites::from_env(a.dev.dev_info.dev_id),
         handler,
         c: CompState {
             qid,
@@ -521,7 +529,36 @@ struct CompState {
     down: bool,
 }
 
+/// The lost-write fault hook (see the module docs): the files whose existence
+/// turns it on.
+struct DropWrites {
+    path: std::path::PathBuf,
+    dev_path: std::path::PathBuf,
+}
+
+impl DropWrites {
+    /// The hook, when this build has it and `LUNIX_UBLK_FAULT_DROP_WRITES` is set.
+    fn from_env(dev_id: u32) -> Option<Self> {
+        if !cfg!(feature = "crashpoints") {
+            return None;
+        }
+        let path = std::path::PathBuf::from(std::env::var_os("LUNIX_UBLK_FAULT_DROP_WRITES")?);
+        let mut dev_path = path.clone().into_os_string();
+        dev_path.push(format!(".{dev_id}"));
+        Some(Self {
+            path,
+            dev_path: std::path::PathBuf::from(dev_path),
+        })
+    }
+
+    fn active(&self) -> bool {
+        self.path.exists() || self.dev_path.exists()
+    }
+}
+
 struct Loop {
+    /// The lost-write fault hook (test builds only).
+    drop_writes: Option<DropWrites>,
     /// Declared first: it drops (and joins its watcher, which writes to the
     /// handler's wake fd) before the handler.
     hold: Option<Hold>,
@@ -723,7 +760,12 @@ impl Loop {
 
     /// Decodes a started request and hands it to the engine.
     fn dispatch(&mut self, q: &UblkQueue<'_>, tag: u16) {
-        let Loop { handler, c, .. } = self;
+        let Loop {
+            handler,
+            c,
+            drop_writes,
+            ..
+        } = self;
         let t = usize::from(tag);
 
         let iod = q.get_iod(tag);
@@ -764,6 +806,11 @@ impl Loop {
                 Comp { q, c: &mut *c }.complete(Tag(tag), IoStatus::err(EIO));
                 return;
             }
+        }
+        if op == IoOp::Write && drop_writes.as_ref().is_some_and(DropWrites::active) {
+            // Fault hook: acknowledge the write and lose it.
+            Comp { q, c: &mut *c }.complete(Tag(tag), IoStatus::ok(len));
+            return;
         }
         // SAFETY: `ptrs[t]` is the start of a buffer of `buf_bytes >= len`
         // bytes that this thread owns; the tag is started, so neither the
