@@ -55,5 +55,24 @@ python3 -I "$REPO/crates/lunix-ublk/tests/root/fsyncer.py" verify "$MNT/fs.dat" 
 rec negctl/full-stack/fsyncer-ack "$([ "$rc" != 0 ] && echo pass || echo fail)" rc="$rc"
 umount_fs "$MNT"
 cell_end "$VOL" neg
+# ---- N4: lost acknowledged writes (the crashpoints build's file-armed hook LUNIX_UBLK_FAULT_DROP_WRITES): while the file
+# exists WRITEs are acknowledged and thrown away; a verified write must then FAIL. Needs LUNIXD_CP.
+if [ -n "${LUNIXD_CP:-}" ] && [ -x "$LUNIXD_CP" ]; then
+  DAEMON_BIN="$LUNIXD_CP"; DROPF="$ST/dropw"; rm -f "$DROPF"
+  CRASH_ENV="LUNIX_UBLK_FAULT_DROP_WRITES=$DROPF"
+  VOL=neg4; cell_begin "$VOL" 8 65536 integrity
+  D4="$OUT/raw/neg4"; mkdir -p "$D4/s1" "$D4/s2"
+  export DEV="$CUR_DEV" BASE=0 PER_JOB=$((256 * MIB)) JOBS=1 QD=16 RUNTIME=60 SEED=6 LOOPS=1 VONLY=0 TRIM_BASE=$((1024 * MIB)) TRIM_SIZE=$((64 * MIB))
+  fio_run neg4-ok 60 "$REPO/bench/phase1/exit/fio/verify-raw.fio" "--aux-path=$D4/s1" --section=main; rc=$?
+  [ "$rc" = 0 ]; expect "N4 precondition: a verified write passes while the hook is not armed (rc $rc)" $?
+  # a different seed and region: with the same ones the dropped writes would leave exactly the data of the run before
+  : > "$DROPF"; export SEED=7 BASE=$((512 * MIB))
+  fio_run neg4-bad 60 "$REPO/bench/phase1/exit/fio/verify-raw.fio" "--aux-path=$D4/s2" --section=main; rc=$?
+  rm -f "$DROPF"
+  [ "$rc" != 0 ] || [ "$(fio_errors "$OUT/raw/fio-neg4-bad.json")" != 0 ]; expect "N4 control tripped: the verified write fails while WRITEs are acknowledged and dropped (rc $rc)" $?
+  rec negctl/full-stack/drop-writes "$([ "$rc" != 0 ] && echo pass || echo fail)" fio_rc="$rc"
+  cell_end "$VOL" neg4
+  CRASH_ENV=""; DAEMON_BIN=""
+else say "- N4 skipped: LUNIXD_CP not set"; fi
 say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
 exit "$FAIL"

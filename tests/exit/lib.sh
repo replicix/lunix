@@ -304,6 +304,7 @@ detach_all() {
 }
 teardown() {
   trap - EXIT INT TERM
+  CRASH_ENV=""   # a recovery start must never carry a crash setting
   if [ -e "$OUT/WEDGED" ]; then echo "teardown: run marked WEDGED; nothing else touched" >&2; cap_stop; return 1; fi
   local d left=""
   for d in $(grep -o '/dev/ublkb[0-9]*' "$CREATED_DEVICES" 2>/dev/null | sort -u); do [ -b "$d" ] && left="$left $d"; done

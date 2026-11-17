@@ -20,7 +20,9 @@
 #   tools/remote.sh root env LUNIX_ROOT_TESTS=1 LUNIX_SPIKE_DIR=<abs scratch> LUNIXD=<abs>/lunixd LUNIXD_CP=<abs cp build>/lunixd \
 #       LUNIX=<abs>/lunix TESTD=<abs>/lunix-ublk-testd [POINTS_FROM=1 POINTS_TO=20] bash tests/exit/crashpoints.sh
 here="$(cd "$(dirname "$0")" && pwd)"
-: "${BUDGET_S:=72000}" "${RUN_CAP_S:=600}" "${WL_SECS:=120}" "${POST_SECS:=30}" "${COUNT_SECS:=240}" "${CHUNK:=65536}"
+: "${BUDGET_S:=72000}" "${RUN_CAP_S:=600}" "${WL_SECS:=120}" "${POST_SECS:=30}" "${CHUNK:=65536}"
+# the counting run is as long as the crash runs, so that the "last" hit is about the last one a run reaches
+: "${COUNT_SECS:=$WL_SECS}"
 : "${HITS_FALLBACK:=1 25 250}" "${VOL_GIB:=32}" "${VOLMODE:=integrity}" "${COMMIT_INTERVAL_MS:=2000}" "${GC_EVERY_S:=15}"
 export SCRIPT_CAP="${SCRIPT_CAP:-$((BUDGET_S + 3600))}" COMMIT_INTERVAL_MS
 . "$here/lib.sh"; . "$here/crashlib.sh"
@@ -33,14 +35,55 @@ if [ -n "${POINTS:-}" ]; then tr ' ' '\n' <<< "$POINTS" | sort > "$OUT/points.tx
 else sed -n "${POINTS_FROM:-1},${POINTS_TO:-\$}p" "$OUT/points-all.txt" > "$OUT/points.txt"; fi
 say "# M15 crash points ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $(nproc) cpus): $(wc -l < "$OUT/points.txt") of $(wc -l < "$OUT/points-all.txt") points, run cap $RUN_CAP_S s, budget $BUDGET_S s"
 
-CRASHED=0
-ensure_up() { # restart a dead daemon in recovery mode (no crash setting); returns 0 when it restarted one
-  daemon_alive && return 1
-  CRASH_ENV=""
-  [ -n "${DPID:-}" ] && { wait "$DPID" 2>/dev/null; DRC=$?; }
-  DPID=""; CRASHED=1; CRASH_T=$((SECONDS - RUN_T0))
-  start_lunixd || wedged "lunixd did not restart after the crash point (exit $DRC)"
-  if [ -n "$CUR_DEV" ] && [ -e "$ST/dev/$CUR_VOL" ]; then wait_recovered "$DLOG" 120 || say "- (no recovery line in $DLOG: the volume may not have been attached yet)"; fi
+# ---- the supervisor ---------------------------------------------------------------------------------------------
+# The daemon runs under a small supervisor loop in the background: it starts lunixd with the crash setting once, and every
+# restart after an exit (the crash is a SIGKILL from inside, status 137) is a plain recovery start without the setting. The
+# script itself never has to notice a crash to keep going: a mkfs, umount or detach that blocks while the daemon is down is
+# released by the supervisor. Exits are logged in sup-exits.log (epoch seconds, status, the daemon's log).
+SUPGEN=0; SUPPID=""; SUP_ENV=""; CRASHED=0; CRASH_T=""; RUN_EPOCH0=0
+sup_loop() {
+  local first=1 n=0 dl
+  while :; do
+    n=$((n + 1)); dl="$OUT/lunixd.s$SUPGEN.$n.log"
+    if [ "$first" = 1 ]; then
+      # shellcheck disable=SC2086  # SUP_ENV is a list of VAR=value words
+      env -u LUNIX_CRASH_AT -u LUNIX_CRASH_COUNT $SUP_ENV taskset -c "$DAEMON_CPUS" "$LUNIXD_CP" --config "$ST/lunixd.toml" > "$dl" 2>&1 &
+    else
+      env -u LUNIX_CRASH_AT -u LUNIX_CRASH_COUNT taskset -c "$DAEMON_CPUS" "$LUNIXD_CP" --config "$ST/lunixd.toml" > "$dl" 2>&1 &
+    fi
+    echo $! > "$ST/daemon.pid"; echo "$dl" > "$ST/daemon.log.path"
+    wait $!; local rc=$?
+    echo "$(date +%s) $rc $dl" >> "$OUT/sup-exits.log"
+    [ -e "$ST/sup.stop" ] && break
+    first=0; sleep 0.2
+  done
+}
+daemon_alive() { [ -s "$ST/daemon.pid" ] && kill -0 "$(cat "$ST/daemon.pid")" 2>/dev/null; }
+wait_ping() { local i; for i in $(seq 1 $(($1 * 10))); do "$LUNIXD" ctl --socket "$SOCK" '{"method":"ping"}' >/dev/null 2>&1 && return 0; sleep 0.1; done; return 1; }
+start_lunixd() {
+  rm -f "$ST/sup.stop" "$ST/daemon.pid" "$ST/daemon.log.path"; : > "$OUT/sup-exits.log"
+  SUP_ENV=$CRASH_ENV; SUPGEN=$((SUPGEN + 1))
+  sup_loop & SUPPID=$!
+  wait_ping 90 || wedged "no daemon answered within 90 s of the supervisor start"
+  DLOG=$(cat "$ST/daemon.log.path"); DPID=$(cat "$ST/daemon.pid"); register_all
+}
+stop_lunixd() { # TERM = QuiesceAll then exit; the supervisor ends; a stopping daemon is never killed
+  [ -n "$SUPPID" ] || return 0
+  touch "$ST/sup.stop"
+  daemon_alive && kill -TERM "$(cat "$ST/daemon.pid")" 2>/dev/null
+  local i; for i in $(seq 1 600); do kill -0 "$SUPPID" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$SUPPID" 2>/dev/null; then echo "lunixd did not exit within 60 s of SIGTERM; not killing it" >&2; return 1; fi
+  wait "$SUPPID" 2>/dev/null; SUPPID=""; DPID=""; return 0
+}
+crash_seen() { # sets CRASHED, CRASH_T, DLOG; flags a daemon exit that is not the planned SIGKILL
+  local n; n=$(awk '$2 != 0 {c++} END {print c + 0}' "$OUT/sup-exits.log" 2>/dev/null)
+  [ "${n:-0}" -gt 0 ] || return 1
+  if [ "$CRASHED" = 0 ]; then
+    CRASHED=1; CRASH_T=$(($(awk 'NR==1{print $1}' "$OUT/sup-exits.log") - RUN_EPOCH0))
+    local st; st=$(awk 'NR==1{print $2}' "$OUT/sup-exits.log")
+    [ "$st" = 137 ] || { RUN_NOTES="$RUN_NOTES;daemon exited with status $st instead of the crash point's SIGKILL"; RUN_STATUS=fail; }
+  fi
+  DLOG=$(cat "$ST/daemon.log.path")
   return 0
 }
 vol_exists() { lx volume list --json 2>/dev/null | jq -e --arg n "$1" '.[] | select(.name==$n)' >/dev/null; }
@@ -51,28 +94,27 @@ add_cleanup stop_gc_loop
 # one_run LABEL FS CRASH_ENV_WORDS: setup, workload with the crash setting, checks. Sets RUN_STATUS and the fields.
 one_run() {
   local label=$1 fs=$2; CRASH_ENV=$3
-  RUN_T0=$SECONDS; CRASHED=0; CRASH_T=""; RUN_STATUS=pass; RUN_NOTES=""
+  RUN_T0=$SECONDS; RUN_EPOCH0=$(date +%s); CRASHED=0; CRASH_T=""; RUN_STATUS=pass; RUN_NOTES=""
   local vol="cp$$"
   CUR_VOL=$vol; CUR_MODE=$VOLMODE; CUR_DEV=""
   cell_reset
   start_lunixd || wedged "lunixd did not start for $label"
   local tries=0
   until vol_exists "$vol"; do
-    mkvol "$vol" $((VOL_GIB * GIB)) "$CHUNK" "$VOLMODE"; ensure_up
+    mkvol "$vol" $((VOL_GIB * GIB)) "$CHUNK" "$VOLMODE"; wait_ping 90
     tries=$((tries + 1)); [ $tries -ge 3 ] && break
   done
   tries=0
   while [ -z "$CUR_DEV" ] || [ ! -b "$CUR_DEV" ]; do
-    attach_vol "$vol"; ensure_up
+    attach_vol "$vol"; wait_ping 90
     CUR_DEV=$(dev_of "$vol")
     tries=$((tries + 1)); [ $tries -ge 3 ] && break
   done
-  [ -b "$CUR_DEV" ] || { RUN_STATUS=fail; RUN_NOTES="setup: no device"; return; }
+  [ -b "$CUR_DEV" ] || { RUN_STATUS=fail; RUN_NOTES="setup: no device"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
   register_id "${CUR_DEV#/dev/ublkb}"
-  # mkfs and mount: a crash inside them only delays them (the kernel holds the requests until a daemon serves)
-  mkfs_fs "$fs" "$CUR_DEV" || { RUN_STATUS=fail; RUN_NOTES="setup: mkfs"; return; }
-  ensure_up
-  mount_fs "$fs" "$CUR_DEV" "$MNT" || { RUN_STATUS=fail; RUN_NOTES="setup: mount"; return; }
+  # mkfs and mount: a crash inside them only delays them (the supervisor restarts the daemon and the kernel reissues)
+  mkfs_fs "$fs" "$CUR_DEV" || { RUN_STATUS=fail; RUN_NOTES="setup: mkfs"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
+  mount_fs "$fs" "$CUR_DEV" "$MNT" || { RUN_STATUS=fail; RUN_NOTES="setup: mount"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
   local rt=$((WL_SECS + POST_SECS + 120))
   wl_start "$label" "$fs" "$rt" 268435456 4
   ( while :; do sleep "$GC_EVERY_S"; timeout -k 5 120 "$LUNIX" --socket "$SOCK" gc "$vol" >/dev/null 2>&1; done ) </dev/null >/dev/null 2>&1 &
@@ -81,25 +123,23 @@ one_run() {
   local deadline_post=""
   while :; do
     sleep 0.5
-    if ! daemon_alive; then
-      if [ "$CRASHED" = 0 ]; then ensure_up; deadline_post=$((SECONDS + POST_SECS)); say "- crashed after ${CRASH_T}s (exit $DRC)"
-      else wedged "daemon died again without a crash setting ($label)"; fi
-    fi
+    if [ -z "$deadline_post" ] && crash_seen; then deadline_post=$((SECONDS + POST_SECS)); say "- crashed after ${CRASH_T}s (status $(awk 'NR==1{print $2}' "$OUT/sup-exits.log"))"; fi
     [ -n "$deadline_post" ] && [ "$SECONDS" -ge "$deadline_post" ] && break
     [ -z "$deadline_post" ] && [ $((SECONDS - RUN_T0)) -ge "$WL_SECS" ] && break
     [ $((SECONDS - RUN_T0)) -ge "$RUN_CAP_S" ] && { RUN_NOTES="$RUN_NOTES;run cap"; break; }
     wl_alive || { RUN_NOTES="$RUN_NOTES;load ended early"; break; }
   done
   stop_gc_loop
-  if [ "$CRASHED" = 0 ]; then RUN_STATUS=unreached; fi
-  # stop the load: it ends by its own runtime (rt) at the latest; TERM it now so the run stays short
+  # a crash may also come during the checks below: look again at the end
   WL_STOPPED=1; kill -TERM "$FIO_PID" 2>/dev/null
   wl_finish "$fs" 600
   detach_vol "$vol"; local drc=$?
+  if [ "$drc" != 0 ]; then wait_ping 90; detach_vol "$vol"; drc=$?; fi
   lunix_fsck "$vol" "$label"; local frc=$?
+  crash_seen
+  [ "$CRASHED" = 0 ] && RUN_STATUS=unreached
   { wl_ok && [ "$drc" = 0 ] && [ "$frc" = 0 ]; } || RUN_STATUS=fail
   WL_STOPPED=0
-  [ "$CRASHED" = 0 ] && [ "$RUN_STATUS" = fail ] && RUN_STATUS=fail
   RUN_SECS=$((SECONDS - RUN_T0))
   [ $RUN_SECS -gt "$RUN_CAP_S" ] && RUN_NOTES="$RUN_NOTES;exceeded the ${RUN_CAP_S}s cap"
   RUN_REC_MS=$(daemon_ms "$DLOG")
@@ -123,7 +163,7 @@ if [ ! -s "$COUNTS" ]; then
   WL_SECS_ORIG=$WL_SECS; POST_SECS_ORIG=$POST_SECS; WL_SECS=$COUNT_SECS; POST_SECS=0
   one_run count ext4 "LUNIX_CRASH_COUNT=$OUT/counts.raw" || true
   stop_lunixd || wedged "the counting daemon did not exit"   # the counts are written on its clean exit
-  [ -s "$OUT/counts.raw" ] && cp "$OUT/counts.raw" "$OUT/counts.txt"
+  [ -s "$OUT/counts.raw" ] && { cp "$OUT/counts.raw" "$OUT/counts.txt"; cp "$OUT/counts.raw" "$COUNTS"; }
   WL_SECS=$WL_SECS_ORIG; POST_SECS=$POST_SECS_ORIG
 fi
 [ -s "$COUNTS" ] && COUNT_SRC=counted || COUNT_SRC="HITS_FALLBACK ($HITS_FALLBACK: the daemon wrote no counts)"

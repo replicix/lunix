@@ -41,8 +41,8 @@ NEED_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB))
 
 # fio_env TARGET I QD JOBS: exports the variables of the job files
 fio_env() {
-  local i=$3 jobs=$5
-  export SEED=$((1000 + i)) QD=$4 JOBS=$jobs RUNTIME LOOPS=1000000 VONLY=0
+  local i=$2 jobs=$4
+  export SEED=$((1000 + i)) QD=$3 JOBS=$jobs RUNTIME LOOPS=1000000 VONLY=0
   export PER_JOB=$((PER_PROFILE_MIB * MIB / jobs)) TRIM_SIZE=$((TRIM_MIB * MIB))
   if [ "$1" = raw ]; then
     export DEV="$CUR_DEV" BASE=$((i * PER_PROFILE_MIB * MIB)) TRIM_BASE=$(((NPROF * PER_PROFILE_MIB + i * TRIM_MIB) * MIB))
@@ -125,5 +125,6 @@ for chunk in "${_c[@]}"; do for mode in "${_m[@]}"; do for tgt in "${_t[@]}"; do
   [ -e "$OUT/WEDGED" ] && break 3
 done; done; done
 say ""; say "## end"
+[ "$(wc -l < "$RES")" = "$NCELLS" ]; expect "every cell produced a result record ($(wc -l < "$RES") of $NCELLS)" $? || FAIL=1
 say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
 exit "$FAIL"
