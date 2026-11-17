@@ -196,6 +196,7 @@ impl Collector for MovingCollector {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
 
@@ -205,6 +206,7 @@ impl Collector for MovingCollector {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
 
