@@ -19,11 +19,14 @@
 //!    opener and the M9 destage adapter, then `Engine::open`, which verifies
 //!    the chain, applies R4, sweeps orphans, catches the index up, recovers
 //!    the journal and raises the floor.
-//! 5. Only then record the trust-on-first-use pin and the keyring sequence in
+//! 5. Register GC's urgent pass as the space ladder's compact step
+//!    ([`CompactStep`]).
+//! 6. Only then record the trust-on-first-use pin and the keyring sequence in
 //!    `state/pins` (R4 precedes every write).
 
 mod destage;
 mod floor;
+mod ladder;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,6 +49,7 @@ use lunix_format::{CommitSeq, CryptoMode, DekGen, FamilyId, IdLen, Profile, Volu
 use lunix_iface::clock::{Clock, SystemClock};
 use lunix_iface::crypto::{CommitCodec, ExtentCodec, MetaCodec};
 use lunix_iface::map::{BlockMap, NodeSource};
+use lunix_iface::space::{Ladder, LadderStepKind};
 use lunix_iface::store::{CommitStore, PackRead, VolumeDir};
 use lunix_iface::Error;
 use lunix_index::LsmIndex;
@@ -57,6 +61,7 @@ use lunix_store::{read_volume_file, FsOps, LocalVolume, StoreOptions};
 
 pub use destage::{map_error, map_outcome, retry_of, PipelineDestager, PressureThresholds};
 pub use floor::DirFloor;
+pub use ladder::CompactStep;
 
 use crate::fsio;
 
@@ -831,6 +836,11 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         hooks: Arc::new(NoHooks),
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);
+    // The ladder's compact step is GC's urgent pass (plan M12 step 12).
+    space.register(
+        LadderStepKind::Compact,
+        Box::new(CompactStep(Arc::downgrade(&engine))),
+    );
     record_pins(&store, &desc, ok.record_pin, ok.keyring_seq)?;
     Ok(VolumeStack {
         engine,

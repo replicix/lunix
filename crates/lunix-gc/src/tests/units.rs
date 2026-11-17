@@ -314,6 +314,38 @@ fn status_and_stats_follow_the_passes() {
 }
 
 #[test]
+fn a_requested_pass_starts_although_none_is_due() {
+    let mut s = sim();
+    churn(&mut s, 6);
+    s.clock.advance(Duration::from_secs(5));
+    s.pass().unwrap();
+    let before = s.gc.stats().passes;
+    // Nothing changed since: no pass is due, however long the volume idles.
+    s.clock.advance(Duration::from_secs(5));
+    let p = s.step().unwrap();
+    assert_eq!(p.state, GcState::Idle);
+    assert!(!p.done);
+    assert_eq!(s.gc.stats().passes, before);
+    // Asked for, the next step starts one; it runs to its end as usual.
+    s.gc.request_pass();
+    s.pass().unwrap();
+    assert_eq!(s.gc.stats().passes, before + 1);
+    // The request was used up.
+    s.clock.advance(Duration::from_secs(5));
+    s.step().unwrap();
+    assert_eq!(s.gc.stats().passes, before + 1);
+    assert_eq!(s.gc.status().state, None);
+    // An urgent pass answers a pending request: no second pass follows it.
+    s.gc.request_pass();
+    s.urgent(1).unwrap();
+    assert_eq!(s.gc.stats().passes, before + 2);
+    s.clock.advance(Duration::from_secs(5));
+    s.step().unwrap();
+    assert_eq!(s.gc.stats().passes, before + 2);
+    assert_eq!(Collector::status(&s.gc), s.gc.status());
+}
+
+#[test]
 fn a_pass_that_finds_nothing_writes_no_evidence() {
     let mut s = sim();
     s.write(0, 1);

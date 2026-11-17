@@ -34,16 +34,16 @@ use std::time::Duration;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
-use lunix_iface::gc::{Collector, GcView, Moved, TipInfo};
+use lunix_iface::gc::{Collector, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
 use lunix_iface::space::SpaceKind;
-use lunix_iface::{Error, Result};
+use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
 use crate::engine::{CommitOutcome, Inner};
-use crate::recover::{high_water, Recovered};
+use crate::recover::Recovered;
 use crate::stats::add;
 
 /// The coordinator's state, under the engine's coordinator mutex.
@@ -72,6 +72,14 @@ pub(crate) struct Coord {
     /// A `persist` failed (at C8 or of the catch-up at open): the next cut
     /// retries it before anything else and fails while it fails (N13).
     pub(crate) index_unpersisted: bool,
+    /// When a cut that failed for space last ran GC's urgent pass (the space
+    /// ladder's compact step from the coordinator; rate-limited).
+    pub(crate) last_space_urgent: Option<Duration>,
+    /// The last cut failed for space: the next cut applies no compaction
+    /// re-hints (they stay in `moved`, their outputs are named all the same),
+    /// so a cut that fails again leaves the map at the tip and GC's urgent
+    /// pass can still run.
+    pub(crate) short_of_space: bool,
 }
 
 impl Coord {
@@ -92,6 +100,8 @@ impl Coord {
             collector,
             upto_seg: rec.upto_seg,
             index_unpersisted: rec.index_unpersisted,
+            last_space_urgent: None,
+            short_of_space: false,
         }
     }
 }
@@ -312,8 +322,17 @@ impl Inner {
                     c = prev + (c - prev) / 2;
                     tracing::info!(cut = c, "map dirty-leaf cap reached: cutting smaller");
                 }
-                Err(CutFail::Other(e)) => return Err(e),
-                Ok(o) => return Ok(o),
+                Err(CutFail::Other(e)) => {
+                    if e.kind() == ErrorKind::NoSpace {
+                        co.short_of_space = true;
+                        self.space_short(co);
+                    }
+                    return Err(e);
+                }
+                Ok(o) => {
+                    co.short_of_space = false;
+                    return Ok(o);
+                }
             }
         }
     }
@@ -375,7 +394,14 @@ impl Inner {
         // failure keeps them for the next cut (nothing was applied); a later
         // failure of this cut leaves them applied in memory, pointing at
         // sealed segments, and still to be named (`pending_named`).
-        if let Err(e) = self.apply_moved(co) {
+        // While cuts fail for space the re-hints wait (`short_of_space`): a
+        // failed destage after them would leave the map ahead of the tip and
+        // stop GC, the one thing that frees space.
+        if co.short_of_space {
+            if !co.moved.is_empty() {
+                tracing::debug!("compaction re-hints deferred: the last cut failed for space");
+            }
+        } else if let Err(e) = self.apply_moved(co) {
             tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
         }
         // C3: destage; every segment sealed before the map transaction
@@ -725,43 +751,14 @@ impl Inner {
     }
 
     fn gc_step(&self, co: &mut Coord) {
-        let (Some(budget), Some(params)) = (self.cfg.gc_budget, self.cfg.gc_params) else {
+        let Some(budget) = self.cfg.gc_budget else {
             return;
         };
-        if co.collector.is_none() {
-            return;
-        }
         // The hook's preconditions (M17): between cuts, map root = tip root.
-        if self.map.root() != co.tip.map_root || self.map.dirty_leaf_count() != 0 {
+        if self.cfg.gc_params.is_none() || co.collector.is_none() || !self.map_at_tip(co) {
             return;
         }
-        let tip = TipInfo {
-            commit_seq: co.tip.common.commit_seq,
-            map_root: co.tip.map_root,
-            chain_floor: co.tip.chain_floor,
-            high_water_mark: high_water(&co.retained),
-        };
-        let retained = co.retained.clone();
-        let view = GcView {
-            retained: &retained,
-            tip,
-            pins: &*self.pins,
-            map: &*self.map,
-            index: &*self.index,
-            segments: &*self.segments,
-            packs: &*self.packs,
-            commits: &*self.commits,
-            commit_codec: &*self.commit_codec,
-            extents: &*self.extents,
-            state: &*self.gc_state,
-            space: &*self.space,
-            clock: &*self.clock,
-            params,
-        };
-        let Some(collector) = co.collector.as_mut() else {
-            return;
-        };
-        match collector.step(&view, budget) {
+        match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => co.moved.extend(p.moved),
             Err(e) => tracing::warn!(error = %e, "gc step failed; the pass resumes later"),
         }

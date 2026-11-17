@@ -215,6 +215,22 @@ pub trait Collector: Send {
 
     /// Counters.
     fn stats(&self) -> GcStats;
+
+    /// Makes the next `step` start a pass even when none is due (the control
+    /// socket's `Gc`: a pass now, not after the pass interval). A pass in
+    /// progress is not affected; an urgent pass clears the request (it is a
+    /// whole pass). The default ignores it: the collector keeps its own
+    /// schedule.
+    fn request_pass(&mut self) {}
+
+    /// The collector's state for `GcStatus`. The default carries the counters
+    /// only.
+    fn status(&self) -> GcStatusSnapshot {
+        GcStatusSnapshot {
+            stats: self.stats(),
+            ..GcStatusSnapshot::default()
+        }
+    }
 }
 
 /// A snapshot of the collector for `GcStatus`.

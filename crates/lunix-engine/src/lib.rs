@@ -45,6 +45,7 @@ mod destage;
 mod engine;
 mod error;
 mod flush;
+mod gc;
 mod queue;
 mod read;
 mod recover;

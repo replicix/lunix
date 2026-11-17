@@ -154,6 +154,31 @@ paths = [
   "bench/phase1/gc/**",
 ]
 
+# M12c: the daemon GC wiring left from plan M12 step 12 (GcControl, the Gc and
+# GcStatus handlers, the urgent pass as the space ladder's compact step).
+[m12c]
+paths = [
+  "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/tests/units.rs",
+  "crates/lunix-engine/src/gc.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/src/stack/ladder.rs",
+  "crates/lunixd/tests/control.rs",
+  "crates/lunixd/tests/control_gc.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_gc_ladder.rs",
+  "crates/lunix-cli/tests/socket.rs",
+  "crates/lunix-cli/tests/snapshots/gc-status.txt",
+  "docs/reference/gc.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 

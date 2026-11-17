@@ -9,6 +9,7 @@ use lunix_format::{CommitSeq, WriteSeq};
 use lunix_iface::block::{BlockEngine, QueueConfig, QueueHandler, ResizeHook};
 use lunix_iface::clock::Clock;
 use lunix_iface::crypto::{CommitCodec, ExtentCodec};
+use lunix_iface::gc::{GcControl, GcPassSummary, GcStatusSnapshot};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::journal::{Journal, LaneId};
 use lunix_iface::map::BlockMap;
@@ -96,6 +97,12 @@ pub(crate) struct Inner {
     /// `JournalReserved` bytes the engine holds (admissions minus reclaims).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
+    /// The collector's status after its last call (`GcControl::status` reads
+    /// it without the coordinator mutex).
+    pub(crate) gc_status: Mutex<GcStatusSnapshot>,
+    /// `quiesce` was called: the engine is about to be dropped (detach, a
+    /// quiesce handover). A requested GC pass stops waiting.
+    pub(crate) closing: AtomicBool,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
 }
@@ -233,6 +240,10 @@ impl Engine {
             cfg.read_helpers,
         );
         let lanes = usize::from(deps.journal.lanes());
+        let gc_status = collector
+            .as_ref()
+            .map(|c| c.status())
+            .unwrap_or_default();
         let coord = Coord::new(&rec, collector, deps.clock.monotonic());
         let inner = Arc::new(Inner {
             size: AtomicU64::new(rec.tip.size),
@@ -267,6 +278,8 @@ impl Engine {
             durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
             coord: Mutex::new(coord),
+            gc_status: Mutex::new(gc_status),
+            closing: AtomicBool::new(false),
             resize_hook: Mutex::new(None),
             report: rec.report,
             cfg,
@@ -378,6 +391,25 @@ impl Engine {
     }
 }
 
+/// The daemon's way to the collector (the control socket's `Gc` and
+/// `GcStatus`, the space ladder's compact step); see the `gc` module.
+impl GcControl for Engine {
+    /// Blocks until the pass ends (it waits out the grace) or, for a dry run,
+    /// until the mark is done. Never call it from a queue thread.
+    fn run_pass(&self, dry_run: bool) -> Result<GcPassSummary> {
+        self.inner.run_pass(dry_run)
+    }
+
+    /// Blocks for the urgent pass. Never call it from a queue thread.
+    fn run_urgent(&self, want_bytes: u64) -> Result<u64> {
+        self.inner.run_urgent(want_bytes)
+    }
+
+    fn status(&self) -> GcStatusSnapshot {
+        lock(&self.inner.gc_status).clone()
+    }
+}
+
 impl Drop for Engine {
     fn drop(&mut self) {
         self.stop_threads();
@@ -449,6 +481,9 @@ impl BlockEngine for Engine {
     }
 
     fn quiesce(&self) -> Result<()> {
+        // Before the coordinator mutex: a requested GC pass waiting out its
+        // grace gives up at its next step instead of holding the detach.
+        self.inner.closing.store(true, Ordering::Release);
         let mut co = lock(&self.inner.coord);
         self.inner.commit(&mut co, false, None).map(|_| ())
     }

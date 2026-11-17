@@ -2,17 +2,18 @@
 //!
 //! Every handler blocks (file I/O, ublk control commands, engine commits) and
 //! runs on a blocking thread of the control server, never on a tokio worker.
-//! One mutex per volume serialises the calls on that volume; the registry has
-//! its own.
+//! One mutex per volume serialises the calls on that volume (except `Gc`,
+//! which holds it only to find the engine, and `GcStatus`, which does not take
+//! it); the registry has its own.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Instant;
 
 use lunix_crypto::{Argon2Cost, AttachError};
-use lunix_engine::OnJournalDamage;
+use lunix_engine::{Engine, OnJournalDamage};
 use lunix_format::commit::Commit;
 use lunix_format::local::{DeviceRecord, RegistryEntry, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
@@ -26,7 +27,7 @@ use lunix_iface::ctl::{
     VolumeCreate, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody, VolumeSummary,
     PROTOCOL_VERSION,
 };
-use lunix_iface::gc::GcStatusSnapshot;
+use lunix_iface::gc::GcControl;
 use lunix_iface::space::{SpaceEvents, SpaceGate};
 use lunix_iface::store::VolumeDir;
 use lunix_iface::ErrorKind;
@@ -83,6 +84,10 @@ pub struct Daemon {
     cfg: DaemonConfig,
     registry: Mutex<Registry>,
     slots: Mutex<HashMap<String, Arc<Mutex<Slot>>>>,
+    /// The engine of each attached volume, held weakly: `GcStatus` reads the
+    /// collector's status without the volume's mutex, which a running `Gc`
+    /// pass or an attach may hold for a long time.
+    engines: Mutex<HashMap<String, Weak<Engine>>>,
     audit: Audit,
     /// Set before a quiesce takes its snapshot: mutating calls are refused
     /// (cleared again when the quiesce fails without freezing anything).
@@ -365,6 +370,7 @@ impl Daemon {
             cfg,
             registry: Mutex::new(registry),
             slots: Mutex::new(slots),
+            engines: Mutex::new(HashMap::new()),
             quiescing: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exit_tx: Mutex::new(None),
@@ -405,6 +411,11 @@ impl Daemon {
 
     fn slot(&self, name: &str) -> Arc<Mutex<Slot>> {
         Arc::clone(lock(&self.slots).entry(name.to_owned()).or_default())
+    }
+
+    /// Remembers the engine of a volume being attached (for `GcStatus`).
+    fn note_engine(&self, name: &str, live: &Live) {
+        lock(&self.engines).insert(name.to_owned(), Arc::downgrade(&live.stack.engine));
     }
 
     fn entry(&self, name: &str) -> Result<RegistryEntry, CtlError> {
@@ -719,6 +730,7 @@ impl Daemon {
                     locked_bytes = live.device.locked_bytes() + live.stack.journal.locked_bytes(),
                     "attached; queue and journal I/O memory locked"
                 );
+                self.note_engine(&name, &live);
                 *g = Slot::Attached(Box::new(live));
                 Ok(Response::Attached(resp))
             }
@@ -1102,17 +1114,61 @@ impl Daemon {
 
     // ------------------------------------------------------------ gc
 
+    /// `Gc`: a pass now (or a dry run) on the engine's coordinator
+    /// (`GcControl::run_pass`; `--dry-run` takes the same path and changes
+    /// nothing). The volume's mutex is held only to find the engine: a pass
+    /// waits out its grace, and a detach or a quiesce must not wait for it.
+    /// A quiesce of the engine (detach, `QuiesceAll`) ends the wait with
+    /// `Closed`; the pass itself goes on as a background pass while the
+    /// engine lives.
     fn gc(&self, g: &GcRequest) -> Result<Response, CtlError> {
         self.entry(&g.name)?;
-        Err(err(
-            ErrorCode::Invalid,
-            "gc: this build has no collector (lunix-gc, M17, is not merged)",
-        ))
+        let engine = {
+            let slot = self.slot(&g.name);
+            let guard = lock(&slot);
+            match &*guard {
+                Slot::Attached(l) => Arc::clone(&l.stack.engine),
+                _ => {
+                    return Err(err(
+                        ErrorCode::Invalid,
+                        format!("attach {} first: gc runs on an attached volume", g.name),
+                    ))
+                }
+            }
+        };
+        let started = Instant::now();
+        let res = engine.run_pass(g.dry_run);
+        drop(engine);
+        match res {
+            Ok(s) => {
+                tracing::info!(
+                    volume = %g.name,
+                    dry_run = s.dry_run,
+                    pass = s.pass,
+                    bytes_freed = s.bytes_freed,
+                    segments_deleted = s.segments_deleted,
+                    segments_compacted = s.segments_compacted,
+                    ms = started.elapsed().as_millis() as u64,
+                    "gc pass on request"
+                );
+                Ok(Response::Gc(s))
+            }
+            Err(lunix_iface::Error::Closed) => Err(err(
+                ErrorCode::Busy,
+                format!("{} was detached or quiesced while the gc pass ran", g.name),
+            )),
+            Err(e) => Err(err(store_code(e.kind()), format!("gc: {e}"))),
+        }
     }
 
+    /// `GcStatus`: the collector's last published status, without waiting
+    /// for the volume's mutex. A volume that is not attached is idle.
     fn gc_status(&self, p: &NameParam) -> Result<Response, CtlError> {
         self.entry(&p.name)?;
-        Ok(Response::GcStatus(GcStatusSnapshot::default()))
+        let engine = lock(&self.engines).get(&p.name).and_then(Weak::upgrade);
+        Ok(Response::GcStatus(
+            engine.map(|e| e.status()).unwrap_or_default(),
+        ))
     }
 
     // ------------------------------------------------------------ quiesce, startup
@@ -1315,6 +1371,7 @@ impl Daemon {
             match self.bring_up(&e.name, &voldir, AttachOpts::default()) {
                 Ok((live, recovered, _)) => {
                     tracing::info!(volume = %e.name, recovered, stall_ms = started.elapsed().as_millis() as u64, "volume recovered at start");
+                    self.note_engine(&e.name, &live);
                     *g = Slot::Attached(Box::new(live));
                 }
                 Err(Failed::Orphan { dev_id, error }) => {

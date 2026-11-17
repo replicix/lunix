@@ -17,6 +17,24 @@ up a cut for longer than one unit past the budget.
 A pass runs when the previous one ended at least 30 s ago and something may
 have changed: a new tip, condemned objects waiting, or different pins.
 
+The daemon reaches the collector in three ways (the engine's `GcControl`, all
+on the coordinator):
+
+- **`lunix gc NAME`** (`Gc`) finishes the pass in progress, or starts one at
+  once (due or not), and steps it to its end, releasing the coordinator
+  between steps; it returns that pass's summary, so it takes at least the
+  grace. A detach or quiesce of the volume ends the wait (`Busy`); the pass
+  then goes on in the background. **`--dry-run`** is one call that marks and
+  reports what a pass would condemn, delete and compact, changing nothing.
+- **`lunix gc NAME --status`** (`GcStatus`) reads the status the collector
+  published after its last call, without waiting for the coordinator.
+- **The space ladder's compact step** is the urgent pass (below): the gate
+  runs it on its own thread when a reservation does not fit. A cut that fails
+  for space (a destage `NoSpace` from a full host file system) runs it too,
+  from the coordinator, at most every 2 s, and holds back compaction
+  re-hints until a cut succeeds, so a failed cut never leaves the map ahead
+  of the tip (which would stop GC).
+
 ## What is kept
 
 **Roots** are pinned when a mark starts:
