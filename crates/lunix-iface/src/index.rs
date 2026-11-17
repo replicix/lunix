@@ -131,7 +131,12 @@ pub trait ChunkIndex: Send + Sync {
     fn catch_up(&self, segments: &[SegId], footers: &dyn SegmentFooters) -> Result<CatchUpReport>;
 
     /// Rebuilds the whole index from the footers of `segments` (the
-    /// `fsck --rebuild-index` engine).
+    /// `fsck --rebuild-index` engine), atomically and durably: the entries
+    /// are written as new runs first, then one manifest swap replaces every
+    /// old run (the old run files stay for GC). A crash leaves the old index
+    /// or the new one, never an empty manifest. The caller passes only
+    /// segments a durable commit covers (ids at or below the highest one the
+    /// retained chain names), since the entries are persisted at once.
     fn rebuild(&self, segments: &[SegId], footers: &dyn SegmentFooters) -> Result<()>;
 
     /// Deletes a run file; returns the bytes freed (missing frees 0). The

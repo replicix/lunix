@@ -113,8 +113,12 @@ fn low_live_segment(s: &mut Sim) -> SegId {
         s.write(i, 300 + i);
     }
     s.commit().unwrap();
-    s.commit().unwrap();
-    s.commit().unwrap();
+    // Until no FULL of GC's retained set (from the lowest chain_floor a
+    // retained FULL records, N24) predates the overwrite: 2·retain_last − 2
+    // commits.
+    for _ in 0..(2 * s.retain_last).saturating_sub(2).max(2) {
+        s.commit().unwrap();
+    }
     seg
 }
 
@@ -347,6 +351,8 @@ fn rule12_ii_condemn_skips_an_object_a_retained_commit_names() {
     s.write(0, 4242);
     s.commit().unwrap();
     assert!(s.tip.new_segments.contains(&out));
+    s.commit().unwrap();
+    // One more: the FULL before the overwrite leaves GC's retained set (N24).
     s.commit().unwrap();
     // Dead now, but a retained FULL names it.
     let l = s.with_view(|v| crate::liveness(v, s.cfg.gc)).unwrap();

@@ -356,7 +356,7 @@ pub fn reset_rollback_floor_is_refused_without_the_option<F: StoreFixture>(f: &m
     for why in [
         FloorReset::TruncateTip,
         FloorReset::OperatorReset,
-        FloorReset::RepairPins,
+        FloorReset::RepairPins { max_keyring_seq: 0 },
     ] {
         let e = f
             .volume()

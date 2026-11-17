@@ -29,3 +29,6 @@ lunix-format.workspace = true
 tempfile.workspace = true
 proptest.workspace = true
 lunix-testkit.workspace = true
+lunix-store.workspace = true
+lunix-map.workspace = true
+lunix-index.workspace = true

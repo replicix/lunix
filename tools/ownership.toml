@@ -126,6 +126,10 @@ paths = ["crates/lunix-cli/**"]
 paths = [
   "crates/lunix-cli/src/fsck.rs",
   "crates/lunix-cli/src/key.rs",
+  "crates/lunix-cli/src/lib.rs",
+  "crates/lunix-cli/src/main.rs",
+  "crates/lunix-cli/tests/**",
+  "crates/lunix-cli/Cargo.toml",
 ]
 
 # M14 creates src/gc.rs (the stub M17.B fills).
@@ -143,6 +147,9 @@ exclude = ["crates/lunix-gc/tests/**"]
 paths = [
   "crates/lunix-gc/tests/**",
   "crates/lunix-fsck/src/gc.rs",
+  "crates/lunix-fsck/tests/gc*.rs",
+  "crates/lunix-fsck/tests/gc_hook.rs",
+  "crates/lunix-fsck/tests/common/mod.rs",
   "crates/lunixd/tests/stack_gc*.rs",
   "bench/phase1/gc/**",
 ]

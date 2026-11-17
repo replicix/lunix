@@ -2739,7 +2739,12 @@ in Spec gaps (N6-N9).
    but read, so no GC version can delete a future pin's base); and the
    trained dictionaries referenced by live extents (none in phase 1;
    codec-3 extents are counted when they appear). `chain_floor` is the
-   older retained FULL's `commit_seq`.
+   older retained FULL's `commit_seq`. **GC's retained set** (N24, lead
+   decision of 2026-11-14, option (b)) is every FULL from the lowest
+   `chain_floor` any retained FULL records up to the tip, for roots and for
+   "named by a retained commit" alike (with `retain_last = 2`: three FULLs,
+   so after `fsck --repair --truncate-tip` both roots of the predecessor are
+   complete and fsck is clean).
 2. **When it runs.** On the engine's coordinator thread, between cuts, and
    only when the in-memory map root equals the tip's `map_root` (M11
    guarantees it; the hook asserts it). Mark, condemn and compaction steps
@@ -3608,6 +3613,8 @@ New gaps found by the review and the decisions:
 | N20 | integrity-mode safety rests on rules outside `lunix-crypto` (M2 review finding 2) | **resolved** (D20, cross-cutting rule 13): R1-R4 are normative in DESIGN §6, §7, §8.4, §10.1, §15 and ADR-11, and have gates in M5, M7, M9, M11, M12 and M14 |
 | N21 | the `id_len = 16` collision residual in integrity mode (M2 review finding 8) | **resolved** (D18, maintainer): keyed chunk ids in `integrity` mode; `plain` keeps the residual and promises nothing against a bucket writer |
 | N22 | the rollback anchor (DESIGN §22.1, M2 review attack 8) | **resolved** (D19, ADR-31): local floor in `state/pins` v2; phase 5 adds the mirror maximum and a Kubernetes floor; `state/pins` v2 and D18's purpose id need the maintainer's re-sign of `FREEZE.md` |
+| N24 | `--truncate-tip` after GC: the predecessor's own `chain_floor` commit and its data (GC review M1, called N12 there) | **resolved** (lead, 2026-11-14, option (b)): GC's retained set is every FULL from the lowest `chain_floor` a retained FULL records up to the tip, for roots and named objects alike (M17 rule 1, `gc.md`); `lunix-gc` reads the FULLs below the tip's `chain_floor` from the commit store; tests truncate the tip, mount the predecessor and read every root of its window |
+| N25 | the mark's leaf walk costs `leaves² / 32` skip-set lookups per mark (each leaf unit traverses the whole root; GC re-review) | **open, plan item for M17.B / the map interface:** a range walk in `BlockMap` (`walk_leaves_range(root, from_leaf, n)` or a resumable cursor) so a leaf unit costs only its own leaves; M17.B measures a 64 M-chunk (1 TiB at 16 KiB) mark against the step budget before and after |
 | N23 | salt and nonce source, hostile keyring cost, key-file open flags (M2 review findings 1, 3, 4) | **resolved** as spec statements (D20, cross-cutting rule 3, ADR-11 amendment, DESIGN §15); the code fixes are M2's, tracked in `wip/01-p1-m2-review.md` (findings 1-7) |
 
 ## Out of scope

@@ -5,7 +5,8 @@
 //! content and the ledger equals the files; at quiescence the objects that
 //! exist are exactly the model's reachable set (plus what the rules keep:
 //! named by a retained commit or above the high-water mark), and the commit
-//! objects are exactly `min(chain_floor, rollback floor) ..= tip` plus pins.
+//! objects are exactly `min(chain_floor, rollback floor) ..= tip` plus pins,
+//! where `chain_floor` is the lowest one a retained FULL records (N24).
 //!
 //! `LUNIX_GC_CASES` (default 48 per configuration) and `LUNIX_GC_OPS`
 //! (default 300) scale it; the gate run uses 2 000 cases.

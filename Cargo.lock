@@ -1007,6 +1007,9 @@ dependencies = [
  "lunix-format",
  "lunix-fsck",
  "lunix-iface",
+ "lunix-index",
+ "lunix-map",
+ "lunix-store",
  "lunix-testkit",
  "proptest",
  "serde",
@@ -1158,6 +1161,7 @@ dependencies = [
  "rustix 1.1.4",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]
