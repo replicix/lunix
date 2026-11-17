@@ -231,8 +231,13 @@ pub(crate) fn orphans(sink: &mut Sink, facts: &Facts) {
         // Without a walk nothing can be said about references.
         return;
     }
+    // At or below the high-water mark an unreferenced container is GC's
+    // garbage (its naming commit may already be collected): the GC hook's dry
+    // run counts it. Above the mark it is crash residue or a leftover.
+    let gc_garbage = |id: &lunix_format::ObjId| id.raw() <= facts.high_water;
     for id in facts.segments.keys() {
-        if facts.named_segments.contains(id)
+        if gc_garbage(id)
+            || facts.named_segments.contains(id)
             || facts.referenced_segments.contains(id)
             || facts.condemned_ids.contains(id)
         {
@@ -245,7 +250,8 @@ pub(crate) fn orphans(sink: &mut Sink, facts: &Facts) {
         ));
     }
     for id in facts.packs.keys() {
-        if facts.named_packs.contains(id)
+        if gc_garbage(id)
+            || facts.named_packs.contains(id)
             || used_packs.contains(id)
             || facts.condemned_ids.contains(id)
         {
