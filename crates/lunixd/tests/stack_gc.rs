@@ -289,15 +289,20 @@ fn churn(mode: CryptoMode, cs: u32) {
     // store stops shrinking.
     stack.engine.commit_now(true).expect("commit");
     stack.engine.commit_now(true).expect("commit");
-    let mut last = u64::MAX;
-    for _ in 0..12 {
+    // A window long enough for a whole pass at this size (a mark, the grace,
+    // the deletes, a compaction at `gc_rate`); settled after two windows
+    // without a shrink.
+    let window = 12 + (region >> 20) / 32;
+    let (mut last, mut flat) = (u64::MAX, 0);
+    for _ in 0..40 {
         concurrent_reads +=
-            ticks_with_reader(&stack, &mut d, &model, 12, &format!("{tag} settling"));
+            ticks_with_reader(&stack, &mut d, &model, window, &format!("{tag} settling"));
         let (bytes, _) = store_bytes(&vol);
-        if bytes >= last {
+        flat = if bytes >= last { flat + 1 } else { 0 };
+        if flat == 2 {
             break;
         }
-        last = bytes;
+        last = last.min(bytes);
     }
     check_all(&stack, &mut d, &model, &format!("{tag} after GC"));
     let evidence = evidence(&stack);
