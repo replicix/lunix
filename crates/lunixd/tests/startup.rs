@@ -17,7 +17,9 @@ static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn a_signal_during_startup_recovery_exits() {
-    let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(t) = common::scratch("startup") else {
         return;
     };
@@ -63,7 +65,9 @@ fn a_signal_during_startup_recovery_exits() {
 /// build warns at start, any other build does not.
 #[test]
 fn a_crashpoints_build_warns_at_start_and_a_normal_build_does_not() {
-    let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(t) = common::scratch("build-kind") else {
         return;
     };
