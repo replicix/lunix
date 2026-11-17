@@ -473,6 +473,28 @@ fn truncate_tip_refuses_when_the_previous_commit_is_no_longer_a_root() {
 }
 
 #[test]
+fn truncate_tip_with_retain_last_1_and_a_damaged_tip_goes_ahead_when_the_previous_root_resolves() {
+    // M14 re-review R-2: the walk of the previous root decides, not retain_last.
+    let mut s = spec(CryptoMode::Integrity);
+    s.retain_last = 1;
+    let b = build(&s);
+    let tip = b.commit_rel(b.known.tip);
+    b.flip(&tip, 50);
+    let r = b.fsck(&Options {
+        truncate_tip: true,
+        ..repair(&b)
+    });
+    let a = r
+        .repairs
+        .iter()
+        .find(|a| a.action == "truncate_tip")
+        .unwrap_or_else(|| panic!("{}", r.render_text()));
+    assert!(a.detail.contains("retain_last is below 2"), "{}", a.detail);
+    assert!(has(&format!("{tip}.damaged"), &b));
+    assert_eq!(r.tip, Some(b.known.tip - 1));
+}
+
+#[test]
 fn truncate_tip_walks_the_previous_root_before_changing_anything() {
     let b = build(&spec(CryptoMode::Integrity));
     let tip = b.commit_rel(b.known.tip);
@@ -524,6 +546,17 @@ fn repair_pins_replaces_a_rejected_pins_file_from_the_verified_tip() {
         assert_eq!(floor.max_commit_seq, CommitSeq(b.known.tip));
         let log = std::fs::read_to_string(b.path("state/floor-resets.log")).expect("audit");
         assert!(log.contains("repair_pins"), "{log}");
+        // The keyring that unlocked the volume stays the rollback mark (P-4).
+        let pins = lunix_format::local::LocalPinsFile::decode(&b.read("state/pins")).expect("pins");
+        let want = match &b.keyring_path {
+            Some(p) => {
+                lunix_format::keyring::Keyring::decode(&std::fs::read(p).expect("keyring"))
+                    .expect("keyring")
+                    .keyring_seq
+            }
+            None => 0,
+        };
+        assert_eq!(pins.pins.max_keyring_seq, want, "mode {}", mode_name(mode));
         // A readable file is not repaired.
         drop(store);
         let r = b.fsck(&Options {
@@ -545,4 +578,28 @@ fn the_floor_repairs_leave_an_audit_line_each() {
     let log = std::fs::read_to_string(b.path("state/floor-resets.log")).expect("audit");
     assert_eq!(log.lines().count(), 1, "{log}");
     assert!(log.contains("truncate_tip"));
+}
+
+#[test]
+fn commits_kept_only_for_the_rollback_floor_are_a_note() {
+    // M14 re-review R-3: the window between the rollback floor and GC's
+    // retained set (here commit 0; the set reaches down to commit 1) is
+    // reported as information, and the volume stays clean.
+    let b = build(&spec(CryptoMode::Integrity));
+    assert!(b.known.tip >= 3);
+    let hash = b.crypto.meta().object_hash(&b.read(&b.commit_rel(0)));
+    set_floor(
+        &b,
+        Some(RollbackFloor {
+            max_commit_seq: CommitSeq(0),
+            tip_hash: hash,
+        }),
+    );
+    let r = b.fsck(&b.opts());
+    let f = r
+        .with_code(code::FLOOR_WINDOW)
+        .next()
+        .unwrap_or_else(|| panic!("{}", r.render_text()));
+    assert!(f.message.contains("0..=0"), "{}", f.message);
+    assert_eq!(r.exit_code(), 0, "{}", r.render_text());
 }

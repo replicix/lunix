@@ -129,12 +129,22 @@ impl LockedMemory {
     /// Locks `len` bytes at `ptr`.
     ///
     /// # Errors
-    /// The `mlock` error, with a hint at `RLIMIT_MEMLOCK`.
+    /// `InvalidInput` for an unaligned region (unlocking it later would
+    /// unlock a page it shares with a neighbour); otherwise the `mlock`
+    /// error, with a hint at `RLIMIT_MEMLOCK`.
     ///
     /// # Safety
     /// `ptr .. ptr + len` must lie inside one live mapping of this process
-    /// that outlives `self`.
+    /// that outlives `self`, and `ptr` and `len` must be page-aligned (checked).
     pub unsafe fn lock_region(&mut self, ptr: *const u8, len: usize) -> std::io::Result<()> {
+        // SAFETY: sysconf has no preconditions.
+        let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap_or(4096);
+        if !(ptr as usize).is_multiple_of(page) || !len.is_multiple_of(page) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("lock_region: {ptr:p}+{len} is not page-aligned"),
+            ));
+        }
         // SAFETY: the caller's contract.
         if unsafe { libc::mlock(ptr.cast(), len) } != 0 {
             let e = std::io::Error::last_os_error();
@@ -200,6 +210,20 @@ impl Drop for LockedMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unaligned_region_is_refused_and_not_recorded() {
+        let mut l = LockedMemory::default();
+        let buf = vec![0u8; 3 * 4096];
+        let p = buf.as_ptr();
+        // SAFETY: the region is refused before any call; `buf` is live.
+        let e = unsafe { l.lock_region(p.wrapping_add(1), 4096) }.expect_err("unaligned ptr");
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+        // SAFETY: as above.
+        let e = unsafe { l.lock_region(p, 100) }.expect_err("unaligned len");
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(l.bytes(), 0);
+    }
 
     #[test]
     fn nothing_selected_does_nothing() {

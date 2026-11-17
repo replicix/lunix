@@ -3,6 +3,8 @@
 //! temporary socket.
 #![allow(dead_code)]
 
+pub mod volume;
+
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;

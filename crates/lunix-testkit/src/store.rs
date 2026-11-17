@@ -1196,7 +1196,7 @@ impl VolumeDir for MemStore {
                 why: "the commit at the new floor's height does not hash to the floor's tip_hash",
             });
         }
-        if why == FloorReset::RepairPins {
+        if matches!(why, FloorReset::RepairPins { .. }) {
             // The memory store never has a rejected pins file.
             return Err(Error::Refused {
                 why: "state/pins is not rejected; nothing to repair",

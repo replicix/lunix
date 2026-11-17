@@ -80,12 +80,12 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
   roots, LFS cost-benefit compaction, and condemn → grace → recheck →
   delete (DESIGN §11). The ladder's compact step is real.
 - `fsck`, including index rebuild.
-- The compression-dictionary study (ADR-30, plan milestone M18): the
-  benchmark of dictionaries against zstd levels at 4, 16 and 64 KiB on
-  real block-device data, with a Constellation-style arm (whole files
-  under 4 MiB, 4 MiB chunks, dictionary chosen by file extension), and the
-  crate `replicix-zdict` in replicix-core: the dictionary codec (codec id
-  3), the dictionary blob format and a generic trainer and evaluator.
+- The compression-dictionary study (ADR-30) is done: the pre-registered
+  validation study (`bench/dict-study/validation/SUMMARY.md`) found no
+  built-in dictionary worth codec 3 (D1, D3-D6 NO-GO) and per-volume
+  training on database volumes "marginal, not established" (ruling
+  R-D2). Plan milestones M18a and M18b are dropped; codec id 3 stays
+  reserved and `replicix-zdict` is not built in v1.
 - Encryption: format, the keyring with its key slots, AEAD, the
   attach-time downgrade check (descriptor MAC and KMK fingerprint), and
   hash-chained commits with an HMAC on every commit of unencrypted
@@ -114,9 +114,7 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - The default chunk size is decided (ADR-5): fio, a database (pgbench)
   and a VM-image workload at 16 KiB and 64 KiB, comparing dedup and
   compression ratio, map size, CPU per GiB and partial-chunk RMW.
-- The dictionary benchmark report is published, with both arms, and
-  `replicix-zdict` ships with its codec-3 decoder test vectors pinned as
-  goldens.
+- (The dictionary study is already published; no dictionary gate.)
 
 ## Phase 2: One S3 backend (authority), async mode
 
@@ -173,13 +171,13 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
 - `rollback`.
 - Tiered retention and the `chain_floor`.
 - Per-snapshot USED, WRITTEN and REFER, and `gc --dry-run`.
-- Compression advisor (ADR-30, a v1 requirement). The benchmark, the
-  dictionary codec and the trainer come from phase 1 (`replicix-zdict`):
-  - `lunix compress estimate`, then `train`, `apply` and `ls|rm`, with the
-    adoption thresholds and built-in dictionaries that the phase 1
-    benchmark set;
-  - the dictionary read path integration (codec id 3, `dicts/`, the GC
-    rule).
+- Compression advisor (ADR-30), reduced by the validation study: no
+  dictionaries in v1 (codec id 3 stays reserved; `train`, `apply`,
+  `ls|rm` and the dictionary read path are out). What remains is a
+  level advisor: `lunix compress estimate` reports the stored size and
+  CPU cost of the zstd levels on a sample of the volume (the study found
+  the level, not a dictionary, to be the free gain). Reopening
+  dictionaries needs the deciding experiment of ruling R-D2.
 - `diff`, raw `export`, a full-copy `restore`, shrink and `verify`.
 - GC honours `holds/` (always empty in v1).
 
@@ -190,8 +188,7 @@ done, partial and not-run items in [the plan's status](wip/00-p0-spikes-and-gate
   being written.
 - Rollback round-trips.
 - `compress estimate` on a sample lands within its stated confidence
-  interval of `--exact`; `apply --rewrite` under load keeps fio verify
-  and fsck clean, and the volume reads back identically.
+  interval of `--exact`.
 - Space figures match a brute-force recount.
 
 ## Phase 5: Multiple backends
@@ -253,6 +250,11 @@ downtime, and warm against cold time-to-steady-state measured.
 
 **Scope:**
 - `lunix upgrade` via QUIESCE/recovery with no unmount.
+- Key material in use is locked before any release that offers encrypted
+  volumes (maintainer, 2026-11-15; M12a final review F1): locked stacks
+  for every thread that handles keys, locked buffers for passphrases and
+  slot plaintext, `blake3` zeroize, and fail-closed key-arena growth.
+  Until then the docs require no swap or encrypted swap.
 - Fuzzing every decoder, and perf gates in CI.
 - Packaging (static musl binary, deb/rpm, container image).
 - Docs: tutorials, reference.

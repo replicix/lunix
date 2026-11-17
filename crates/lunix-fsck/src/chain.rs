@@ -199,14 +199,15 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
 
     // Commit files below the floor are legal only while condemned; one that
     // no longer authenticates is a warning (it matters only to the R4 walk).
+    let mut below: std::collections::BTreeMap<CommitSeq, Retained> =
+        std::collections::BTreeMap::new();
     for info in list.iter().filter(|i| i.seq < floor_seq) {
-        let opened = s
-            .vol
-            .get(info.seq)
-            .ok()
-            .and_then(|b| s.commit_codec().open_commit(info.seq, &b).ok());
+        let opened = s.vol.get(info.seq).ok().and_then(|b| {
+            let c = s.commit_codec().open_commit(info.seq, &b).ok()?;
+            Some((c, s.commit_codec().object_hash(&b)))
+        });
         match opened {
-            Some(c) => {
+            Some((c, hash)) => {
                 facts.stats.commits += 1;
                 // Still on disk until GC deletes it: what it names is not an
                 // orphan, only garbage that GC has not collected yet.
@@ -215,6 +216,14 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
                     facts.named_packs.extend(f.map_packs.iter().copied());
                     facts.named_packs.extend(f.map_root.pack);
                 }
+                below.insert(
+                    info.seq,
+                    Retained {
+                        seq: info.seq,
+                        commit: c,
+                        hash,
+                    },
+                );
             }
             None => sink.push(Finding::new(
                 code::COMMIT_BELOW_FLOOR,
@@ -243,7 +252,66 @@ pub(crate) fn check(s: &Session, sink: &mut Sink, facts: &mut Facts) {
         }
     }
 
+    gc_window(sink, facts, floor_seq, below);
     rollback(s, sink, facts, tip_seq, &tip_hash);
+}
+
+/// GC's retained set reaches below `chain_floor` (N24): the FULLs from the
+/// lowest `chain_floor` a retained FULL records, linked down from the floor
+/// commit (a missing or unlinked one ends the walk, as in `lunix-gc`). They
+/// are roots for the walk and the orphan check. Commits further down that the
+/// rollback floor keeps are reported once as a note (the window of ADR-31).
+fn gc_window(
+    sink: &mut Sink,
+    facts: &mut Facts,
+    floor_seq: CommitSeq,
+    mut below: std::collections::BTreeMap<CommitSeq, Retained>,
+) {
+    if !facts.chain_ok {
+        return;
+    }
+    let gc_floor = facts
+        .retained
+        .iter()
+        .filter_map(|r| match &r.commit {
+            Commit::Full(f) => Some(f.chain_floor),
+            _ => None,
+        })
+        .min()
+        .unwrap_or(floor_seq);
+    facts.gc_floor = gc_floor.min(floor_seq);
+    let mut child = facts.retained.first().map(|r| *r.commit.common());
+    let mut seq = floor_seq;
+    let mut extra = Vec::new();
+    while seq > gc_floor {
+        seq = CommitSeq(seq.0 - 1);
+        let Some(r) = below.remove(&seq) else {
+            break;
+        };
+        if child.is_some_and(|c| check_child(r.commit.common(), &r.hash, &c).is_err()) {
+            break;
+        }
+        child = Some(*r.commit.common());
+        extra.push(r);
+    }
+    extra.reverse();
+    let lowest_kept = extra.first().map_or(floor_seq, |r| r.seq);
+    facts.gc_extra = extra;
+    let window: Vec<CommitSeq> = below
+        .keys()
+        .copied()
+        .filter(|&q| q < lowest_kept && facts.floor.is_some_and(|f| q >= f.max_commit_seq))
+        .collect();
+    if let (Some(lo), Some(hi)) = (window.first(), window.last()) {
+        sink.push(Finding::new(
+            code::FLOOR_WINDOW,
+            "state/commits",
+            format!(
+                "commits {}..={} lie between the rollback floor and GC's retained set: kept as chain links only, what they name is not checked",
+                lo.0, hi.0
+            ),
+        ));
+    }
 }
 
 /// Rule R4 against the floor in `state/pins`.

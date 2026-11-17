@@ -577,9 +577,10 @@ fn fill(
         stats: vec![1, 2, 3],
     })
     .expect("checkpoint");
+    // An empty condemned list (body version 1: a zero count).
     vol.store_condemned(&lunix_format::gcfile::Condemned {
         body_ver: 1,
-        body: vec![0, 1, 2, 3, 4, 5, 6, 7],
+        body: vec![0, 0, 0, 0],
     })
     .expect("condemned");
     write_journal(spec, dir, desc.volume_uuid);

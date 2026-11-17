@@ -4,8 +4,9 @@
 //! # Roots
 //!
 //! The root set `R` is pinned when the mark starts and walked exactly: the
-//! map roots of the retained FULL commits of the view, plus the commits that
-//! snapshot, reader and hold pins name (read even when empty, so no GC
+//! map roots of GC's retained FULLs ([`retained_fulls`]: every FULL from the
+//! lowest `chain_floor` any retained FULL records up to the tip, N12), plus
+//! the commits that snapshot, reader and hold pins name (read even when empty, so no GC
 //! version can delete a future pin's base). Objects are listed at the same
 //! moment; only objects in those listings are ever candidates, so an object
 //! created later is never judged by a root set that predates it.
@@ -55,7 +56,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::Duration;
 
-use lunix_format::commit::{Commit, MapRoot};
+use lunix_format::commit::{Commit, Full, MapRoot};
 use lunix_format::node::DataEntry;
 use lunix_format::{CommitSeq, Hint, IdLen, IdPrefix, PackId, SegId};
 use lunix_iface::gc::GcView;
@@ -179,22 +180,81 @@ impl Liveness {
     }
 }
 
-/// Reads the root set: the retained FULLs, then the pinned commits.
+/// The lowest `chain_floor` any retained FULL of the view records (the tip's
+/// own floor when the view retains none).
+pub fn keep_floor(view: &GcView<'_>) -> CommitSeq {
+    view.retained
+        .iter()
+        .filter_map(|c| match c {
+            Commit::Full(f) => Some(f.chain_floor),
+            _ => None,
+        })
+        .chain(std::iter::once(view.tip.chain_floor))
+        .min()
+        .unwrap_or(view.tip.chain_floor)
+}
+
+/// GC's retained set (N12, option (b), lead decision of 2026-11-14): every
+/// FULL from [`keep_floor`] up to the tip, ascending. These are roots and
+/// what they name is never condemned, so after an offline `fsck --repair
+/// --truncate-tip` the predecessor's own retained window is complete (both
+/// its roots readable, every object it names present).
+///
+/// The view carries the commits from the tip's `chain_floor` up; the ones
+/// below are read from the commit store, walking down from the tip's
+/// `chain_floor`. A missing commit ends that walk (after a truncation the
+/// floor commit's own floor may already be gone: nothing below it can be
+/// kept); a commit that exists but does not open fails the call.
 ///
 /// # Errors
-/// `Invalid` when the view retains no FULL; a pin whose commit cannot be read
-/// or is not a FULL fails the mark (GC never runs past a pin it cannot
-/// resolve).
-pub fn root_set(view: &GcView<'_>) -> Result<(Vec<Root>, BTreeSet<CommitSeq>)> {
-    let mut roots: Vec<Root> = view
+/// Store and codec errors other than `NotFound`.
+pub fn retained_fulls(view: &GcView<'_>) -> Result<Vec<Full>> {
+    let mut out: Vec<Full> = view
         .retained
         .iter()
         .filter_map(|c| match c {
-            Commit::Full(f) => Some(Root {
-                seq: f.common.commit_seq,
-                root: f.map_root,
-            }),
+            Commit::Full(f) => Some(f.clone()),
             _ => None,
+        })
+        .collect();
+    let have: BTreeSet<CommitSeq> = out.iter().map(|f| f.common.commit_seq).collect();
+    let low = keep_floor(view);
+    let mut seq = view.tip.chain_floor;
+    while seq > low {
+        seq = CommitSeq(seq.0 - 1);
+        if have.contains(&seq) {
+            continue;
+        }
+        let bytes = match view.commits.get(seq) {
+            Ok(b) => b,
+            Err(e) if e.kind() == ErrorKind::NotFound => break,
+            Err(e) => return Err(e),
+        };
+        if let Commit::Full(f) = view.commit_codec.open_commit(seq, &bytes)? {
+            out.push(f);
+        }
+    }
+    out.sort_by_key(|f| f.common.commit_seq);
+    Ok(out)
+}
+
+/// Reads the root set: GC's retained FULLs ([`retained_fulls`]), then the
+/// pinned commits.
+///
+/// # Errors
+/// `Invalid` when the view retains no FULL; a retained FULL below the tip's
+/// `chain_floor` that exists but does not open, or a pin whose commit cannot
+/// be read or is not a FULL, fails the mark (GC never runs past a root it
+/// cannot resolve).
+pub fn root_set(view: &GcView<'_>) -> Result<(Vec<Root>, BTreeSet<CommitSeq>)> {
+    if !view.retained.iter().any(|c| matches!(c, Commit::Full(_))) {
+        return Err(Error::invalid("the view retains no FULL commit"));
+    }
+    let mut roots: Vec<Root> = retained_fulls(view)?
+        .iter()
+        .map(|f| Root {
+            seq: f.common.commit_seq,
+            root: f.map_root,
         })
         .collect();
     if roots.is_empty() {
