@@ -78,7 +78,28 @@ SEL=(-g "$GROUP" -x dangerous); [ -n "${TESTS:-}" ] && read -ra SEL <<< "$TESTS"
 t0=$SECONDS
 ( cd "$XFSTESTS_DIR" && HOST_OPTIONS="$OUT/local.config" timeout -k 120 "$CHECK_CAP_S" ./check -E "$OUT/exclude" "${SEL[@]}" > "$OUT/check.stdout" 2>&1 ) &
 CHECK_PID=$!
-wait "$CHECK_PID"; CRC=$?; CHECK_PID=""
+# Stall watchdog (the same rule for the reference and for Lunix): `./check` has no per-test timeout, and one test that never
+# ends costs the whole run (xfs/118 hung for 4 h on the plain loop reference and the run hit its cap). When ./check's output
+# has not grown for STALL_S seconds (default 1800; every test prints at its start and its end), the test that is running is
+# killed (its process tree, KILL) and the event is appended to stalled-tests.txt; ./check then records the test as failed
+# and goes on. A test that stalls on both targets is "fails on both" in the comparison; one that stalls only on Lunix is a defect.
+tree() { local c; for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }
+(
+  last=-1; since=$SECONDS
+  while kill -0 "$CHECK_PID" 2>/dev/null; do
+    sleep 60
+    sz=$(stat -c %s "$OUT/check.stdout" 2>/dev/null || echo 0)
+    if [ "$sz" != "$last" ]; then last=$sz; since=$SECONDS; continue; fi
+    [ $((SECONDS - since)) -ge "${STALL_S:-1800}" ] || continue
+    t=$(tail -c 300 "$OUT/check.stdout" | grep -o '[a-z0-9]*/[0-9][0-9]*' | tail -1)
+    echo "$(date -u +%FT%TZ) stalled ${t:-unknown}" >> "$OUT/stalled-tests.txt"
+    root=$(pgrep -f "tests/${t:-nonexistent}\$" | head -1)
+    [ -n "$root" ] && for p in $(tree "$root"); do kill -KILL "$p" 2>/dev/null; done
+    since=$SECONDS
+  done
+) &
+WD_PID=$!
+wait "$CHECK_PID"; CRC=$?; kill "$WD_PID" 2>/dev/null; CHECK_PID=""
 secs=$((SECONDS - t0))
 say "- ./check ended with status $CRC after ${secs}s"
 [ "$CRC" = 124 ] && fail "./check hit its cap of $CHECK_CAP_S s (aborted, not extended)"
@@ -91,6 +112,7 @@ expect "guest fsck of the TEST device clean after the run" $? || true
 if [ "$TARGET" = lunix ]; then
   for n in xt xs; do CUR_VOL=$n; detach_vol "$n"; expect "detach $n" $? || true; lunix_fsck "$n" "$n"; expect "lunix fsck --deep $n clean (exit $FSCK_RC)" $? || true; done
 fi
+[ -s "$OUT/stalled-tests.txt" ] && say "- STALLED tests (killed by the watchdog): $(cut -d" " -f3 "$OUT/stalled-tests.txt" | tr "\n" " ")"
 rec "xfstests/$TARGET/$FS/$([ "$TARGET" = lunix ] && echo "c$((CHUNK / 1024))k" || echo ref)" info check_status="$CRC" secs="$secs" results="$RESDIR" group="${TESTS:-$GROUP}"
 say "- compare with: python3 bench/phase1/exit/xfstests-compare.py <reference dir> <lunix dir>..."
 say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
