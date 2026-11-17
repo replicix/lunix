@@ -9,11 +9,19 @@
 //! key file, never from the command line or the environment, and are never
 //! printed.
 //!
+//! The keyring is per family and the volume `LOCK` per volume, so every change
+//! also takes an exclusive `flock` on the family directory
+//! (`families/<family>/`), always before the volume `LOCK`. Every secret is
+//! gathered before either lock is taken (a prompt never holds a lock), and the
+//! keyring is read, unlocked and replaced under both. A change is recorded in
+//! the volume's `state/pins` (`max_keyring_seq`) so an older keyring is refused
+//! at the next attach.
+//!
 //! A `plain` volume has no keyring and no slots. Removing a slot does not
 //! revoke the credential of someone who already saw the root key (ADR-11).
 
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -21,7 +29,7 @@ use clap::{Args, Subcommand};
 use lunix_crypto::keyring::{self, KeyFile, NewSlot, Unlock};
 use lunix_crypto::{verify_descriptor_mac, Argon2Cost, UnlockOptions};
 use lunix_format::keyring::{Keyring, RootKind, SlotParams};
-use lunix_format::local::LocalPinsFile;
+use lunix_format::local::{LocalPins, LocalPinsFile};
 use lunix_format::paths::local_keyring_path;
 use lunix_format::volume::VolumeDescriptor;
 use lunix_format::CryptoMode;
@@ -92,6 +100,11 @@ pub struct KeyAddArgs {
     #[arg(long, value_name = "FILE")]
     pub unlock_key_file: Option<PathBuf>,
 
+    /// Ask on the terminal for the existing passphrase that unlocks the
+    /// volume (no echo).
+    #[arg(long)]
+    pub unlock_passphrase: bool,
+
     /// Read the existing passphrase that unlocks the volume from this
     /// descriptor.
     #[arg(long, value_name = "FD")]
@@ -116,6 +129,11 @@ pub struct KeyRmArgs {
     #[arg(long, value_name = "FILE")]
     pub unlock_key_file: Option<PathBuf>,
 
+    /// Ask on the terminal for the existing passphrase that unlocks the
+    /// volume (no echo).
+    #[arg(long)]
+    pub unlock_passphrase: bool,
+
     /// Read the existing passphrase that unlocks the volume from this
     /// descriptor.
     #[arg(long, value_name = "FD")]
@@ -127,6 +145,9 @@ const MAX_VOLUME_FILE: u64 = 1 << 20;
 
 /// The largest keyring read (32 slots of about 200 bytes).
 const MAX_KEYRING_FILE: u64 = 1 << 20;
+
+/// How long a change waits for another key change of the same family.
+const FAMILY_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Runs `lunix key`.
 pub fn run_key(args: KeyArgs) -> ExitCode {
@@ -141,9 +162,9 @@ pub fn run_key(args: KeyArgs) -> ExitCode {
 pub(crate) fn run_key_to(args: KeyArgs, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
     let KeyArgs { command, socket } = args;
     let result = match command {
-        KeyCommand::Ls(a) => ls(&a, &socket, out),
-        KeyCommand::AddSlot(a) => add_slot(a, &socket, out),
-        KeyCommand::RmSlot(a) => rm_slot(a, &socket, out),
+        KeyCommand::Ls(a) => ls(&a, &socket, out, err),
+        KeyCommand::AddSlot(a) => add_slot(a, &socket, out, err),
+        KeyCommand::RmSlot(a) => rm_slot(a, &socket, out, err),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -185,23 +206,31 @@ fn open_vol(
     name: &str,
     dir: Option<&Path>,
     socket: &Path,
+    err: &mut dyn Write,
 ) -> Result<(PathBuf, VolumeDescriptor), CliError> {
     let dir = locate(name, dir, socket)?;
-    ensure_detached(name, socket)?;
+    ensure_detached(name, socket, err)?;
     let bytes = read_capped(&dir.join("volume"), MAX_VOLUME_FILE, "volume descriptor")?;
     let desc = VolumeDescriptor::decode(&bytes)
         .map_err(|e| CliError::Other(format!("the volume descriptor is damaged: {e}")))?;
     Ok((dir, desc))
 }
 
-fn load_keyring(name: &str, dir: PathBuf, desc: VolumeDescriptor) -> Result<Vol, CliError> {
-    let abs = std::path::absolute(&dir)
+/// `<root>/families/<family>/keyring` for the volume directory `dir`.
+fn keyring_path_of(dir: &Path, desc: &VolumeDescriptor) -> Result<PathBuf, CliError> {
+    let abs = std::path::absolute(dir)
         .map_err(|e| CliError::Other(format!("cannot make the volume path absolute: {e}")))?;
     let parent = abs.parent().unwrap_or_else(|| Path::new("/"));
-    let keyring_path = PathBuf::from(local_keyring_path(
+    Ok(PathBuf::from(local_keyring_path(
         &parent.to_string_lossy(),
         &desc.family_id,
-    ));
+    )))
+}
+
+fn load_keyring(name: &str, dir: PathBuf, desc: VolumeDescriptor) -> Result<Vol, CliError> {
+    let keyring_path = keyring_path_of(&dir, &desc)?;
+    let abs = std::path::absolute(&dir)
+        .map_err(|e| CliError::Other(format!("cannot make the volume path absolute: {e}")))?;
     let keyring_bytes = read_capped(&keyring_path, MAX_KEYRING_FILE, "keyring")?;
     let keyring = Keyring::decode(&keyring_bytes)
         .map_err(|e| CliError::Other(format!("the keyring is damaged: {e}")))?;
@@ -292,8 +321,14 @@ fn slot_infos(kr: &Keyring) -> Vec<SlotInfo> {
         .collect()
 }
 
-fn ls(a: &KeyLsArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliError> {
-    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket)?;
+fn ls(
+    a: &KeyLsArgs,
+    socket: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<(), CliError> {
+    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket, err)?;
+    let keyed = desc.crypto_mode.is_keyed();
     let mut listing = KeyListing {
         name: a.name.clone(),
         uuid: desc.volume_uuid.to_string(),
@@ -304,7 +339,7 @@ fn ls(a: &KeyLsArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliError>
         dek_gen: None,
         slots: Vec::new(),
     };
-    if desc.crypto_mode.is_keyed() {
+    if keyed {
         let vol = load_keyring(&a.name, dir, desc)?;
         listing.keyring_seq = Some(vol.keyring.keyring_seq);
         listing.root = Some(root_name(vol.keyring.root_kind));
@@ -318,7 +353,7 @@ fn ls(a: &KeyLsArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliError>
         return Ok(());
     }
     writeln!(out, "volume {} ({})", sanitize(&listing.name), listing.mode)?;
-    if listing.slots.is_empty() {
+    if !keyed {
         writeln!(out, "a plain volume has no key slots")?;
         return Ok(());
     }
@@ -362,55 +397,111 @@ impl Cred {
     }
 }
 
-fn read_key_file(path: &Path, what: &str) -> Result<KeyFile, CliError> {
-    KeyFile::read(path).map_err(|e| CliError::Usage(format!("{what} {}: {e}", path.display())))
+fn read_key_file(path: &Path, what: &str, err: &mut dyn Write) -> Result<KeyFile, CliError> {
+    let (kf, loose) = KeyFile::read_noting_mode(path)
+        .map_err(|e| CliError::Usage(format!("{what} {}: {e}", path.display())))?;
+    if loose {
+        let _ = writeln!(
+            err,
+            "warning: {} is readable by group or others; use mode 0600",
+            path.display()
+        );
+    }
+    Ok(kf)
+}
+
+/// What the command line says about unlocking.
+struct UnlockOpts<'a> {
+    key_file: Option<&'a Path>,
+    prompt: bool,
+    fd: Option<u32>,
 }
 
 /// Gathers the unlocking credential: `--unlock-key-file`,
-/// `--unlock-passphrase-fd`, or the volume's own `integrity.key`.
-fn unlock_cred(key_file: Option<&Path>, fd: Option<u32>, vol_dir: &Path) -> Result<Cred, CliError> {
-    match (key_file, fd) {
-        (Some(_), Some(_)) => Err(CliError::Usage(
-            "give one of --unlock-key-file and --unlock-passphrase-fd, not both".to_owned(),
-        )),
-        (Some(p), None) => Ok(Cred::KeyFile(read_key_file(p, "--unlock-key-file")?)),
-        (None, Some(fd)) => {
-            let pass = PassphraseArgs {
-                passphrase: true,
-                passphrase_fd: Some(fd),
-            };
-            match pass.read(false)? {
-                Some(s) => Ok(Cred::Pass(s)),
-                None => Err(CliError::Usage("no passphrase was read".to_owned())),
-            }
-        }
-        (None, None) => {
-            let default = vol_dir.join("integrity.key");
-            if default.exists() {
-                Ok(Cred::KeyFile(read_key_file(
-                    &default,
-                    "the volume's key file",
-                )?))
-            } else {
-                Err(CliError::Usage(
-                    "say how to unlock the volume: --unlock-key-file FILE or --unlock-passphrase-fd N".to_owned(),
-                ))
-            }
-        }
+/// `--unlock-passphrase` (prompt), `--unlock-passphrase-fd`, or the volume's
+/// own `integrity.key`.
+fn unlock_cred(o: &UnlockOpts<'_>, vol_dir: &Path, err: &mut dyn Write) -> Result<Cred, CliError> {
+    let given =
+        usize::from(o.key_file.is_some()) + usize::from(o.prompt) + usize::from(o.fd.is_some());
+    if given > 1 {
+        return Err(CliError::Usage(
+            "give one of --unlock-key-file, --unlock-passphrase and --unlock-passphrase-fd"
+                .to_owned(),
+        ));
+    }
+    if let Some(p) = o.key_file {
+        return Ok(Cred::KeyFile(read_key_file(p, "--unlock-key-file", err)?));
+    }
+    if o.prompt || o.fd.is_some() {
+        let pass = PassphraseArgs {
+            passphrase: o.prompt,
+            passphrase_fd: o.fd,
+        };
+        return match pass.read(false)? {
+            Some(s) => Ok(Cred::Pass(s)),
+            None => Err(CliError::Usage("no passphrase was read".to_owned())),
+        };
+    }
+    let default = vol_dir.join("integrity.key");
+    if default.exists() {
+        Ok(Cred::KeyFile(read_key_file(
+            &default,
+            "the volume's key file",
+            err,
+        )?))
+    } else {
+        Err(CliError::Usage(
+            "say how to unlock the volume: --unlock-key-file FILE, --unlock-passphrase or --unlock-passphrase-fd N"
+                .to_owned(),
+        ))
     }
 }
 
-/// Takes the volume `LOCK` (an `flock`, as the engine and `lunix-fsck` do).
-fn lock_volume(dir: &Path) -> Result<std::fs::File, CliError> {
-    let f = std::fs::OpenOptions::new()
+/// The locks of a key change, released when dropped.
+struct Locks {
+    _family: std::fs::File,
+    _volume: std::fs::File,
+}
+
+/// Takes the family lock (an `flock` on `families/<family>/`, waiting for
+/// another key change) and then the volume `LOCK` (as the engine and
+/// `lunix-fsck` do). The order is always family first.
+fn lock_all(keyring_path: &Path, vol_dir: &Path) -> Result<Locks, CliError> {
+    let fam_dir = keyring_path
+        .parent()
+        .ok_or_else(|| CliError::Other("the keyring has no directory".to_owned()))?;
+    let fam = std::fs::File::open(fam_dir)
+        .map_err(|e| CliError::Other(format!("cannot open {}: {e}", fam_dir.display())))?;
+    let start = std::time::Instant::now();
+    loop {
+        match fam.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if start.elapsed() < FAMILY_LOCK_WAIT => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(CliError::Daemon(CtlError::new(
+                    ErrorCode::Busy,
+                    "another key change of this family is running",
+                )))
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Err(CliError::Other(format!("cannot lock the family: {e}")))
+            }
+        }
+    }
+    let vol = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(dir.join("LOCK"))
+        .open(vol_dir.join("LOCK"))
         .map_err(|e| CliError::Other(format!("cannot open the volume lock: {e}")))?;
-    match f.try_lock() {
-        Ok(()) => Ok(f),
+    match vol.try_lock() {
+        Ok(()) => Ok(Locks {
+            _family: fam,
+            _volume: vol,
+        }),
         Err(std::fs::TryLockError::WouldBlock) => Err(CliError::Daemon(CtlError::new(
             ErrorCode::Busy,
             "another process holds the volume lock (is the volume attached?)",
@@ -421,12 +512,20 @@ fn lock_volume(dir: &Path) -> Result<std::fs::File, CliError> {
     }
 }
 
-/// The highest `keyring_seq` this host recorded for the volume (0 if none).
-fn seen_keyring_seq(dir: &Path) -> u64 {
-    std::fs::read(dir.join("state/pins"))
-        .ok()
-        .and_then(|b| LocalPinsFile::decode(&b).ok())
-        .map_or(0, |p| p.pins.max_keyring_seq)
+/// The pins file of the volume: `None` when absent; a rejected file is an
+/// error (never read as "no floor").
+fn read_pins(dir: &Path, name: &str) -> Result<Option<LocalPinsFile>, CliError> {
+    let path = dir.join("state/pins");
+    match std::fs::read(&path) {
+        Ok(b) => LocalPinsFile::decode(&b).map(Some).map_err(|_| {
+            CliError::Other(format!(
+                "state/pins is rejected; run `lunix fsck {} --repair --repair-pins` first",
+                sanitize(name)
+            ))
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(CliError::Other(format!("cannot read state/pins: {e}"))),
+    }
 }
 
 fn keyring_err(e: keyring::KeyringError) -> CliError {
@@ -453,14 +552,15 @@ fn keyring_err(e: keyring::KeyringError) -> CliError {
 }
 
 /// Unwraps the root with `cred` and checks that it belongs to the volume: the
-/// descriptor MAC must verify under it.
-fn unlock_root(vol: &Vol, cred: &Cred) -> Result<lunix_crypto::Root, CliError> {
+/// descriptor MAC must verify under it. `seen` is the highest `keyring_seq`
+/// this host recorded.
+fn unlock_root(vol: &Vol, cred: &Cred, seen: u64) -> Result<lunix_crypto::Root, CliError> {
     let unlocked = keyring::unlock(
         &vol.keyring_bytes,
         vol.desc.profile,
         &vol.desc.family_id,
         &cred.unlock(),
-        seen_keyring_seq(&vol.dir),
+        seen,
         &UnlockOptions::default(),
     )
     .map_err(keyring_err)?;
@@ -475,16 +575,31 @@ fn unlock_root(vol: &Vol, cred: &Cred) -> Result<lunix_crypto::Root, CliError> {
     Ok(unlocked.root)
 }
 
-/// Replaces the keyring: a temporary file beside it (same mode), `fsync`,
-/// rename, `fsync` of the directory.
-fn replace_keyring(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mode = std::fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o777)
-        .unwrap_or(0o600);
+/// Where a keyring replacement failed.
+#[derive(Debug)]
+enum ReplaceError {
+    /// Nothing was replaced: the old keyring is intact.
+    NotReplaced(std::io::Error),
+    /// The new keyring is in place, but the directory entry may not be durable.
+    NotDurable(std::io::Error),
+}
+
+/// Replaces a file atomically: a temporary file beside it (same mode and
+/// owner where permitted), `fsync`, rename, `fsync` of the directory.
+fn replace_file(path: &Path, bytes: &[u8], default_mode: u32) -> Result<(), ReplaceError> {
+    use ReplaceError::{NotDurable, NotReplaced};
+    let old = std::fs::metadata(path).ok();
+    let mode = old
+        .as_ref()
+        .map_or(default_mode, |m| m.permissions().mode() & 0o777);
     let dir = path
         .parent()
-        .ok_or_else(|| std::io::Error::other("the keyring has no directory"))?;
-    let tmp = dir.join(format!("keyring.tmp.{}", std::process::id()));
+        .ok_or_else(|| NotReplaced(std::io::Error::other("the file has no directory")))?;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = dir.join(format!("{file_name}.tmp.{}", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
     let write = || -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new()
@@ -493,19 +608,94 @@ fn replace_keyring(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             .mode(mode)
             .open(&tmp)?;
         f.write_all(bytes)?;
+        if let Some(m) = &old {
+            // Best effort: only root may give a file away.
+            let _ = std::os::unix::fs::chown(&tmp, Some(m.uid()), Some(m.gid()));
+        }
         f.sync_all()?;
-        std::fs::rename(&tmp, path)?;
-        std::fs::File::open(dir)?.sync_all()
+        std::fs::rename(&tmp, path)
     };
-    let r = write();
-    if r.is_err() {
+    if let Err(e) = write() {
         let _ = std::fs::remove_file(&tmp);
+        return Err(NotReplaced(e));
     }
-    r
+    std::fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(NotDurable)
 }
 
-fn add_slot(a: KeyAddArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliError> {
-    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket)?;
+fn replace_keyring(path: &Path, bytes: &[u8]) -> Result<(), ReplaceError> {
+    replace_file(path, bytes, 0o600)
+}
+
+/// Removes `keyring.tmp.*` files an interrupted change left behind (the family
+/// lock is held, so none belongs to a running command).
+fn sweep_temp(keyring_path: &Path) {
+    let Some(dir) = keyring_path.parent() else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        if e.file_name().to_string_lossy().starts_with("keyring.tmp.") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// Raises `max_keyring_seq` in the volume's `state/pins` to `seq`, so an older
+/// keyring is refused at the next attach. The rollback floor and the pin are
+/// kept; an absent file is created as the store does.
+fn record_keyring_seq(vol: &Vol, seq: u64) -> Result<(), CliError> {
+    let mut file = match read_pins(&vol.dir, &vol.name)? {
+        Some(f) => f,
+        None => LocalPinsFile {
+            pins: LocalPins {
+                volume_uuid: vol.desc.volume_uuid,
+                family_id: vol.desc.family_id,
+                max_keyring_seq: 0,
+                max_epoch: 0,
+                pin: None,
+            },
+            floor: None,
+        },
+    };
+    if file.pins.max_keyring_seq >= seq {
+        return Ok(());
+    }
+    file.pins.max_keyring_seq = seq;
+    let mut b = Vec::with_capacity(LocalPinsFile::LEN);
+    file.encode(&mut b)
+        .map_err(|e| CliError::Other(format!("cannot encode state/pins: {e}")))?;
+    replace_file(&vol.dir.join("state/pins"), &b, 0o644).map_err(|e| match e {
+        ReplaceError::NotReplaced(e) | ReplaceError::NotDurable(e) => CliError::Other(format!(
+            "the keyring was changed but state/pins could not be updated: {e}"
+        )),
+    })
+}
+
+/// Maps the outcome of the keyring replacement: a keyring in place but not
+/// known to be durable is a failure that must not undo anything.
+fn replaced(r: Result<(), ReplaceError>) -> Result<(), CliError> {
+    match r {
+        Ok(()) => Ok(()),
+        Err(ReplaceError::NotReplaced(e)) => {
+            Err(CliError::Other(format!("cannot replace the keyring: {e}")))
+        }
+        Err(ReplaceError::NotDurable(e)) => Err(CliError::Other(format!(
+            "the keyring was replaced but may not be durable (directory sync failed: {e}); check it with `lunix key ls`"
+        ))),
+    }
+}
+
+fn add_slot(
+    a: KeyAddArgs,
+    socket: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<(), CliError> {
+    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket, err)?;
     if !desc.crypto_mode.is_keyed() {
         return Err(CliError::Usage(
             "a plain volume has no key slots, so there is nothing to add".to_owned(),
@@ -527,21 +717,34 @@ fn add_slot(a: KeyAddArgs, socket: &Path, out: &mut dyn Write) -> Result<(), Cli
             "--passphrase-fd and --unlock-passphrase-fd need two different descriptors".to_owned(),
         ));
     }
-    let vol = load_keyring(&a.name, dir, desc)?;
+    let abs_dir = std::path::absolute(&dir)
+        .map_err(|e| CliError::Other(format!("cannot make the volume path absolute: {e}")))?;
+    // Every secret first: no lock is held across a prompt.
     let cred = unlock_cred(
-        a.unlock_key_file.as_deref(),
-        a.unlock_passphrase_fd,
-        &vol.dir,
+        &UnlockOpts {
+            key_file: a.unlock_key_file.as_deref(),
+            prompt: a.unlock_passphrase,
+            fd: a.unlock_passphrase_fd,
+        },
+        &abs_dir,
+        err,
     )?;
-    // The new slot's secret.
+    // A wrong credential fails now, before the new passphrase is asked twice;
+    // the authoritative unlock is the one under the locks.
+    let early = load_keyring(&a.name, dir.clone(), desc.clone())?;
+    unlock_root(&early, &cred, 0)?;
     let new_pass = a.pass.read(true)?;
     let (new_key, create_key_file) = match &a.key_file {
         None => (None, false),
-        Some(p) if p.exists() => (Some(read_key_file(p, "--key-file")?), false),
+        Some(p) if p.exists() => (Some(read_key_file(p, "--key-file", err)?), false),
         Some(_) => (Some(KeyFile::generate().map_err(keyring_err)?), true),
     };
-    let _lock = lock_volume(&vol.dir)?;
-    let root = unlock_root(&vol, &cred)?;
+    // Under the locks: read, unlock, derive, write.
+    let _locks = lock_all(&early.keyring_path, &abs_dir)?;
+    sweep_temp(&early.keyring_path);
+    let vol = load_keyring(&a.name, dir, desc)?;
+    let seen = read_pins(&vol.dir, &vol.name)?.map_or(0, |p| p.pins.max_keyring_seq);
+    let root = unlock_root(&vol, &cred, seen)?;
     let new_slot = match (&new_pass, &new_key) {
         (Some(p), _) => NewSlot::Passphrase {
             passphrase: p.expose(),
@@ -553,20 +756,22 @@ fn add_slot(a: KeyAddArgs, socket: &Path, out: &mut dyn Write) -> Result<(), Cli
     let (new_kr, id) =
         keyring::add_slot(&vol.keyring, vol.desc.profile, &root, &new_slot).map_err(keyring_err)?;
     let bytes = keyring::encode(&new_kr).map_err(keyring_err)?;
-    // A key file the keyring will name is made durable first, and removed
-    // again when the keyring cannot be replaced.
+    // A key file the keyring will name is made durable first. It is removed
+    // again only when the keyring was certainly not replaced.
     let key_path = a.key_file.as_deref().filter(|_| create_key_file);
     if let (Some(p), Some(k)) = (key_path, &new_key) {
         k.write_new(p).map_err(|e| {
             CliError::Other(format!("cannot write the key file {}: {e}", p.display()))
         })?;
     }
-    if let Err(e) = replace_keyring(&vol.keyring_path, &bytes) {
+    let result = replace_keyring(&vol.keyring_path, &bytes);
+    if matches!(result, Err(ReplaceError::NotReplaced(_))) {
         if let Some(p) = key_path {
             let _ = std::fs::remove_file(p);
         }
-        return Err(CliError::Other(format!("cannot replace the keyring: {e}")));
     }
+    replaced(result)?;
+    record_keyring_seq(&vol, new_kr.keyring_seq)?;
     let kind = if new_pass.is_some() {
         "passphrase"
     } else {
@@ -588,13 +793,32 @@ fn add_slot(a: KeyAddArgs, socket: &Path, out: &mut dyn Write) -> Result<(), Cli
     Ok(())
 }
 
-fn rm_slot(a: KeyRmArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliError> {
-    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket)?;
+fn rm_slot(
+    a: KeyRmArgs,
+    socket: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<(), CliError> {
+    let (dir, desc) = open_vol(&a.name, a.dir.as_deref(), socket, err)?;
     if !desc.crypto_mode.is_keyed() {
         return Err(CliError::Usage(
             "a plain volume has no key slots, so there is nothing to remove".to_owned(),
         ));
     }
+    let abs_dir = std::path::absolute(&dir)
+        .map_err(|e| CliError::Other(format!("cannot make the volume path absolute: {e}")))?;
+    let cred = unlock_cred(
+        &UnlockOpts {
+            key_file: a.unlock_key_file.as_deref(),
+            prompt: a.unlock_passphrase,
+            fd: a.unlock_passphrase_fd,
+        },
+        &abs_dir,
+        err,
+    )?;
+    let keyring_path = keyring_path_of(&dir, &desc)?;
+    let _locks = lock_all(&keyring_path, &abs_dir)?;
+    sweep_temp(&keyring_path);
     let vol = load_keyring(&a.name, dir, desc)?;
     if !vol.keyring.slots.iter().any(|s| s.slot_id == a.slot) {
         return Err(CliError::Usage(format!(
@@ -608,18 +832,13 @@ fn rm_slot(a: KeyRmArgs, socket: &Path, out: &mut dyn Write) -> Result<(), CliEr
             "the last slot cannot be removed: the volume would be locked for good".to_owned(),
         ));
     }
-    let cred = unlock_cred(
-        a.unlock_key_file.as_deref(),
-        a.unlock_passphrase_fd,
-        &vol.dir,
-    )?;
-    let _lock = lock_volume(&vol.dir)?;
-    let root = unlock_root(&vol, &cred)?;
+    let seen = read_pins(&vol.dir, &vol.name)?.map_or(0, |p| p.pins.max_keyring_seq);
+    let root = unlock_root(&vol, &cred, seen)?;
     let new_kr =
         keyring::remove_slot(&vol.keyring, vol.desc.profile, &root, a.slot).map_err(keyring_err)?;
     let bytes = keyring::encode(&new_kr).map_err(keyring_err)?;
-    replace_keyring(&vol.keyring_path, &bytes)
-        .map_err(|e| CliError::Other(format!("cannot replace the keyring: {e}")))?;
+    replaced(replace_keyring(&vol.keyring_path, &bytes))?;
+    record_keyring_seq(&vol, new_kr.keyring_seq)?;
     writeln!(
         out,
         "removed slot {} from {} (keyring_seq {})",
@@ -640,7 +859,7 @@ mod tests {
 
     use lunix_crypto::keyring::Unlock;
     use lunix_crypto::seal_descriptor;
-    use lunix_format::local::VolumeJson;
+    use lunix_format::local::{LocalPinsFile, VolumeJson};
     use lunix_format::volume::CodecPolicy;
     use lunix_format::{FamilyId, IdLen, Profile, TimeMs, VolumeUuid};
     use lunix_iface::ctl::{Outcome, Response, VolumeState};
@@ -730,7 +949,7 @@ mod tests {
         let server = FakeCtlServer::start(&tmp.path().join("ctl.sock")).unwrap();
         let root = tmp.path().join("vols");
         let dir = root.join(VolumeUuid(UUID).to_string());
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("state")).unwrap();
         let key_file = dir.join("integrity.key");
         let kind = if mode == CryptoMode::Encrypted {
             RootKind::Kmk
@@ -805,6 +1024,7 @@ mod tests {
             pass: PassphraseArgs::default(),
             key_file: None,
             unlock_key_file: None,
+            unlock_passphrase: false,
             unlock_passphrase_fd: None,
         }
     }
@@ -815,6 +1035,7 @@ mod tests {
             slot,
             dir: Some(f.root()),
             unlock_key_file: None,
+            unlock_passphrase: false,
             unlock_passphrase_fd: None,
         }
     }
@@ -1051,5 +1272,240 @@ mod tests {
             ..rm_args(&f, 1)
         }));
         assert_eq!(code, 2);
+    }
+
+    /// A second volume of the same family beside the first (its own uuid,
+    /// descriptor and `integrity.key`, the family's keyring).
+    fn sibling(f: &Fixture, name: &str, uuid: [u8; 16]) -> PathBuf {
+        let kf = KeyFile::read(&f.key_file).unwrap();
+        let bytes = std::fs::read(f.keyring()).unwrap();
+        let unlocked = keyring::unlock(
+            &bytes,
+            Profile::Default,
+            &FamilyId(FAMILY),
+            &Unlock::KeyFile(&kf),
+            0,
+            &UnlockOptions::default(),
+        )
+        .unwrap();
+        let dir = f.root().join(VolumeUuid(uuid).to_string());
+        std::fs::create_dir_all(dir.join("state")).unwrap();
+        let mut desc =
+            VolumeDescriptor::decode(&std::fs::read(f.vol_dir().join("volume")).unwrap()).unwrap();
+        desc.volume_uuid = VolumeUuid(uuid);
+        let vbytes = seal_descriptor(&mut desc, Some(&unlocked.root)).unwrap();
+        std::fs::write(dir.join("volume"), vbytes).unwrap();
+        let json = VolumeJson::new(name, &dir.to_string_lossy());
+        std::fs::write(dir.join("volume.json"), json.to_json_pretty().unwrap()).unwrap();
+        std::fs::copy(&f.key_file, dir.join("integrity.key")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_keyring_changed_while_the_command_waits_for_its_secret_is_not_overwritten() {
+        let f = fixture(CryptoMode::Integrity);
+        // Setup: a second key file, which terminal 1 will unlock with.
+        let second = f.tmp.path().join("second.key");
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(second.clone()),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+        let (rd, mut wr) = std::io::pipe().unwrap();
+        let fd = u32::try_from(rd.as_raw_fd()).unwrap();
+        // Terminal 1: add-slot --passphrase-fd, blocked until the secret comes.
+        let args = f.args(KeyCommand::AddSlot(KeyAddArgs {
+            pass: PassphraseArgs {
+                passphrase: false,
+                passphrase_fd: Some(fd),
+            },
+            unlock_key_file: Some(second.clone()),
+            ..add_args(&f)
+        }));
+        let h = std::thread::spawn(move || {
+            let (mut o, mut e) = (Vec::new(), Vec::new());
+            let code = run_key_to(args, &mut o, &mut e);
+            (exit_of(code), String::from_utf8(e).unwrap())
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // Terminal 2: a third slot, then the first one removed.
+        let third = f.tmp.path().join("third.key");
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(third),
+            unlock_key_file: Some(second.clone()),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+        let (code, _, err) = f.run(KeyCommand::RmSlot(KeyRmArgs {
+            unlock_key_file: Some(second),
+            ..rm_args(&f, 1)
+        }));
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(f.slot_ids(), vec![2, 3]);
+        // The prompt is answered: the slot is added to what is there now.
+        wr.write_all(b"late-passphrase\n").unwrap();
+        drop(wr);
+        let (code, err) = h.join().unwrap();
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(
+            f.slot_ids(),
+            vec![2, 3, 4],
+            "slot 3 survives, slot 1 stays removed"
+        );
+        assert_eq!(f.keyring_seq(), 5);
+    }
+
+    #[test]
+    fn concurrent_changes_on_sibling_volumes_keep_both_slots() {
+        let f = fixture(CryptoMode::Integrity);
+        sibling(&f, "v2", [0x22; 16]);
+        for round in 0..3u32 {
+            let before = f.keyring_seq();
+            let mut handles = Vec::new();
+            for (name, tag) in [("v1", "a"), ("v2", "b")] {
+                let key = f.tmp.path().join(format!("{tag}{round}.key"));
+                let args = f.args(KeyCommand::AddSlot(KeyAddArgs {
+                    name: name.into(),
+                    key_file: Some(key),
+                    ..add_args(&f)
+                }));
+                handles.push(std::thread::spawn(move || {
+                    let (mut o, mut e) = (Vec::new(), Vec::new());
+                    let code = run_key_to(args, &mut o, &mut e);
+                    (exit_of(code), String::from_utf8(e).unwrap())
+                }));
+            }
+            for h in handles {
+                let (code, err) = h.join().unwrap();
+                assert_eq!(code, 0, "{err}");
+            }
+            assert_eq!(f.keyring_seq(), before + 2, "round {round}");
+        }
+        assert_eq!(f.slot_ids().len(), 7);
+    }
+
+    #[test]
+    fn a_key_change_is_recorded_in_state_pins_and_an_older_keyring_is_refused() {
+        let f = fixture(CryptoMode::Integrity);
+        let old = std::fs::read(f.keyring()).unwrap();
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(f.tmp.path().join("k2")),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+        let pins =
+            LocalPinsFile::decode(&std::fs::read(f.vol_dir().join("state/pins")).unwrap()).unwrap();
+        assert_eq!(pins.pins.max_keyring_seq, 2);
+        // Someone puts the old keyring (with its removed slots) back.
+        std::fs::write(f.keyring(), &old).unwrap();
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(f.tmp.path().join("k3")),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 6, "{err}");
+        assert!(err.contains("older"), "{err}");
+        assert_eq!(std::fs::read(f.keyring()).unwrap(), old);
+    }
+
+    #[test]
+    fn a_rejected_state_pins_is_an_error_and_changes_nothing() {
+        let f = fixture(CryptoMode::Integrity);
+        std::fs::write(f.vol_dir().join("state/pins"), b"garbage").unwrap();
+        let before = std::fs::read(f.keyring()).unwrap();
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(f.tmp.path().join("k2")),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 1, "{err}");
+        assert!(err.contains("--repair-pins"), "{err}");
+        assert_eq!(std::fs::read(f.keyring()).unwrap(), before);
+        assert!(!f.tmp.path().join("k2").exists());
+    }
+
+    #[test]
+    fn a_daemon_that_fails_does_not_block_the_offline_command() {
+        let f = fixture(CryptoMode::Integrity);
+        f.server.respond(
+            "VolumeStatus",
+            Outcome::Err(CtlError::new(ErrorCode::Internal, "broken")),
+        );
+        let (code, out, err) = f.run(ls_args(&f, false));
+        assert_eq!(code, 0, "{err}");
+        assert!(out.contains("slot 1"), "{out}");
+        assert!(
+            err.contains("warning: the daemon gave no usable answer"),
+            "{err}"
+        );
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(f.tmp.path().join("k2")),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+    }
+
+    #[test]
+    fn add_slot_from_an_existing_key_file_uses_it_as_it_is() {
+        let f = fixture(CryptoMode::Integrity);
+        let path = f.tmp.path().join("mine.key");
+        let kf = KeyFile::generate().unwrap();
+        kf.write_new(&path).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let (code, out, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(path.clone()),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+        assert!(!out.contains("wrote the new key file"), "{out}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let bytes = std::fs::read(f.keyring()).unwrap();
+        assert!(keyring::unlock(
+            &bytes,
+            Profile::Default,
+            &FamilyId(FAMILY),
+            &Unlock::KeyFile(&kf),
+            0,
+            &UnlockOptions::default()
+        )
+        .is_ok());
+        // A loose mode is warned about, not refused.
+        let loose = f.tmp.path().join("loose.key");
+        KeyFile::generate().unwrap().write_new(&loose).unwrap();
+        std::fs::set_permissions(&loose, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(loose),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0);
+        assert!(err.contains("readable by group or others"), "{err}");
+    }
+
+    #[test]
+    fn stale_temporary_keyrings_are_swept_and_a_mode_is_kept() {
+        let f = fixture(CryptoMode::Integrity);
+        let stale = f.keyring().with_file_name("keyring.tmp.99999");
+        std::fs::write(&stale, b"half").unwrap();
+        std::fs::set_permissions(&f.keyring(), std::fs::Permissions::from_mode(0o640)).unwrap();
+        let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
+            key_file: Some(f.tmp.path().join("k2")),
+            ..add_args(&f)
+        }));
+        assert_eq!(code, 0, "{err}");
+        assert!(!stale.exists());
+        let mode = std::fs::metadata(f.keyring()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+    }
+
+    #[test]
+    fn the_two_stages_of_a_replacement_are_told_apart() {
+        let missing = std::env::temp_dir()
+            .join("lunix-m13b-no-such-dir")
+            .join("keyring");
+        let e = replace_keyring(&missing, b"x").unwrap_err();
+        assert!(matches!(e, ReplaceError::NotReplaced(_)));
+        let e = replaced(Err(ReplaceError::NotReplaced(std::io::Error::other("x")))).unwrap_err();
+        assert!(e.to_string().contains("cannot replace"));
+        let e = replaced(Err(ReplaceError::NotDurable(std::io::Error::other("x")))).unwrap_err();
+        assert!(e.to_string().contains("may not be durable"), "{e}");
+        assert_eq!(e.exit_code(), 1);
     }
 }

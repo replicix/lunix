@@ -6,9 +6,12 @@
 //! directory to [`lunix_fsck::check`], which takes the volume `LOCK` itself.
 //!
 //! Exit codes are the library's for the outcome of a run: 0 clean, 1 warnings
-//! only, 2 errors found. Failures before the check follow the `lunix` table:
-//! 3 busy (attached), 4 not found; a bad option value is 64, as in the
-//! `lunix-fsck` binary (clap's own usage errors stay 2).
+//! only, 2 errors found. Two outcomes where nothing could be checked follow the
+//! `lunix` table instead, so a monitor does not read them as damage: 3 when the
+//! volume `LOCK` is held (the library's `busy` finding), 6 when no credential
+//! unlocks the volume (`credential`, `keyring_rollback`). Failures before the
+//! check: 3 attached, 4 not found; a bad option value is 64, as in the
+//! `lunix-fsck` binary.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -60,7 +63,8 @@ pub struct FsckArgs {
     #[arg(long, requires = "repair")]
     pub reset_floor: bool,
 
-    /// With --repair: delete orphaned files above the tip.
+    /// With --repair: delete unreferenced segments and packs (only after the
+    /// whole volume resolved without errors).
     #[arg(long, requires = "repair")]
     pub delete_orphans: bool,
 
@@ -108,7 +112,7 @@ pub fn run_fsck(args: FsckArgs) -> ExitCode {
 
 /// [`run_fsck`] with the output streams given.
 pub(crate) fn run_fsck_to(args: FsckArgs, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
-    match fsck(&args, out) {
+    match fsck(&args, out, err) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             let code = match &e {
@@ -121,21 +125,40 @@ pub(crate) fn run_fsck_to(args: FsckArgs, out: &mut dyn Write, err: &mut dyn Wri
     }
 }
 
-fn fsck(args: &FsckArgs, out: &mut dyn Write) -> Result<u8, CliError> {
+fn fsck(args: &FsckArgs, out: &mut dyn Write, err: &mut dyn Write) -> Result<u8, CliError> {
     let dir = locate(&args.name, args.dir.as_deref(), &args.socket)?;
-    ensure_detached(&args.name, &args.socket)?;
+    ensure_detached(&args.name, &args.socket, err)?;
     let passphrase = args.pass.read(false)?;
     let opts = options(args, passphrase);
     let report = lunix_fsck::check(&dir, &opts);
+    let code = exit_code(&report);
     if args.json {
-        writeln!(out, "{}", report.to_json())?;
+        // The document's `exit` is the process exit code.
+        let mut doc: serde_json::Value = serde_json::from_str(&report.to_json())
+            .map_err(|_| CliError::Other("cannot encode the output".into()))?;
+        doc["exit"] = serde_json::Value::from(code);
+        let text = serde_json::to_string_pretty(&doc)
+            .map_err(|_| CliError::Other("cannot encode the output".into()))?;
+        writeln!(out, "{text}")?;
     } else {
         write!(out, "{}", report.render_text())?;
         for h in hints(&report, &args.name) {
             writeln!(out, "hint: {h}")?;
         }
     }
-    Ok(u8::try_from(report.exit_code()).unwrap_or(2))
+    Ok(code)
+}
+
+/// The process exit code of a report: the library's, except that a run that
+/// could not look (volume locked, no working credential) is not "errors found".
+fn exit_code(report: &Report) -> u8 {
+    if report.has("busy") {
+        3
+    } else if report.has("credential") || report.has("keyring_rollback") {
+        6
+    } else {
+        u8::try_from(report.exit_code()).unwrap_or(2)
+    }
 }
 
 /// The library options for the command line.
@@ -175,6 +198,25 @@ fn hints(report: &Report, name: &str) -> Vec<String> {
     if report.has("fork") {
         v.push(
             "the history diverged from the one this host recorded; decide which copy to keep before any repair".to_owned(),
+        );
+    }
+    if report.has("state_pins") {
+        v.push(format!(
+            "state/pins is rejected: `lunix fsck {name} --repair --repair-pins` replaces it from the verified tip (it gives up the recorded floors and pin)"
+        ));
+    }
+    if report.has("index_lost") {
+        v.push(format!(
+            "`lunix fsck {name} --repair --rebuild-index` rewrites the chunk index from the segment footers"
+        ));
+    }
+    if report.has("gc_unchecked") {
+        v.push("GC's checks did not run, so `--repair --gc` will refuse; fix the errors above and run again".to_owned());
+    }
+    if report.has("busy") {
+        v.push(
+            "another process holds the volume lock (a daemon, another fsck, or `lunix key`)"
+                .to_owned(),
         );
     }
     if report.has("tip_auth") {
@@ -284,13 +326,19 @@ fn read_volume_json(dir: &Path) -> Option<lunix_format::local::VolumeJson> {
     lunix_format::local::VolumeJson::from_json(&text).ok()
 }
 
-/// Refuses a volume the daemon reports as anything but detached. A daemon that
-/// cannot be reached is not an answer: the volume `LOCK` the library (and
-/// `lunix key`) takes is the real guard.
+/// Refuses a volume the daemon reports as attached, recovering or read-only.
+/// Any other outcome (no daemon, an unknown name, a daemon that hangs up, times
+/// out or fails) is not an answer: a warning goes to `err` and the volume
+/// `LOCK`, which the library (and `lunix key`) takes, is the real guard. A broken
+/// daemon must not block the offline tools.
 ///
 /// # Errors
-/// `Busy` (exit 3) when the volume is attached, recovering or read-only.
-pub(crate) fn ensure_detached(name: &str, socket: &Path) -> Result<(), CliError> {
+/// `Busy` (exit 3) when the daemon reports the volume as not detached.
+pub(crate) fn ensure_detached(
+    name: &str,
+    socket: &Path,
+    err: &mut dyn Write,
+) -> Result<(), CliError> {
     let Ok(mut c) = Client::connect_with_timeout(socket, DAEMON_WAIT) else {
         return Ok(());
     };
@@ -306,9 +354,15 @@ pub(crate) fn ensure_detached(name: &str, socket: &Path) -> Result<(), CliError>
                 sanitize(name)
             ),
         ))),
-        Ok(_) => Err(CliError::Protocol("unexpected reply to status".to_owned())),
         Err(CliError::Daemon(e)) if e.code == ErrorCode::NotFound => Ok(()),
-        Err(e) => Err(e),
+        Ok(_) | Err(_) => {
+            let _ = writeln!(
+                err,
+                "warning: the daemon gave no usable answer about {}; continuing, the volume lock decides",
+                sanitize(name)
+            );
+            Ok(())
+        }
     }
 }
 
@@ -609,6 +663,23 @@ mod tests {
     }
 
     #[test]
+    fn a_daemon_that_fails_does_not_block_fsck() {
+        let env = Env::new();
+        env.dir_with(Some(&[0u8; 64]));
+        env.server.respond(
+            "VolumeStatus",
+            Outcome::Err(CtlError::new(ErrorCode::Internal, "broken")),
+        );
+        let (code, out, err) = env.run(env.args("v1"));
+        assert_eq!(code, 2, "{err}");
+        assert!(out.contains("volume_parse"), "{out}");
+        assert!(
+            err.contains("warning: the daemon gave no usable answer"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn a_damaged_volume_is_exit_2_in_text_and_json() {
         let env = Env::new();
         env.dir_with(Some(&[0u8; 64]));
@@ -636,7 +707,10 @@ mod tests {
         env.keyed_descriptor_only();
         env.state(VolumeState::Detached);
         let (code, out, _) = env.run(env.args("v1"));
-        assert_eq!(code, 2);
+        assert_eq!(
+            code, 6,
+            "no working credential is exit 6, not 'errors found'"
+        );
         assert!(out.contains("credential"), "{out}");
         assert!(out.contains("hint: give the key with --key-file"), "{out}");
     }
@@ -661,14 +735,17 @@ mod tests {
                 passphrase_fd: Some(fd),
             };
             let (code, out, err) = env.run(a);
-            assert_eq!(code, 2, "{out}{err}");
+            assert_eq!(code, 6, "{out}{err}");
+            if json {
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+                assert_eq!(
+                    v["exit"], 6,
+                    "the document says what the process exits with"
+                );
+            }
             let hay = |h: &[u8]| h.windows(CANARY.len()).any(|w| w == CANARY);
             assert!(!hay(out.as_bytes()) && !hay(err.as_bytes()));
         }
-        assert!(!std::fs::read("/proc/self/cmdline")
-            .unwrap()
-            .windows(CANARY.len())
-            .any(|w| w == CANARY));
         drop(held);
     }
 

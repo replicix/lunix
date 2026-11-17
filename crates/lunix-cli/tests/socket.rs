@@ -781,10 +781,10 @@ fn a_daemon_that_hangs_up_is_a_generic_error() {
 #[test]
 fn fsck_repair_flags_need_repair() {
     let env = Env::new();
-    // --gc needs --repair.
-    assert_eq!(env.run(&["fsck", "vol1", "--gc"]).code, 2);
-    assert_eq!(env.run(&["fsck", "vol1", "--reset-floor"]).code, 2);
-    assert_eq!(env.run(&["fsck", "vol1", "--delete-orphans"]).code, 2);
+    // --gc needs --repair (a usage error of fsck is 64, not "errors found").
+    assert_eq!(env.run(&["fsck", "vol1", "--gc"]).code, 64);
+    assert_eq!(env.run(&["fsck", "vol1", "--reset-floor"]).code, 64);
+    assert_eq!(env.run(&["fsck", "vol1", "--delete-orphans"]).code, 64);
 }
 
 #[test]
