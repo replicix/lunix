@@ -21,6 +21,7 @@ struct Found {
     clen: u32,
     ulen: u32,
     seg: lunix_format::ObjId,
+    off: u32,
 }
 
 fn by_hint(facts: &Facts, id_len: IdLen, e: &EntryRec) -> Option<Found> {
@@ -37,6 +38,7 @@ fn by_hint(facts: &Facts, id_len: IdLen, e: &EntryRec) -> Option<Found> {
         clen: x.clen,
         ulen: x.ulen,
         seg: e.seg,
+        off: e.off,
     })
 }
 
@@ -56,6 +58,7 @@ fn by_index(facts: &Facts, view: &IndexView, e: &EntryRec) -> Option<Found> {
             clen: x.clen,
             ulen: x.ulen,
             seg: c.hint.seg,
+            off: c.hint.off,
         })
     })
 }
@@ -71,6 +74,8 @@ struct Ctx<'a> {
     rebuilt: Option<Option<IndexView>>,
     s: &'a Session,
     referenced: HashSet<lunix_format::ObjId>,
+    /// The extents entries resolved to, `(segment, offset)`.
+    live: Vec<(lunix_format::ObjId, u32)>,
     unresolved: u64,
 }
 
@@ -79,6 +84,7 @@ impl Ctx<'_> {
     fn resolve(&mut self, e: &EntryRec, sink: &mut Sink) -> Option<Found> {
         if let Some(f) = by_hint(self.facts, self.id_len, e) {
             self.referenced.insert(f.seg);
+            self.live.push((f.seg, f.off));
             return Some(f);
         }
         // A stale hint: the index, confirmed against the full id.
@@ -96,6 +102,7 @@ impl Ctx<'_> {
         match found {
             Some(f) => {
                 self.referenced.insert(f.seg);
+                self.live.push((f.seg, f.off));
                 // The delete-time invariant: after the index is rebuilt from
                 // the footers the entry still resolves.
                 let facts = self.facts;
@@ -137,6 +144,7 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
     };
     let id_len = s.desc.id_len;
     let mut referenced = HashSet::new();
+    let mut live: Vec<(lunix_format::ObjId, u32)>;
     let mut ratios = Ratios {
         chunk_size: s.desc.chunk_size,
         chunk_count: walk.tip_chunks,
@@ -150,6 +158,7 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
             rebuilt: None,
             s,
             referenced: HashSet::new(),
+            live: Vec::new(),
             unresolved: 0,
         };
         let key = |e: &EntryRec| (e.seg, e.off, e.clen);
@@ -196,6 +205,18 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
         }
         walk.other_entries = Vec::new();
         referenced.extend(cx.referenced);
+        live = cx.live;
+    }
+    // Mark the live extents in their containers (the index comparison
+    // counts a missing entry as lost only for those, M17.B review B-4).
+    live.sort_unstable();
+    live.dedup();
+    for (seg, off) in live {
+        if let Some(c) = facts.segments.get_mut(&seg) {
+            if let Ok(i) = c.exts.binary_search_by_key(&off, |e| e.off) {
+                c.exts[i].live = true;
+            }
+        }
     }
     ratios.hole_chunks = ratios.chunk_count.saturating_sub(ratios.mapped_chunks);
     if ratios.unique_chunks > 0 {
