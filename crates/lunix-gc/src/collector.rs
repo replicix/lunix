@@ -1351,7 +1351,7 @@ impl Gc {
         self.last_compacted.clear();
         let mut m = Mark::new(self.cfg);
         m.run(view)?;
-        point!(self.points, "gc.mark.end");
+        point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
         self.after_mark(&l);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());

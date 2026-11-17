@@ -248,6 +248,7 @@ count in `bytes`.
 | point | after it |
 |---|---|
 | `gc.mark.end` | the mark is complete (nothing durable yet) |
+| `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
 | `gc.delete.before_unlink` | nothing deleted |
 | `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of the segment: `catch_up` drops them at open, a later pass removes the list entry |
