@@ -88,6 +88,8 @@ pub struct Daemon {
     /// without the volume's mutex (an attach may hold that for long) and
     /// without the engine. Set at attach, removed at detach.
     gc_status: Mutex<HashMap<String, GcStatusHandle>>,
+    /// Volumes with a `Gc` call waiting for a pass on request.
+    gc_running: Mutex<std::collections::HashSet<String>>,
     audit: Audit,
     /// Set before a quiesce takes its snapshot: mutating calls are refused
     /// (cleared again when the quiesce fails without freezing anything).
@@ -374,6 +376,7 @@ impl Daemon {
             registry: Mutex::new(registry),
             slots: Mutex::new(slots),
             gc_status: Mutex::new(HashMap::new()),
+            gc_running: Mutex::new(std::collections::HashSet::new()),
             quiescing: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exit_tx: Mutex::new(None),
@@ -423,11 +426,17 @@ impl Daemon {
     }
 
     /// Drops a detached volume: the device first (it holds the engine), then
-    /// the stack, after the threads that borrowed the engine let go of it (a
+    /// the stack, after the calls that borrowed the engine let go of it (a
     /// `Gc` call, the space ladder's compact step: both end at once on a
-    /// quiesced engine, at most one collector step later). Dropping the last
-    /// handle stops the engine's threads and releases `LOCK`, so the volume
-    /// can be attached or checked again as soon as the detach answered.
+    /// quiesced engine, at most one collector unit later). The borrow gate
+    /// is closed first, so no new borrow starts. Dropping the last handle
+    /// stops the engine's threads and releases `LOCK`, so the volume can be
+    /// attached or checked again as soon as the detach answered.
+    ///
+    /// Exception: a borrow still running after [`ENGINE_RELEASE_WAIT`] (a
+    /// collector unit stuck in I/O) keeps the engine; the detach answers all
+    /// the same, with a warning, and `LOCK` is released only when that borrow
+    /// ends.
     fn release(name: &str, live: Live) {
         let Live {
             device,
@@ -436,13 +445,8 @@ impl Daemon {
         } = live;
         drop(device);
         drop(link);
-        let start = Instant::now();
-        while Arc::strong_count(&stack.engine) > 1 {
-            if start.elapsed() > ENGINE_RELEASE_WAIT {
-                tracing::warn!(volume = %name, "a call still holds the engine after the detach; LOCK is released when it ends");
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
+        if !stack.borrows.close_and_wait(ENGINE_RELEASE_WAIT) {
+            tracing::warn!(volume = %name, "a call still holds the engine after the detach; LOCK is released when it ends");
         }
         drop(stack);
     }
@@ -1150,14 +1154,15 @@ impl Daemon {
     /// waits out its grace, and a detach or a quiesce must not wait for it.
     /// A quiesce of the engine (detach, `QuiesceAll`) ends the call with
     /// `Closed` (answered `Busy`) at once, and no collector call starts after
-    /// it; a detach waits for this call to let go of the engine.
+    /// it; the call holds a borrow (`stack::Borrows`) the detach waits for. One
+    /// non-dry call per volume at a time: a second one answers `Busy`.
     fn gc(&self, g: &GcRequest) -> Result<Response, CtlError> {
         self.entry(&g.name)?;
-        let engine = {
+        let (engine, borrows) = {
             let slot = self.slot(&g.name);
             let guard = lock(&slot);
             match &*guard {
-                Slot::Attached(l) => Arc::clone(&l.stack.engine),
+                Slot::Attached(l) => (Arc::clone(&l.stack.engine), Arc::clone(&l.stack.borrows)),
                 _ => {
                     return Err(err(
                         ErrorCode::Invalid,
@@ -1165,6 +1170,27 @@ impl Daemon {
                     ))
                 }
             }
+        };
+        let detaching = || {
+            err(
+                ErrorCode::Busy,
+                format!("{} was detached or quiesced while the gc pass ran", g.name),
+            )
+        };
+        let Some(_borrow) = borrows.enter() else {
+            return Err(detaching());
+        };
+        // One pass on request per volume: a client that gave up and retries
+        // does not stack call threads (a pass lasts at least its grace).
+        let _running = if g.dry_run {
+            None
+        } else {
+            Some(Running::enter(&self.gc_running, &g.name).ok_or_else(|| {
+                err(
+                    ErrorCode::Busy,
+                    format!("a gc pass on request for {} is already running", g.name),
+                )
+            })?)
         };
         let started = Instant::now();
         let res = engine.run_pass(g.dry_run);
@@ -1183,10 +1209,7 @@ impl Daemon {
                 );
                 Ok(Response::Gc(s))
             }
-            Err(lunix_iface::Error::Closed) => Err(err(
-                ErrorCode::Busy,
-                format!("{} was detached or quiesced while the gc pass ran", g.name),
-            )),
+            Err(lunix_iface::Error::Closed) => Err(detaching()),
             Err(e) => Err(err(store_code(e.kind()), format!("gc: {e}"))),
         }
     }
@@ -1543,6 +1566,27 @@ enum Failed {
     Orphan { dev_id: u32, error: CtlError },
     /// Anything else; nothing is left.
     Plain(CtlError),
+}
+
+/// A volume's entry in `Daemon::gc_running` while a `Gc` call waits.
+struct Running<'a> {
+    set: &'a Mutex<std::collections::HashSet<String>>,
+    name: String,
+}
+
+impl<'a> Running<'a> {
+    fn enter(set: &'a Mutex<std::collections::HashSet<String>>, name: &str) -> Option<Self> {
+        lock(set).insert(name.to_owned()).then(|| Self {
+            set,
+            name: name.to_owned(),
+        })
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        lock(self.set).remove(&self.name);
+    }
 }
 
 #[cfg(test)]

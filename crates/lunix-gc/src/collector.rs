@@ -470,6 +470,7 @@ impl Gc {
             last_pass: self.last_pass.clone(),
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
+            requests: 0,
         }
     }
 

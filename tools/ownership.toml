@@ -159,12 +159,15 @@ paths = [
 [m12c]
 paths = [
   "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-iface/src/block.rs",
+  "crates/lunix-iface/tests/ctl.rs",
   "crates/lunix-gc/src/collector.rs",
   "crates/lunix-gc/src/tests/units.rs",
   "crates/lunix-engine/src/gc.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/tests/gc_control.rs",
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/src/server.rs",
   "crates/lunixd/src/stack/mod.rs",

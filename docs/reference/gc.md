@@ -25,19 +25,31 @@ calling thread runs the collector under the coordinator mutex):
 
 - **`lunix gc NAME`** (`Gc`) asks for a pass now (due or not) and steps it to
   its end. Between two steps it releases the coordinator and pauses (5 ms, or
-  100 ms in the grace), so cuts, a quiesce and the ladder get in. A pass
-  already marking answers; one past its mark (its view predates the call)
-  finishes first and the next one answers; an urgent pass that ends meanwhile
-  answers too (its mark began after the call). It takes at least the grace and
-  is not cut off by the daemon's `call_timeout` (the client's `--timeout`,
-  default 600 s, still applies; the pass goes on after a client gives up).
-  Answers: `Invalid` when the volume is not attached; `Busy` when the volume
-  is detached or quiesced meanwhile (the call ends at once, no collector call
-  starts after the quiesce, and the detach waits for the call to let go of the
-  engine, so `LOCK` is free when the detach answers), or when the map stays
-  ahead of the tip for 50 steps; `Refused` when the collector dropped the pass
-  four times (errors, see the log). **`--dry-run`** is one call that marks and
-  reports what a pass would condemn, delete and compact, changing nothing.
+  100 ms in the grace or when compaction is at its rate cap), so cuts, a
+  quiesce and the ladder get in. It returns once a pass that started after
+  the call ended: when the collector was idle, the next pass to end (the
+  requested one, or an urgent pass); when a pass was in progress (its view
+  predates the call), the one after it (an urgent pass that aborts the pass
+  in progress counts as that pass). The answer covers **every pass that ended
+  while the call waited**: the counts summed, `bytes_freed` and
+  `segments_compacted` from the collector's counters, `pass` the newest
+  evidence number. A call that finds a pass waiting out its grace therefore
+  reports what that pass deleted too. It takes at least the grace and is not
+  cut off by the daemon's `call_timeout`; the client's `--timeout` (default
+  600 s) still applies. When the client hangs up, the daemon stops waiting for
+  it within a second and the pass goes on in the daemon. One such call per
+  volume runs at a time; a second answers `Busy`.
+  Other answers: `Invalid` when the volume is not attached; `Busy` when the
+  volume is detached or quiesced meanwhile, or when the map stays ahead of the
+  tip for 50 steps; `Refused` when the collector dropped the pass four times
+  (errors, see the log). After a quiesce no collector call starts (requested,
+  urgent or background step). A detach waits for the call (and for a running
+  compact step) to let go of the engine, so the engine's threads are stopped
+  and `LOCK` is free when the detach answers, **except** when such a call is
+  still running after 30 s (a collector unit stuck in I/O): the detach then
+  answers with a warning in the log and `LOCK` is released only when that
+  call ends. **`--dry-run`** is one call that marks and reports what a pass
+  would condemn, delete and compact, changing nothing.
 - **`lunix gc NAME --status`** (`GcStatus`) reads the status the collector
   published after its last call, without waiting for the coordinator or the
   engine. A volume that is not attached is idle, with empty counters.
@@ -46,9 +58,15 @@ calling thread runs the collector under the coordinator mutex):
   fails for space at any step (a destage `NoSpace` from a full host file
   system, an index run that cannot be written) runs it too, from the
   coordinator, at least 2 s after the end of the last urgent pass (either
-  kind); the pause doubles, up to 60 s, while those passes free nothing.
+  kind). The pause doubles, up to 60 s, while those passes free nothing; it
+  is at most the floor grace after a pass that condemned something, and back
+  to 2 s after a successful commit or a pass that freed bytes.
   Compaction re-hints are applied only after a cut's destage succeeded, so a
-  cut that fails for space leaves the map at the tip and GC can run.
+  cut that fails for space leaves the map at the tip and GC can run. They
+  share the map's dirty-leaf cap with the cut: they are applied in leaf order,
+  as many leaves as fit (at most `max_leaves_per_cut`, halved on `MapFull`),
+  and the rest wait; moves that wait for want of room trigger a cut on their
+  own only once per commit interval.
 
 ## What is kept
 

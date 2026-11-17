@@ -131,6 +131,8 @@ pub(crate) struct Inner {
     /// What a requested GC pass waits on between steps; `quiesce` notifies it
     /// (under its mutex, after setting `closing`).
     pub(crate) gc_wake: (Mutex<()>, Condvar),
+    /// Requested passes being waited for (`GcStatusSnapshot::requests`).
+    pub(crate) gc_requests: AtomicU64,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
 }
@@ -306,6 +308,7 @@ impl Engine {
             gc_status: Arc::new(Mutex::new(gc_status)),
             closing: AtomicBool::new(false),
             gc_wake: (Mutex::new(()), Condvar::new()),
+            gc_requests: AtomicU64::new(0),
             resize_hook: Mutex::new(None),
             report: rec.report,
             cfg,

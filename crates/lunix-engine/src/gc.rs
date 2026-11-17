@@ -22,7 +22,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use lunix_iface::gc::{Collector, GcPassSummary, GcProgress, GcState, GcView, TipInfo};
+use lunix_iface::gc::{Collector, GcPassSummary, GcProgress, GcState, GcStats, GcView, TipInfo};
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::coord::Coord;
@@ -128,7 +128,9 @@ impl Inner {
             params,
         };
         let r = f(&mut **collector, &view);
-        *lock(&self.gc_status) = collector.status();
+        let mut st = collector.status();
+        st.requests = self.gc_requests.load(Ordering::Acquire);
+        *lock(&self.gc_status) = st;
         r
     }
 
@@ -149,11 +151,16 @@ impl Inner {
     /// `GcControl::run_pass`. A dry run is one call on the coordinator.
     ///
     /// A pass asks for one now (whether or not one is due) and steps it to
-    /// its end, pausing between steps without the coordinator mutex. When a
-    /// pass is already marking, that pass answers; when one is past its mark
-    /// (its view predates the call), the next one does. An urgent pass that
-    /// ends meanwhile (the ladder's) also answers: its mark began after the
-    /// call.
+    /// its end, pausing between steps without the coordinator mutex. The
+    /// call returns once a pass that started after it ended: the next pass
+    /// to end when the collector was idle (the requested one, or an urgent
+    /// pass, whose mark began after the call), else the one after the pass in
+    /// progress (its view predates the call; an urgent pass that aborts it
+    /// counts as that pass). The answer covers every pass that ended while
+    /// the call waited: counts summed, `bytes_freed` and
+    /// `segments_compacted` from the collector's counters, `pass` the newest
+    /// evidence number. So a call that found a pass in its grace reports what
+    /// that pass freed too.
     pub(crate) fn run_pass(&self, dry_run: bool) -> Result<GcPassSummary> {
         let Some(budget) = self.cfg.gc_budget else {
             return Err(no_collector());
@@ -164,19 +171,16 @@ impl Inner {
             return self.with_collector(&mut co, |c, v| c.dry_run(v));
         }
         let c = co.collector.as_mut().ok_or_else(no_collector)?;
-        let need = c.stats().passes
+        let start = c.stats();
+        let need = start.passes
             + match c.status().state {
-                Some(GcState::Marking) => 1,
-                None => {
-                    ask(&mut **c)?;
-                    1
-                }
-                Some(_) => {
-                    ask(&mut **c)?;
-                    2
-                }
+                None => 1,
+                Some(_) => 2,
             };
+        ask(&mut **c)?;
         drop(co);
+        let _waiting = Waiting::new(self);
+        let mut acc = Answer::new(start);
         let mut asks = 1u32;
         let mut busy = 0u32;
         loop {
@@ -184,8 +188,9 @@ impl Inner {
                 let mut co = lock(&self.coord);
                 self.check_open()?;
                 let c = co.collector.as_mut().ok_or_else(no_collector)?;
-                if c.stats().passes >= need {
-                    return Ok(c.status().last_pass.unwrap_or_default());
+                acc.observe(&**c);
+                if acc.passes() >= need {
+                    return Ok(acc.summary(&**c));
                 }
                 if c.status().state.is_none() {
                     if asks == MAX_ASKS {
@@ -196,16 +201,16 @@ impl Inner {
                     asks += 1;
                     ask(&mut **c)?;
                 }
+                let read = c.stats().compaction_read;
                 match self.with_collector(&mut co, |c, v| c.step(v, budget)) {
                     Ok(p) => {
-                        let pause = step_pause(&p);
-                        co.moved.extend(p.moved);
-                        if let Some(c) = co.collector.as_ref() {
-                            if c.stats().passes >= need {
-                                return Ok(c.status().last_pass.unwrap_or_default());
-                            }
+                        co.moved.extend(p.moved.iter().copied());
+                        let c = co.collector.as_ref().ok_or_else(no_collector)?;
+                        acc.observe(&**c);
+                        if acc.passes() >= need {
+                            return Ok(acc.summary(&**c));
                         }
-                        pause
+                        step_pause(&p, c.stats().compaction_read > read)
                     }
                     // A cut failed after it applied re-hints: wait for the
                     // next one (bounded).
@@ -256,10 +261,19 @@ impl Inner {
                     freed = p.freed,
                     "a commit failed for space: gc urgent pass"
                 );
+                let condemned = co
+                    .collector
+                    .as_ref()
+                    .is_some_and(|c| c.status().condemned_pending > 0);
+                let doubled = co.space_backoff.saturating_mul(2).min(SPACE_URGENT_MAX);
                 co.space_backoff = if p.freed > 0 {
                     SPACE_URGENT_MIN
+                } else if condemned {
+                    // What it condemned can go once the floor grace ran: the
+                    // next pass is useful then, not later.
+                    doubled.min(self.floor_grace()).max(SPACE_URGENT_MIN)
                 } else {
-                    co.space_backoff.saturating_mul(2).min(SPACE_URGENT_MAX)
+                    doubled
                 };
                 co.moved.extend(p.moved);
             }
@@ -277,10 +291,21 @@ impl Inner {
         let mut co = lock(&self.coord);
         self.check_open()?;
         let res = self.with_collector(&mut co, |c, v| c.urgent(v, want_bytes));
-        co.last_space_urgent = Some(self.clock.monotonic());
+        // Only a pass that ran counts for `space_short`'s pause.
+        if !matches!(&res, Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::Unsupported)) {
+            co.last_space_urgent = Some(self.clock.monotonic());
+        }
         let p = res?;
         co.moved.extend(p.moved);
         Ok(p.freed)
+    }
+
+    /// The urgent pass's grace: 10 s plus twice `read_timeout` (the
+    /// collector's `grace_floor`; the engine names no collector crate).
+    fn floor_grace(&self) -> Duration {
+        self.cfg.gc_params.map_or(SPACE_URGENT_MAX, |p| {
+            Duration::from_secs(10).saturating_add(p.read_timeout.saturating_mul(2))
+        })
     }
 }
 
@@ -296,17 +321,87 @@ fn ask(c: &mut dyn Collector) -> Result<()> {
 }
 
 /// The pause after a step: longer when the pass waits out its grace or the
-/// step could do nothing (compaction at its rate cap moves and frees
-/// nothing).
-fn step_pause(p: &GcProgress) -> Duration {
+/// step could do nothing (compaction at its rate cap: it read nothing).
+fn step_pause(p: &GcProgress, compaction_read: bool) -> Duration {
     let idle = match p.state {
         GcState::Grace => true,
-        GcState::Compacting => p.moved.is_empty() && p.freed == 0,
+        GcState::Compacting => !compaction_read && p.moved.is_empty() && p.freed == 0,
         _ => false,
     };
     if idle {
         IDLE_PAUSE
     } else {
         STEP_PAUSE
+    }
+}
+
+/// Counts a waiting `run_pass` in the published status
+/// (`GcStatusSnapshot::requests`) while it lives.
+struct Waiting<'a>(&'a Inner);
+
+impl<'a> Waiting<'a> {
+    fn new(inner: &'a Inner) -> Self {
+        let n = inner.gc_requests.fetch_add(1, Ordering::AcqRel) + 1;
+        lock(&inner.gc_status).requests = n;
+        Self(inner)
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        let n = self.0.gc_requests.fetch_sub(1, Ordering::AcqRel) - 1;
+        lock(&self.0.gc_status).requests = n;
+    }
+}
+
+/// What `run_pass` answers: the passes that ended while it waited.
+struct Answer {
+    start: GcStats,
+    seen: u64,
+    sum: GcPassSummary,
+}
+
+impl Answer {
+    fn new(start: GcStats) -> Self {
+        Self {
+            start,
+            seen: start.passes,
+            sum: GcPassSummary::default(),
+        }
+    }
+
+    fn passes(&self) -> u64 {
+        self.seen
+    }
+
+    /// Adds the last pass's summary when a pass ended since the last look
+    /// (a pass ends at most once between two looks in practice; the counters
+    /// below are exact in any case).
+    fn observe(&mut self, c: &dyn Collector) {
+        let now = c.stats().passes;
+        if now > self.seen {
+            if let Some(p) = c.status().last_pass {
+                let s = &mut self.sum;
+                s.pass = s.pass.max(p.pass);
+                s.segments_condemned += p.segments_condemned;
+                s.segments_deleted += p.segments_deleted;
+                s.packs_deleted += p.packs_deleted;
+                s.runs_deleted += p.runs_deleted;
+                s.commits_deleted += p.commits_deleted;
+                s.bytes_moved += p.bytes_moved;
+            }
+            self.seen = now;
+        }
+    }
+
+    fn summary(&self, c: &dyn Collector) -> GcPassSummary {
+        let now = c.stats();
+        GcPassSummary {
+            bytes_freed: now.bytes_freed.saturating_sub(self.start.bytes_freed),
+            segments_compacted: now
+                .segments_compacted
+                .saturating_sub(self.start.segments_compacted),
+            ..self.sum.clone()
+        }
     }
 }

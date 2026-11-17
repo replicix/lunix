@@ -229,7 +229,7 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
         any::<u64>(),
         any::<u64>(),
         proptest::option::of(summary()),
-        proptest::collection::vec(any::<u64>(), 7),
+        proptest::collection::vec(any::<u64>(), 8),
         proptest::option::of(any::<u64>()),
     )
         .prop_map(
@@ -249,6 +249,7 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         compaction_written: s[6],
                     },
                     last_finished_ms,
+                    requests: s[7],
                 }
             },
         )

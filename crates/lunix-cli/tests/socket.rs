@@ -695,6 +695,7 @@ fn gc_pass_dry_run_and_status() {
             compaction_written: 1 << 20,
         },
         last_finished_ms: Some(1_767_225_600_000),
+        requests: 1,
     };
     env.ok("GcStatus", Response::GcStatus(status.clone()));
     let o = env.run(&["gc", "vol1", "--status"]);
@@ -706,6 +707,7 @@ fn gc_pass_dry_run_and_status() {
     assert!(v["state"].is_null(), "{v}");
     assert_eq!(v["stats"]["passes"], 3);
     assert_eq!(v["last_pass"]["pass"], 7);
+    assert_eq!(v["requests"], 1);
     assert_eq!(
         serde_json::from_value::<GcStatusSnapshot>(v).unwrap(),
         status

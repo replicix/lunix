@@ -78,9 +78,14 @@ pub(crate) struct Coord {
     /// `space_backoff` after it.
     pub(crate) last_space_urgent: Option<Duration>,
     /// The pause between two urgent passes run because commits fail for
-    /// space: doubles while they free nothing, back to the minimum when one
-    /// frees bytes.
+    /// space: back to the minimum after a successful commit or a pass that
+    /// freed bytes, at most the floor grace after one that condemned, else
+    /// doubling to a maximum.
     pub(crate) space_backoff: Duration,
+    /// The last `apply_moved` left moves for want of room under the map's
+    /// dirty-leaf cap: moves alone then trigger a cut only once per commit
+    /// interval (each such cut walks the tip's leaves).
+    pub(crate) moves_deferred: bool,
 }
 
 impl Coord {
@@ -103,6 +108,7 @@ impl Coord {
             index_unpersisted: rec.index_unpersisted,
             last_space_urgent: None,
             space_backoff: crate::gc::SPACE_URGENT_MIN,
+            moves_deferred: false,
         }
     }
 }
@@ -266,7 +272,14 @@ impl Inner {
     }
 
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.moved.is_empty() || !co.pending_named.is_empty() || co.index_unpersisted {
+        if !co.pending_named.is_empty() || co.index_unpersisted {
+            return true;
+        }
+        let now = self.clock.monotonic();
+        if !co.moved.is_empty()
+            && (!co.moves_deferred
+                || now.saturating_sub(co.last_commit_at) >= self.cfg.commit_interval)
+        {
             return true;
         }
         let dirty = self.journal.last_issued() > co.tip.cut_seq;
@@ -274,7 +287,6 @@ impl Inner {
             co.dirty_since = None;
             return false;
         }
-        let now = self.clock.monotonic();
         let since = *co.dirty_since.get_or_insert(now.max(co.last_commit_at));
         let elapsed = now.saturating_sub(since);
         elapsed >= self.cfg.commit_interval
@@ -294,10 +306,10 @@ impl Inner {
         new_size: Option<u64>,
     ) -> Result<CommitOutcome> {
         let res = self.commit_once(co, force, new_size);
-        if let Err(e) = &res {
-            if e.kind() == ErrorKind::NoSpace {
-                self.space_short(co);
-            }
+        match &res {
+            Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
+            Err(_) => {}
+            Ok(_) => co.space_backoff = crate::gc::SPACE_URGENT_MIN,
         }
         res
     }
@@ -734,13 +746,17 @@ impl Inner {
     /// C3, second half: compaction's `moved` records become conditional
     /// re-hints (a newer write wins). `Moved` carries no chunk number, so
     /// the chunks are found by walking the tip's leaves for the old hints.
+    ///
+    /// The re-hints share the map's dirty-leaf cap with this cut's destage:
+    /// they go in leaf order, in one transaction of at most
+    /// `max_leaves_per_cut` leaves, halved on `MapFull` down to one leaf; the
+    /// moves of the leaves left over stay in `moved` for a later cut
+    /// (`moves_deferred`). Moves whose chunk was rewritten since are done.
     fn apply_moved(&self, co: &mut Coord) -> Result<()> {
         if co.moved.is_empty() {
+            co.moves_deferred = false;
             return Ok(());
         }
-        let mut segs: Vec<SegId> = co.moved.iter().map(|m| m.new.seg).collect();
-        segs.sort_unstable();
-        segs.dedup();
         let olds: HashMap<Hint, Hint> = co.moved.iter().map(|m| (m.old, m.new)).collect();
         let mut hits: Vec<(ChunkNo, Hint, Hint)> = Vec::new();
         let root = co.tip.map_root;
@@ -750,24 +766,72 @@ impl Inner {
                 hits.push((ci, h, new));
             }
         })?;
-        let mut txn = self.map.begin_update()?;
-        for (ci, old, new) in hits {
-            txn.rehint(ci, old, new)?;
-        }
-        txn.commit()?;
-        co.moved.clear();
+        hits.sort_unstable_by_key(|(ci, _, _)| ci.0);
+        let fanout = u64::from(self.cfg.map_fanout.max(1));
+        let mut leaves: Vec<u64> = hits.iter().map(|(ci, _, _)| ci.0 / fanout).collect();
+        leaves.dedup();
+        let mut n = leaves
+            .len()
+            .min(usize::try_from(self.cfg.max_leaves_per_cut.max(1)).unwrap_or(usize::MAX));
+        let applied = loop {
+            let Some(&last) = leaves.get(n.saturating_sub(1)) else {
+                break 0;
+            };
+            let take = hits.partition_point(|(ci, _, _)| ci.0 / fanout <= last);
+            match self.rehint(&hits[..take]) {
+                Ok(()) => break take,
+                Err(e) if e.kind() == ErrorKind::MapFull && n > 1 => n /= 2,
+                Err(e) => {
+                    co.moves_deferred = true;
+                    return Err(e);
+                }
+            }
+        };
+        // Moves of the leaves not applied stay; every other one is done
+        // (applied, or its chunk was rewritten: the move is moot).
+        let left: HashSet<Hint> = hits[applied..].iter().map(|(_, old, _)| *old).collect();
+        let (keep, done): (Vec<Moved>, Vec<Moved>) =
+            co.moved.drain(..).partition(|m| left.contains(&m.old));
+        co.moved = keep;
+        co.moves_deferred = !co.moved.is_empty();
+        let mut segs: Vec<SegId> = done.iter().map(|m| m.new.seg).collect();
+        segs.sort_unstable();
+        segs.dedup();
         for seg in segs {
             if !co.pending_named.contains(&seg) {
                 co.pending_named.push(seg);
             }
         }
+        if co.moves_deferred {
+            tracing::info!(
+                left = co.moved.len(),
+                "compaction re-hints: the map's dirty-leaf cap left some for a later cut"
+            );
+        }
         Ok(())
+    }
+
+    /// One re-hint transaction; `MapFull` leaves the map untouched.
+    fn rehint(&self, hits: &[(ChunkNo, Hint, Hint)]) -> Result<()> {
+        if hits.is_empty() {
+            return Ok(());
+        }
+        let mut txn = self.map.begin_update()?;
+        for &(ci, old, new) in hits {
+            txn.rehint(ci, old, new)?;
+        }
+        txn.commit().map(|_| ())
     }
 
     fn gc_step(&self, co: &mut Coord) {
         let Some(budget) = self.cfg.gc_budget else {
             return;
         };
+        // No collector call starts once a quiesce began (the engine is
+        // about to be dropped; moves made now would be lost with it).
+        if self.closing.load(Ordering::Acquire) {
+            return;
+        }
         match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => co.moved.extend(p.moved),
             // No collector, or the map ahead of the tip (the hook's

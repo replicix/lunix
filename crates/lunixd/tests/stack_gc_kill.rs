@@ -467,6 +467,9 @@ fn run_ladder(stack: &lunixd::stack::VolumeStack) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // A failed run never bumps `compact_runs` (the loop would see the
+    // error first); checked once more all the same.
+    assert_eq!(stack.space.step_errors(), errors, "the compact step failed");
     stack
         .space
         .reconfigure(&saved)

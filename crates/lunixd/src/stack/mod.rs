@@ -62,7 +62,7 @@ use lunix_store::{read_volume_file, FsOps, LocalVolume, StoreOptions};
 
 pub use destage::{map_error, map_outcome, retry_of, PipelineDestager, PressureThresholds};
 pub use floor::DirFloor;
-pub use ladder::CompactStep;
+pub use ladder::{Borrow, Borrows, CompactStep};
 
 use crate::fsio;
 
@@ -540,9 +540,13 @@ pub struct VolumeStack {
     /// The rollback floor found before the engine opened (`None`: first
     /// attach on this host, which cannot detect an earlier rollback).
     pub floor_before: Option<RollbackFloor>,
-    /// Runs of the space ladder's compact step that have ended (with or
-    /// without bytes freed), for tests and diagnostics.
+    /// Runs of the space ladder's compact step that ended without an error
+    /// (with or without bytes freed), for tests and diagnostics; a failed
+    /// run is in `LunixSpace::step_errors`.
     pub compact_runs: Arc<AtomicU64>,
+    /// Calls that use the engine besides its owner (a `Gc` call, the compact
+    /// step); a detach closes it and waits for them.
+    pub borrows: Arc<Borrows>,
 }
 
 impl std::fmt::Debug for VolumeStack {
@@ -842,11 +846,13 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     let engine = Arc::new(Engine::open(cfg, deps)?);
     // The ladder's compact step is GC's urgent pass (plan M12 step 12).
     let compact_runs = Arc::new(AtomicU64::new(0));
+    let borrows = Arc::new(Borrows::default());
     space.register(
         LadderStepKind::Compact,
         Box::new(CompactStep {
             engine: Arc::downgrade(&engine),
             runs: Arc::clone(&compact_runs),
+            borrows: Arc::clone(&borrows),
         }),
     );
     record_pins(&store, &desc, ok.record_pin, ok.keyring_seq)?;
@@ -862,5 +868,6 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         voldir,
         floor_before,
         compact_runs,
+        borrows,
     })
 }

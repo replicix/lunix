@@ -251,6 +251,9 @@ pub struct GcStatusSnapshot {
     pub stats: GcStats,
     /// When the last pass finished, milliseconds since the epoch.
     pub last_finished_ms: Option<u64>,
+    /// Control calls waiting for a pass on request (`GcControl::run_pass`);
+    /// set by the engine wiring, 0 from a collector.
+    pub requests: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by

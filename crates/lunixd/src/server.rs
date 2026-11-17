@@ -143,7 +143,7 @@ fn connection(daemon: &Arc<Daemon>, mut stream: StdStream, peer: Peer) -> Option
             }
             continue;
         }
-        let (res, after) = run_call(daemon, peer, frame);
+        let (res, after) = run_call(daemon, peer, frame, &stream);
         let out = match res {
             Ok(r) => ResponseFrame::ok(id, r),
             Err(e) => ResponseFrame::err(id, e),
@@ -164,6 +164,7 @@ fn run_call(
     daemon: &Arc<Daemon>,
     peer: Peer,
     frame: RequestFrame,
+    stream: &StdStream,
 ) -> (Result<Response, CtlError>, After) {
     // QuiesceAll is bounded by its own watchdogs and must never be cut off
     // from its exit (M12a review M2): it runs inline, without the timeout.
@@ -173,7 +174,10 @@ fn run_call(
     let timeout = daemon.config().call_timeout;
     // A gc pass lasts at least its grace plus a rate-limited compaction and
     // ends at once when the volume is detached or quiesced: it is not cut off
-    // by the call timeout (the client's own `--timeout` still applies).
+    // by the call timeout (the client's own `--timeout` still applies). This
+    // thread stops waiting when the client hangs up; the call thread then
+    // finishes the pass (one per volume, `Daemon::gc`), which is bounded and
+    // ends on a detach or quiesce.
     let bounded = !matches!(&frame.call, lunix_iface::ctl::Request::Gc(g) if !g.dry_run);
     let (tx, rx) = mpsc::channel();
     let d = Arc::clone(daemon);
@@ -191,23 +195,54 @@ fn run_call(
             After::Continue,
         );
     }
-    let got = if bounded {
-        rx.recv_timeout(timeout).ok()
-    } else {
-        rx.recv().ok()
+    if bounded {
+        return match rx.recv_timeout(timeout) {
+            Ok(r) => r,
+            Err(_) => (
+                Err(CtlError::new(
+                    ErrorCode::Internal,
+                    format!(
+                        "the call did not finish within {} ms; it may still complete",
+                        timeout.as_millis()
+                    ),
+                )),
+                After::Continue,
+            ),
+        };
+    }
+    loop {
+        match rx.recv_timeout(PEER_POLL) {
+            Ok(r) => return r,
+            Err(mpsc::RecvTimeoutError::Timeout) if !peer_gone(stream) => {}
+            Err(_) => {
+                return (
+                    Err(CtlError::new(
+                        ErrorCode::Internal,
+                        "the client hung up; the gc pass goes on in the daemon",
+                    )),
+                    After::Continue,
+                )
+            }
+        }
+    }
+}
+
+/// How often a call without a timeout checks that its client is still there.
+const PEER_POLL: Duration = Duration::from_secs(1);
+
+/// True when the client closed its end of the connection.
+fn peer_gone(stream: &StdStream) -> bool {
+    use rustix::event::{poll, PollFd, PollFlags, Timespec};
+    let mut fds = [PollFd::new(stream, PollFlags::RDHUP)];
+    let zero = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
     };
-    match got {
-        Some(r) => r,
-        None => (
-            Err(CtlError::new(
-                ErrorCode::Internal,
-                format!(
-                    "the call did not finish within {} ms; it may still complete",
-                    timeout.as_millis()
-                ),
-            )),
-            After::Continue,
-        ),
+    match poll(&mut fds, Some(&zero)) {
+        Ok(n) if n > 0 => fds[0]
+            .revents()
+            .intersects(PollFlags::RDHUP | PollFlags::HUP | PollFlags::ERR),
+        _ => false,
     }
 }
 

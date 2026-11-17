@@ -216,7 +216,8 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
 
     // A detach while a pass on request waits (M12c review S-2): the call ends
     // `Busy`, the detach answers once the engine is gone, and the volume can
-    // be attached again at once (`LOCK` released).
+    // be attached again at once (`LOCK` released). The pass the attach
+    // started is in its grace, so the call waits for the pass after it.
     let sock = d.socket.clone();
     let waiting = std::thread::spawn(move || {
         call_on(
@@ -227,35 +228,44 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
             }),
         )
     });
+    // The detach comes once the call waits in the engine (`requests`), not
+    // after a guessed delay.
     let start = Instant::now();
-    while status(&mut d).state.is_none() {
+    while status(&mut d).requests == 0 {
         assert!(
             start.elapsed() < Duration::from_secs(30),
-            "no pass in progress"
+            "the gc call never reached the engine"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    std::thread::sleep(Duration::from_millis(300));
+    // One pass on request per volume: a second call answers at once.
+    match d.call(Request::Gc(GcRequest {
+        name: "g".into(),
+        dry_run: false,
+    })) {
+        Outcome::Err(e) => assert_eq!(e.code, ErrorCode::Busy, "{e:?}"),
+        o => panic!("a second gc call: {o:?}"),
+    }
     assert!(matches!(
         ok(d.call(Request::Detach(NameParam { name: "g".into() }))),
         Response::Detached
     ));
     ok(d.call(attach()));
+    // The waiting call needed at least one more grace: it ended `Busy`.
     match waiting.join().expect("gc call thread") {
         Outcome::Err(e) => assert_eq!(e.code, ErrorCode::Busy, "{e:?}"),
-        Outcome::Ok(r) => eprintln!("the pass ended before the detach: {r:?}"),
+        o => panic!("the waiting gc call: {o:?}"),
     }
     let before = segment_files(&voldir);
 
-    // The pass on request: condemn, grace, recheck, delete.
+    // The pass on request: condemn, grace, recheck, delete. Whether the pass
+    // the attach started or the requested one deleted, the call's answer
+    // covers both; the asserts use the engine's counters (new since the
+    // re-attach) and the segment files, not one pass's summary.
     let started = Instant::now();
     let pass = gc(&mut d, false);
     eprintln!("gc pass on request: {pass:?} in {:?}", started.elapsed());
-    assert!(!pass.dry_run && pass.pass >= 1, "{pass:?}");
-    assert!(
-        pass.segments_deleted > 0 && pass.bytes_freed > 0,
-        "{pass:?}"
-    );
+    assert!(!pass.dry_run, "{pass:?}");
     let after = segment_files(&voldir);
     assert!(
         bytes(&after) < bytes(&before),
@@ -263,24 +273,13 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
         bytes(&before),
         bytes(&after)
     );
-    let gone = before.difference(&after).count() as u64;
-    assert!(gone >= pass.segments_deleted, "{gone} files gone, {pass:?}");
-
-    match ok(d.call(Request::GcStatus(NameParam { name: "g".into() }))) {
-        Response::GcStatus(s) => {
-            assert_eq!(s.state, None, "{s:?}");
-            assert!(s.stats.passes >= 1, "{s:?}");
-            assert_eq!(
-                s.last_pass.as_ref().map(|p| p.pass),
-                Some(pass.pass),
-                "{s:?}"
-            );
-            assert!(s.last_finished_ms.is_some(), "{s:?}");
-            assert!(s.stats.bytes_freed >= pass.bytes_freed, "{s:?}");
-            assert!(s.stats.live_bytes > 0, "{s:?}");
-        }
-        r => panic!("{r:?}"),
-    }
+    let s = status(&mut d);
+    assert!(s.stats.passes >= 1, "{s:?}");
+    assert!(s.stats.bytes_freed > 0, "{s:?}");
+    assert!(s.stats.bytes_freed >= pass.bytes_freed, "{pass:?} {s:?}");
+    assert!(s.last_finished_ms.is_some(), "{s:?}");
+    assert!(s.stats.live_bytes > 0, "{s:?}");
+    assert_eq!(s.requests, 0, "{s:?}");
 
     // A second dry run answers too.
     assert!(gc(&mut d, true).dry_run);
