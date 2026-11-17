@@ -76,7 +76,7 @@ codes! {
     /// A chain link is wrong.
     CHAIN_BROKEN = "chain_broken", Error, "commit_seq, parent_hash or epoch of a link is wrong, or genesis does not name the volume";
     /// A commit below the floor is damaged.
-    COMMIT_BELOW_FLOOR = "commit_below_floor", Warning, "a commit file below chain_floor does not authenticate (legal only while condemned)";
+    COMMIT_BELOW_FLOOR = "commit_below_floor", Warning, "a commit file below chain_floor does not authenticate (legal only while condemned; inside GC's retained set GC stops until the next commit moves the window)";
     /// `chain_floor` disagrees with `retain_last`.
     CHAIN_FLOOR = "chain_floor", Warning, "chain_floor is not the older of the retain_last retained commits";
     /// `chain_floor` is above the tip.
@@ -89,6 +89,8 @@ codes! {
     ROLLBACK = "rollback", Error, "the tip is below the rollback floor in state/pins";
     /// Another commit at the floor's height.
     FORK = "fork", Error, "the chain has another commit than the one the rollback floor recorded";
+    /// Commits kept below GC's retained set for the rollback floor.
+    FLOOR_WINDOW = "floor_window", Note, "commits between the rollback floor and GC's retained set are kept as chain links only (ADR-31): authenticated and linked, what they name is not checked";
     /// The walk back to the floor cannot be completed.
     FORK_UNVERIFIABLE = "fork_unverifiable", Error, "a link between the tip and the rollback floor is missing or does not authenticate";
 
@@ -144,7 +146,9 @@ codes! {
     /// A named index run or the manifest is damaged.
     INDEX_RUN = "index_run", Error, "an index run or the manifest is damaged (repair: --rebuild-index)";
     /// A footer id has no index entry.
-    INDEX_MISSING = "index_missing", Warning, "chunks in sealed segments have no index entry (mount catches up)";
+    INDEX_MISSING = "index_missing", Warning, "chunks of segments the retained chain names have no index entry (mount's catch-up restores them)";
+    /// The same for segments the retained chain does not name.
+    INDEX_LOST = "index_lost", Error, "chunks of segments in use that the retained chain does not name have no index entry: mount's catch-up does not restore them, only --rebuild-index does";
     /// An index entry names a copy that is not there.
     INDEX_STALE = "index_stale", Warning, "index entries name an extent that is not at that location";
     /// An index entry for no stored chunk.
@@ -155,14 +159,16 @@ codes! {
     // Journal.
     /// A ring file belongs to another volume.
     JOURNAL_UUID = "journal_uuid", Error, "a journal file belongs to another volume";
-    /// Damage above the floor.
-    JOURNAL_DAMAGE = "journal_damage", Error, "journal damage above the floor with valid records after it: recovery would stop there";
+    /// Damage above the floor with valid records after it in its lane.
+    JOURNAL_RESIDUE = "journal_residue", Note, "journal damage above the floor with valid records after it in its lane: it holds no durable record unless a number at or below the flushed watermark is missing, which journal_loss reports (ADR-4, E1 sign-off 2026-11-16); recovery wipes from the first gap";
     /// Damage at or below the floor.
-    JOURNAL_DAMAGE_BELOW_FLOOR = "journal_damage_below_floor", Warning, "journal damage at or below the floor (covered by the commit)";
+    JOURNAL_DAMAGE_BELOW_FLOOR = "journal_damage_below_floor", Note, "journal damage at or below the floor: covered by the commit, costs nothing (a commit does not sync the journal, so a crash can tear such records; E1)";
     /// A torn tail.
     JOURNAL_TAIL = "journal_tail", Note, "a torn last record of a lane: crash residue, legal";
-    /// Valid records beyond the first gap.
-    IGNORED_AFTER_GAP = "ignored_after_gap", Warning, "valid records beyond the first gap of the merged write_seq order are ignored by recovery";
+    /// The merge stops at or below the watermark.
+    JOURNAL_LOSS = "journal_loss", Error, "the merged write_seq order (records and marks) misses a number at or below the flushed watermark, or holds one twice: durable records are lost, `on_journal_damage = refuse` refuses";
+    /// Valid records beyond the first gap, above the watermark.
+    IGNORED_AFTER_GAP = "ignored_after_gap", Note, "the merged write_seq order (records and marks) misses a number above the flushed watermark: crash residue, recovery ignores and wipes the valid records beyond it";
     /// A journal file name or header is unusable.
     JOURNAL_FILE = "journal_file", Warning, "a file in journal/ has an unusable name or header";
     /// Plain volume.
@@ -173,6 +179,14 @@ codes! {
     REPAIR_REFUSED = "repair_refused", Error, "a requested repair was refused; nothing was changed by it";
     /// A pass pending in `state/gc`.
     GC_PENDING = "gc_pending", Note, "GC work is pending in state/gc";
+    /// fsck's per-segment liveness differs from `lunix-gc`'s mark.
+    GC_LIVENESS = "gc_liveness", Error, "per-segment live bytes recounted by fsck differ from lunix-gc's mark";
+    /// What a GC pass would do now.
+    GC_DRY_RUN = "gc_dry_run", Note, "what a GC pass would condemn, delete and compact now (finish it with --repair --gc)";
+    /// GC's figures could not be computed.
+    GC_UNCHECKED = "gc_unchecked", Warning, "GC's mark, the liveness recount or the dry run failed: the GC checks did not run (--repair --gc refuses)";
+    /// The offline GC pass ran.
+    GC_REPAIRED = "gc_repaired", Note, "--repair --gc finished GC's work offline (passes and bytes freed)";
 }
 
 /// The documented entry for `code`.

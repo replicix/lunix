@@ -214,9 +214,20 @@ claims. Evidence: [s3probe](../../bench/s3probe/RESULTS.md).
   or FUA completes only after the group flush covering it has written and
   `fdatasync`ed every lane's records up to its `upto`, so every record at or
   below the watermark was durable before a later record witnessed it:
-  - a gap at or below the watermark, or a damaged range whose next valid
-    record in its lane is at or below it, is loss of durable data, and
-    `refuse` refuses it (the volume stays offline for `fsck`);
+  - a gap at or below the watermark is loss of durable data, and `refuse`
+    refuses it (the volume stays offline for `fsck`). A damaged range alone
+    is not: without such a gap every number above the floor is held by a
+    valid record, so the range held only records at or below the cut (which
+    the commit covers; a commit does not sync the journal, so a power loss
+    can tear them) or no record at all. Wherever a FLUSH- or FUA-covered
+    record is lost, the record carrying the watermark lies above it and the
+    merge cannot pass the missing number, so the gap rule sees every such
+    loss. **Rule change E1, maintainer sign-off 2026-11-16 (rule change, no
+    layout change):** the earlier rule also refused a damaged range whose
+    next valid record in its lane was at or below the watermark; after one
+    crash that tore a record at or below the cut, the first lane open raised
+    the watermark past it and every later `refuse` open was refused, the one
+    after a clean close too (M12b review);
   - a `write_seq` found twice (a wipe that did not happen) is never residue
     and is refused at any watermark;
   - everything above the watermark is treated as crash residue, whatever its

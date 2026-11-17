@@ -153,7 +153,10 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
             unresolved: 0,
         };
         let key = |e: &EntryRec| (e.seg, e.off, e.clen);
-        let mut unique_ids: HashSet<ChunkId> = HashSet::new();
+        // One record per distinct extent the tip resolves to (the entries are
+        // grouped by extent), deduplicated by id at the end: a sorted vector
+        // of 40 bytes per extent instead of a hash set.
+        let mut unique: Vec<(ChunkId, u32, u32)> = Vec::new();
         walk.tip_entries.sort_unstable_by_key(key);
         let mut i = 0;
         while i < walk.tip_entries.len() {
@@ -164,17 +167,24 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
             let run = (j - i) as u64;
             ratios.mapped_chunks += run;
             match cx.resolve(&walk.tip_entries[i], sink) {
-                Some(f) => {
-                    if unique_ids.insert(f.id) {
-                        ratios.unique_ulen += u64::from(f.ulen);
-                        ratios.unique_clen += u64::from(f.clen);
-                    }
-                }
+                Some(f) => unique.push((f.id, f.ulen, f.clen)),
                 None => ratios.unresolved_entries += run,
             }
             i = j;
         }
-        ratios.unique_chunks = unique_ids.len() as u64;
+        // The tip's entries are done with: free them before the rest.
+        walk.tip_entries = Vec::new();
+        // By (id, clen): one id stored twice with different lengths (a
+        // re-sealed compaction output, a duplicate) counts the same copy on
+        // every run.
+        unique.sort_unstable_by_key(|u| (u.0, u.2));
+        unique.dedup_by_key(|u| u.0);
+        for &(_, ulen, clen) in &unique {
+            ratios.unique_ulen += u64::from(ulen);
+            ratios.unique_clen += u64::from(clen);
+        }
+        ratios.unique_chunks = unique.len() as u64;
+        drop(unique);
         walk.other_entries.sort_unstable_by_key(key);
         let mut last: Option<EntryRec> = None;
         for e in &walk.other_entries {
@@ -184,6 +194,7 @@ pub(crate) fn run(s: &Session, view: Option<&IndexView>, sink: &mut Sink, facts:
             last = Some(*e);
             cx.resolve(e, sink);
         }
+        walk.other_entries = Vec::new();
         referenced.extend(cx.referenced);
     }
     ratios.hole_chunks = ratios.chunk_count.saturating_sub(ratios.mapped_chunks);

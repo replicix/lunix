@@ -82,7 +82,14 @@ pub(crate) fn walk(s: &Session, sink: &mut Sink, facts: &mut Facts) {
     // The tip first and whole, so its entry list is complete; the other
     // retained roots then skip every subtree already walked.
     let mut roots: Vec<(MapRoot, u64, bool)> = vec![(tip.full.map_root, tip.full.size, true)];
-    for r in facts.retained.iter().rev() {
+    // GC's retained set below chain_floor (N24) is a root set too: GC keeps
+    // what it reaches, so `--truncate-tip` leaves a complete volume.
+    for r in facts
+        .retained
+        .iter()
+        .rev()
+        .chain(facts.gc_extra.iter().rev())
+    {
         if let Commit::Full(f) = &r.commit {
             if r.seq != tip.seq {
                 roots.push((f.map_root, f.size, false));

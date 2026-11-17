@@ -578,7 +578,6 @@ impl LocalVolume {
             hex_lower(&new.tip_hash)
         );
         let path = self.inner.path(FLOOR_AUDIT);
-        let existed = path.exists();
         let mut f = fs::OpenOptions::new()
             .append(true)
             .create(true)
@@ -586,12 +585,12 @@ impl LocalVolume {
             .map_err(io_err)?;
         f.write_all(line.as_bytes()).map_err(io_err)?;
         self.inner.fs.fdatasync(&f).map_err(io_err)?;
-        if !existed {
-            self.inner
-                .fs
-                .fsync_dir(&self.inner.path("state"))
-                .map_err(io_err)?;
-        }
+        // Every time (M14 re-review P-3): an earlier run may have created the
+        // file and died before its directory sync. An offline path.
+        self.inner
+            .fs
+            .fsync_dir(&self.inner.path("state"))
+            .map_err(io_err)?;
         Ok(())
     }
 
@@ -772,13 +771,17 @@ impl VolumeDir for LocalVolume {
         let _serial = lock(&self.inner.pins_lock);
         let current = self.read_pins_file();
         let (mut file, old) = match (why, current) {
-            (FloorReset::RepairPins, Ok(_)) => {
+            (FloorReset::RepairPins { .. }, Ok(_)) => {
                 return Err(Error::Refused {
                     why: "state/pins is not rejected; nothing to repair",
                 })
             }
-            (FloorReset::RepairPins, Err(e)) if e.kind() == lunix_iface::ErrorKind::Corrupt => {
-                (self.fresh_pins_file()?, None)
+            (FloorReset::RepairPins { max_keyring_seq }, Err(e))
+                if e.kind() == lunix_iface::ErrorKind::Corrupt =>
+            {
+                let mut fresh = self.fresh_pins_file()?;
+                fresh.pins.max_keyring_seq = max_keyring_seq;
+                (fresh, None)
             }
             (_, Err(e)) => return Err(e),
             (_, Ok(Some(f))) => {

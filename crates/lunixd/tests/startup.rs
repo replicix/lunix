@@ -1,6 +1,7 @@
 //! M12a re-review R4: a signal while startup recovery runs ends the daemon.
 //! In-process: `server::run` with a startup step that never finishes, then a
 //! `SIGUSR2` to this test process (its own binary, so no other test sees it).
+//! M12a final review F2: a crashpoints build warns at start.
 
 mod common;
 
@@ -51,4 +52,21 @@ fn a_signal_during_startup_recovery_exits() {
     assert_eq!(code, Ok(0));
     assert!(start.elapsed() < Duration::from_secs(30));
     assert!(daemon.is_exiting());
+}
+
+/// The binary under test is built with this test's features: a crashpoints
+/// build warns at start, any other build does not.
+#[test]
+fn a_crashpoints_build_warns_at_start_and_a_normal_build_does_not() {
+    let Some(t) = common::scratch("build-kind") else {
+        return;
+    };
+    let mut d = common::Daemon::start(t.path(), "");
+    let log = d.log_text();
+    d.kill();
+    assert_eq!(
+        log.contains("test build: crash points and fault hooks are compiled in"),
+        cfg!(feature = "crashpoints"),
+        "{log}"
+    );
 }

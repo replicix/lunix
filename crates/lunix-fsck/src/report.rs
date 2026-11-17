@@ -158,8 +158,14 @@ pub struct Stats {
     pub extents: u64,
     /// Map nodes read.
     pub map_nodes: u64,
-    /// Journal records valid above the floor.
+    /// Journal records (writes and holes) recovery would replay: valid,
+    /// above the floor and before the first gap.
     pub journal_records: u64,
+    /// Marks of the mark ring above the floor and before the first gap
+    /// (they fill their `write_seq`, replay nothing).
+    pub journal_marks: u64,
+    /// The flushed watermark: the highest any valid record or mark carries.
+    pub journal_flushed: u64,
 }
 
 /// A repair that was applied, for the output.
@@ -306,6 +312,11 @@ impl Report {
             s,
             "checked: {} commits, {} segments, {} packs, {} map nodes, {} extents, {} journal records",
             st.commits, st.segments, st.packs, st.map_nodes, st.extents, st.journal_records
+        );
+        let _ = writeln!(
+            s,
+            "journal: {} records and {} marks to replay, flushed watermark {}",
+            st.journal_records, st.journal_marks, st.journal_flushed
         );
         if !self.uncovered.is_empty() {
             let _ = writeln!(s, "not covered by this run:");

@@ -200,9 +200,10 @@ fn catch_up_and_rebuild_read_real_segment_footers() {
     let mut want: Vec<_> = hints[4..].to_vec();
     want.sort_by_key(|e| e.0);
     assert_eq!(all, want);
-    assert!(
-        ix_main.runs().unwrap().is_empty(),
-        "rebuild starts from scratch"
+    assert_eq!(
+        ix_main.runs().unwrap().len(),
+        1,
+        "rebuild replaces every run by one new run, persisted at once"
     );
 }
 

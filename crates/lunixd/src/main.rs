@@ -105,6 +105,14 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     };
     let cfg = DaemonConfig::load(&path, explicit)?;
     StderrLog::install(cfg.log_level);
+    // M12a final review F2: a crashpoints build lands at the same path as a
+    // production one; say so first thing.
+    if cfg!(feature = "crashpoints") {
+        tracing::warn!(
+            crash_points = lunixd::crash_points().len(),
+            "test build: crash points and fault hooks are compiled in; not for production"
+        );
+    }
     // Before any other thread exists: the mount namespace and the I/O-flusher
     // flag are inherited. Core dumps are off in every build (a dump keeps
     // /dev/ublkcN open and holds key material). No mlockall (maintainer,
