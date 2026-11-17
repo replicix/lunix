@@ -127,7 +127,9 @@ fn rehints_that_do_not_fit_the_dirty_leaf_cap_go_in_batches_not_all_deferred() {
     }));
     let mut r = v.open().map_err(|e| e.0).expect("open");
     for (i, c) in [0, LEAF, 2 * LEAF].into_iter().enumerate() {
-        assert!(r.write(0, c * cs, &pattern(i as u64 + 1, CS as usize), false).is_ok());
+        assert!(r
+            .write(0, c * cs, &pattern(i as u64 + 1, CS as usize), false)
+            .is_ok());
     }
     // Three leaves exceed the cap of 2: the cut is retried smaller.
     while r.engine.commit_now(false).expect("commit") != CommitOutcome::Idle {}
@@ -142,7 +144,9 @@ fn rehints_that_do_not_fit_the_dirty_leaf_cap_go_in_batches_not_all_deferred() {
 
     // A cut that dirties a fourth leaf leaves room for one more leaf: one
     // leaf of re-hints goes in (before the fix: none, all deferred).
-    assert!(r.write(0, 3 * LEAF * cs, &pattern(9, CS as usize), false).is_ok());
+    assert!(r
+        .write(0, 3 * LEAF * cs, &pattern(9, CS as usize), false)
+        .is_ok());
     assert!(matches!(
         r.engine.commit_now(false).expect("commit"),
         CommitOutcome::Committed { .. }
