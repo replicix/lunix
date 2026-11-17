@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use lunix_engine::{CommitOutcome, EngineConfig, OnJournalDamage};
@@ -40,7 +41,6 @@ use lunix_format::local::OnFull;
 use lunix_format::{CryptoMode, WriteSeq};
 use lunix_gc::GcConfig;
 use lunix_iface::block::BlockEngine;
-use lunix_iface::gc::GcControl;
 use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
 use lunixd::testsupport::{
     close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch,
@@ -441,7 +441,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
 
 /// Refuses one reservation (a `cache_max` at what is charged, `on_full =
 /// error`), which starts the space ladder on the gate's thread, and waits for
-/// its compact step (the urgent pass) to finish. Restores the settings.
+/// its compact step (the urgent pass) to end. Restores the settings.
 fn run_ladder(stack: &lunixd::stack::VolumeStack) {
     let saved = stack.json.space.clone();
     let mut tight = saved.clone();
@@ -451,7 +451,7 @@ fn run_ladder(stack: &lunixd::stack::VolumeStack) {
         .space
         .reconfigure(&tight)
         .expect("child tight settings");
-    let passes = stack.engine.status().stats.passes;
+    let runs = stack.compact_runs.load(Ordering::Acquire);
     let errors = stack.space.step_errors();
     let out = stack
         .space
@@ -459,7 +459,7 @@ fn run_ladder(stack: &lunixd::stack::VolumeStack) {
         .expect("child reserve");
     assert!(matches!(out, ReserveOutcome::NoSpace), "{out:?}");
     let start = Instant::now();
-    while stack.engine.status().stats.passes == passes {
+    while stack.compact_runs.load(Ordering::Acquire) == runs {
         assert_eq!(stack.space.step_errors(), errors, "the compact step failed");
         assert!(
             start.elapsed() < Duration::from_secs(120),

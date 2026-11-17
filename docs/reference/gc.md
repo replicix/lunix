@@ -7,33 +7,48 @@ design is DESIGN §11 and plan M17; the byte layouts of the envelopes are in
 
 ## Where it runs
 
-The engine's commit coordinator calls the collector between cuts, with the
-in-memory map equal to the tip's root and no dirty leaf. Nothing else calls
-it: the control socket's `Gc` request and the space ladder's compact step post
-a request to the coordinator. One call (`step`) does small units of work until
-its budget (`gc_step_budget_ms`, default 50 ms) is spent, so a pass never holds
-up a cut for longer than one unit past the budget.
+Every call of the collector runs under the engine's coordinator mutex,
+between cuts, with the in-memory map equal to the tip's root and no dirty
+leaf; that mutex makes each caller the single caller. The background calls
+are the coordinator's own: one budgeted `step` after every commit (C10) and on
+every tick, also a tick whose commit failed, as long as the map is at the tip.
+A step does small units of work until its budget (`gc_step_budget_ms`, default
+50 ms) is spent, so a background step never holds up a cut for longer than one
+unit past the budget. The urgent pass and a dry run are one call each and hold
+the coordinator for a whole mark (and the urgent pass's compaction).
 
 A pass runs when the previous one ended at least 30 s ago and something may
 have changed: a new tip, condemned objects waiting, or different pins.
 
-The daemon reaches the collector in three ways (the engine's `GcControl`, all
-on the coordinator):
+The daemon reaches the collector in three ways (the engine's `GcControl`; the
+calling thread runs the collector under the coordinator mutex):
 
-- **`lunix gc NAME`** (`Gc`) finishes the pass in progress, or starts one at
-  once (due or not), and steps it to its end, releasing the coordinator
-  between steps; it returns that pass's summary, so it takes at least the
-  grace. A detach or quiesce of the volume ends the wait (`Busy`); the pass
-  then goes on in the background. **`--dry-run`** is one call that marks and
+- **`lunix gc NAME`** (`Gc`) asks for a pass now (due or not) and steps it to
+  its end. Between two steps it releases the coordinator and pauses (5 ms, or
+  100 ms in the grace), so cuts, a quiesce and the ladder get in. A pass
+  already marking answers; one past its mark (its view predates the call)
+  finishes first and the next one answers; an urgent pass that ends meanwhile
+  answers too (its mark began after the call). It takes at least the grace and
+  is not cut off by the daemon's `call_timeout` (the client's `--timeout`,
+  default 600 s, still applies; the pass goes on after a client gives up).
+  Answers: `Invalid` when the volume is not attached; `Busy` when the volume
+  is detached or quiesced meanwhile (the call ends at once, no collector call
+  starts after the quiesce, and the detach waits for the call to let go of the
+  engine, so `LOCK` is free when the detach answers), or when the map stays
+  ahead of the tip for 50 steps; `Refused` when the collector dropped the pass
+  four times (errors, see the log). **`--dry-run`** is one call that marks and
   reports what a pass would condemn, delete and compact, changing nothing.
 - **`lunix gc NAME --status`** (`GcStatus`) reads the status the collector
-  published after its last call, without waiting for the coordinator.
+  published after its last call, without waiting for the coordinator or the
+  engine. A volume that is not attached is idle, with empty counters.
 - **The space ladder's compact step** is the urgent pass (below): the gate
-  runs it on its own thread when a reservation does not fit. A cut that fails
-  for space (a destage `NoSpace` from a full host file system) runs it too,
-  from the coordinator, at most every 2 s, and holds back compaction
-  re-hints until a cut succeeds, so a failed cut never leaves the map ahead
-  of the tip (which would stop GC).
+  runs it on its own thread when a reservation does not fit. A commit that
+  fails for space at any step (a destage `NoSpace` from a full host file
+  system, an index run that cannot be written) runs it too, from the
+  coordinator, at least 2 s after the end of the last urgent pass (either
+  kind); the pause doubles, up to 60 s, while those passes free nothing.
+  Compaction re-hints are applied only after a cut's destage succeeded, so a
+  cut that fails for space leaves the map at the tip and GC can run.
 
 ## What is kept
 

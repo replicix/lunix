@@ -54,7 +54,7 @@ mod stats;
 pub use config::{EngineConfig, OnJournalDamage};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
-pub use engine::{CommitOutcome, Engine};
+pub use engine::{CommitOutcome, Engine, GcStatusHandle};
 pub use error::OpenError;
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;

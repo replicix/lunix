@@ -327,7 +327,7 @@ fn a_requested_pass_starts_although_none_is_due() {
     assert!(!p.done);
     assert_eq!(s.gc.stats().passes, before);
     // Asked for, the next step starts one; it runs to its end as usual.
-    s.gc.request_pass();
+    assert!(s.gc.request_pass());
     s.pass().unwrap();
     assert_eq!(s.gc.stats().passes, before + 1);
     // The request was used up.
@@ -336,7 +336,7 @@ fn a_requested_pass_starts_although_none_is_due() {
     assert_eq!(s.gc.stats().passes, before + 1);
     assert_eq!(s.gc.status().state, None);
     // An urgent pass answers a pending request: no second pass follows it.
-    s.gc.request_pass();
+    assert!(s.gc.request_pass());
     s.urgent(1).unwrap();
     assert_eq!(s.gc.stats().passes, before + 2);
     s.clock.advance(Duration::from_secs(5));

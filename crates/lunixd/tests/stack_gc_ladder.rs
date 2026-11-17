@@ -8,9 +8,10 @@
 //! On a churned volume a tight `cache_max` with `on_full = error` refuses one
 //! reservation, which starts the ladder: its urgent pass condemns the dead
 //! rounds. With no GC step for longer than the floor grace (manual engine), a
-//! second refusal starts the ladder again, and that urgent pass deletes: segment files, the `Segments` charge and
-//! the status counters go down or up as they should, the volume reads back
-//! equal and `lunix-fsck` finds nothing at rest.
+//! second refusal starts the ladder again, and that urgent pass deletes:
+//! segment files, the `Segments` charge and the status counters go down or up
+//! as they should, the volume reads back equal and `lunix-fsck` finds nothing
+//! at rest.
 //!
 //! A second test fills a volume: the host file system (a test `FsOps` that
 //! answers `ENOSPC` to segment syncs above a byte bound) refuses segments,
@@ -18,6 +19,12 @@
 //! coordinator runs the urgent pass when a cut fails for space (the ladder's
 //! compact step from the engine side, plan M17.B review S-2), which frees
 //! the dead rounds, and the workload completes without any normal pass.
+//!
+//! A third test has compaction moves pending when the first cut fails for
+//! space (M12c review B-1): the re-hints are applied only after a destage
+//! succeeded, so the failed cut leaves the map at the tip, the urgent pass
+//! runs, and a fail / succeed / fail sequence ends with the volume equal to
+//! the oracle.
 //!
 //! ```text
 //! cargo build --release -p lunix-fsck
@@ -39,6 +46,7 @@ use lunix_format::CryptoMode;
 use lunix_gc::GcConfig;
 use lunix_iface::gc::GcControl;
 use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
+use lunix_iface::ErrorKind;
 use lunix_store::{FsOps, RealFs};
 use lunixd::stack::{OpenParams, VolumeStack};
 use lunixd::testsupport::{close, fsck, fsck_binary, payload, Driver, Scratch, VolumeBuilder};
@@ -76,14 +84,14 @@ fn segment_bytes(stack: &VolumeStack) -> (usize, u64) {
 
 /// Refuses one reservation (a `cache_max` at what is charged, `on_full =
 /// error`), which starts the ladder on the gate's thread, and waits for the
-/// urgent pass to finish. Restores the settings.
+/// compact step (the urgent pass) to end. Restores the settings.
 fn run_ladder(stack: &VolumeStack) {
     let saved = stack.json.space.clone();
     let mut tight = saved.clone();
     tight.on_full = OnFull::Error;
     tight.cache_max = Some(stack.space.snapshot().used().max(1));
     stack.space.reconfigure(&tight).expect("tight settings");
-    let passes = stack.engine.status().stats.passes;
+    let runs = stack.compact_runs.load(Ordering::Acquire);
     let errors = stack.space.step_errors();
     let out = stack
         .space
@@ -91,7 +99,7 @@ fn run_ladder(stack: &VolumeStack) {
         .expect("reserve");
     assert!(matches!(out, ReserveOutcome::NoSpace), "{out:?}");
     let start = Instant::now();
-    while stack.engine.status().stats.passes == passes {
+    while stack.compact_runs.load(Ordering::Acquire) == runs {
         assert_eq!(stack.space.step_errors(), errors, "the compact step failed");
         assert!(
             start.elapsed() < Duration::from_secs(120),
@@ -203,7 +211,8 @@ fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
 #[derive(Debug)]
 struct BoundedFs {
     segments: PathBuf,
-    cap: u64,
+    /// `u64::MAX`: no bound.
+    cap: AtomicU64,
     refused: AtomicU64,
 }
 
@@ -225,7 +234,7 @@ impl FsOps for BoundedFs {
             std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).unwrap_or_default();
         if path.parent() == Some(self.segments.as_path()) {
             let len = file.metadata()?.len();
-            if self.sealed_bytes() + len > self.cap {
+            if self.sealed_bytes() + len > self.cap.load(Ordering::Acquire) {
                 self.refused.fetch_add(1, Ordering::Relaxed);
                 return Err(std::io::Error::from_raw_os_error(libc_enospc()));
             }
@@ -270,7 +279,7 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
     let vol = b.create().expect("create");
     let fs = Arc::new(BoundedFs {
         segments: vol.voldir.join("segments"),
-        cap: 6 * region,
+        cap: AtomicU64::new(6 * region),
         refused: AtomicU64::new(0),
     });
     let store_fs: Arc<dyn FsOps> = fs.clone();
@@ -320,7 +329,7 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
         "full volume: {} segment syncs refused, {failed_commits} explicit commits failed, gc {s:?}, sealed {} B (cap {} B), {:?}",
         fs.refused.load(Ordering::Relaxed),
         fs.sealed_bytes(),
-        fs.cap,
+        fs.cap.load(Ordering::Relaxed),
         start.elapsed()
     );
     assert!(
@@ -333,7 +342,7 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
         s.stats.bytes_freed > 0,
         "the urgent pass freed nothing: {s:?}"
     );
-    assert!(fs.sealed_bytes() <= fs.cap);
+    assert!(fs.sealed_bytes() <= fs.cap.load(Ordering::Relaxed));
     drop(d);
     close(stack).expect("close");
     if let Some(f) = fsck(&vol) {
@@ -344,6 +353,134 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
     let all = d.read_all(size).expect("read");
     assert!(
         all[..region as usize] == last[..],
+        "the region differs after reopen"
+    );
+    drop(d);
+    close(stack).expect("close");
+}
+
+#[test]
+fn moves_pending_when_cuts_fail_for_space_leave_the_map_at_the_tip() {
+    let t = Scratch::new("m12c-moves");
+    let cs = 64u32 << 10;
+    let cs64 = u64::from(cs);
+    let region = 8u64 << 20;
+    let size = 64u64 << 20;
+    let mut b = VolumeBuilder::new(t.path())
+        .manual()
+        .mode(CryptoMode::Integrity)
+        .chunk_size(cs)
+        .size_bytes(size);
+    b.track_syncs = false;
+    let manual = b.engine.clone();
+    b.engine = Some(Arc::new(move |c: &mut EngineConfig| {
+        if let Some(m) = &manual {
+            m(c);
+        }
+        gc_tune(c);
+    }));
+    let vol = b.create().expect("create");
+    let fs = Arc::new(BoundedFs {
+        segments: vol.voldir.join("segments"),
+        cap: AtomicU64::new(u64::MAX),
+        refused: AtomicU64::new(0),
+    });
+    let store_fs: Arc<dyn FsOps> = fs.clone();
+    let stack = vol
+        .open_with(|o| {
+            o.store_fs = Some(store_fs);
+            // Passes only on request (and the first one, due at open).
+            o.gc = Some(GcConfig {
+                pass_interval: Duration::from_secs(3600),
+                ..GcConfig::default()
+            });
+        })
+        .expect("open");
+    let mut d = Driver::new(&stack).expect("driver");
+    let mut oracle = vec![0u8; region as usize];
+    let mut write = |d: &mut Driver, c: u64, seed: u64| {
+        let data = payload(seed, cs as usize);
+        assert!(d.write(0, c * cs64, &data, false).is_ok());
+        oracle[(c * cs64) as usize..((c + 1) * cs64) as usize].copy_from_slice(&data);
+    };
+
+    // The region whole, then three chunks of four again: the first segment
+    // keeps a quarter live. Three forced FULLs take its whole-live root out
+    // of GC's retained set.
+    for c in 0..region / cs64 {
+        write(&mut d, c, c);
+    }
+    assert!(d.flush(0).is_ok());
+    stack.engine.commit_now(false).expect("commit");
+    for c in (0..region / cs64).filter(|c| c % 4 != 0) {
+        write(&mut d, c, (1 << 32) | c);
+    }
+    assert!(d.flush(0).is_ok());
+    stack.engine.commit_now(false).expect("commit");
+    for _ in 0..3 {
+        stack.engine.commit_now(true).expect("forced commit");
+    }
+
+    // A pass on request compacts that segment; no cut since: its moves are
+    // pending.
+    let pass = stack.engine.run_pass(false).expect("gc pass");
+    let s = stack.engine.status();
+    eprintln!("moves: pass {pass:?}; status {s:?}");
+    assert!(pass.segments_compacted > 0, "{pass:?}");
+    assert!(s.moved_pending > 0, "no move pending: {s:?}");
+
+    // Fail / succeed / fail / succeed. Every failed cut leaves the map at the
+    // tip: a dry run answers (not `Busy`) and the urgent pass ran.
+    for round in 0..2u64 {
+        fs.cap.store(fs.sealed_bytes(), Ordering::Release);
+        for c in (0..region / cs64).step_by(8) {
+            write(&mut d, c, ((2 + round) << 32) | c);
+        }
+        assert!(d.flush(0).is_ok());
+        let passes = stack.engine.status().stats.passes;
+        // The urgent pass runs at the first failed commit, or once its
+        // backoff after the last one (which freed nothing) has run out.
+        let start = Instant::now();
+        loop {
+            let e = stack
+                .engine
+                .commit_now(false)
+                .expect_err("the cut must fail for space");
+            assert_eq!(e.kind(), ErrorKind::NoSpace, "{e}");
+            let dry = stack
+                .engine
+                .run_pass(true)
+                .unwrap_or_else(|e| panic!("round {round}: the map is not at the tip: {e}"));
+            assert!(dry.dry_run);
+            let s = stack.engine.status();
+            if s.stats.passes > passes {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(90),
+                "round {round}: no urgent pass after the failed cuts: {s:?}"
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        assert!(!stack.engine.is_stopped());
+        fs.cap.store(u64::MAX, Ordering::Release);
+        stack
+            .engine
+            .commit_now(false)
+            .expect("the cut after space came back");
+        stack.engine.commit_now(true).expect("forced commit");
+    }
+    assert!(fs.refused.load(Ordering::Relaxed) > 0);
+    drop(d);
+    close(stack).expect("close");
+    if let Some(f) = fsck(&vol) {
+        assert!(f.no_errors(), "lunix-fsck:\n{}", f.text);
+    }
+    let stack = vol.open().expect("reopen");
+    let mut d = Driver::new(&stack).expect("driver");
+    let all = d.read_all(size).expect("read");
+    assert!(
+        all[..region as usize] == oracle[..],
         "the region differs after reopen"
     );
     drop(d);

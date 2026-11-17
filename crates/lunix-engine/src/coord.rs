@@ -12,9 +12,10 @@
 //! classified ([`Retry`]): `MapFull` classes cut smaller, `Later` and
 //! `AfterSpace` fail this attempt (the next trigger retries), `Never` and
 //! `Stop` stop the engine's commits (writes fail, reads continue). Compaction
-//! re-hints run before the destage in their own transaction; a failure there
-//! keeps them for the next cut; their output segments are named by this
-//! cut's FULL all the same (N10: naming an existing sealed segment is always
+//! re-hints run right after a successful destage, in their own transaction
+//! (a failed destage leaves the map at the tip, so GC can still run); a
+//! failure there keeps them for the next cut; their output segments are named
+//! by this cut's FULL all the same (N10: naming an existing sealed segment is always
 //! safe, and `persist` may then cover their relocations). A failure after the
 //! destage committed its transaction (C5, C6) stops further commits in this
 //! process (the in-memory map is ahead of the durable state) until the
@@ -72,14 +73,14 @@ pub(crate) struct Coord {
     /// A `persist` failed (at C8 or of the catch-up at open): the next cut
     /// retries it before anything else and fails while it fails (N13).
     pub(crate) index_unpersisted: bool,
-    /// When a cut that failed for space last ran GC's urgent pass (the space
-    /// ladder's compact step from the coordinator; rate-limited).
+    /// When the last urgent pass ended (a commit that failed for space, or
+    /// the space ladder's compact step): `space_short` waits
+    /// `space_backoff` after it.
     pub(crate) last_space_urgent: Option<Duration>,
-    /// The last cut failed for space: the next cut applies no compaction
-    /// re-hints (they stay in `moved`, their outputs are named all the same),
-    /// so a cut that fails again leaves the map at the tip and GC's urgent
-    /// pass can still run.
-    pub(crate) short_of_space: bool,
+    /// The pause between two urgent passes run because commits fail for
+    /// space: doubles while they free nothing, back to the minimum when one
+    /// frees bytes.
+    pub(crate) space_backoff: Duration,
 }
 
 impl Coord {
@@ -101,7 +102,7 @@ impl Coord {
             upto_seg: rec.upto_seg,
             index_unpersisted: rec.index_unpersisted,
             last_space_urgent: None,
-            short_of_space: false,
+            space_backoff: crate::gc::SPACE_URGENT_MIN,
         }
     }
 }
@@ -226,7 +227,16 @@ impl Inner {
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
         let mut co = crate::engine::lock(&self.coord);
         if self.wanted(&mut co) {
-            self.commit(&mut co, false, None)
+            let res = self.commit(&mut co, false, None);
+            // A commit that failed without touching the map (no space, an
+            // index run still unpersisted, writes in flight) still steps the
+            // collector: a volume that cannot commit must still collect
+            // (M12c review S-3). `gc_step` does nothing unless the map is at
+            // the tip.
+            if res.is_err() && !self.is_failed() {
+                self.gc_step(&mut co);
+            }
+            res
         } else {
             // An idle volume still steps the collector (M17.A review minor
             // 4): a pass waiting in its grace finishes without a cut. Its
@@ -274,17 +284,32 @@ impl Inner {
     }
 
     /// Cuts at the current `write_seq` and commits (C1-C10). `force`
-    /// commits even when nothing changed; `new_size` grows the volume.
+    /// commits even when nothing changed; `new_size` grows the volume. A
+    /// commit that fails for space, at any step (the destage, the index
+    /// run's retry), runs GC's urgent pass (`space_short`).
     pub(crate) fn commit(
         &self,
         co: &mut Coord,
         force: bool,
         new_size: Option<u64>,
     ) -> Result<CommitOutcome> {
+        let res = self.commit_once(co, force, new_size);
+        if let Err(e) = &res {
+            if e.kind() == ErrorKind::NoSpace {
+                self.space_short(co);
+            }
+        }
+        res
+    }
+
+    fn commit_once(
+        &self,
+        co: &mut Coord,
+        force: bool,
+        new_size: Option<u64>,
+    ) -> Result<CommitOutcome> {
         if self.is_failed() {
-            return Err(Error::Io(std::io::Error::other(
-                "the engine stopped committing after a failure",
-            )));
+            return Err(crate::engine::stopped());
         }
         // N13: no new FULL while index entries of named segments are only
         // in memory.
@@ -322,17 +347,8 @@ impl Inner {
                     c = prev + (c - prev) / 2;
                     tracing::info!(cut = c, "map dirty-leaf cap reached: cutting smaller");
                 }
-                Err(CutFail::Other(e)) => {
-                    if e.kind() == ErrorKind::NoSpace {
-                        co.short_of_space = true;
-                        self.space_short(co);
-                    }
-                    return Err(e);
-                }
-                Ok(o) => {
-                    co.short_of_space = false;
-                    return Ok(o);
-                }
+                Err(CutFail::Other(e)) => return Err(e),
+                Ok(o) => return Ok(o),
             }
         }
     }
@@ -390,20 +406,6 @@ impl Inner {
             return Err(CutFail::Other(e));
         }
         lunix_iface::crashpoint!("engine.c2.cut");
-        // C3, first: compaction re-hints, in their own transaction. A
-        // failure keeps them for the next cut (nothing was applied); a later
-        // failure of this cut leaves them applied in memory, pointing at
-        // sealed segments, and still to be named (`pending_named`).
-        // While cuts fail for space the re-hints wait (`short_of_space`): a
-        // failed destage after them would leave the map ahead of the tip and
-        // stop GC, the one thing that frees space.
-        if co.short_of_space {
-            if !co.moved.is_empty() {
-                tracing::debug!("compaction re-hints deferred: the last cut failed for space");
-            }
-        } else if let Err(e) = self.apply_moved(co) {
-            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
-        }
         // C3: destage; every segment sealed before the map transaction
         // commits, index inserts held back.
         let writes = (c > prev).then(|| WriteSeqRange {
@@ -443,6 +445,18 @@ impl Inner {
         }
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
+        // C3, second: compaction re-hints, in their own transaction, only
+        // after the destage succeeded (M12c review B-1): a destage that fails
+        // (for space, typically) then leaves the map at the tip, so GC (the
+        // urgent pass that frees the space) can still run. A re-hint is
+        // conditional on the old hint, so a chunk this cut rewrote keeps its
+        // new entry. A failure keeps them for the next cut (nothing was
+        // applied); a later failure of this cut leaves them applied in
+        // memory, pointing at sealed segments, still to be named
+        // (`pending_named`).
+        if let Err(e) = self.apply_moved(co) {
+            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
+        }
         self.points
             .hit("engine.c3.destaged")
             .map_err(CutFail::Other)?;
@@ -754,12 +768,11 @@ impl Inner {
         let Some(budget) = self.cfg.gc_budget else {
             return;
         };
-        // The hook's preconditions (M17): between cuts, map root = tip root.
-        if self.cfg.gc_params.is_none() || co.collector.is_none() || !self.map_at_tip(co) {
-            return;
-        }
         match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => co.moved.extend(p.moved),
+            // No collector, or the map ahead of the tip (the hook's
+            // precondition, M17): nothing to step now.
+            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {}
             Err(e) => tracing::warn!(error = %e, "gc step failed; the pass resumes later"),
         }
     }

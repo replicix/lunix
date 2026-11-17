@@ -158,7 +158,8 @@ fn connection(daemon: &Arc<Daemon>, mut stream: StdStream, peer: Peer) -> Option
     }
 }
 
-/// Runs a call on its own thread, bounded by the configured timeout.
+/// Runs a call on its own thread, bounded by the configured timeout (a gc
+/// pass is not: see below).
 fn run_call(
     daemon: &Arc<Daemon>,
     peer: Peer,
@@ -170,6 +171,10 @@ fn run_call(
         return daemon.handle(peer, frame.call);
     }
     let timeout = daemon.config().call_timeout;
+    // A gc pass lasts at least its grace plus a rate-limited compaction and
+    // ends at once when the volume is detached or quiesced: it is not cut off
+    // by the call timeout (the client's own `--timeout` still applies).
+    let bounded = !matches!(&frame.call, lunix_iface::ctl::Request::Gc(g) if !g.dry_run);
     let (tx, rx) = mpsc::channel();
     let d = Arc::clone(daemon);
     let spawned = std::thread::Builder::new()
@@ -186,9 +191,14 @@ fn run_call(
             After::Continue,
         );
     }
-    match rx.recv_timeout(timeout) {
-        Ok(r) => r,
-        Err(_) => (
+    let got = if bounded {
+        rx.recv_timeout(timeout).ok()
+    } else {
+        rx.recv().ok()
+    };
+    match got {
+        Some(r) => r,
+        None => (
             Err(CtlError::new(
                 ErrorCode::Internal,
                 format!(

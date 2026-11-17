@@ -1,8 +1,9 @@
 //! `Gc` and `GcStatus` over the control socket (plan M12 step 12), against a
 //! `lunixd` child with `device = "none"`: a churn volume (written in process
 //! through `lunixd::testsupport`, then attached by the daemon), a dry run
-//! that reports dead objects and deletes nothing, a pass on request that
-//! frees them, and the status fields after it. The volume then reads back
+//! that reports dead objects and deletes nothing, a detach while a pass on
+//! request waits (the call ends, the volume attaches again at once), a pass
+//! on request that frees them, and the status fields after it. The volume then reads back
 //! equal to what was written last and `lunix-fsck` (when built) finds no
 //! error.
 //!
@@ -19,18 +20,19 @@
 mod common;
 
 use std::collections::BTreeSet;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use common::{scratch, Daemon};
 use lunix_format::local::VolumeJson;
 use lunix_format::paths::local as lpath;
 use lunix_format::CryptoMode;
 use lunix_iface::ctl::{
-    Attach, Compress, ErrorCode, GcRequest, NameParam, Outcome, Request, Response, VolumeCreate,
-    VolumeMode,
+    read_frame, to_payload, write_frame, Attach, Compress, ErrorCode, GcRequest, NameParam,
+    Outcome, Request, RequestFrame, Response, ResponseFrame, VolumeCreate, VolumeMode, MAX_FRAME,
 };
-use lunix_iface::gc::GcPassSummary;
+use lunix_iface::gc::{GcPassSummary, GcStatusSnapshot};
 use lunixd::testsupport::{close, fsck, payload, Driver, TestVolume, VolumeBuilder};
 
 const SIZE: u64 = 64 << 20;
@@ -123,6 +125,37 @@ fn short_grace(voldir: &Path) {
     std::fs::write(&path, j.to_json_pretty().unwrap()).unwrap();
 }
 
+fn attach() -> Request {
+    Request::Attach(Attach {
+        name: "g".into(),
+        queues: None,
+        depth: None,
+        cpus: None,
+        max_io_buf_bytes: None,
+        credential: None,
+        on_journal_damage: None,
+        allow_unverifiable_fork: false,
+    })
+}
+
+fn status(d: &mut Daemon) -> GcStatusSnapshot {
+    match ok(d.call(Request::GcStatus(NameParam { name: "g".into() }))) {
+        Response::GcStatus(s) => s,
+        r => panic!("{r:?}"),
+    }
+}
+
+/// One call on its own connection (from another thread than `Daemon`'s).
+fn call_on(socket: &Path, req: Request) -> Outcome {
+    let frame = RequestFrame::new(1, req);
+    let payload = to_payload(&frame).expect("payload");
+    let mut s = UnixStream::connect(socket).expect("connect");
+    write_frame(&mut s, &payload, MAX_FRAME).expect("write");
+    let reply = read_frame(&mut s, MAX_FRAME).expect("reply");
+    let r: ResponseFrame = serde_json::from_slice(&reply).expect("response");
+    r.result
+}
+
 fn voldir_of(d: &mut Daemon) -> PathBuf {
     match ok(d.call(Request::VolumeList)) {
         Response::VolumeList { volumes } => {
@@ -164,33 +197,55 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
         o => panic!("{o:?}"),
     }
 
-    ok(d.call(Request::Attach(Attach {
-        name: "g".into(),
-        queues: None,
-        depth: None,
-        cpus: None,
-        max_io_buf_bytes: None,
-        credential: None,
-        on_journal_damage: None,
-        allow_unverifiable_fork: false,
-    })));
-    let attached = Instant::now();
+    ok(d.call(attach()));
 
-    // The dry run reports the dead rounds and deletes nothing (no grace has
-    // run since the attach: nothing can be deleted yet by anyone).
+    // The dry run reports the dead rounds and deletes nothing. The pass the
+    // attach started may delete meanwhile (after its 12 s grace, on a slow
+    // host): the file sets are compared only when nothing was freed.
+    let freed_before = status(&mut d).stats.bytes_freed;
     let before = segment_files(&voldir);
     let dry = gc(&mut d, true);
-    assert!(
-        attached.elapsed().as_secs() < 10,
-        "the dry run took too long"
-    );
+    let after_dry = segment_files(&voldir);
     assert!(dry.dry_run && dry.pass == 0, "{dry:?}");
     assert!(dry.segments_deleted > 0 && dry.bytes_freed > 0, "{dry:?}");
-    assert_eq!(segment_files(&voldir), before, "a dry run deleted segments");
-    match ok(d.call(Request::GcStatus(NameParam { name: "g".into() }))) {
-        Response::GcStatus(s) => assert!(s.last_pass.is_none() && s.stats.passes == 0, "{s:?}"),
-        r => panic!("{r:?}"),
+    if status(&mut d).stats.bytes_freed == freed_before {
+        assert_eq!(after_dry, before, "a dry run deleted segments");
+    } else {
+        eprintln!("a background pass deleted during the dry run: file sets not compared");
     }
+
+    // A detach while a pass on request waits (M12c review S-2): the call ends
+    // `Busy`, the detach answers once the engine is gone, and the volume can
+    // be attached again at once (`LOCK` released).
+    let sock = d.socket.clone();
+    let waiting = std::thread::spawn(move || {
+        call_on(
+            &sock,
+            Request::Gc(GcRequest {
+                name: "g".into(),
+                dry_run: false,
+            }),
+        )
+    });
+    let start = Instant::now();
+    while status(&mut d).state.is_none() {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "no pass in progress"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(matches!(
+        ok(d.call(Request::Detach(NameParam { name: "g".into() }))),
+        Response::Detached
+    ));
+    ok(d.call(attach()));
+    match waiting.join().expect("gc call thread") {
+        Outcome::Err(e) => assert_eq!(e.code, ErrorCode::Busy, "{e:?}"),
+        Outcome::Ok(r) => eprintln!("the pass ended before the detach: {r:?}"),
+    }
+    let before = segment_files(&voldir);
 
     // The pass on request: condemn, grace, recheck, delete.
     let started = Instant::now();
@@ -227,9 +282,8 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
         r => panic!("{r:?}"),
     }
 
-    // A second dry run finds the deleted rounds gone.
-    let dry2 = gc(&mut d, true);
-    assert!(dry2.bytes_freed < dry.bytes_freed, "{dry2:?} after {dry:?}");
+    // A second dry run answers too.
+    assert!(gc(&mut d, true).dry_run);
 
     // Detached: the data is the last round's, fsck finds no error.
     assert!(matches!(

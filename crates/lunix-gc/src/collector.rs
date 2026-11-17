@@ -1544,8 +1544,9 @@ impl Collector for Gc {
         self.stats
     }
 
-    fn request_pass(&mut self) {
+    fn request_pass(&mut self) -> bool {
         self.forced = true;
+        true
     }
 
     fn status(&self) -> GcStatusSnapshot {

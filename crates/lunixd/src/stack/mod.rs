@@ -29,6 +29,7 @@ mod floor;
 mod ladder;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use lunix_crypto::keyring::{self, Argon2Cost, KeyFile, NewSlot, Unlock};
@@ -539,6 +540,9 @@ pub struct VolumeStack {
     /// The rollback floor found before the engine opened (`None`: first
     /// attach on this host, which cannot detect an earlier rollback).
     pub floor_before: Option<RollbackFloor>,
+    /// Runs of the space ladder's compact step that have ended (with or
+    /// without bytes freed), for tests and diagnostics.
+    pub compact_runs: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for VolumeStack {
@@ -837,9 +841,13 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);
     // The ladder's compact step is GC's urgent pass (plan M12 step 12).
+    let compact_runs = Arc::new(AtomicU64::new(0));
     space.register(
         LadderStepKind::Compact,
-        Box::new(CompactStep(Arc::downgrade(&engine))),
+        Box::new(CompactStep {
+            engine: Arc::downgrade(&engine),
+            runs: Arc::clone(&compact_runs),
+        }),
     );
     record_pins(&store, &desc, ok.record_pin, ok.keyring_seq)?;
     Ok(VolumeStack {
@@ -853,5 +861,6 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         json,
         voldir,
         floor_before,
+        compact_runs,
     })
 }

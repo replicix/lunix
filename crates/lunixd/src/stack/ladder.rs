@@ -5,9 +5,11 @@
 //! The gate runs the step on its own thread and the step waits for the
 //! coordinator; the coordinator never waits for the gate's thread (it never
 //! parks in the gate), so the two cannot deadlock. The step holds the engine
-//! weakly: the gate never keeps a closed volume's engine alive.
+//! weakly: the gate never keeps a closed volume's engine alive, and on a
+//! quiesced engine the step frees nothing and lets go at once.
 
-use std::sync::Weak;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use lunix_engine::Engine;
 use lunix_iface::gc::GcControl;
@@ -15,11 +17,16 @@ use lunix_iface::space::{Freed, LadderStep, Urgency};
 use lunix_iface::{Error, Result};
 
 /// [`LadderStep`] for `LadderStepKind::Compact`.
-pub struct CompactStep(pub Weak<Engine>);
+pub struct CompactStep {
+    /// The volume's engine.
+    pub engine: Weak<Engine>,
+    /// Incremented after every run (`VolumeStack::compact_runs`).
+    pub runs: Arc<AtomicU64>,
+}
 
-impl LadderStep for CompactStep {
-    fn run(&mut self, want_bytes: u64, urgency: Urgency) -> Result<Freed> {
-        let Some(engine) = self.0.upgrade() else {
+impl CompactStep {
+    fn urgent(&self, want_bytes: u64, urgency: Urgency) -> Result<Freed> {
+        let Some(engine) = self.engine.upgrade() else {
             return Ok(Freed(0));
         };
         match engine.run_urgent(want_bytes) {
@@ -34,5 +41,13 @@ impl LadderStep for CompactStep {
                 Err(e)
             }
         }
+    }
+}
+
+impl LadderStep for CompactStep {
+    fn run(&mut self, want_bytes: u64, urgency: Urgency) -> Result<Freed> {
+        let r = self.urgent(want_bytes, urgency);
+        self.runs.fetch_add(1, Ordering::Release);
+        r
     }
 }

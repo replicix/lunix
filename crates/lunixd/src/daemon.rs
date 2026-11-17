@@ -9,11 +9,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use lunix_crypto::{Argon2Cost, AttachError};
-use lunix_engine::{Engine, OnJournalDamage};
+use lunix_engine::{GcStatusHandle, OnJournalDamage};
 use lunix_format::commit::Commit;
 use lunix_format::local::{DeviceRecord, RegistryEntry, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
@@ -84,10 +84,10 @@ pub struct Daemon {
     cfg: DaemonConfig,
     registry: Mutex<Registry>,
     slots: Mutex<HashMap<String, Arc<Mutex<Slot>>>>,
-    /// The engine of each attached volume, held weakly: `GcStatus` reads the
-    /// collector's status without the volume's mutex, which a running `Gc`
-    /// pass or an attach may hold for a long time.
-    engines: Mutex<HashMap<String, Weak<Engine>>>,
+    /// The collector status of each attached volume: `GcStatus` reads it
+    /// without the volume's mutex (an attach may hold that for long) and
+    /// without the engine. Set at attach, removed at detach.
+    gc_status: Mutex<HashMap<String, GcStatusHandle>>,
     audit: Audit,
     /// Set before a quiesce takes its snapshot: mutating calls are refused
     /// (cleared again when the quiesce fails without freezing anything).
@@ -105,6 +105,9 @@ impl std::fmt::Debug for Daemon {
             .finish_non_exhaustive()
     }
 }
+
+/// How long a detach waits for a call to let go of the engine.
+const ENGINE_RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn err(code: ErrorCode, msg: impl Into<String>) -> CtlError {
     CtlError::new(code, msg)
@@ -370,7 +373,7 @@ impl Daemon {
             cfg,
             registry: Mutex::new(registry),
             slots: Mutex::new(slots),
-            engines: Mutex::new(HashMap::new()),
+            gc_status: Mutex::new(HashMap::new()),
             quiescing: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exit_tx: Mutex::new(None),
@@ -413,9 +416,35 @@ impl Daemon {
         Arc::clone(lock(&self.slots).entry(name.to_owned()).or_default())
     }
 
-    /// Remembers the engine of a volume being attached (for `GcStatus`).
+    /// Remembers the collector status of a volume being attached (for
+    /// `GcStatus`).
     fn note_engine(&self, name: &str, live: &Live) {
-        lock(&self.engines).insert(name.to_owned(), Arc::downgrade(&live.stack.engine));
+        lock(&self.gc_status).insert(name.to_owned(), live.stack.engine.gc_status_handle());
+    }
+
+    /// Drops a detached volume: the device first (it holds the engine), then
+    /// the stack, after the threads that borrowed the engine let go of it (a
+    /// `Gc` call, the space ladder's compact step: both end at once on a
+    /// quiesced engine, at most one collector step later). Dropping the last
+    /// handle stops the engine's threads and releases `LOCK`, so the volume
+    /// can be attached or checked again as soon as the detach answered.
+    fn release(name: &str, live: Live) {
+        let Live {
+            device,
+            stack,
+            link,
+        } = live;
+        drop(device);
+        drop(link);
+        let start = Instant::now();
+        while Arc::strong_count(&stack.engine) > 1 {
+            if start.elapsed() > ENGINE_RELEASE_WAIT {
+                tracing::warn!(volume = %name, "a call still holds the engine after the detach; LOCK is released when it ends");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        drop(stack);
     }
 
     fn entry(&self, name: &str) -> Result<RegistryEntry, CtlError> {
@@ -999,7 +1028,8 @@ impl Daemon {
         if let Err(e) = live.stack.store.clear_device_record() {
             tracing::warn!(volume = %p.name, error = %e, "state/device not removed (the next start sees the device gone and clears it)");
         }
-        drop(live);
+        lock(&self.gc_status).remove(&p.name);
+        Self::release(&p.name, *live);
         match res {
             Ok(()) => Ok(Response::Detached),
             Err(e) => Err(device_error(&e)),
@@ -1118,9 +1148,9 @@ impl Daemon {
     /// (`GcControl::run_pass`; `--dry-run` takes the same path and changes
     /// nothing). The volume's mutex is held only to find the engine: a pass
     /// waits out its grace, and a detach or a quiesce must not wait for it.
-    /// A quiesce of the engine (detach, `QuiesceAll`) ends the wait with
-    /// `Closed`; the pass itself goes on as a background pass while the
-    /// engine lives.
+    /// A quiesce of the engine (detach, `QuiesceAll`) ends the call with
+    /// `Closed` (answered `Busy`) at once, and no collector call starts after
+    /// it; a detach waits for this call to let go of the engine.
     fn gc(&self, g: &GcRequest) -> Result<Response, CtlError> {
         self.entry(&g.name)?;
         let engine = {
@@ -1148,7 +1178,7 @@ impl Daemon {
                     bytes_freed = s.bytes_freed,
                     segments_deleted = s.segments_deleted,
                     segments_compacted = s.segments_compacted,
-                    ms = started.elapsed().as_millis() as u64,
+                    ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                     "gc pass on request"
                 );
                 Ok(Response::Gc(s))
@@ -1165,10 +1195,8 @@ impl Daemon {
     /// for the volume's mutex. A volume that is not attached is idle.
     fn gc_status(&self, p: &NameParam) -> Result<Response, CtlError> {
         self.entry(&p.name)?;
-        let engine = lock(&self.engines).get(&p.name).and_then(Weak::upgrade);
-        Ok(Response::GcStatus(
-            engine.map(|e| e.status()).unwrap_or_default(),
-        ))
+        let st = lock(&self.gc_status).get(&p.name).map(GcStatusHandle::get);
+        Ok(Response::GcStatus(st.unwrap_or_default()))
     }
 
     // ------------------------------------------------------------ quiesce, startup
