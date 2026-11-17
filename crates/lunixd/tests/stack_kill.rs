@@ -60,7 +60,11 @@ const QUEUES: u16 = 2;
 /// The prep child's kill: inside its first commit, after the first segment
 /// is sealed.
 const PREP_KILL: &str = "destage.after_segment_seal:1";
-const PREFIXES: [&str; 6] = ["engine.", "store.", "journal.", "index.", "destage.", "gc."];
+/// `gc.*` (and the store and index points only GC reaches) are killed by
+/// `stack_gc_kill.rs`, whose workload gives the collector whole passes.
+const PREFIXES: [&str; 5] = ["engine.", "store.", "journal.", "index.", "destage."];
+/// Points of the prefixes above that only GC reaches (`stack_gc_kill.rs`).
+const GC_ONLY: [&str; 2] = ["index.after_condemn_flag", "store.evidence."];
 const CHILD_ENV: &str = "LUNIX_KILL_CHILD";
 
 fn env_or(name: &str, default: u64) -> u64 {
@@ -654,16 +658,10 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
 }
 
-/// Registered points no phase 1 workload reaches without GC or
-/// `fsck --truncate-tip`: GC's condemn and evidence, and the set-aside of a
-/// tip. Any other unreached point fails the loop (a workload that stops
-/// reaching a point, or `gc.*` points once the collector is wired, M17.B).
+/// Registered points no workload of this loop reaches: the set-aside of a
+/// tip (`fsck --truncate-tip` only). GC's own points are `stack_gc_kill.rs`'s.
+/// Any other unreached point fails the loop.
 const EXPECTED_UNREACHED: &[&str] = &[
-    "index.after_condemn_flag",
-    "store.evidence.after_dirsync",
-    "store.evidence.after_fdatasync",
-    "store.evidence.after_rename",
-    "store.evidence.before_fdatasync",
     "store.set_aside.after_dirsync",
     "store.set_aside.after_rename",
     "store.set_aside.before_rename",
@@ -700,6 +698,7 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
     let points: Vec<&'static str> = lunix_iface::crashpoint::registered()
         .into_iter()
         .filter(|n| PREFIXES.iter().any(|p| n.starts_with(p)))
+        .filter(|n| !GC_ONLY.iter().any(|p| n.starts_with(p)))
         .filter(|n| only.is_empty() || only.iter().any(|o| n.starts_with(o.as_str())))
         .collect();
     let reached: BTreeMap<&str, u64> = points
