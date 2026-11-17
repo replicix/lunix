@@ -1484,7 +1484,7 @@ mod tests {
         let f = fixture(CryptoMode::Integrity);
         let stale = f.keyring().with_file_name("keyring.tmp.99999");
         std::fs::write(&stale, b"half").unwrap();
-        std::fs::set_permissions(&f.keyring(), std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::fs::set_permissions(f.keyring(), std::fs::Permissions::from_mode(0o640)).unwrap();
         let (code, _, err) = f.run(KeyCommand::AddSlot(KeyAddArgs {
             key_file: Some(f.tmp.path().join("k2")),
             ..add_args(&f)
