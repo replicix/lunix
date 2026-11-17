@@ -483,6 +483,10 @@ pub struct OpenParams {
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
     pub journal_tweak: Option<JournalTweak>,
+    /// The collector's own settings (`None`: [`lunix_gc::GcConfig`]'s
+    /// defaults). The GC settings of `volume.json` reach it through the
+    /// engine's `gc_params`; tests shorten the pass interval here.
+    pub gc: Option<lunix_gc::GcConfig>,
 }
 
 impl OpenParams {
@@ -500,6 +504,7 @@ impl OpenParams {
             lock_memory: false,
             store_fs: None,
             journal_tweak: None,
+            gc: None,
         }
     }
 }
@@ -766,6 +771,26 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.map_fanout = u32::from(desc.map_fanout);
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
+    // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
+    // idle ticks, with the settings of volume.json.
+    let budget = std::time::Duration::from_millis(json.gc_step_budget_ms);
+    cfg.gc_budget = Some(lunix_iface::gc::GcBudget {
+        max_duration: budget,
+        max_bytes: json
+            .gc_rate
+            .saturating_mul(json.gc_step_budget_ms)
+            .div_ceil(1000)
+            .max(1 << 20),
+    });
+    cfg.gc_params = Some(lunix_iface::gc::GcParams {
+        retain_last: json.retain_last,
+        grace: std::time::Duration::from_millis(json.gc_grace_ms),
+        read_timeout: std::time::Duration::from_millis(json.read_timeout_ms),
+        rate_bytes_per_s: json.gc_rate,
+        live_threshold: json.gc_live_threshold,
+        chunk_size: cs,
+        id_len: desc.id_len,
+    });
     if let Some(b) = p.max_io_buf_bytes {
         cfg.max_io_buf_bytes = b;
     }
@@ -795,7 +820,14 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
             cfg: map_cfg,
         }),
         destager: Arc::new(destager),
-        collector: None,
+        // Built once and kept as long as the engine: unnamed compaction
+        // outputs and undelivered moves are memory only (gc.md "What the
+        // wiring must do"). The rollback floor comes from the volume
+        // directory.
+        collector: Some(Box::new(lunix_gc::Gc::new(
+            Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
+            p.gc.unwrap_or_default(),
+        ))),
         hooks: Arc::new(NoHooks),
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);

@@ -218,6 +218,12 @@ impl Inner {
         if self.wanted(&mut co) {
             self.commit(&mut co, false, None)
         } else {
+            // An idle volume still steps the collector (M17.A review minor
+            // 4): a pass waiting in its grace finishes without a cut. Its
+            // moves make the next tick cut.
+            if !self.is_failed() {
+                self.gc_step(&mut co);
+            }
             Ok(CommitOutcome::Idle)
         }
     }
