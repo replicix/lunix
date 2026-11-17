@@ -240,12 +240,21 @@ fn churn(mode: CryptoMode, cs: u32) {
     let mut peak_store = 0u64;
     let mut concurrent_reads = 0u64;
     for r in 0..rounds {
+        // A cut every 64 MiB written, so the journal ring (manual engine: no
+        // background commit) never fills on a large region.
+        let every = (64u64 << 20) / cs64;
         if r % 2 == 0 {
             for c in 0..region / cs64 {
                 write_chunk(&mut d, &mut model, cs, c, rng.next_u64());
+                if (c + 1) % every == 0 {
+                    stack.engine.commit_now(false).expect("commit");
+                }
             }
         } else {
-            for _ in 0..(region / cs64) {
+            for i in 0..(region / cs64) {
+                if (i + 1) % every == 0 {
+                    stack.engine.commit_now(false).expect("commit");
+                }
                 let blocks = 1 + rng.below(2 * cs64 / BLOCK);
                 let off = rng.below((region - blocks * BLOCK) / BLOCK) * BLOCK;
                 let len = (blocks * BLOCK) as u32;
