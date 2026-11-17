@@ -5,10 +5,10 @@
 //! refused, and frees the objects a pass condemned once their floor grace
 //! ran, without waiting for the configured grace.
 //!
-//! A churned volume runs a pass up to its grace (dead rounds condemned), then
-//! stops stepping GC for longer than the floor grace; a tight `cache_max`
-//! with `on_full = error` refuses one reservation, which starts the ladder.
-//! The urgent pass then deletes: segment files, the `Segments` charge and
+//! On a churned volume a tight `cache_max` with `on_full = error` refuses one
+//! reservation, which starts the ladder: its urgent pass condemns the dead
+//! rounds. With no GC step for longer than the floor grace (manual engine), a
+//! second refusal starts the ladder again, and that urgent pass deletes: segment files, the `Segments` charge and
 //! the status counters go down or up as they should, the volume reads back
 //! equal and `lunix-fsck` finds nothing at rest.
 //!
@@ -37,7 +37,7 @@ use lunix_engine::EngineConfig;
 use lunix_format::local::OnFull;
 use lunix_format::CryptoMode;
 use lunix_gc::GcConfig;
-use lunix_iface::gc::{GcControl, GcState};
+use lunix_iface::gc::GcControl;
 use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
 use lunix_store::{FsOps, RealFs};
 use lunixd::stack::{OpenParams, VolumeStack};
@@ -137,20 +137,12 @@ fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
         stack.engine.commit_now(false).expect("commit");
     }
 
-    // A pass up to its grace: the dead rounds are condemned.
-    let start = Instant::now();
-    loop {
-        stack.engine.tick().expect("tick");
-        let s = stack.engine.status();
-        if s.state == Some(GcState::Grace) && s.condemned_pending > 0 {
-            break;
-        }
-        assert!(
-            start.elapsed() < Duration::from_secs(60),
-            "no pass reached its grace: {s:?}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // A first ladder run: its urgent pass condemns the dead rounds (a pass
+    // the commits above started may have condemned only part of them), and
+    // they start their floor grace.
+    run_ladder(&stack);
+    let s = stack.engine.status();
+    assert!(s.condemned_pending > 0, "nothing condemned: {s:?}");
     // No GC step for longer than the floor grace (the engine is manual).
     std::thread::sleep(GRACE + Duration::from_millis(500));
     let condemned = stack.engine.status().condemned_pending;
