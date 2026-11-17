@@ -59,13 +59,36 @@ impl Candidate {
     }
 }
 
+/// What an output costs per live extent beyond its payload (extent header and
+/// footer entry, rounded up) and per segment (footer header, trailer).
+pub const OUTPUT_COST_PER_EXTENT: u64 = 128;
+/// See [`OUTPUT_COST_PER_EXTENT`].
+pub const OUTPUT_COST_PER_SEGMENT: u64 = 4096;
+
+/// Whether compacting a segment of `size` bytes holding `extents` live
+/// extents of `live` payload bytes frees enough: what an output would hold
+/// for them (payload, per-extent and per-segment overhead) must be below
+/// `threshold` of `size`. A small segment whose dead bytes are mostly
+/// container overhead is no candidate: its output would be as large, and it
+/// would be rewritten at every pass on an idle volume.
+pub fn worth_compacting(size: u64, live: u64, extents: u64, threshold: f64) -> bool {
+    if size == 0 || live == 0 {
+        return false;
+    }
+    let out = live
+        .saturating_add(extents.saturating_mul(OUTPUT_COST_PER_EXTENT))
+        .saturating_add(OUTPUT_COST_PER_SEGMENT);
+    (out as f64) < threshold * size as f64
+}
+
 /// Sorts candidates best first: higher score, then lower id.
 pub fn rank(cands: &mut [Candidate]) {
     cands.sort_by(|a, b| b.score().total_cmp(&a.score()).then(a.seg.cmp(&b.seg)));
 }
 
-/// The compaction candidates of a mark: segments with live bytes, a live
-/// fraction below `threshold`, an id at or below `high_water_mark`, and not
+/// The compaction candidates of a mark: segments with live bytes, worth
+/// compacting at `threshold` ([`worth_compacting`]: the live fraction counts
+/// an output's overhead), an id at or below `high_water_mark`, and not
 /// excluded by the caller (condemned, unnamed output, named by the tip FULL:
 /// younger than one commit interval). Segments holding a live extent that no
 /// confirmed index entry names are left out: `relocate` could not move it, so
@@ -90,7 +113,8 @@ pub fn candidates(
                 live,
                 age: high_water_mark.saturating_sub(s.seg.raw()),
             };
-            (live > 0 && c.utilization() < threshold).then_some(c)
+            let extents = l.live_in(s.seg).len() as u64;
+            worth_compacting(c.size, live, extents, threshold).then_some(c)
         })
         .collect();
     rank(&mut out);

@@ -723,6 +723,7 @@ impl Gc {
         }
         if self.last_tip != Some(view.tip.commit_seq)
             || (!self.list.entries.is_empty() && self.last_pass_changed)
+            || !self.uncertain.is_empty()
         {
             return Ok(true);
         }
@@ -776,6 +777,9 @@ impl Gc {
         }
         self.phase = Phase::Idle;
         self.last_end = Some(view.clock.monotonic());
+        // An abandoned pass may have done part of its work (a delete whose
+        // call failed): the next one runs even if nothing else changed.
+        self.last_pass_changed = true;
     }
 
     fn note_heap(&mut self) {
