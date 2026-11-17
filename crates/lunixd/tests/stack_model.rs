@@ -17,12 +17,16 @@
 //!   every write a completed FLUSH or FUA write covered and everything a
 //!   durable commit or grow covered.
 //! * Half the sequences open with `on_journal_damage = refuse`: the damage
-//!   lies above the flushed watermark, so it is crash residue and the open
-//!   must succeed (ADR-4). One refusal is tolerated and counted
-//!   (`e1_refusals`): damage at or below the floor that a later flush's
-//!   watermark passed (defect E1 in `lunix-engine`, the M12b report and
-//!   `stack_support::refuse_ignores_torn_records_below_the_floor`); the
-//!   sequence then goes on with a `wipe` open. Any other refusal fails.
+//!   lies above the flushed watermark or at or below the floor, so nothing
+//!   durable is missing and the open must succeed (ADR-4); any refusal
+//!   fails the test.
+//! * `lunix-fsck` on every crashed volume reports no error (crash residue is
+//!   a note or a warning).
+//! * A plain drop (no damage) gives back the whole oracle.
+//! * The journal runs on small ring files (`VolumeBuilder::small_journal`),
+//!   so every sequence wraps, reclaims and reinitialises them under damage;
+//!   the store runs on the `SyncTracker`, so a crash undoes what no sync
+//!   covered.
 //! * A clean reopen gives back the whole oracle; the store self-check is
 //!   clean at the end of every sequence, and `lunix-fsck` reports no error
 //!   when its binary is built (`LUNIX_FSCK` or the target directory;
@@ -50,7 +54,7 @@ use lunix_engine::{CommitOutcome, OnJournalDamage};
 use lunix_format::CryptoMode;
 use lunix_iface::block::BlockEngine;
 use lunix_iface::store::VolumeDir;
-use lunixd::stack::{StackError, VolumeStack};
+use lunixd::stack::VolumeStack;
 use lunixd::testsupport::{
     close, fsck, CrashDamage, DeviceModel, Driver, ModelOp, Scratch, TestRng, TestVolume,
     VolumeBuilder,
@@ -83,7 +87,13 @@ struct Stats {
     stored_ulen: u64,
     stored_clen: u64,
     fsck_runs: u64,
-    e1_refusals: u64,
+    fsck_after_crash: u64,
+    store_renames_undone: u64,
+    store_unlinks_undone: u64,
+    store_truncated: u64,
+    ring_files_reinitialised: u64,
+    late_releases: u64,
+    max_lock_wait: std::time::Duration,
     fsck_warnings: BTreeMap<String, u64>,
     time: BTreeMap<&'static str, (u64, std::time::Duration)>,
 }
@@ -116,12 +126,20 @@ impl Case {
 
     fn new(parent: &Path, mode: CryptoMode, cs: u32, seed: u64) -> Self {
         let cs64 = u64::from(cs);
+        // Small ring files (4 per lane) so every sequence fills, reclaims,
+        // reinitialises and wraps them under crash damage. The background
+        // coordinator is on: a lane that fills between two steps waits for
+        // the commit its fill triggers, as on a device.
         let mut b = VolumeBuilder::new(parent)
             .manual()
+            .small_journal(4)
             .mode(mode)
             .chunk_size(cs)
             .size_bytes(16 * cs64)
             .queues(2);
+        b.engine = Some(std::sync::Arc::new(|c: &mut lunix_engine::EngineConfig| {
+            c.read_helpers = 2;
+        }));
         if seed % 2 == 1 {
             b.on_journal_damage = OnJournalDamage::Refuse;
         }
@@ -292,38 +310,6 @@ impl Case {
         e.1 += t0.elapsed();
         let stack = match opened {
             Ok(s) => s,
-            Err(StackError::JournalDamage)
-                if self.vol.builder.on_journal_damage == OnJournalDamage::Refuse =>
-            {
-                // Defect E1 (lunix-engine `refuse_worthy`, M12b report): a
-                // damaged range whose `next_seq` is at or below the watermark
-                // is refused even when recovery found every number above the
-                // floor (no gap), so the range can only hold numbers at or
-                // below the floor or numbers another lane holds: it costs
-                // nothing. A refusal with a gap at or below the watermark is
-                // a real one and fails the test.
-                let s = self
-                    .vol
-                    .open_with(|p| p.on_journal_damage = OnJournalDamage::Wipe)
-                    .unwrap_or_else(|e| panic!("{} reopen under wipe failed: {e}", self.ctx()));
-                let rep = s.engine.recovery_report();
-                let w = rep.flushed.0;
-                let range_rule = rep
-                    .damaged
-                    .iter()
-                    .any(|d| d.next_seq.is_some_and(|n| n.0 <= w));
-                // With a gap, recovery stops at it: `next_seq` is the gap.
-                let gap_rule = rep.ignored_after_gap.is_some() && rep.next_seq.0 <= w;
-                let e1 = range_rule && !gap_rule;
-                assert!(
-                    e1,
-                    "{} refused with a gap at or below the watermark: {rep:?}; last crash {:?}",
-                    self.ctx(),
-                    self.last_crash
-                );
-                self.stats.e1_refusals += 1;
-                s
-            }
             Err(e) => panic!(
                 "{} reopen failed: {e}; last crash {:?}",
                 self.ctx(),
@@ -416,9 +402,19 @@ impl Case {
             self.stats.damaged_records += c.records_damaged as u64;
             self.stats.kept_records += c.records_kept as u64;
             self.stats.files_removed += c.files_removed as u64;
+            self.stats.store_renames_undone += c.store_undone.renames as u64;
+            self.stats.store_unlinks_undone += c.store_undone.unlinks as u64;
+            self.stats.store_truncated += c.store_undone.truncated as u64;
+            self.stats.max_lock_wait = self.stats.max_lock_wait.max(c.released_after);
+            if c.released_after > std::time::Duration::from_millis(1) {
+                self.stats.late_releases += 1;
+            }
+            self.fsck_crashed();
         } else {
             drop(d);
             drop(stack);
+            let w = lunixd::testsupport::wait_unlocked(&self.vol.voldir);
+            self.stats.max_lock_wait = self.stats.max_lock_wait.max(w);
             self.last_crash = None;
             self.stats.plain_drops += 1;
             // Nothing was damaged: every acknowledged request is in the
@@ -430,6 +426,20 @@ impl Case {
             return;
         }
         self.reopen(false);
+    }
+
+    /// `lunix-fsck` on the crashed volume before the reopen: crash residue
+    /// is a note or a warning, never an error (ADR-4).
+    fn fsck_crashed(&mut self) {
+        if let Some(f) = fsck(&self.vol) {
+            assert!(
+                f.no_errors(),
+                "{} lunix-fsck on the crashed volume found errors:\n{}",
+                self.ctx(),
+                f.text
+            );
+            self.stats.fsck_after_crash += 1;
+        }
     }
 
     fn step(&mut self) {
@@ -503,10 +513,25 @@ impl Case {
         close(stack).expect("close");
         let r = self.vol.check().expect("store self-check runs");
         assert!(r.is_clean(), "{} store self-check: {r:?}", self.ctx());
+        // Ring files whose ordinal is above the files a lane starts with
+        // were reclaimed and reinitialised during the sequence.
+        if let Ok(rd) = std::fs::read_dir(self.vol.voldir.join("journal")) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let ord = name
+                    .strip_suffix(".j")
+                    .and_then(|n| n.split_once('-'))
+                    .and_then(|(_, o)| u32::from_str_radix(o, 16).ok());
+                if ord.is_some_and(|o| o > 4) {
+                    self.stats.ring_files_reinitialised += 1;
+                }
+            }
+        }
         if let Some(f) = fsck(&self.vol) {
+            // At rest: clean (notes only).
             assert!(
-                f.no_errors(),
-                "{} lunix-fsck found errors:\n{}",
+                f.exit == 0,
+                "{} lunix-fsck at rest is not clean:\n{}",
                 self.ctx(),
                 f.text
             );
@@ -575,7 +600,13 @@ fn run_model(mode: CryptoMode, cs: u32) {
         total.stored_ulen += s.stored_ulen;
         total.stored_clen += s.stored_clen;
         total.fsck_runs += s.fsck_runs;
-        total.e1_refusals += s.e1_refusals;
+        total.fsck_after_crash += s.fsck_after_crash;
+        total.store_renames_undone += s.store_renames_undone;
+        total.store_unlinks_undone += s.store_unlinks_undone;
+        total.store_truncated += s.store_truncated;
+        total.ring_files_reinitialised += s.ring_files_reinitialised;
+        total.late_releases += s.late_releases;
+        total.max_lock_wait = total.max_lock_wait.max(s.max_lock_wait);
         for (k, v) in s.fsck_warnings {
             *total.fsck_warnings.entry(k).or_insert(0) += v;
         }
@@ -599,6 +630,10 @@ fn run_model(mode: CryptoMode, cs: u32) {
             "no crash damaged a record: {total:?}"
         );
         assert!(total.dedup_hits > 0, "no dedup hit: {total:?}");
+        assert!(
+            total.ring_files_reinitialised > 0,
+            "no ring file was ever reinitialised: {total:?}"
+        );
         assert!(
             total.stored_clen < total.stored_ulen,
             "nothing compressed: {total:?}"

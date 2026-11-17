@@ -1,7 +1,7 @@
 //! `lunixd::testsupport` itself: the builder in every mode, the oracle's
 //! prefix search, the crash's damage staying above the flush point; and the
-//! defect the stack model test found in the engine's `refuse` rule (E1,
-//! ignored until the engine is fixed; see the M12b report).
+//! defect the stack model test found in the engine's `refuse` rule (E1, the
+//! M12b report).
 //!
 //! `cargo test -p lunixd --features testsupport --test stack_support`
 
@@ -195,19 +195,18 @@ fn tear_record(voldir: &Path, mark: &[u8]) {
     panic!("record not found");
 }
 
-/// Defect E1 (lunix-engine `recover::refuse_worthy`). A crash right after a
-/// commit can tear journal records the commit's cut covers but no flush
-/// synced. Damage at or below the floor costs nothing (on-disk-formats
-/// §5.3), and recovery wipes only what follows the last record below its
-/// stop point, so a torn record followed by a later record of its lane stays
-/// in the ring file. Once a later flush raises the watermark above it, the
-/// next recovery reports it as a damaged range whose `next_seq` is at or
-/// below the watermark, and `refuse` refuses the volume although nothing
-/// above the floor is missing. Expected: the open succeeds. Run with
-/// `--ignored`; it fails until `refuse_worthy` ignores ranges whose records
-/// all lie at or below the floor (`next_seq <= cut_seq + 1`).
+/// Defect E1 (lunix-engine `recover::refuse_worthy`, fixed on
+/// `lead/p1-fixes2`). A crash right after a commit can tear journal records
+/// the commit's cut covers but no flush synced. Damage at or below the floor
+/// costs nothing (on-disk-formats §5.3), and recovery wipes only what follows
+/// the last record below its stop point, so a torn record followed by a
+/// later record of its lane stays in the ring file. Once the watermark
+/// passes it (the first lane open after recovery already raises it), the
+/// old rule refused every later open under `refuse` although nothing was
+/// missing. The rule now refuses only a duplicate or a gap at or below the
+/// watermark: a damaged range without a gap holds only numbers at or below
+/// the floor or numbers another lane holds.
 #[test]
-#[ignore = "defect E1 in lunix-engine: refuse refuses damage below the floor"]
 fn refuse_ignores_torn_records_below_the_floor() {
     let t = Scratch::new("m12b-support-e1");
     let mut b = VolumeBuilder::new(t.path())
@@ -324,4 +323,54 @@ fn close_refuses_a_stack_with_a_live_driver() {
     let d = Driver::new(&s).expect("driver");
     let _keep = d;
     let _ = close(s);
+}
+
+#[test]
+fn the_sync_tracker_undoes_what_no_sync_covered() {
+    use lunix_store::FsOps;
+    use std::io::Write as _;
+    let t = Scratch::new("m12b-support-tracker");
+    let v = t.path().join("vol");
+    std::fs::create_dir_all(v.join("state")).unwrap();
+    let tr = lunixd::testsupport::SyncTracker::new(&v);
+    let put = |name: &str, bytes: &[u8], sync: bool| {
+        let p = v.join("state").join(name);
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(bytes).unwrap();
+        if sync {
+            tr.fdatasync(&f).unwrap();
+        }
+        p
+    };
+    // Synced data, renamed, directory synced: durable.
+    let a = put("a.tmp", b"durable", true);
+    tr.rename(&a, &v.join("state/a"), true).unwrap();
+    tr.fsync_dir(&v.join("state")).unwrap();
+    // Renamed and directory synced, data never synced: emptied.
+    let c = put("c.tmp", b"never synced", false);
+    tr.rename(&c, &v.join("state/c"), true).unwrap();
+    tr.fsync_dir(&v.join("state")).unwrap();
+    // Synced data, renamed, directory not synced: the rename is undone.
+    let b = put("b.tmp", b"not published", true);
+    tr.rename(&b, &v.join("state/b"), true).unwrap();
+    // Appended after the sync: cut back.
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(v.join("state/a"))
+            .unwrap();
+        f.write_all(b" and more").unwrap();
+    }
+    // Unlinked without a directory sync: back after the crash.
+    let d = put("d", b"deleted?", true);
+    tr.unlink(&d).unwrap();
+    assert!(!d.exists());
+    assert_eq!(tr.pending(), 2);
+    let loss = tr.crash();
+    assert_eq!((loss.renames, loss.unlinks), (1, 1), "{loss:?}");
+    assert_eq!(std::fs::read(v.join("state/a")).unwrap(), b"durable");
+    assert!(!v.join("state/b").exists() && v.join("state/b.tmp").exists());
+    assert_eq!(std::fs::read(v.join("state/c")).unwrap(), b"");
+    assert_eq!(std::fs::read(&d).unwrap(), b"deleted?");
+    assert_eq!(tr.pending(), 0);
 }

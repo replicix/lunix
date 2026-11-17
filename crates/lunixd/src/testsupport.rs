@@ -16,6 +16,7 @@
 //! | [`DeviceModel`], [`ModelOp`] | the flat-device oracle with the crash question: after a crash the device equals the oracle after some prefix of the mutating requests, at least as long as the durable prefix |
 //! | [`payload`] | deterministic write data, incompressible, half or highly compressible by seed |
 //! | [`damage_journal`], [`damage_unsynced`] | the two halves of a crash, usable on a volume directory nothing has open |
+//! | [`SyncTracker`], [`SyncLoss`] | the store's durability record and what a crash undid |
 //! | [`TestRng`] | a seeded generator (no `rand` dependency) |
 //! | [`Scratch`], [`fsck`], [`fsck_binary`] | a scratch directory on a real file system, and `lunix-fsck` on a closed volume |
 //!
@@ -26,7 +27,13 @@
 //!
 //! [`TestVolume::crash_with`] drops the engine without a final commit, then:
 //!
-//! 1. **Journal:** every lane's records past its last flush point are damaged
+//! 1. **Store:** the volume's [`SyncTracker`] (the store's `FsOps` test hook,
+//!    installed through `OpenParams::store_fs`) undoes every rename and
+//!    unlink no directory `fsync` covered, newest first, and cuts every file
+//!    a rename published or `fdatasync` named back to what its last
+//!    `fdatasync` covered. A store that reports an object durable before
+//!    syncing it loses the object here, and the oracle sees it.
+//! 2. **Journal:** every lane's records past its last flush point are damaged
 //!    at byte level ([`damage_journal`]). The flush point is the larger of
 //!    the caller's bound (what a completed FLUSH or FUA write covered, which
 //!    the [`Driver`] tracks) and the flushed watermark the surviving records
@@ -35,17 +42,12 @@
 //!    Each record above it is kept, zeroed (never written), torn from a
 //!    sector boundary, or has one byte flipped, at random, independently in
 //!    every lane and in the mark ring.
-//! 2. **Files never synced:** `*.tmp` and `*.open` files (the store's and the
-//!    index's unsealed objects; the only files whose directory entry the
-//!    store never syncs) are deleted, truncated or kept at random
-//!    ([`damage_unsynced`]).
+//! 3. **Files never synced:** `*.tmp` and `*.open` files are deleted,
+//!    truncated or kept at random ([`damage_unsynced`]).
 //!
-//! The store's `FsOps` test hook (renames and creates not yet covered by a
-//! directory `fsync`) cannot be installed through
-//! [`crate::stack::OpenParams`] today; the M12b report proposes the field.
-//! With every store object made visible by rename and directory `fsync`
-//! before anything names it, and the drop crash happening between calls,
-//! the unsynced set is the one above.
+//! Outside the hook: `lunix-index` syncs with its own calls, and the journal
+//! is the journal's (part 2). [`VolumeBuilder::small_journal`] shrinks the
+//! ring files so a short test wraps, reclaims and reinitialises them.
 //!
 //! # Example
 //!
@@ -90,8 +92,8 @@ use lunix_iface::block::{
 use lunix_iface::ctl::Secret;
 use lunix_iface::journal::Journal;
 use lunix_iface::Error;
-use lunix_journal::{FileJournal, DEFAULT_MARK_IDLE};
-use lunix_store::read_volume_file;
+use lunix_journal::{FileJournal, JournalConfig, DEFAULT_MARK_IDLE};
+use lunix_store::{read_volume_file, FsOps, RealFs};
 
 use crate::check::{check_volume, CheckReport};
 use crate::stack::{
@@ -148,7 +150,20 @@ pub struct VolumeBuilder {
     pub destage_workers: Option<usize>,
     /// What an open does about journal damage.
     pub on_journal_damage: OnJournalDamage,
+    /// Small journal ring files: `Some(files_per_lane)` opens the journal with
+    /// ring files of [`SMALL_RING_FILE`] bytes, `files_per_lane` per lane, so
+    /// a short test fills, reclaims and reinitialises them (and each open
+    /// scans little). `None`: the production geometry.
+    pub small_journal: Option<u64>,
+    /// Record the store's durability calls ([`SyncTracker`]) so a crash
+    /// undoes what no `fdatasync` or directory `fsync` covered (default on).
+    pub track_syncs: bool,
 }
+
+/// The ring file length of [`VolumeBuilder::small_journal`]: the smallest the
+/// journal takes (a header block and one maximal record), rounded up to
+/// 64 KiB.
+pub const SMALL_RING_FILE: u64 = (1 << 20) + (64 << 10);
 
 impl VolumeBuilder {
     /// Defaults: 64 KiB chunks, 1 GiB, `integrity`, one queue, `Auto`
@@ -170,6 +185,8 @@ impl VolumeBuilder {
             map_fanout: 512,
             destage_workers: None,
             on_journal_damage: OnJournalDamage::Wipe,
+            small_journal: None,
+            track_syncs: true,
         }
     }
 
@@ -205,6 +222,13 @@ impl VolumeBuilder {
     #[must_use]
     pub fn passphrase(mut self, passphrase: &str) -> Self {
         self.passphrase = Some(passphrase.to_owned());
+        self
+    }
+
+    /// Small journal ring files, `files_per_lane` per lane (at least 2).
+    #[must_use]
+    pub fn small_journal(mut self, files_per_lane: u64) -> Self {
+        self.small_journal = Some(files_per_lane.max(2));
         self
     }
 
@@ -264,11 +288,15 @@ impl VolumeBuilder {
             argon2: TEST_ARGON2,
             json: Some(&tweak),
         })?;
+        let syncs = self
+            .track_syncs
+            .then(|| Arc::new(SyncTracker::new(&created.voldir)));
         Ok(TestVolume {
             voldir: created.voldir,
             builder: self,
             uuid: created.uuid,
             key_file,
+            syncs,
         })
     }
 }
@@ -284,6 +312,9 @@ pub struct TestVolume {
     /// The generated key file of an encrypted volume made without a
     /// passphrase.
     pub key_file: Option<PathBuf>,
+    /// The store's durability calls of every open (when
+    /// [`VolumeBuilder::track_syncs`]).
+    pub syncs: Option<Arc<SyncTracker>>,
 }
 
 impl std::fmt::Debug for TestVolume {
@@ -311,11 +342,15 @@ impl TestVolume {
         let voldir = voldir.into();
         let bytes = read_volume_file(&voldir)?;
         let desc = VolumeDescriptor::decode(&bytes).map_err(Error::from)?;
+        let syncs = builder
+            .track_syncs
+            .then(|| Arc::new(SyncTracker::new(&voldir)));
         Ok(TestVolume {
             voldir,
             builder,
             uuid: desc.volume_uuid,
             key_file,
+            syncs,
         })
     }
 
@@ -350,6 +385,17 @@ impl TestVolume {
         p.tweak.clone_from(&b.engine);
         p.destage_workers = b.destage_workers;
         p.on_journal_damage = b.on_journal_damage;
+        if let Some(files) = b.small_journal {
+            let lanes = u64::from(b.queues);
+            p.journal_tweak = Some(Arc::new(move |j: &mut JournalConfig| {
+                j.file_len = SMALL_RING_FILE;
+                j.journal_max = lanes * files * SMALL_RING_FILE;
+            }));
+        }
+        if let Some(t) = &self.syncs {
+            let fs: Arc<dyn FsOps> = t.clone();
+            p.store_fs = Some(fs);
+        }
         p
     }
 
@@ -359,7 +405,7 @@ impl TestVolume {
     /// # Errors
     /// What `stack::open_volume` reports (R4, attach check, recovery).
     pub fn open(&self) -> Result<VolumeStack, StackError> {
-        open_volume(self.params())
+        self.open_with(|_| {})
     }
 
     /// Like [`open`](Self::open) with the parameters changed by `f` first.
@@ -367,6 +413,7 @@ impl TestVolume {
     /// # Errors
     /// What `stack::open_volume` reports.
     pub fn open_with(&self, f: impl FnOnce(&mut OpenParams)) -> Result<VolumeStack, StackError> {
+        wait_unlocked(&self.voldir);
         let mut p = self.params();
         f(&mut p);
         open_volume(p)
@@ -409,8 +456,12 @@ impl TestVolume {
     pub fn crash_with(&self, stack: VolumeStack, durable: WriteSeq, seed: u64) -> CrashDamage {
         assert_no_driver(&stack);
         drop(stack);
+        let released_after = wait_unlocked(&self.voldir);
         let mut rng = TestRng::new(seed);
+        let lost = self.syncs.as_ref().map(|t| t.crash()).unwrap_or_default();
         let mut d = damage_journal(&self.voldir, durable, &mut rng);
+        d.store_undone = lost;
+        d.released_after = released_after;
         let (removed, truncated) = damage_unsynced(&self.voldir, &mut rng);
         d.files_removed = removed;
         d.files_truncated = truncated;
@@ -449,6 +500,7 @@ impl TestVolume {
         let to = self.builder.parent.join(name);
         copy_tree(&self.voldir, &to)?;
         let b = &self.builder;
+        let syncs = b.track_syncs.then(|| Arc::new(SyncTracker::new(&to)));
         Ok(TestVolume {
             voldir: to,
             builder: VolumeBuilder {
@@ -466,9 +518,12 @@ impl TestVolume {
                 map_fanout: b.map_fanout,
                 destage_workers: b.destage_workers,
                 on_journal_damage: b.on_journal_damage,
+                small_journal: b.small_journal,
+                track_syncs: b.track_syncs,
             },
             uuid: self.uuid,
             key_file: self.key_file.clone(),
+            syncs,
         })
     }
 }
@@ -484,8 +539,39 @@ impl TestVolume {
 pub fn close(stack: VolumeStack) -> Result<(), Error> {
     assert_no_driver(&stack);
     let r = stack.engine.quiesce();
+    let voldir = stack.voldir.clone();
     drop(stack);
+    wait_unlocked(&voldir);
     r
+}
+
+/// Waits until nothing holds the volume's `LOCK` and returns how long that
+/// took. In a multi-threaded test process a closed `LOCK` descriptor can stay
+/// held for a moment: a child process another test thread is starting
+/// (`lunix-fsck`, a kill-loop child) holds a copy of every descriptor until
+/// its `exec` closes it, and the `flock` goes with the last copy. A crash
+/// must not touch the files before that, and an open would get `Busy`.
+///
+/// # Panics
+/// When the lock is still held after 30 s.
+pub fn wait_unlocked(voldir: &Path) -> Duration {
+    let start = Instant::now();
+    let path = voldir.join("LOCK");
+    loop {
+        let Ok(f) = std::fs::File::open(&path) else {
+            return start.elapsed();
+        };
+        if rustix::fs::flock(&f, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_ok() {
+            let _ = rustix::fs::flock(&f, rustix::fs::FlockOperation::Unlock);
+            return start.elapsed();
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "{} is still locked 30 s after its stack was dropped",
+            voldir.display()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 /// Live [`Driver`]s per engine (keyed by the engine's address), so `close`
@@ -1137,6 +1223,11 @@ pub struct CrashDamage {
     pub files_removed: usize,
     /// Unsynced files truncated.
     pub files_truncated: usize,
+    /// What the [`SyncTracker`] undid in the store.
+    pub store_undone: SyncLoss,
+    /// How long after the drop the volume `LOCK` was free (threads of the
+    /// dropped stack still held the store until then).
+    pub released_after: Duration,
 }
 
 fn journal_files(voldir: &Path) -> Vec<PathBuf> {
@@ -1402,4 +1493,272 @@ pub fn fsck(vol: &TestVolume) -> Option<FsckOutcome> {
         findings,
         text,
     })
+}
+
+// ------------------------------------------------------------ sync tracker
+
+/// What [`SyncTracker::crash`] undid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SyncLoss {
+    /// Renames no directory `fsync` covered, reverted.
+    pub renames: usize,
+    /// Unlinks no directory `fsync` covered, reverted.
+    pub unlinks: usize,
+    /// Files cut back to what their last `fdatasync` covered (or emptied when
+    /// a rename published them without one).
+    pub truncated: usize,
+}
+
+#[derive(Debug)]
+enum Pending {
+    Rename {
+        from: PathBuf,
+        to: PathBuf,
+        /// The file `to` replaced (a replacing rename), restored on undo.
+        old: Option<Vec<u8>>,
+    },
+    Unlink {
+        path: PathBuf,
+        grave: PathBuf,
+        key: Option<(u64, u64)>,
+    },
+}
+
+/// True when `p` names a file directly in `dir` (the store builds both from
+/// the volume directory; canonical forms settle any difference in spelling).
+fn parent_is(p: &Path, dir: &Path) -> bool {
+    let Some(parent) = p.parent() else {
+        return false;
+    };
+    parent == dir
+        || match (parent.canonicalize(), dir.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+}
+
+#[derive(Debug, Default)]
+struct TrackerState {
+    pending: Vec<Pending>,
+    /// Bytes each file (by device and inode) had at its last `fdatasync`.
+    synced: HashMap<(u64, u64), u64>,
+    /// Files a rename published (by device and inode).
+    published: std::collections::HashSet<(u64, u64)>,
+    graves: u64,
+}
+
+/// The store's test hook (`StoreOptions::fs` through
+/// [`OpenParams::store_fs`]): [`RealFs`] plus a record of what is durable.
+/// A rename or unlink is durable once its directory is `fsync`ed; a file's
+/// data once it is `fdatasync`ed. [`crash`](Self::crash) undoes the rest, in
+/// reverse order, so a store that publishes a commit, pack or segment before
+/// the sync that makes it durable loses it in the model test.
+///
+/// Limits: `FsOps` sees no create and no write, so a file is checked only
+/// once a rename publishes it or `fdatasync` names it; `lunix-index` syncs
+/// with its own calls and the journal is separate, so `index/` and
+/// `journal/` are outside the hook.
+#[derive(Debug)]
+pub struct SyncTracker {
+    voldir: PathBuf,
+    graveyard: PathBuf,
+    st: Mutex<TrackerState>,
+}
+
+fn file_key(m: &std::fs::Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    (m.dev(), m.ino())
+}
+
+impl SyncTracker {
+    /// A tracker for the volume at `voldir` (its graveyard for unlinked files
+    /// lies next to it).
+    pub fn new(voldir: &Path) -> Self {
+        let name = voldir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Self {
+            voldir: voldir.to_path_buf(),
+            // One per tracker (a killed child process leaves its own).
+            graveyard: voldir.with_file_name(format!(
+                ".m12b-graves-{name}-{}",
+                hex(&random_bytes::<8>().unwrap_or_default())
+            )),
+            st: Mutex::new(TrackerState::default()),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, TrackerState> {
+        self.st
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Renames and unlinks not yet made durable by a directory `fsync`.
+    pub fn pending(&self) -> usize {
+        self.state().pending.len()
+    }
+
+    /// The crash: reverts every pending unlink and rename (newest first) and
+    /// cuts every published or synced file back to its synced length. Call it
+    /// with the volume closed. The record then starts afresh.
+    ///
+    /// # Panics
+    /// On an I/O error (a test cannot go on).
+    pub fn crash(&self) -> SyncLoss {
+        let mut st = self.state();
+        let mut loss = SyncLoss::default();
+        while let Some(p) = st.pending.pop() {
+            match p {
+                Pending::Rename { from, to, old } => {
+                    if to.exists() {
+                        std::fs::rename(&to, &from)
+                            .unwrap_or_else(|e| panic!("undo rename {}: {e}", to.display()));
+                        if let Some(bytes) = old {
+                            std::fs::write(&to, bytes)
+                                .unwrap_or_else(|e| panic!("restore {}: {e}", to.display()));
+                        }
+                        loss.renames += 1;
+                    }
+                }
+                Pending::Unlink { path, grave, .. } => {
+                    if !path.exists() {
+                        std::fs::rename(&grave, &path)
+                            .unwrap_or_else(|e| panic!("undo unlink {}: {e}", path.display()));
+                        loss.unlinks += 1;
+                    } else {
+                        let _ = std::fs::remove_file(&grave);
+                    }
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk_files(&self.voldir, true, &mut files);
+        for f in files {
+            let Ok(m) = std::fs::metadata(&f) else {
+                continue;
+            };
+            let k = file_key(&m);
+            let keep = match st.synced.get(&k) {
+                Some(&n) => n,
+                None if st.published.contains(&k) => 0,
+                None => continue,
+            };
+            if m.len() > keep {
+                OpenOptions::new()
+                    .write(true)
+                    .open(&f)
+                    .and_then(|h| h.set_len(keep))
+                    .unwrap_or_else(|e| panic!("truncate {}: {e}", f.display()));
+                loss.truncated += 1;
+            }
+        }
+        st.published.clear();
+        let _ = std::fs::remove_dir_all(&self.graveyard);
+        loss
+    }
+
+    fn forget(st: &mut TrackerState, path: &Path) {
+        if let Ok(m) = std::fs::metadata(path) {
+            let k = file_key(&m);
+            st.synced.remove(&k);
+            st.published.remove(&k);
+        }
+    }
+}
+
+/// Every regular file below `dir`, outside the top-level `journal/`,
+/// `index/` and `cache/` (not the store's).
+fn walk_files(dir: &Path, top: bool, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let skip = top && matches!(name.to_str(), Some("journal" | "index" | "cache"));
+        match e.file_type() {
+            Ok(t) if t.is_dir() && !skip => walk_files(&e.path(), false, out),
+            Ok(t) if t.is_file() => out.push(e.path()),
+            _ => {}
+        }
+    }
+}
+
+impl FsOps for SyncTracker {
+    fn fdatasync(&self, file: &std::fs::File) -> std::io::Result<()> {
+        RealFs.fdatasync(file)?;
+        let m = file.metadata()?;
+        self.state().synced.insert(file_key(&m), m.len());
+        Ok(())
+    }
+
+    fn rename(&self, from: &Path, to: &Path, noreplace: bool) -> std::io::Result<()> {
+        let mut st = self.state();
+        let old = if noreplace {
+            None
+        } else {
+            std::fs::read(to).ok()
+        };
+        if old.is_some() {
+            Self::forget(&mut st, to);
+        }
+        let moved = std::fs::metadata(from).map(|m| file_key(&m));
+        RealFs.rename(from, to, noreplace)?;
+        if let Ok(k) = moved {
+            st.published.insert(k);
+        }
+        st.pending.push(Pending::Rename {
+            from: from.to_path_buf(),
+            to: to.to_path_buf(),
+            old,
+        });
+        Ok(())
+    }
+
+    fn fsync_dir(&self, dir: &Path) -> std::io::Result<()> {
+        RealFs.fsync_dir(dir)?;
+        let mut st = self.state();
+        let pending = std::mem::take(&mut st.pending);
+        let mut keep = Vec::with_capacity(pending.len());
+        for p in pending {
+            let in_dir = match &p {
+                Pending::Rename { to, .. } => parent_is(to, dir),
+                Pending::Unlink { path, .. } => parent_is(path, dir),
+            };
+            if !in_dir {
+                keep.push(p);
+            } else if let Pending::Unlink { grave, key, .. } = p {
+                // The unlink is durable: the inode goes, its record with it.
+                let _ = std::fs::remove_file(grave);
+                if let Some(k) = key {
+                    st.synced.remove(&k);
+                    st.published.remove(&k);
+                }
+            }
+        }
+        st.pending = keep;
+        Ok(())
+    }
+
+    fn unlink(&self, path: &Path) -> std::io::Result<()> {
+        let mut st = self.state();
+        std::fs::create_dir_all(&self.graveyard)?;
+        st.graves += 1;
+        let grave = self.graveyard.join(format!("{}", st.graves));
+        let key = std::fs::metadata(path).ok().map(|m| file_key(&m));
+        // Keep the data until the directory is synced: a crash before that
+        // brings the file back.
+        std::fs::hard_link(path, &grave)?;
+        if let Err(e) = RealFs.unlink(path) {
+            let _ = std::fs::remove_file(&grave);
+            return Err(e);
+        }
+        st.pending.push(Pending::Unlink {
+            path: path.to_path_buf(),
+            grave,
+            key,
+        });
+        Ok(())
+    }
 }

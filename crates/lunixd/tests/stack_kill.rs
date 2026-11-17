@@ -536,17 +536,9 @@ struct Tally {
 ///
 /// * After a kill: what a crash leaves (temporary files, unnamed or
 ///   unreferenced containers, an index behind the chain, journal residue).
-/// * At rest (after recovery and a clean close): nothing but notes.
-const ALLOWED_AFTER_KILL: &[&str] = &[
-    "leftover",
-    "crash_leftover",
-    "orphan",
-    "index_missing",
-    "ignored_after_gap",
-    "journal_damage_below_floor",
-    "journal_file",
-];
-const ALLOWED_AT_REST: &[&str] = &["index_missing", "journal_file"];
+/// * At rest (after recovery and a clean close): notes only (exit 0).
+const ALLOWED_AFTER_KILL: &[&str] = &["leftover", "crash_leftover", "orphan", "index_missing"];
+const ALLOWED_AT_REST: &[&str] = &[];
 
 fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally: &mut Tally) {
     let Some(f) = fsck(vol) else {
