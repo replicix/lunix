@@ -63,14 +63,19 @@ impl Candidate {
 /// footer entry, rounded up) and per segment (footer header, trailer).
 pub const OUTPUT_COST_PER_EXTENT: u64 = 128;
 /// See [`OUTPUT_COST_PER_EXTENT`].
-pub const OUTPUT_COST_PER_SEGMENT: u64 = 4096;
+pub const OUTPUT_COST_PER_SEGMENT: u64 = 512;
 
-/// Whether compacting a segment of `size` bytes holding `extents` live
-/// extents of `live` payload bytes frees enough: what an output would hold
-/// for them (payload, per-extent and per-segment overhead) must be below
-/// `threshold` of `size`. A small segment whose dead bytes are mostly
-/// container overhead is no candidate: its output would be as large, and it
-/// would be rewritten at every pass on an idle volume.
+/// Bytes a compaction must free at least: what the source holds beyond what
+/// its output would.
+pub const MIN_GAIN: u64 = 1024;
+
+/// Whether to compact a segment of `size` bytes holding `extents` live
+/// extents of `live` payload bytes: its live fraction `live / size` is below
+/// `threshold`, and an output for those extents (payload, per-extent and
+/// per-segment overhead) is at least [`MIN_GAIN`] smaller than the source. A
+/// small segment whose dead bytes are mostly container overhead is no
+/// candidate: its output would be as large, and it would be rewritten at
+/// every pass on an idle volume.
 pub fn worth_compacting(size: u64, live: u64, extents: u64, threshold: f64) -> bool {
     if size == 0 || live == 0 {
         return false;
@@ -78,7 +83,7 @@ pub fn worth_compacting(size: u64, live: u64, extents: u64, threshold: f64) -> b
     let out = live
         .saturating_add(extents.saturating_mul(OUTPUT_COST_PER_EXTENT))
         .saturating_add(OUTPUT_COST_PER_SEGMENT);
-    (out as f64) < threshold * size as f64
+    (live as f64) < threshold * size as f64 && size >= out.saturating_add(MIN_GAIN)
 }
 
 /// Sorts candidates best first: higher score, then lower id.

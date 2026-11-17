@@ -158,10 +158,10 @@ segment that was not yet condemned).
 
 ## Compaction
 
-Candidates are segments with live bytes whose compaction frees enough: what an
-output would hold for their live extents (the payload plus 128 bytes per extent
-and 4 KiB per segment of container overhead) must be below
-`gc_live_threshold` (default 0.5) of the file size; a small segment whose dead
+Candidates are segments with live bytes, a live fraction `live / file size`
+below `gc_live_threshold` (default 0.5), and an output at least 1 KiB smaller
+than the source (the output holds the live payload plus 128 bytes per extent
+and 512 bytes per segment of container overhead): a small segment whose dead
 bytes are mostly overhead would be rewritten into an output as large at every
 pass, and is left alone. Candidates are also at or below the high-water mark,
 not condemned, not an unnamed output, and not introduced by the tip FULL

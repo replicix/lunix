@@ -88,9 +88,9 @@ fn reference(
             let u = live as f64 / x.size_bytes as f64;
             let age = (hwm - x.seg.raw()) as f64;
             // An output holds the payload plus 128 bytes per extent and
-            // 4 KiB per segment.
-            let out = live + extents(x.seg) * 128 + 4096;
-            ((out as f64) < threshold * x.size_bytes as f64)
+            // 512 bytes per segment, and must be 1 KiB smaller.
+            let out = live + extents(x.seg) * 128 + 512;
+            (u < threshold && x.size_bytes >= out + 1024)
                 .then_some(((1.0 - u) * age / (1.0 + u), x.seg))
         })
         .collect();
