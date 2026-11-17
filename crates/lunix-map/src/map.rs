@@ -48,6 +48,11 @@ pub(crate) struct Inner {
     pub(crate) overlay: HashMap<u64, Dirty>,
     pub(crate) txn_open: bool,
     interior: HashMap<NodeHash, Arc<Interior>, KeyBuild>,
+    /// Where each resident interior node is stored. Its hash covers the
+    /// child hashes, not their locations: another root can hold a node of the
+    /// same hash stored elsewhere, with other child locations, so a walk may
+    /// use the resident node for a child only at this location.
+    interior_loc: HashMap<NodeHash, NodeLoc, KeyBuild>,
     leaves: Lru,
 }
 
@@ -117,7 +122,7 @@ struct SealCtx<'a> {
     leaves_written: u64,
     bytes: u64,
     retired: Vec<NodeHash>,
-    fresh: Vec<(NodeHash, Arc<Interior>)>,
+    fresh: Vec<(NodeHash, Arc<Interior>, NodeLoc)>,
 }
 
 /// The shape of the tree being rebuilt.
@@ -172,6 +177,7 @@ impl RadixMap {
             overlay: HashMap::new(),
             txn_open: false,
             interior: HashMap::default(),
+            interior_loc: HashMap::default(),
             leaves: Lru::new(cfg.map_cache_max, cfg.decoded_tier_leaves, decoded_cost),
         };
         Ok(Self {
@@ -355,20 +361,31 @@ impl RadixMap {
         Ok(node)
     }
 
-    /// An interior node for a walk: resident when it is, read (not cached)
-    /// when it is not.
+    /// An interior node for a walk: resident when it is the same stored
+    /// object (same hash **and** location), read (not cached) otherwise. A
+    /// node of the same hash stored elsewhere (the content went `X -> Y -> X`
+    /// and was sealed again) has other child locations: substituting it would
+    /// report the tip's packs for an older root's children (M17.B stack
+    /// review B-1).
     fn interior_for_walk(&self, child: &Child, level: Option<u8>) -> Result<Arc<Interior>> {
-        if let Some(n) = lock(&self.inner).interior.get(&child.hash) {
-            return Ok(Arc::clone(n));
+        {
+            let g = lock(&self.inner);
+            if let Some(n) = g.interior.get(&child.hash) {
+                if child.loc.is_some() && g.interior_loc.get(&child.hash) == child.loc.as_ref() {
+                    return Ok(Arc::clone(n));
+                }
+            }
         }
         Ok(Arc::new(self.read_interior(child, level)?))
     }
 
     fn load_interior(&self, child: &Child, level: u8) -> Result<Arc<Interior>> {
         let node = Arc::new(self.read_interior(child, Some(level))?);
-        lock(&self.inner)
-            .interior
-            .insert(child.hash, Arc::clone(&node));
+        let mut g = lock(&self.inner);
+        g.interior.insert(child.hash, Arc::clone(&node));
+        if let Some(loc) = child.loc {
+            g.interior_loc.insert(child.hash, loc);
+        }
         Ok(node)
     }
 
@@ -621,7 +638,7 @@ impl RadixMap {
         ctx.buf.clear();
         node.encode(&mut ctx.buf)?;
         let loc = self.seal_extent(ctx, &hash)?;
-        ctx.fresh.push((hash, Arc::new(node)));
+        ctx.fresh.push((hash, Arc::new(node), loc));
         Ok(Child {
             hash,
             loc: Some(loc),
@@ -846,9 +863,11 @@ impl BlockMap for RadixMap {
             g.overlay.clear();
             for h in &ctx.retired {
                 g.interior.remove(h);
+                g.interior_loc.remove(h);
             }
-            for (h, n) in ctx.fresh.drain(..) {
+            for (h, n, loc) in ctx.fresh.drain(..) {
                 g.interior.insert(h, n);
+                g.interior_loc.insert(h, loc);
             }
         }
         let wrote = ctx.bytes > 0;

@@ -141,3 +141,37 @@ fn a_dead_segment_waits_for_every_unnamed_output_its_ids_moved_to() {
     assert!(!v.gc.unnamed_outputs().contains(&t1), "T1 is named");
     assert!(!v.segments().contains(&s), "S is deleted once T1 is named");
 }
+
+/// M17.B stack review B-1: leaf 0 goes `X -> Y -> X`, so the tip holds an
+/// interior root of the same hash as an older retained root, stored again
+/// with other child locations. The mark must walk the older root's own
+/// stored nodes; with the tip's resident copy standing in, the pack that
+/// holds the older root's leaf is condemned and deleted.
+#[test]
+fn a_reverted_subtree_keeps_the_older_roots_pack() {
+    let mut v = Vol::sized(4, 1024);
+    v.write(0, 1);
+    v.commit().expect("C1");
+    v.write(256, 2);
+    v.commit().expect("C2");
+    v.write(1, 3);
+    v.commit().expect("C3");
+    v.discard(1);
+    v.commit().expect("C4");
+    assert_eq!(v.full(2).map_root.hash, v.full(4).map_root.hash);
+    v.passes(4).expect("passes");
+    let packs = v.packs();
+    // GC's retained set under C4: C2, C3, C4.
+    for seq in 2..=4 {
+        let nodes = v
+            .nodes_from_disk(seq)
+            .unwrap_or_else(|e| panic!("commit {seq}'s map does not walk from disk: {e}"));
+        for n in nodes {
+            assert!(
+                packs.contains(&n.loc.pack),
+                "commit {seq} needs pack {:?}, which GC deleted",
+                n.loc.pack
+            );
+        }
+    }
+}
