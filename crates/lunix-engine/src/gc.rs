@@ -129,7 +129,11 @@ impl Inner {
         }
         let before = {
             let co = lock(&self.coord);
-            co.collector.as_ref().ok_or_else(no_collector)?.stats().passes
+            co.collector
+                .as_ref()
+                .ok_or_else(no_collector)?
+                .stats()
+                .passes
         };
         let finished = |co: &Coord| -> Option<GcPassSummary> {
             let c = co.collector.as_ref()?;
@@ -201,10 +205,16 @@ impl Inner {
             .max(u64::from(self.cfg.chunk_size));
         match self.with_collector(co, |c, v| c.urgent(v, want)) {
             Ok(p) => {
-                tracing::info!(want, freed = p.freed, "a cut failed for space: gc urgent pass");
+                tracing::info!(
+                    want,
+                    freed = p.freed,
+                    "a cut failed for space: gc urgent pass"
+                );
                 co.moved.extend(p.moved);
             }
-            Err(e) => tracing::warn!(error = %e, "a cut failed for space; the gc urgent pass failed"),
+            Err(e) => {
+                tracing::warn!(error = %e, "a cut failed for space; the gc urgent pass failed")
+            }
         }
     }
 

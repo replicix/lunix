@@ -96,7 +96,12 @@ fn churn(vol: &TestVolume) -> Vec<u8> {
         last.clear();
         for c in 0..REGION / u64::from(CS) {
             let data = payload(r << 32 | c, CS as usize);
-            let st = d.write((c % u64::from(QUEUES)) as usize, c * u64::from(CS), &data, false);
+            let st = d.write(
+                (c % u64::from(QUEUES)) as usize,
+                c * u64::from(CS),
+                &data,
+                false,
+            );
             assert!(st.is_ok(), "write: {st:?}");
             last.extend_from_slice(&data);
         }
@@ -175,7 +180,10 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
     // run since the attach: nothing can be deleted yet by anyone).
     let before = segment_files(&voldir);
     let dry = gc(&mut d, true);
-    assert!(attached.elapsed().as_secs() < 10, "the dry run took too long");
+    assert!(
+        attached.elapsed().as_secs() < 10,
+        "the dry run took too long"
+    );
     assert!(dry.dry_run && dry.pass == 0, "{dry:?}");
     assert!(dry.segments_deleted > 0 && dry.bytes_freed > 0, "{dry:?}");
     assert_eq!(segment_files(&voldir), before, "a dry run deleted segments");
@@ -207,7 +215,11 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
         Response::GcStatus(s) => {
             assert_eq!(s.state, None, "{s:?}");
             assert!(s.stats.passes >= 1, "{s:?}");
-            assert_eq!(s.last_pass.as_ref().map(|p| p.pass), Some(pass.pass), "{s:?}");
+            assert_eq!(
+                s.last_pass.as_ref().map(|p| p.pass),
+                Some(pass.pass),
+                "{s:?}"
+            );
             assert!(s.last_finished_ms.is_some(), "{s:?}");
             assert!(s.stats.bytes_freed >= pass.bytes_freed, "{s:?}");
             assert!(s.stats.live_bytes > 0, "{s:?}");

@@ -173,7 +173,10 @@ fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
         "{urgent:?}"
     );
     assert!(files2 < files && seg_bytes2 < seg_bytes);
-    assert!(charged2 < charged, "Segments charge {charged} -> {charged2}");
+    assert!(
+        charged2 < charged,
+        "Segments charge {charged} -> {charged2}"
+    );
     assert!(s.stats.bytes_freed >= urgent.bytes_freed);
 
     // Moves (if it compacted) are named by the next cuts; the data is intact.
@@ -194,7 +197,10 @@ fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
     let stack = vol.open().expect("reopen");
     let mut d = Driver::new(&stack).expect("driver");
     let all = d.read_all(size).expect("read");
-    assert!(all[..region as usize] == last[..], "the region differs after reopen");
+    assert!(
+        all[..region as usize] == last[..],
+        "the region differs after reopen"
+    );
     drop(d);
     close(stack).expect("close");
 }
@@ -223,8 +229,8 @@ impl BoundedFs {
 
 impl FsOps for BoundedFs {
     fn fdatasync(&self, file: &File) -> std::io::Result<()> {
-        let path = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
-            .unwrap_or_default();
+        let path =
+            std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).unwrap_or_default();
         if path.parent() == Some(self.segments.as_path()) {
             let len = file.metadata()?.len();
             if self.sealed_bytes() + len > self.cap {
@@ -325,10 +331,16 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
         fs.cap,
         start.elapsed()
     );
-    assert!(fs.refused.load(Ordering::Relaxed) > 0, "the volume never filled");
+    assert!(
+        fs.refused.load(Ordering::Relaxed) > 0,
+        "the volume never filled"
+    );
     assert!(!stack.engine.is_stopped());
     assert!(s.stats.passes >= 2, "no urgent pass ran: {s:?}");
-    assert!(s.stats.bytes_freed > 0, "the urgent pass freed nothing: {s:?}");
+    assert!(
+        s.stats.bytes_freed > 0,
+        "the urgent pass freed nothing: {s:?}"
+    );
     assert!(fs.sealed_bytes() <= fs.cap);
     drop(d);
     close(stack).expect("close");
@@ -338,7 +350,10 @@ fn a_full_volume_recovers_through_the_urgent_pass_when_cuts_fail_for_space() {
     let stack = vol.open().expect("reopen");
     let mut d = Driver::new(&stack).expect("driver");
     let all = d.read_all(size).expect("read");
-    assert!(all[..region as usize] == last[..], "the region differs after reopen");
+    assert!(
+        all[..region as usize] == last[..],
+        "the region differs after reopen"
+    );
     drop(d);
     close(stack).expect("close");
 }

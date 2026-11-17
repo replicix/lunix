@@ -240,10 +240,7 @@ impl Engine {
             cfg.read_helpers,
         );
         let lanes = usize::from(deps.journal.lanes());
-        let gc_status = collector
-            .as_ref()
-            .map(|c| c.status())
-            .unwrap_or_default();
+        let gc_status = collector.as_ref().map(|c| c.status()).unwrap_or_default();
         let coord = Coord::new(&rec, collector, deps.clock.monotonic());
         let inner = Arc::new(Inner {
             size: AtomicU64::new(rec.tip.size),

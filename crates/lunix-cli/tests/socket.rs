@@ -668,10 +668,7 @@ fn gc_pass_dry_run_and_status() {
     ] {
         assert!(v[k].is_u64(), "{k}: {v}");
     }
-    assert_eq!(
-        serde_json::from_value::<GcPassSummary>(v).unwrap(),
-        pass
-    );
+    assert_eq!(serde_json::from_value::<GcPassSummary>(v).unwrap(), pass);
     env.ok(
         "Gc",
         Response::Gc(GcPassSummary {
@@ -709,7 +706,10 @@ fn gc_pass_dry_run_and_status() {
     assert!(v["state"].is_null(), "{v}");
     assert_eq!(v["stats"]["passes"], 3);
     assert_eq!(v["last_pass"]["pass"], 7);
-    assert_eq!(serde_json::from_value::<GcStatusSnapshot>(v).unwrap(), status);
+    assert_eq!(
+        serde_json::from_value::<GcStatusSnapshot>(v).unwrap(),
+        status
+    );
     assert_eq!(env.run(&["gc", "vol1", "--status", "--dry-run"]).code, 2);
     let reqs = env.server.requests();
     assert_eq!(

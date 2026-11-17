@@ -36,9 +36,9 @@ use std::time::{Duration, Instant};
 use std::sync::Arc;
 
 use lunix_engine::{CommitOutcome, EngineConfig, OnJournalDamage};
+use lunix_format::local::OnFull;
 use lunix_format::{CryptoMode, WriteSeq};
 use lunix_gc::GcConfig;
-use lunix_format::local::OnFull;
 use lunix_iface::block::BlockEngine;
 use lunix_iface::gc::GcControl;
 use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
@@ -447,7 +447,10 @@ fn run_ladder(stack: &lunixd::stack::VolumeStack) {
     let mut tight = saved.clone();
     tight.on_full = OnFull::Error;
     tight.cache_max = Some(stack.space.snapshot().used().max(1));
-    stack.space.reconfigure(&tight).expect("child tight settings");
+    stack
+        .space
+        .reconfigure(&tight)
+        .expect("child tight settings");
     let passes = stack.engine.status().stats.passes;
     let errors = stack.space.step_errors();
     let out = stack
@@ -464,7 +467,10 @@ fn run_ladder(stack: &lunixd::stack::VolumeStack) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    stack.space.reconfigure(&saved).expect("child settings back");
+    stack
+        .space
+        .reconfigure(&saved)
+        .expect("child settings back");
 }
 
 /// The child entry: does nothing unless this process was started by a kill
