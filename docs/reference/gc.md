@@ -24,9 +24,10 @@ the coordinator for a whole mark (and the urgent pass's compaction).
 A pass runs when the
 previous one ended at least 30 s ago and something may have changed: a new
 tip, different pins, or condemned objects waiting after a pass that changed
-something. A pass that changed nothing (its only lines are `defer`) is not
-repeated until the tip or the pins change; the pins are then looked at once
-per interval, not at every tick.
+something. A pass that changed nothing (its only lines are deferrals that wait
+for a FULL) is not repeated until the tip or the pins change; the pins are
+then looked at once per interval, not at every tick. A pass abandoned on an
+error, or one that deferred for the store or the rollback floor, is retried.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -173,7 +174,8 @@ their map roots are not roots, so their data may go.
    output (M17.B review B-1). On an idle volume the collector asks the
    engine for that cut (`GcProgress::cut_wanted`, one empty FULL), so the
    source goes at the next pass instead of being deferred at every pass
-   (M17.B stack review S-1). This rule is exact only while the engine
+   (M17.B stack review S-1), and only when a cut helps: the blocking copy is
+   in an unnamed output or named by the tip (re-review M-1). This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
@@ -182,8 +184,9 @@ their map roots are not roots, so their data may go.
    leaves a complete volume (N24). The truncation itself deletes the commit
    files below the new tip's `chain_floor` that would join the set only under
    the new tip (they were outside it under the old one and may be half
-   collected), and refuses when a root of the new chain resolves into an
-   object only the dropped tip names.
+   collected), refuses when a root of the new chain resolves into an
+   object only the dropped tip names, and rebuilds the index: GC moved the
+   entries of relocated ids into the output the next open sweeps.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
@@ -290,7 +293,8 @@ One sealed, create-only object per pass that condemned, un-condemned,
 deleted or compacted anything; a pass that found nothing, or only deferred
 what it had deferred before, writes none, and its number is used by the
 next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
-new one deletes the oldest beyond that (`GcStateStore::delete_evidence`).
+new one deletes the oldest beyond that, at most 16 per pass
+(`GcStateStore::delete_evidence`).
 Evidence objects are not in the ledger; the bound keeps them under 1 024 x
 48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and

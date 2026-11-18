@@ -66,7 +66,11 @@ impl Evidence {
     ) {
         debug_assert!(!reason.contains(['"', '\\', '\n']));
         self.lines += 1;
-        if action != Action::Defer {
+        // A deferral that waits for a FULL is no change; one that waits for
+        // the store or the rollback floor is retried at the next pass.
+        if action != Action::Defer
+            || !reason.starts_with("live copies of its ids are not durable yet")
+        {
             self.changes += 1;
         }
         if self.bytes.len() >= EVIDENCE_CAP {
@@ -90,8 +94,8 @@ impl Evidence {
         self.lines == 0
     }
 
-    /// The pass changed nothing: no line but `defer` (a repeated deferral is
-    /// not written; gc.md "the evidence object").
+    /// The pass changed nothing: no line but a `defer` that waits for a FULL
+    /// (a repeated deferral is not written; gc.md "the evidence object").
     pub(crate) fn only_defers(&self) -> bool {
         self.changes == 0
     }

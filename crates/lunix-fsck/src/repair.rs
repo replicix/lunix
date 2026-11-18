@@ -50,6 +50,11 @@ pub(crate) fn run(
     actions: &mut Vec<RepairAction>,
     recheck: Recheck<'_>,
 ) {
+    // A dropped tip may have named a compaction output whose relocations the
+    // index already points at; the next open sweeps that output (it lies
+    // above the new high-water mark) and those ids would lose their entries.
+    // The index is rebuilt after a truncation, from what the new tip keeps.
+    let mut truncated = false;
     if opts.truncate_tip {
         if !opts.repair {
             refuse(refusals, "--truncate-tip", "it is a repair: add --repair");
@@ -63,6 +68,7 @@ pub(crate) fn run(
                 // Nothing else runs on a volume whose tip is in question.
                 return;
             }
+            truncated = true;
         }
     }
     if opts.repair_pins {
@@ -110,7 +116,7 @@ pub(crate) fn run(
     ]
     .iter()
     .any(|c| found.has(c));
-    if opts.rebuild_index || (opts.repair && index_damaged) {
+    if opts.rebuild_index || truncated || (opts.repair && index_damaged) {
         if facts.tip.is_none() || !facts.chain_ok {
             refuse(
                 refusals,

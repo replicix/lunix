@@ -67,7 +67,14 @@ const PREP_KILL: &str = "destage.after_segment_seal:1";
 /// `stack_gc_kill.rs`, whose workload gives the collector whole passes.
 const PREFIXES: [&str; 5] = ["engine.", "store.", "journal.", "index.", "destage."];
 /// Points of the prefixes above that only GC reaches (`stack_gc_kill.rs`).
-const GC_ONLY: [&str; 2] = ["index.after_condemn_flag", "store.evidence."];
+/// Unlinks happen here only when GC deletes, at wall-clock times: their
+/// counts are not reproducible from run to run (re-review M-5.4).
+const GC_ONLY: [&str; 4] = [
+    "index.after_condemn_flag",
+    "store.evidence.",
+    "store.delete.",
+    "store.segment_delete.",
+];
 const CHILD_ENV: &str = "LUNIX_KILL_CHILD";
 
 fn env_or(name: &str, default: u64) -> u64 {
@@ -571,23 +578,10 @@ struct Tally {
 ///   unreferenced containers, an index behind the chain, journal residue).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
 const ALLOWED_AFTER_KILL: &[&str] = &["leftover", "crash_leftover", "orphan", "index_missing"];
-/// After a kill between a segment's unlink (GC's delete runs while this loop
-/// writes) and its `drop_segment`: also `index_extra` (gc.md crash table; the
-/// open's catch-up drops the entries, at rest they are gone).
-const ALLOWED_AFTER_UNLINK: &[&str] = &[
-    "leftover",
-    "crash_leftover",
-    "orphan",
-    "index_missing",
-    "index_extra",
-];
 const ALLOWED_AT_REST: &[&str] = &[];
 
 fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally: &mut Tally) {
-    let Some(f) = fsck(vol) else {
-        // No binary: the store self-check stands in (closed volumes only).
-        return;
-    };
+    let f = fsck(vol).unwrap_or_else(|| panic!("{what}: lunix-fsck is not built"));
     assert!(
         f.no_errors(),
         "{what}: lunix-fsck {when} found errors:\n{}",
@@ -617,14 +611,7 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// the kill), recovery under `refuse` against the oracle, writes and a
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    let allowed = if what.contains("store.delete.after_unlink:")
-        || what.contains("store.delete.after_dirsync:")
-    {
-        ALLOWED_AFTER_UNLINK
-    } else {
-        ALLOWED_AFTER_KILL
-    };
-    fsck_clean(&p.vol, "after-kill", what, allowed, tally);
+    fsck_clean(&p.vol, "after-kill", what, ALLOWED_AFTER_KILL, tally);
     let mut durable = 0usize;
     let mut durable_seq = 0u64;
     for l in std::fs::read_to_string(&p.progress)
@@ -704,11 +691,15 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         again == actual,
         "{what}: the device differs after a clean close and reopen"
     );
+    // GC finishes what the close's commit left, then the close cuts nothing.
+    settle_gc(&stack, &mut d, &actual, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let r = p.vol.check().expect("store self-check runs");
     assert!(r.is_clean(), "{what}: store self-check: {r:?}");
     fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
+    let f = fsck(&p.vol).unwrap_or_else(|| panic!("{what}: lunix-fsck is not built"));
+    assert_no_gc_work(&f.text, what);
 }
 
 /// After recovery: ticks through a grace and whole passes until GC has
@@ -716,20 +707,28 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
 /// again, the recheck un-condemns what the replayed journal made live, the
 /// deletes complete), then the device is read again against `actual`.
 fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], what: &str) {
+    // Quiescent: nothing condemned, and no cut (moves or a cut the collector
+    // asked for) for a grace and more; a deadline, not a fixed window.
     let start = Instant::now();
+    let mut last_cut = Instant::now();
     loop {
-        stack.engine.tick().expect("tick after recovery");
+        if matches!(
+            stack.engine.tick().expect("tick after recovery"),
+            CommitOutcome::Committed { .. }
+        ) {
+            last_cut = Instant::now();
+        }
         let listed = lunix_iface::store::GcStateStore::load_condemned(&stack.store)
             .expect("condemned list")
             .as_ref()
             .and_then(lunix_gc::CondemnedList::from_file)
             .map_or(0, |l| l.entries.len());
-        if listed == 0 && start.elapsed() > Duration::from_secs(12) {
+        if listed == 0 && last_cut.elapsed() > Duration::from_secs(13) {
             break;
         }
         assert!(
-            start.elapsed() < Duration::from_secs(90),
-            "{what}: GC does not finish after recovery ({listed} condemned)"
+            start.elapsed() < Duration::from_secs(180),
+            "{what}: GC does not settle after recovery ({listed} condemned)"
         );
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -743,6 +742,21 @@ fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], 
     );
 }
 
+/// At rest after GC settled: `lunix-fsck`'s dry run finds nothing to condemn
+/// or delete (an unreferenced container below the mark is not an `orphan`
+/// any more, so this is the leak check; re-review M-3).
+fn assert_no_gc_work(text: &str, what: &str) {
+    for l in text.lines().filter(|l| l.contains("gc_dry_run")) {
+        assert!(
+            !l.contains("would condemn")
+                || l.contains(
+                    "condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 0 commits"
+                ),
+            "{what}: GC left work at rest: {l}"
+        );
+    }
+}
+
 /// Registered points no workload of this loop reaches: the set-aside of a
 /// tip (`fsck --truncate-tip` only). GC's own points are `stack_gc_kill.rs`'s.
 /// Any other unreached point fails the loop.
@@ -753,9 +767,11 @@ const EXPECTED_UNREACHED: &[&str] = &[
 ];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
-    if std::env::var_os("LUNIX_STACK_REQUIRE_FSCK").is_some() {
-        assert!(fsck_binary().is_some(), "lunix-fsck is not built");
-    }
+    // fsck is part of every recovery check: a missing binary fails the loop.
+    assert!(
+        fsck_binary().is_some(),
+        "lunix-fsck is not built: cargo build --release -p lunix-fsck"
+    );
     let all_hits = std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
     let only: Vec<String> = std::env::var("LUNIX_KILL_POINTS")
         .map(|v| v.split(',').map(str::to_owned).collect())

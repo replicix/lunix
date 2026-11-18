@@ -1095,9 +1095,9 @@ impl GcStateStore for MemStore {
         Ok(self.st()?.d.evidence.keys().copied().collect())
     }
 
-    fn delete_evidence(&self, pass: u64) -> Result<u64> {
+    fn delete_evidence(&self, pass: u64) -> Result<bool> {
         let mut st = lock(&self.0.state);
-        Ok(st.d.evidence.remove(&pass).map_or(0, |l| l.len() as u64))
+        Ok(st.d.evidence.remove(&pass).is_some())
     }
 }
 

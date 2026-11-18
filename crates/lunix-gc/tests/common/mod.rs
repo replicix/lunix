@@ -88,6 +88,8 @@ pub struct Vol {
     pending: BTreeMap<u64, Option<u64>>,
     /// Chunks of the volume.
     pub chunks: u64,
+    /// Steps whose progress asked for a cut (`GcProgress::cut_wanted`).
+    pub cut_requests: u64,
 }
 
 impl Vol {
@@ -161,6 +163,7 @@ impl Vol {
             runs_unnamed: Vec::new(),
             pending: BTreeMap::new(),
             chunks,
+            cut_requests: 0,
         }
     }
 
@@ -220,7 +223,13 @@ impl Vol {
         self.gc = gc;
         let p = r?;
         self.moved.extend(p.moved.iter().copied());
+        self.cut_requests += u64::from(p.cut_wanted);
         Ok(p)
+    }
+
+    /// Evidence objects in the store.
+    pub fn evidence(&self) -> Vec<u64> {
+        lunix_iface::store::GcStateStore::evidence_passes(&self.store).expect("gc/")
     }
 
     /// Steps until a pass is done (or there is nothing to do), advancing the

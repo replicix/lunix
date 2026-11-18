@@ -184,12 +184,19 @@ fn ticks_with_reader(
     let mut reads = 0u64;
     std::thread::scope(|sc| {
         sc.spawn(|| {
+            // Set even when a tick panics, or the reader would loop for ever.
+            struct Done<'a>(&'a AtomicBool);
+            impl Drop for Done<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                }
+            }
+            let _done = Done(&done);
             let end = Instant::now() + Duration::from_secs(secs);
             while Instant::now() < end {
                 engine.tick().expect("tick");
                 std::thread::sleep(Duration::from_millis(100));
             }
-            done.store(true, Ordering::Release);
         });
         while !done.load(Ordering::Acquire) {
             stack.engine.release_read_cache();
@@ -318,6 +325,7 @@ fn churn(mode: CryptoMode, cs: u32) {
     let deep = fsck_json(&vol, &["--deep"]);
     assert_eq!(deep["exit"].as_i64(), Some(0), "{tag}: --deep: {deep}");
     let v = fsck_json(&vol, &[]);
+    assert!(no_gc_work(&v), "{tag}: GC left work at rest: {v}");
     let r = &v["ratios"];
     let live = r["unique_clen"].as_u64().expect("unique_clen");
     let b = &r["bytes"];
@@ -461,19 +469,50 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
     };
     let outputs: BTreeSet<u64> = segments(&stack).difference(&written).copied().collect();
     assert!(!outputs.is_empty(), "{tag}: the cut names an output");
-    // A whole pass (condemn, grace, recheck) while only the tip names the
-    // output: the source must stay. The collector then asks for one cut;
-    // stop at it (the tip it makes is the one --truncate-tip drops).
+    // A whole pass while only the tip names the output: a source is
+    // condemned, then the pass ends (its evidence object) after the grace
+    // and the recheck. The source must still be there: under the B-1 rule
+    // the recheck defers it and asks for a cut, which the next tick would
+    // make; under the old rule the recheck deleted it.
+    let listed = |stack: &VolumeStack| -> BTreeSet<u64> {
+        stack
+            .store
+            .load_condemned()
+            .expect("list")
+            .as_ref()
+            .and_then(lunix_gc::CondemnedList::from_file)
+            .map(|l| l.entries.keys().map(|o| o.raw()).collect())
+            .unwrap_or_default()
+    };
     let start = Instant::now();
-    while start.elapsed() < GRACE + Duration::from_secs(20) {
-        if matches!(
-            stack.engine.tick().expect("tick"),
-            CommitOutcome::Committed { .. }
-        ) {
-            break;
-        }
+    while listed(&stack).is_disjoint(&written) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{tag}: no source was condemned"
+        );
+        assert!(
+            matches!(stack.engine.tick().expect("tick"), CommitOutcome::Idle),
+            "{tag}: a cut before the source's pass"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
+    let e0 = evidence(&stack);
+    while evidence(&stack) == e0 {
+        assert!(
+            start.elapsed() < GRACE + Duration::from_secs(60),
+            "{tag}: the source's pass did not end"
+        );
+        assert!(
+            matches!(stack.engine.tick().expect("tick"), CommitOutcome::Idle),
+            "{tag}: a cut inside the source's pass"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        stack.engine.tip().0,
+        named_at,
+        "{tag}: the tip still names the output"
+    );
     assert!(
         written.is_subset(&segments(&stack)),
         "{tag}: a source went while only the tip (commit {}) named its output",
@@ -481,16 +520,31 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
     );
     check_all(&stack, &mut d, &model, &tag);
     drop(d);
-    close(stack).expect("close");
-    fsck_ok(&vol, &tag, true);
+    // A crash now (a close would make the cut the collector asked for): the
+    // tip is the FULL that alone names the output.
+    let _ = vol.crash(stack, 0x6c17);
+    fsck_ok(&vol, &tag, false);
 
+    // Drop that tip: the output is above the new chain's mark and the open
+    // sweeps it; the older roots read through the sources, which GC kept.
     let v = fsck_json(&vol, &["--repair", "--truncate-tip"]);
     let refused: Vec<String> = codes(&v)
         .into_iter()
         .filter(|c| c.contains("repair_refused"))
         .collect();
     assert!(refused.is_empty(), "{tag}: --truncate-tip refused: {v}");
+    assert_eq!(
+        v["tip"].as_u64(),
+        Some(named_at.0 - 1),
+        "{tag}: the naming FULL dropped"
+    );
     let stack = vol.open_with(fast_gc).expect("open the predecessor");
+    for o in &outputs {
+        assert!(
+            !segments(&stack).contains(o),
+            "{tag}: the output {o:x} named only by a dropped commit was swept"
+        );
+    }
     let mut d = Driver::new(&stack).expect("driver");
     check_all(
         &stack,
@@ -545,13 +599,38 @@ fn an_idle_volume_after_compaction_settles() {
         cs,
         (24u64 << 20) / u64::from(cs),
     );
-    // Grace, a pass, the cut it asks for, the next pass: well within 60 s.
-    ticks(&stack, 60);
-    let now = segments(&stack);
-    assert!(
-        written.iter().any(|s| !now.contains(s)),
-        "{tag}: no compaction source went without a forced commit"
-    );
+    // Ticks until a source has gone (compaction, the cut that names the
+    // output, a pass, the cut the collector asks for, the next pass), with a
+    // deadline rather than a fixed window.
+    let start = Instant::now();
+    while written.is_subset(&segments(&stack)) {
+        assert!(
+            start.elapsed() < Duration::from_secs(180),
+            "{tag}: no compaction source went without a forced commit"
+        );
+        ticks(&stack, 1);
+    }
+    // Then until nothing is condemned and no cut came for a grace and more.
+    let mut last_cut = Instant::now();
+    loop {
+        if ticks(&stack, 1) > 0 {
+            last_cut = Instant::now();
+        }
+        let listed = stack
+            .store
+            .load_condemned()
+            .expect("list")
+            .as_ref()
+            .and_then(lunix_gc::CondemnedList::from_file)
+            .map_or(0, |l| l.entries.len());
+        if listed == 0 && last_cut.elapsed() > GRACE + Duration::from_secs(3) {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(300),
+            "{tag}: GC does not settle ({listed} condemned)"
+        );
+    }
     // Settled: a grace and more past it change nothing.
     let (e0, s0, tip0) = (evidence(&stack), segments(&stack), stack.engine.tip().0);
     let cuts = ticks(&stack, GRACE.as_secs() + 5);
@@ -563,6 +642,24 @@ fn an_idle_volume_after_compaction_settles() {
     drop(d);
     close(stack).expect("close");
     fsck_ok(&vol, tag, true);
+    // Nothing left for a pass to condemn or delete (the leak check).
+    assert!(
+        no_gc_work(&fsck_json(&vol, &[])),
+        "{tag}: GC left work at rest"
+    );
+}
+
+/// `lunix-fsck`'s dry run finds nothing to condemn or delete.
+fn no_gc_work(v: &serde_json::Value) -> bool {
+    v["findings"].as_array().is_none_or(|a| {
+        a.iter().filter(|f| f["code"] == "gc_dry_run").all(|f| {
+            let m = f["message"].as_str().unwrap_or("");
+            !m.contains("would condemn")
+                || m.contains(
+                    "condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 0 commits",
+                )
+        })
+    })
 }
 
 /// M17.B stack review B-1 on the stack: leaf 0 goes `X -> Y -> X` (chunk 0
@@ -689,7 +786,31 @@ fn a_tampered_live_extent_is_skipped_by_compaction_and_fails_its_read() {
 
     let stack = vol.open_with(fast_gc).expect("open");
     let mut d = Driver::new(&stack).expect("driver");
-    ticks(&stack, GRACE.as_secs() + 30);
+    // Until compaction has run and skipped the segment: a `skip` line for it
+    // in an evidence object (integrity mode: the lines are readable).
+    let want = format!(
+        "\"action\":\"skip\",\"kind\":\"segment\",\"id\":\"{:016x}\"",
+        seg.raw()
+    );
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick");
+        let skipped = std::fs::read_dir(vol.voldir.join("gc"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                std::fs::read(e.path()).is_ok_and(|b| String::from_utf8_lossy(&b).contains(&want))
+            });
+        if skipped {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "{tag}: compaction never ran over the tampered segment"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert!(
         segments(&stack).contains(&seg.raw()),
         "{tag}: the segment with the bad extent stays"

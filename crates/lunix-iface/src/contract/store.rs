@@ -268,6 +268,21 @@ pub fn evidence_is_create_only<F: StoreFixture>(f: &mut F) {
     assert_eq!(g.evidence_passes().expect("list"), vec![1, 3]);
 }
 
+/// Evidence objects are deleted one by one: the listing shrinks, a missing
+/// one reports `false` (GC's local bound).
+pub fn evidence_can_be_deleted<F: StoreFixture>(f: &mut F) {
+    let g = f.gc_state();
+    g.put_evidence(1, b"{\"a\":1}\n").expect("put");
+    g.put_evidence(2, b"{\"b\":2}\n").expect("put");
+    assert!(g.delete_evidence(1).expect("delete"));
+    assert_eq!(g.evidence_passes().expect("list"), vec![2]);
+    assert!(!g.delete_evidence(1).expect("again"), "already gone");
+    assert!(!g.delete_evidence(7).expect("never"));
+    // The next pass number still follows the newest.
+    g.put_evidence(3, b"{}\n").expect("put");
+    assert_eq!(g.evidence_passes().expect("list"), vec![2, 3]);
+}
+
 /// The condemned list is absent until stored, and replaced atomically.
 pub fn condemned_list_round_trips<F: StoreFixture>(f: &mut F) {
     assert_eq!(f.gc_state().load_condemned().expect("load"), None);

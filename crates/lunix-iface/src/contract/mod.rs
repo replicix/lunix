@@ -215,6 +215,7 @@ macro_rules! contract_store_suite {
                     set_aside_moves_only_the_tip,
                     checkpoint_is_a_double_slot_hint,
                     evidence_is_create_only,
+                    evidence_can_be_deleted,
                     condemned_list_round_trips,
                     sweep_deletes_only_unnamed_orphans_above_the_mark,
                     rollback_floor_is_raise_only,

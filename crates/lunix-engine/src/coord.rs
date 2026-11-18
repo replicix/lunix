@@ -259,7 +259,11 @@ impl Inner {
             // nothing to cut after all (`Idle`, e.g. a cut held below a
             // poisoned write; M12c merge review M-3). One rule: `gc_step`
             // runs when the map is the tip's and does nothing otherwise; a
-            // committed cut stepped it at C10 already.
+            // committed cut stepped it at C10 already. After a failure in
+            // `retry_persist` the collector runs while index entries of named
+            // segments are in memory only (N13): safe, since the tip's names
+            // never count for `named_high` and a FULL is written only after
+            // the persist before it succeeded (M17.B stack re-review M-6).
             let committed = matches!(res, Ok(CommitOutcome::Committed { .. }));
             if !committed && !self.is_failed() {
                 self.gc_step(&mut co);
