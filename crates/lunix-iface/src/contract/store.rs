@@ -268,20 +268,16 @@ pub fn evidence_is_create_only<F: StoreFixture>(f: &mut F) {
     assert_eq!(g.evidence_passes().expect("list"), vec![1, 3]);
 }
 
-/// Evidence objects are deleted one by one: the listing shrinks, the bytes
-/// freed are the object's, a missing one frees 0 (GC's local bound).
+/// Evidence objects are deleted one by one: the listing shrinks, a missing
+/// one reports `false` (GC's local bound).
 pub fn evidence_can_be_deleted<F: StoreFixture>(f: &mut F) {
     let g = f.gc_state();
     g.put_evidence(1, b"{\"a\":1}\n").expect("put");
     g.put_evidence(2, b"{\"b\":2}\n").expect("put");
-    assert!(g.delete_evidence(1).expect("delete") > 0);
+    assert!(g.delete_evidence(1).expect("delete"));
     assert_eq!(g.evidence_passes().expect("list"), vec![2]);
-    assert_eq!(
-        g.delete_evidence(1).expect("again"),
-        0,
-        "a missing object frees 0"
-    );
-    assert_eq!(g.delete_evidence(7).expect("never"), 0);
+    assert!(!g.delete_evidence(1).expect("again"), "already gone");
+    assert!(!g.delete_evidence(7).expect("never"));
     // The next pass number still follows the newest.
     g.put_evidence(3, b"{}\n").expect("put");
     assert_eq!(g.evidence_passes().expect("list"), vec![2, 3]);
