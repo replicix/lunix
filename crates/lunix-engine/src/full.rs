@@ -11,8 +11,12 @@
 //!   the failed commits since the last success failed for space, else `EIO`.
 //!   Once the volume began to close
 //!   ([`Engine::begin_close`](crate::Engine::begin_close)) it answers as soon
-//!   as a commit attempt failed since, and at most [`CLOSE_RING_BOUND`] later
-//!   otherwise, so a quiesce can drain. The background coordinator wakes the
+//!   as a commit attempt failed for space or I/O after the close, and at the
+//!   bound the daemon gives (two thirds of `quiesce_timeout`) otherwise, so a
+//!   quiesce can drain. Only `NoSpace` and `Io` failures count anywhere: a
+//!   benign one (writes in flight at the cut) neither shortens nor ends a
+//!   ring wait. The close is one-way: after the bound every later ring-full
+//!   park fails at once (a failed quiesce leaves the device refusing I/O). The background coordinator wakes the
 //!   queues that hold a ring-parked request.
 //! * **A discard frees space on a full volume** (path P4, decision M6). Hole
 //!   records are charged with `SpaceGate::charge` (the 64 bytes go into a
@@ -51,10 +55,12 @@ const SPACE_CUT_SPACING: Duration = Duration::from_secs(1);
 /// The shortest ring-full wait while commits succeed (review m2).
 pub(crate) const RING_MIN_WAIT: Duration = Duration::from_secs(60);
 
-/// The longest ring-full wait after `begin_close` when no commit attempt
-/// failed: a healthy ring-full wait still gets its cut, and the answer comes
-/// well inside `QUIESCE_DEV`'s 30 s.
-pub(crate) const CLOSE_RING_BOUND: Duration = Duration::from_secs(5);
+/// How long a volume must admit writes again before the ladder's back-off
+/// starts over (review m3: not on every flap).
+const BACKOFF_RESET_AFTER_MS: u64 = 5_000;
+
+/// The shortest spacing of the "writes are refused" log line.
+const REFUSED_LOG_SPACING_MS: u64 = 5_000;
 
 /// How close to the limit the ledger must be for the queue-side flag to
 /// count as "refusing" (review m3).
@@ -77,11 +83,18 @@ pub(crate) struct FullState {
     /// The failed commit attempts since the last success include one that
     /// failed for space.
     commit_nospace: AtomicBool,
-    /// Failed commit attempts so far.
+    /// Commit attempts that failed for space or I/O so far.
     commit_failures: AtomicU64,
-    /// `clock.monotonic()` in ms + 1 of the last failed commit attempt (0:
-    /// none).
+    /// `clock.monotonic()` in ms + 1 of the last commit attempt that failed
+    /// for space or I/O (0: none).
     last_failure_ms: AtomicU64,
+    /// `clock.monotonic()` in ms + 1 when writes were admitted again after
+    /// a refusal (0: refusing, or never refused).
+    admitted_since_ms: AtomicU64,
+    /// `clock.monotonic()` in ms + 1 of the last "refused" log line.
+    refused_logged: AtomicU64,
+    /// The ring bound after `begin_close`, in ms.
+    close_bound_ms: AtomicU64,
     /// The `write_seq` of the newest hole record appended (0: none).
     last_hole: AtomicU64,
     /// The `commit_seq` of the last commit that took a hole record (at
@@ -109,6 +122,9 @@ impl FullState {
             commit_nospace: AtomicBool::new(false),
             commit_failures: AtomicU64::new(0),
             last_failure_ms: AtomicU64::new(0),
+            admitted_since_ms: AtomicU64::new(0),
+            refused_logged: AtomicU64::new(0),
+            close_bound_ms: AtomicU64::new(0),
             last_hole: AtomicU64::new(last_hole),
             hole_commit: AtomicU64::new(tip_commit),
             ring_logged: AtomicU64::new(0),
@@ -135,20 +151,31 @@ impl FullState {
         self.ladder_backoff_ms.store(ms(d), Ordering::Relaxed);
     }
 
-    /// Records the outcome of a write's space reservation. Stores only on a
-    /// change: the admitted path stays a load. A write admitted after a
-    /// refusal ends the episode: the ladder's back-off starts over (review
-    /// m6).
-    /// Returns true when this call changed it.
-    pub(crate) fn set_blocked(&self, blocked: bool) -> bool {
+    /// Records the outcome of a write's space reservation at `now`. Stores
+    /// only on a change: the admitted path stays a load. Returns true when
+    /// this call changed it.
+    pub(crate) fn set_blocked(&self, blocked: bool, now: Duration) -> bool {
         if self.blocked.load(Ordering::Relaxed) == blocked {
             return false;
         }
         self.blocked.store(blocked, Ordering::Relaxed);
-        if !blocked {
+        let since = if blocked {
+            0
+        } else {
+            ms(now).saturating_add(1)
+        };
+        self.admitted_since_ms.store(since, Ordering::Relaxed);
+        true
+    }
+
+    /// The ladder's back-off at `now`: back to the minimum once writes have
+    /// been admitted again for a few seconds (review m6, m3).
+    pub(crate) fn ladder_backoff_at(&self, now: Duration) -> Duration {
+        let since = self.admitted_since_ms.load(Ordering::Relaxed);
+        if since > 0 && ms(now).saturating_add(1).saturating_sub(since) >= BACKOFF_RESET_AFTER_MS {
             self.set_ladder_backoff(crate::gc::SPACE_URGENT_MIN);
         }
-        true
+        self.ladder_backoff()
     }
 
     /// A hole record with this number was appended.
@@ -164,23 +191,29 @@ impl FullState {
         }
     }
 
-    /// Records a commit attempt's outcome at `now`.
+    /// Records a commit attempt's outcome at `now`. Only failures for space
+    /// or I/O count (review N3): `Busy` (writes in flight at the cut) and the
+    /// like say nothing about the ring.
     pub(crate) fn note_commit<T>(&self, res: &Result<T>, now: Duration) {
         match res {
             Ok(_) => self.commit_nospace.store(false, Ordering::Relaxed),
             Err(e) => {
-                if e.kind() == ErrorKind::NoSpace {
+                let kind = e.kind();
+                if kind == ErrorKind::NoSpace {
                     self.commit_nospace.store(true, Ordering::Relaxed);
                 }
-                self.last_failure_ms
-                    .store(ms(now).saturating_add(1), Ordering::Relaxed);
-                self.commit_failures.fetch_add(1, Ordering::AcqRel);
+                if matches!(kind, ErrorKind::NoSpace | ErrorKind::Io) {
+                    self.last_failure_ms
+                        .store(ms(now).saturating_add(1), Ordering::Relaxed);
+                    self.commit_failures.fetch_add(1, Ordering::AcqRel);
+                }
             }
         }
     }
 
-    /// `begin_close` at `now`.
-    pub(crate) fn begin_close(&self, now: Duration) {
+    /// `begin_close` at `now`, ring waits answered within `bound`.
+    pub(crate) fn begin_close(&self, now: Duration, bound: Duration) {
+        self.close_bound_ms.store(ms(bound), Ordering::Relaxed);
         self.close_at_ms.store(ms(now), Ordering::Relaxed);
         self.close_failures.store(
             self.commit_failures.load(Ordering::Acquire),
@@ -214,8 +247,11 @@ impl JournalCharges {
         }
     }
 
-    /// Lane `lane`'s record `write_seq` charged `bytes`.
+    /// Lane `lane`'s record `write_seq` charged `bytes`. 16 bytes per record
+    /// above the last cut: at worst a quarter of the ring size, for a storm
+    /// of discards while cuts fail.
     pub(crate) fn push(&self, lane: usize, write_seq: u64, bytes: u64) {
+        debug_assert!(lane < self.lanes.len(), "lane {lane} out of range");
         if let Some(q) = self.lanes.get(lane) {
             lock(q).push_back((write_seq, bytes));
         }
@@ -224,17 +260,15 @@ impl JournalCharges {
     /// Takes the charges of every record at or below `cut`; returns their
     /// sum.
     pub(crate) fn take_upto(&self, cut: u64) -> u64 {
+        // The lane's queue thread may be appending: hold its mutex only to
+        // split the backlog off, and sum it outside.
         let take = |q: &Charges| {
-            let mut q = lock(q);
-            let mut sum = 0u64;
-            while let Some(&(s, b)) = q.front() {
-                if s > cut {
-                    break;
-                }
-                q.pop_front();
-                sum = sum.saturating_add(b);
-            }
-            sum
+            let taken: Vec<(u64, u64)> = {
+                let mut q = lock(q);
+                let n = q.partition_point(|(s, _)| *s <= cut);
+                q.drain(..n).collect()
+            };
+            taken.iter().fold(0u64, |a, (_, b)| a.saturating_add(*b))
         };
         self.lanes
             .iter()
@@ -265,8 +299,9 @@ impl Inner {
         let closing = f.closing.load(Ordering::Acquire);
         let close_due = closing && {
             let close_at = Duration::from_millis(f.close_at_ms.load(Ordering::Relaxed));
+            let bound = Duration::from_millis(f.close_bound_ms.load(Ordering::Relaxed));
             f.commit_failures.load(Ordering::Acquire) > f.close_failures.load(Ordering::Relaxed)
-                || now.saturating_sub(close_at) >= CLOSE_RING_BOUND
+                || now.saturating_sub(close_at) >= bound
         };
         if !(normal || close_due) {
             return None;
@@ -288,11 +323,13 @@ impl Inner {
     }
 
     /// True while writes are refused or parked for space: the gate has
-    /// waiters, or a queue saw a refusal and the ledger is within 1 MiB of
-    /// the limit.
+    /// waiters or is latched full (the latch holds while the headroom is
+    /// below the resume mark, review N1), or a queue saw a refusal and the
+    /// ledger is within 1 MiB of the limit.
     pub(crate) fn space_refusing(&self) -> bool {
         let snap = self.space.snapshot();
         snap.waiters > 0
+            || snap.full
             || (self.full.blocked.load(Ordering::Relaxed)
                 && snap.used().saturating_add(NEAR_LIMIT) > snap.limit)
     }
@@ -367,8 +404,22 @@ impl Inner {
     /// A write was refused or expired for space: the first one of an
     /// episode is logged with the ledger, so the operator sees why (review
     /// m1; the gate's own transition lines are T5's).
+    /// A write was admitted (reserved or granted). A load on the hot path.
+    pub(crate) fn note_admitted(&self) {
+        if self.full.blocked.load(Ordering::Relaxed) {
+            let _ = self.full.set_blocked(false, self.clock.monotonic());
+        }
+    }
+
     pub(crate) fn note_refused(&self) {
-        if self.full.set_blocked(true) {
+        let now = self.clock.monotonic();
+        if !self.full.set_blocked(true, now) {
+            return;
+        }
+        let now_ms = ms(now).saturating_add(1);
+        let last = self.full.refused_logged.load(Ordering::Relaxed);
+        if last == 0 || now_ms.saturating_sub(last) >= REFUSED_LOG_SPACING_MS {
+            self.full.refused_logged.store(now_ms, Ordering::Relaxed);
             let snap = self.space.snapshot();
             tracing::warn!(
                 used = snap.used(),
@@ -376,5 +427,58 @@ impl Inner {
                 "writes are refused for space (ENOSPC): discard, run gc, or raise cache_max"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lunix_iface::Error;
+
+    #[test]
+    fn only_space_and_io_failures_count_for_a_ring_wait() {
+        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        let busy: Result<()> = Err(Error::Busy {
+            what: "writes in flight at the cut",
+        });
+        f.note_commit(&busy, Duration::from_secs(5));
+        assert_eq!(f.commit_failures.load(Ordering::Relaxed), 0);
+        assert_eq!(f.last_failure_ms.load(Ordering::Relaxed), 0);
+        let io: Result<()> = Err(Error::Io(std::io::Error::other("disk")));
+        f.note_commit(&io, Duration::from_secs(6));
+        assert_eq!(f.commit_failures.load(Ordering::Relaxed), 1);
+        assert!(!f.commit_nospace.load(Ordering::Relaxed));
+        let full: Result<()> = Err(Error::NoSpace);
+        f.note_commit(&full, Duration::from_secs(7));
+        assert!(f.commit_nospace.load(Ordering::Relaxed));
+        // A benign failure keeps the space answer; a success clears it.
+        f.note_commit(&busy, Duration::from_secs(8));
+        assert!(f.commit_nospace.load(Ordering::Relaxed));
+        f.note_commit(&Ok(()), Duration::from_secs(9));
+        assert!(!f.commit_nospace.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn the_ladder_back_off_starts_over_only_after_writes_were_admitted_a_while() {
+        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        f.set_ladder_backoff(Duration::from_secs(32));
+        assert!(f.set_blocked(true, Duration::from_secs(1)));
+        assert!(f.set_blocked(false, Duration::from_secs(2)));
+        // A flap: refused again a second later; nothing reset.
+        assert_eq!(
+            f.ladder_backoff_at(Duration::from_secs(3)),
+            Duration::from_secs(32)
+        );
+        assert!(f.set_blocked(true, Duration::from_secs(3)));
+        assert_eq!(
+            f.ladder_backoff_at(Duration::from_secs(30)),
+            Duration::from_secs(32)
+        );
+        // Admitted for 5 s: back to the minimum.
+        assert!(f.set_blocked(false, Duration::from_secs(31)));
+        assert_eq!(
+            f.ladder_backoff_at(Duration::from_secs(36)),
+            crate::gc::SPACE_URGENT_MIN
+        );
     }
 }

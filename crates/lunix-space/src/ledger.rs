@@ -317,6 +317,7 @@ impl Ledger {
             headroom_total: self.reserve_region(),
             waiters: self.pending_waiters(),
             read_only: self.read_only,
+            full: self.full,
         }
     }
 }

@@ -392,7 +392,7 @@ impl Queue {
                         return Step::Parked;
                     }
                     WaiterState::Granted => {
-                        let _ = inner.full.set_blocked(false);
+                        inner.note_admitted();
                         m.space = SpaceWait::Charged(b);
                     }
                     WaiterState::TimedOut | WaiterState::Cancelled => {
@@ -431,11 +431,11 @@ impl Queue {
                         m.arrived,
                     ) {
                         Ok(ReserveOutcome::Reserved) => {
-                            let _ = inner.full.set_blocked(false);
+                            inner.note_admitted();
                             m.space = SpaceWait::Charged(charge);
                         }
                         Ok(ReserveOutcome::Parked(w)) => {
-                            let _ = inner.full.set_blocked(true);
+                            let _ = inner.full.set_blocked(true, inner.clock.monotonic());
                             m.space = SpaceWait::Waiting(w, charge);
                             return Step::Parked;
                         }

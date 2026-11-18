@@ -499,10 +499,14 @@ impl SpaceGate for LunixSpace {
             deadline,
         });
         if deadline <= now {
-            // It waited its full_timeout in its queue already (ADR-32: the
-            // wait counts from the arrival): it expires now, and latches.
-            st.ledger.expire(now);
-            return Ok(ReserveOutcome::Parked(waiter));
+            // It waited its full_timeout already, in its queue or for the
+            // journal ring (the wait counts from the arrival): refused now,
+            // without parking and without the latch, since it never waited
+            // in the gate (review m1).
+            st.ledger.waiters.pop_back();
+            let want = st.ledger.ladder_want();
+            self.sh.kick_ladder(&mut st, want);
+            return Ok(ReserveOutcome::NoSpace);
         }
         let want = st.ledger.ladder_want();
         self.sh.kick_ladder(&mut st, want);
@@ -537,7 +541,9 @@ impl SpaceGate for LunixSpace {
     }
 
     fn snapshot(&self) -> SpaceSnapshot {
-        lock(&self.sh.st).ledger.snapshot()
+        let mut st = lock(&self.sh.st);
+        st.ledger.update_latch();
+        st.ledger.snapshot()
     }
 
     /// Re-judges every parked request under the new policy (ADR-32):

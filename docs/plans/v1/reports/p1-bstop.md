@@ -167,3 +167,39 @@ The remote target was cleaned afterwards (`cargo clean`).
 Updated deviations: 2 (the flag is now confirmed against the ledger), 6 (the cap's floor needs no
 ring-file term once M4 is fixed), 8 (gone), 10 (the stack tests use the production ring files),
 11 (done). The journal finding is fixed in the engine as the review recommended.
+
+## Re-review response (01-p1-bstop-rereview.md, verdict "merge after fixes")
+
+The third commit carries these fixes. N2 is left as the lead asked (a maintainer decision on a
+`volume.json` change is pending); only its warning is added.
+
+| finding | fix | test |
+|---|---|---|
+| **N1** no window turn inside the latch band | `SpaceSnapshot` gains `full: bool` (the latch, refreshed at each snapshot); `space_refusing` is `waiters > 0 \|\| full \|\| (flag && used + 1 MiB > limit)`. `MemSpace` gets an opt-in latch (`MemSpaceConfig::latch(resume)`) | engine `the_window_turns_inside_the_latch_band` (latched, 1.5 MiB freed, headroom between 1 MiB and the mark, discard, cut and turn, the extents go, the latch opens, a write goes in) |
+| **N2** the grow rule infers the default | unchanged, pending the maintainer. A grow that keeps a cap below `new size + 2 × commit.dirty_bytes` now logs a `warn` saying the volume will refuse writes before it is full | |
+| **N3** fixed 5 s ring bound at quiesce | `Engine::begin_close(ring_bound)`; the daemon passes `close_ring_bound(quiesce_timeout)` = two thirds of it, at least 1 s. Only `NoSpace` and `Io` commit failures count, before and after the close; `Busy` and the like never shorten or end a ring wait. The one-way close is documented | `a_slow_but_healthy_cut_at_quiesce_is_waited_for` (10 s of a 20 s bound, then the cut lands: success); unit `only_space_and_io_failures_count_for_a_ring_wait`; daemon unit `the_ring_bound_at_quiesce_is_two_thirds_of_quiesce_timeout` |
+| `reserve_since` | **required** (no default); implemented by `LunixSpace`, `MemSpace`, fsck's `OfflineSpace` and the iface's `TSpace`. A contract case `a_wait_counts_from_the_arrival` runs against every gate that has the suite | contract (`lunix-space`, testkit, trivial) |
+| m1 | a request past its `full_timeout` on first contact with the gate (it waited in its queue or for the ring) is refused `NoSpace` without parking and **without the latch** | `a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival`, the contract case |
+| m2 | with N3 | |
+| m3 | the "refused" line is rate-limited (one per 5 s); the ladder back-off starts over only after writes were admitted for 5 s, not on every flap | unit `the_ladder_back_off_starts_over_only_after_writes_were_admitted_a_while` |
+| m4 | with `reserve_since` above | |
+| m5 | iface walk-through step 5, `ReclaimReport::bytes` and `Inner::journal_charged` docs, `lunix-space` crate docs and walk-through test comment now say "per cut" | |
+| m6 | DESIGN §4.3 says a restart of a refusing volume turns the window once and its rollback points become empty FULLs | |
+| m7 | `push` has a `debug_assert!` on the lane; `take_upto` splits the backlog off under the lane mutex and sums outside; the memory bound is documented | |
+| m8 | `enospc >= 15`; the deadline test's lower bound allows for `PARKED` | |
+| m9 | `volume.json` is stored before the gate is reconfigured | |
+
+Also in this round, a pre-existing flake outside the milestone's code: `wiring.rs`
+`journal_damage_is_reported_and_wiped_and_refuse_keeps_it` and
+`a_torn_last_record_is_crash_residue_under_refuse` fail when the host is slow between a FLUSH and the
+next write for more than the journal's 50 ms `mark_idle`: a journal mark takes a `write_seq` and
+shifts the numbers they assert. It failed 2 of 5 runs of `cargo test --workspace --test wiring` on
+`origin/main` 3e6fb81 as well (measured on the host) and three CI runs of this round in a row.
+Fixed as a test bug: both write their records with `open_unmarked` (marks off), the helper the R4
+tests already use for the same reason (`wiring.rs`, `tests/common/volume.rs`, added to `[bstop]`);
+then 5 of 5 runs of `wiring` and `logging` passed.
+
+Gate of this round: full `tools/ci.sh` on the host, `ci: all green`, 1868 passed, 0 failed, 27
+ignored (summed over the `test result` lines; parallel test output interleaves, so the sum is
+approximate), `check-ownership: bstop ok (50 changed paths)`. The remote target was deleted
+afterwards.

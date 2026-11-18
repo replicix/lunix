@@ -391,7 +391,10 @@ journal):
 - Every wait has a deadline, the wait for a full journal ring included
   (ADR-32). Discards and write-zeroes are never refused for space and do
   not queue behind parked writes; on a refusing volume the coordinator
-  cuts them and turns the retained window so their space comes back.
+  cuts them and turns the retained window (`retain_last + 1` empty FULLs)
+  so their space comes back. Which commit last took a discard is not
+  persisted: after a restart a refusing volume turns the window once,
+  discards or not, and its retained rollback points are then empty FULLs.
 - A reserve of 2 × the segment size, plus the commit and map headroom, is
   never handed to writes.
 

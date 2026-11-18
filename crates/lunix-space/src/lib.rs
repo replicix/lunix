@@ -10,8 +10,8 @@
 //! `Headroom` is a pseudo-kind holding bounds charged ahead of time; it is not
 //! in `used`. All units are bytes. `JournalReserved` is charged and released
 //! in **encoded record length** (`lunix_iface::journal::record_bytes`: 64 +
-//! 4096 per block for a write, 64 for a hole), the same unit as
-//! `ReclaimReport::bytes`.
+//! 4096 per block for a write, 64 for a hole); the engine releases at C9 the
+//! charges of every record at or below the cut (ADR-32).
 //!
 //! One mutex guards the seven counters and the wait queue, so every method is
 //! atomic for observers: `transfer` is seen entirely or not at all, and

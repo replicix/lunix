@@ -35,6 +35,10 @@ pub struct MemSpaceConfig {
     pub on_full: OnFull,
     /// How long a parked request waits; `None` waits forever.
     pub full_timeout: Option<Duration>,
+    /// The full latch (ADR-32), off when `None`: the first expiry fails
+    /// every waiter and refuses writes at once until the headroom reaches
+    /// this many bytes (at least 1).
+    pub latch: Option<u64>,
 }
 
 impl MemSpaceConfig {
@@ -45,7 +49,15 @@ impl MemSpaceConfig {
             headroom: 0,
             on_full: OnFull::Error,
             full_timeout: None,
+            latch: None,
         }
+    }
+
+    /// With the full latch and its resume mark.
+    #[must_use]
+    pub fn latch(mut self, resume: u64) -> Self {
+        self.latch = Some(resume);
+        self
     }
 
     /// With a headroom region.
@@ -76,6 +88,7 @@ struct State {
     held: [u64; 7],
     waiters: VecDeque<Parked>,
     read_only: bool,
+    full: bool,
 }
 
 impl State {
@@ -95,8 +108,18 @@ impl State {
         self.used().saturating_add(bytes) <= self.limit()
     }
 
+    /// Opens the latch once the headroom reached the resume mark.
+    fn update_latch(&mut self) {
+        if let Some(resume) = self.cfg.latch {
+            if self.full && self.limit().saturating_sub(self.used()) >= resume.max(1) {
+                self.full = false;
+            }
+        }
+    }
+
     /// Grants parked requests that now fit, strictly first in first out.
     fn grant_waiters(&mut self) {
+        self.update_latch();
         while let Some(front) = self.waiters.front() {
             if front.waiter.state() != WaiterState::Pending {
                 self.waiters.pop_front();
@@ -136,6 +159,7 @@ impl MemSpace {
                 held: [0; 7],
                 waiters: VecDeque::new(),
                 read_only: false,
+                full: false,
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
@@ -194,6 +218,10 @@ impl SpaceGate for MemSpace {
         if st.read_only {
             return Err(Error::ReadOnly);
         }
+        st.update_latch();
+        if st.full {
+            return Ok(ReserveOutcome::NoSpace);
+        }
         if st.waiters.is_empty() && st.fits(bytes) {
             st.held[kind.index()] += bytes;
             return Ok(ReserveOutcome::Reserved);
@@ -203,10 +231,12 @@ impl SpaceGate for MemSpace {
         }
         let want = st.used().saturating_add(bytes).saturating_sub(st.limit());
         let waiter = Waiter::new(wake.cloned());
-        let deadline = st
-            .cfg
-            .full_timeout
-            .map(|t| arrived.min(self.clock.monotonic()) + t);
+        let now = self.clock.monotonic();
+        let deadline = st.cfg.full_timeout.map(|t| arrived.min(now) + t);
+        if deadline.is_some_and(|d| d <= now) {
+            // Past its full_timeout already: refused, not parked.
+            return Ok(ReserveOutcome::NoSpace);
+        }
         st.waiters.push_back(Parked {
             waiter: waiter.clone(),
             kind,
@@ -270,15 +300,21 @@ impl SpaceGate for MemSpace {
             .iter()
             .filter(|p| p.deadline.is_some_and(|d| d <= now) && p.waiter.expire())
             .count();
+        let mut failed = expired;
+        if expired > 0 && st.cfg.latch.is_some() {
+            failed += st.waiters.iter().filter(|p| p.waiter.expire()).count();
+            st.full = true;
+        }
         st.waiters
             .retain(|p| p.waiter.state() == WaiterState::Pending);
         // An expired head may have been blocking smaller requests behind it.
         st.grant_waiters();
-        expired
+        failed
     }
 
     fn snapshot(&self) -> SpaceSnapshot {
-        let st = lock(&self.st);
+        let mut st = lock(&self.st);
+        st.update_latch();
         SpaceSnapshot {
             by_kind: st.held,
             limit: st.limit(),
@@ -290,6 +326,7 @@ impl SpaceGate for MemSpace {
                 .filter(|p| p.waiter.state() == WaiterState::Pending)
                 .count() as u64,
             read_only: st.read_only,
+            full: st.full,
         }
     }
 

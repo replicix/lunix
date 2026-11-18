@@ -22,6 +22,8 @@ const CS: u32 = 16 << 10;
 const EIO: i32 = 5;
 const ENOSPC: i32 = 28;
 const RING_MIN: Duration = Duration::from_secs(60);
+/// The ring bound at quiesce the daemon gives for a 7.5 s `quiesce_timeout`.
+const CLOSE_BOUND: Duration = Duration::from_secs(5);
 
 fn pump(r: &mut Running, n: usize) {
     for _ in 0..n {
@@ -136,7 +138,7 @@ fn begin_close_answers_a_ring_wait_once_a_commit_fails_for_space() {
         r.engine.commit_now(false).is_err(),
         "failed before the close"
     );
-    r.engine.begin_close();
+    r.engine.begin_close(CLOSE_BOUND);
     pump(&mut r, 5);
     assert!(!r.is_done(t), "a failure before the close does not count");
     *lock(&v.destage_fault) = Some(Retry::AfterSpace);
@@ -150,12 +152,30 @@ fn begin_close_answers_a_ring_wait_within_its_bound_when_no_commit_fails() {
     let v = Vol::create(CS, 16, 1, JournalMode::Immediate);
     let mut r = v.open().map_err(|e| e.0).expect("open");
     let t = ring_parked(&mut r, IoOp::Write);
-    r.engine.begin_close();
+    r.engine.begin_close(CLOSE_BOUND);
     v.clock.advance(Duration::from_millis(4900));
     pump(&mut r, 5);
     assert!(!r.is_done(t), "a healthy ring wait gets a few seconds");
     v.clock.advance(Duration::from_millis(100));
     assert_eq!(r.wait(&[t])[0].0.errno(), Some(EIO));
+}
+
+#[test]
+fn a_slow_but_healthy_cut_at_quiesce_is_waited_for() {
+    // Review N3: the bound comes from the daemon (two thirds of
+    // `quiesce_timeout`); a cut that takes 10 s of it answers the parked
+    // write with success, not EIO.
+    let v = Vol::create(CS, 16, 1, JournalMode::Immediate);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let t = ring_parked(&mut r, IoOp::Write);
+    r.engine.begin_close(Duration::from_secs(20));
+    v.clock.advance(Duration::from_secs(10));
+    pump(&mut r, 5);
+    assert!(!r.is_done(t), "within the bound");
+    // The cut lands: the ring takes the write.
+    r.journal.set_nospace(false);
+    r.engine.commit_now(false).expect("commit");
+    assert!(r.wait(&[t])[0].0.is_ok());
 }
 
 #[test]
@@ -306,6 +326,61 @@ fn a_discard_is_admitted_with_no_reserved_region_left() {
     assert!(r.hole(0, IoOp::Discard, 0, 256 << 10).is_ok());
     assert!(r.hole(0, IoOp::WriteZeroes, 256 << 10, 256 << 10).is_ok());
     assert_eq!(r.read(0, 0, 4096).1, vec![0u8; 4096]);
+}
+
+#[test]
+fn the_window_turns_inside_the_latch_band() {
+    // Review N1: latched, GC frees a little (more than 1 MiB, less than the
+    // resume mark), the guest discards: the gate parks nothing, but the
+    // engine sees the latch, cuts the discard and turns the window; once the
+    // extents are gone the latch opens.
+    let mut v = Vol::create(CS, 512, 1, JournalMode::Immediate);
+    v.space_cfg = Some(
+        MemSpaceConfig::new(5 << 20)
+            .headroom(1 << 20)
+            .wait(Some(Duration::from_secs(1)))
+            .latch(3 << 20),
+    );
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for i in 0..14u64 {
+        let d = pattern(40 + i, 256 << 10);
+        assert!(r.write(0, i * (256 << 10), &d, false).is_ok(), "fill {i}");
+    }
+    r.engine.commit_now(false).expect("commit the fill");
+    let w = r.submit(0, IoOp::Write, false, 0, 1 << 20, &pattern(50, 1 << 20));
+    pump(&mut r, 20);
+    v.clock.advance(Duration::from_secs(1));
+    assert_eq!(r.space.tick(), 1);
+    assert_eq!(r.wait(&[w])[0].0.errno(), Some(ENOSPC));
+    assert!(r.space.snapshot().full, "latched");
+    // Take the turn the open owes (a second has passed: the first FULL is
+    // due now), then "GC frees" 1.5 MiB of segments.
+    let _ = r.engine.tick().expect("tick");
+    let _ = turn(&v, &mut r);
+    r.space.release(SpaceKind::Segments, 3 << 19);
+    let snap = r.space.snapshot();
+    let headroom = snap.limit - snap.used();
+    assert!(headroom > (1 << 20) && headroom < (3 << 20), "{snap:?}");
+    assert!(
+        snap.full && snap.waiters == 0,
+        "the band: latched, nothing parked"
+    );
+    // The guest discards; one second later the cut, then the turn.
+    let start = tip(&r);
+    assert!(r.hole(0, IoOp::Discard, 0, 1 << 20).is_ok());
+    v.clock.advance(Duration::from_secs(1));
+    assert!(matches!(
+        r.engine.tick().expect("tick"),
+        CommitOutcome::Committed { .. }
+    ));
+    assert_eq!(r.engine.window_turn_left(), 3);
+    assert_eq!(turn(&v, &mut r), 3);
+    assert_eq!(tip(&r), start + 4);
+    // GC deletes the discarded extents (1.25 MiB of segments here): the
+    // headroom passes the mark, the latch opens and a write goes in.
+    r.space.release(SpaceKind::Segments, 5 << 18);
+    assert!(!r.space.snapshot().full);
+    assert!(r.write(0, 0, &pattern(51, 64 << 10), false).is_ok());
 }
 
 fn tip(r: &Running) -> u64 {

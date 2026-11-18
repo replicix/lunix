@@ -314,7 +314,7 @@ impl Inner {
         let mut co = lock(&self.coord);
         self.check_open()?;
         let now = self.clock.monotonic();
-        let pause = self.full.ladder_backoff();
+        let pause = self.full.ladder_backoff_at(now);
         if co
             .last_space_urgent
             .is_some_and(|t| now < t.saturating_add(pause))

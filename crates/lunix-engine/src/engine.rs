@@ -115,7 +115,8 @@ pub(crate) struct Inner {
     pub(crate) durable_cut: AtomicU64,
     /// A write found the journal ring full (a cut is wanted).
     pub(crate) journal_full: AtomicBool,
-    /// `JournalReserved` bytes the engine holds (admissions minus reclaims).
+    /// `JournalReserved` bytes the engine holds: the records admitted and not
+    /// yet at or below a durable cut (C9 releases per cut, `jcharges`).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
     /// The collector's status after its last call (`GcControl::status` and
@@ -432,10 +433,15 @@ impl Engine {
 
     /// The volume is about to quiesce (ADR-32 review M3, beside
     /// `LunixSpace::begin_close`): a write parked for a full journal ring
-    /// fails as soon as a commit attempt fails, and at most a few seconds
-    /// later otherwise, so the queues can drain. One-way.
-    pub fn begin_close(&self) {
-        self.inner.full.begin_close(self.inner.clock.monotonic());
+    /// fails as soon as a commit attempt fails for space or I/O, and after
+    /// `ring_bound` otherwise (the daemon gives two thirds of its
+    /// `quiesce_timeout`), so the queues can drain while a slow but healthy
+    /// cut still gets its time. One-way: after the bound every ring-full park
+    /// fails at once.
+    pub fn begin_close(&self, ring_bound: Duration) {
+        self.inner
+            .full
+            .begin_close(self.inner.clock.monotonic(), ring_bound);
         self.inner.signal_queues();
     }
 

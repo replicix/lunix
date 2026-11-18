@@ -348,8 +348,9 @@ fn a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival() {
     ck.advance(Duration::from_millis(1));
     assert_eq!(g.tick(), 1);
     assert_eq!(w.state(), WaiterState::TimedOut);
-    // One that waited its whole full_timeout in its queue expires at once
-    // (and latches).
+    // One that waited its whole full_timeout in its queue (or for the
+    // journal ring) is refused at once, without parking and without the
+    // latch (review m1).
     let (g, _fs) = gate(
         1000,
         settings(0, OnFull::Wait, Some(Duration::from_secs(5))),
@@ -360,11 +361,9 @@ fn a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival() {
     let late = g
         .reserve_since(K, 200, None, Duration::from_secs(1))
         .unwrap();
-    match late {
-        ReserveOutcome::Parked(w) => assert_eq!(w.state(), WaiterState::TimedOut),
-        other => panic!("{other:?}"),
-    }
-    assert!(g.is_full());
+    refused(late);
+    assert!(!g.is_full());
+    assert_eq!(g.snapshot().waiters, 0);
 }
 
 #[test]

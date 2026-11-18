@@ -120,7 +120,7 @@ fn run_cut(g: &LunixSpace, f: &mut Files, writes: &[(RecordKind, u32)], seg_actu
     f.index_runs.push(index_a);
     assert_eq!(by(g, SpaceKind::Headroom), 0);
 
-    // 5. C9: the journal is reclaimed (ReclaimReport::bytes is the same unit).
+    // 5. C9: the cut is durable; the charges of its records go (per cut).
     let reclaimed: u64 = recs.iter().sum();
     g.release(SpaceKind::JournalReserved, reclaimed);
     for r in &recs {

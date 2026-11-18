@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lunix_crypto::{Argon2Cost, AttachError};
 use lunix_engine::{GcStatusHandle, OnJournalDamage};
@@ -1118,11 +1118,20 @@ impl Daemon {
         let dirty = st.json.commit.dirty_bytes;
         if pct == 0 || new <= old || default_cache_max(old, pct, dirty) != Some(cap) {
             if new > old {
-                tracing::info!(
-                    volume = name,
-                    cache_max = cap,
-                    "grown; the explicit cache_max stays"
-                );
+                if cap < new.saturating_add(dirty.saturating_mul(2)) {
+                    tracing::warn!(
+                        volume = name,
+                        cache_max = cap,
+                        size = new,
+                        "grown; the cache_max stays and is below the new size plus two commits: the volume will refuse writes before it is full (raise it with lunix space --cache-max)"
+                    );
+                } else {
+                    tracing::info!(
+                        volume = name,
+                        cache_max = cap,
+                        "grown; the explicit cache_max stays"
+                    );
+                }
             }
             return;
         }
@@ -1131,11 +1140,13 @@ impl Daemon {
         };
         let mut json = st.json.clone();
         json.space.cache_max = Some(next);
+        // volume.json first: a cap raised in the gate only would be lost at
+        // the next restart (review m9).
         let done = st
-            .space
-            .reconfigure(&json.space)
+            .store
+            .store_volume_json(&json)
             .map_err(|e| e.to_string())
-            .and_then(|()| st.store.store_volume_json(&json).map_err(|e| e.to_string()));
+            .and_then(|()| st.space.reconfigure(&json.space).map_err(|e| e.to_string()));
         match done {
             Ok(()) => {
                 st.json = json;
@@ -1343,7 +1354,7 @@ impl Daemon {
                     // space fail with ENOSPC and nothing parks, so the drain
                     // can finish.
                     live.stack.space.begin_close();
-                    live.stack.engine.begin_close();
+                    live.stack.engine.begin_close(close_ring_bound(t));
                     match live.device.quiesce(t) {
                         Ok(None) => quiesced += 1,
                         Ok(Some(e)) => {
@@ -1680,9 +1691,28 @@ pub(crate) fn default_cache_max(size: u64, percent: u32, dirty_bytes: u64) -> Op
     Some(cap.max(size.saturating_add(dirty_bytes.saturating_mul(2))))
 }
 
+/// How long a write parked for a full journal ring may still wait for its
+/// cut once a quiesce began (review N3): two thirds of `quiesce_timeout`,
+/// so it is answered before `QUIESCE_DEV` gives up, and at least 1 s.
+pub(crate) fn close_ring_bound(quiesce_timeout: Duration) -> Duration {
+    (quiesce_timeout * 2 / 3).max(Duration::from_secs(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ring_bound_at_quiesce_is_two_thirds_of_quiesce_timeout() {
+        assert_eq!(
+            close_ring_bound(Duration::from_secs(30)),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            close_ring_bound(Duration::from_millis(600)),
+            Duration::from_secs(1)
+        );
+    }
 
     #[test]
     fn a_new_volume_gets_twice_its_size_as_cache_max_by_default() {

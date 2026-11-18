@@ -30,9 +30,11 @@
 //! 4. *C5, C6, C8* (map pack, commit, index run durable):
 //!    `transfer(Headroom, Map, bound, actual)`, `transfer(Headroom, Commits,
 //!    bound, actual)`, `transfer(Headroom, Index, bound, actual)`.
-//! 5. *C9* (journal reclaimed): `release(JournalReserved, reclaimed)` with
-//!    `ReclaimReport::bytes` (the same unit, encoded record length), and `release(Headroom, remainder)` for any bound
-//!    left unused.
+//! 5. *C9* (the cut is durable): `release(JournalReserved, charged)` with the
+//!    sum of the charges of every record at or below the cut (the same unit,
+//!    encoded record length), whichever ring files the journal recycled
+//!    (ADR-32; `ReclaimReport::bytes` is not the amount), and
+//!    `release(Headroom, remainder)` for any bound left unused.
 //! 6. *GC delete*: `release(kind, bytes)` for each file removed, after the
 //!    delete is durable.
 //! 7. *Compaction output*: charged from headroom like a cut's segments
@@ -202,6 +204,10 @@ pub struct SpaceSnapshot {
     pub waiters: u64,
     /// True after a fatal host I/O error.
     pub read_only: bool,
+    /// Latched full (ADR-32): a wait for space expired, and writes fail at
+    /// once until the headroom reaches the resume mark. Nothing is parked
+    /// while it holds.
+    pub full: bool,
 }
 
 impl SpaceSnapshot {
@@ -279,10 +285,13 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
 
     /// [`reserve`](Self::reserve) for a request that arrived at `arrived`
     /// (`Clock::monotonic` of the gate's clock), earlier than this call: a
-    /// write that waited in its queue behind a parked one. A parked request's
-    /// `full_timeout` counts from `arrived`, not from this call (ADR-32: a
-    /// write waits at most `full_timeout` from its arrival); one already past
-    /// it expires at once. The default ignores `arrived`.
+    /// write that waited in its queue behind a parked one, or for a full
+    /// journal ring. A parked request's `full_timeout` counts from
+    /// `arrived`, not from this call (ADR-32: a write waits at most
+    /// `full_timeout` from its arrival). One that does not fit and is
+    /// already past it is refused (`NoSpace`) without parking; that refusal
+    /// does not latch the volume (it never waited in the gate). Required: a
+    /// gate that parks must honour `arrived`.
     ///
     /// # Errors
     /// As [`reserve`](Self::reserve).
@@ -292,10 +301,7 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: std::time::Duration,
-    ) -> Result<ReserveOutcome> {
-        let _ = arrived;
-        self.reserve(kind, bytes, wake)
-    }
+    ) -> Result<ReserveOutcome>;
 
     /// Charges `bytes` to `kind` from the reserved headroom: no limit check,
     /// never parks.
