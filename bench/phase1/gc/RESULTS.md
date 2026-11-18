@@ -35,9 +35,14 @@ collector takes), everything else the `volume.json` defaults. Figures from `luni
 Every config is under the plan's bound (1.3 x live + 4 x the largest commit's map-pack bytes + one segment target)
 and reads equal the oracle in every round. The index is the largest overhead at 16 KiB (771 to 775 KiB, 3.6 %).
 
+**The 2 GiB x 10 cell** (plan; `LUNIX_GC_CHURN_MIB=2048`, plain 64 KiB, after the M17.B stack review fixes,
+2026-11-18): live 1 361 MiB, store at rest 1 645 MiB, **ratio 1.209** (bound 1 788 MiB); peak during the churn
+16.0 GiB, about 12 x live (each round writes 2 GiB in about 90 s; the grace and a pass over 32 K chunks with deletes
+and compaction take longer, so GC catches up only once the churn stops); 256 whole-device reads under GC, all equal
+to the oracle; 1 264 s. With the review's changes the 32 MiB cells read 1.016 to 1.056.
+
 Not measured here (the stack does not expose the collector's counters; `GcControl` is not wired, see the report):
-compaction write amplification and the dead share of surviving map packs (N8). The plan's 2 GiB x 10 cell runs with
-`LUNIX_GC_CHURN_MIB=2048 bash bench/phase1/gc/run.sh churn` (not run in this session).
+compaction write amplification and the dead share of surviving map packs (N8). The 2 GiB x 10 cell is above.
 
 ## N25: the mark cost (`crates/lunix-gc/tests/mark_cost.rs`)
 

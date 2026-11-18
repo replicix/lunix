@@ -86,12 +86,20 @@ pub struct Vol {
     upto: Option<SegId>,
     runs_unnamed: Vec<ObjId>,
     pending: BTreeMap<u64, Option<u64>>,
+    /// Chunks of the volume.
+    pub chunks: u64,
 }
 
 impl Vol {
     /// An empty volume of [`CHUNKS`] chunks whose segments hold up to
     /// `extents_per_segment` extents.
     pub fn new(extents_per_segment: u64) -> Self {
+        Self::sized(extents_per_segment, CHUNKS)
+    }
+
+    /// A volume of `chunks` chunks (the map has fanout 256: more than 256
+    /// chunks make an interior root over several leaves).
+    pub fn sized(extents_per_segment: u64, chunks: u64) -> Self {
         let store = MemStore::with_config(MemStoreConfig {
             segment_target: u64::from(CHUNK) * extents_per_segment,
             mode: CryptoMode::Integrity,
@@ -105,7 +113,7 @@ impl Vol {
             lunix_map::RadixMap::new(
                 codec.clone(),
                 source,
-                CHUNKS,
+                chunks,
                 lunix_map::MapConfig::new(256, IdLen::Sixteen),
             )
             .expect("map"),
@@ -114,7 +122,7 @@ impl Vol {
         let space = MemSpace::new(MemSpaceConfig::new(1 << 40), clock.clone());
         let genesis = Full::genesis(
             [0x11; 32],
-            CHUNKS * u64::from(CHUNK),
+            chunks * u64::from(CHUNK),
             map.root().hash,
             clock.now(),
         );
@@ -152,6 +160,7 @@ impl Vol {
             upto: None,
             runs_unnamed: Vec::new(),
             pending: BTreeMap::new(),
+            chunks,
         }
     }
 
@@ -241,11 +250,11 @@ impl Vol {
     }
 
     pub fn write(&mut self, ci: u64, seed: u64) {
-        self.pending.insert(ci % CHUNKS, Some(seed));
+        self.pending.insert(ci % self.chunks, Some(seed));
     }
 
     pub fn discard(&mut self, ci: u64) {
-        self.pending.insert(ci % CHUNKS, None);
+        self.pending.insert(ci % self.chunks, None);
     }
 
     pub fn id_of(&self, seed: u64) -> ChunkId {
@@ -411,5 +420,46 @@ impl Vol {
             }
         }
         Ok(())
+    }
+}
+
+impl Vol {
+    /// The FULL `seq` read back from the store.
+    pub fn full(&self, seq: u64) -> Full {
+        let bytes = self.store.get(CommitSeq(seq)).expect("commit");
+        match self
+            .commit_codec
+            .open_commit(CommitSeq(seq), &bytes)
+            .expect("open")
+        {
+            Commit::Full(f) => f,
+            _ => panic!("not a FULL"),
+        }
+    }
+
+    /// Every node of FULL `seq`'s map, walked from a fresh map instance (from
+    /// the stored packs only, nothing resident).
+    pub fn nodes_from_disk(&self, seq: u64) -> Result<Vec<lunix_iface::map::NodeRef>> {
+        let f = self.full(seq);
+        let source: Arc<dyn NodeSource> = Arc::new(self.store.clone());
+        let map = lunix_map::RadixMap::open(
+            self.codec.clone(),
+            source,
+            &f.map_root,
+            self.chunks,
+            lunix_map::MapConfig::new(256, IdLen::Sixteen),
+        )?;
+        let mut out = Vec::new();
+        map.walk_nodes(&f.map_root, &mut |n| out.push(*n))?;
+        Ok(out)
+    }
+
+    /// Sealed map packs of the store.
+    pub fn packs(&self) -> BTreeSet<ObjId> {
+        lunix_iface::store::PackRead::list_packs(&self.store)
+            .expect("packs")
+            .iter()
+            .map(|p| p.pack)
+            .collect()
     }
 }

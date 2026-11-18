@@ -169,4 +169,13 @@ impl GcStateStore for LocalVolume {
             .filter(|p| *p != 0)
             .collect())
     }
+
+    fn delete_evidence(&self, pass: u64) -> Result<u64> {
+        let name =
+            paths::gc_pass(pass).map_err(|_| Error::invalid("gc pass must be at least 1"))?;
+        let path = self.inner.path(&name);
+        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let removed = crate::fsops::unlink_durable(&self.inner, &path)?;
+        Ok(if removed { size } else { 0 })
+    }
 }

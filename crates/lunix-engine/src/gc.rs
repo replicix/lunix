@@ -101,6 +101,7 @@ impl Inner {
             tip,
             retained,
             collector,
+            moved: self_moved,
             ..
         } = co;
         let Some(collector) = collector.as_mut() else {
@@ -128,6 +129,11 @@ impl Inner {
             params,
         };
         let r = f(&mut **collector, &view);
+        if r.is_err() {
+            // Moves a failed call sealed before it failed reach the next cut
+            // (M17.B stack review M-2).
+            self_moved.extend(collector.take_moved());
+        }
         let mut st = collector.status();
         st.requests = self.gc_requests.load(Ordering::Acquire);
         *lock(&self.gc_status) = st;
@@ -204,13 +210,18 @@ impl Inner {
                 let read = c.stats().compaction_read;
                 match self.with_collector(&mut co, |c, v| c.step(v, budget)) {
                     Ok(p) => {
-                        co.moved.extend(p.moved.iter().copied());
+                        let read_more = co
+                            .collector
+                            .as_ref()
+                            .is_some_and(|c| c.stats().compaction_read > read);
+                        let pause = step_pause(&p, read_more);
+                        co.absorb(p);
                         let c = co.collector.as_ref().ok_or_else(no_collector)?;
                         acc.observe(&**c);
                         if acc.passes() >= need {
                             return Ok(acc.summary(&**c));
                         }
-                        step_pause(&p, c.stats().compaction_read > read)
+                        pause
                     }
                     // A cut failed after it applied re-hints: wait for the
                     // next one (bounded).
@@ -275,7 +286,7 @@ impl Inner {
                 } else {
                     doubled
                 };
-                co.moved.extend(p.moved);
+                co.absorb(p);
             }
             Err(e) => {
                 co.space_backoff = co.space_backoff.saturating_mul(2).min(SPACE_URGENT_MAX);
@@ -296,8 +307,9 @@ impl Inner {
             co.last_space_urgent = Some(self.clock.monotonic());
         }
         let p = res?;
-        co.moved.extend(p.moved);
-        Ok(p.freed)
+        let freed = p.freed;
+        co.absorb(p);
+        Ok(freed)
     }
 
     /// The urgent pass's grace: 10 s plus twice `read_timeout` (the

@@ -35,7 +35,7 @@ use std::time::Duration;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
-use lunix_iface::gc::{Collector, Moved};
+use lunix_iface::gc::{Collector, GcProgress, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
@@ -86,9 +86,21 @@ pub(crate) struct Coord {
     /// dirty-leaf cap: moves alone then trigger a cut only once per commit
     /// interval (each such cut walks the tip's leaves).
     pub(crate) moves_deferred: bool,
+    /// The collector asked for a cut (`GcProgress::cut_wanted`): a FULL below
+    /// the tip must name a compaction output before its source can go.
+    pub(crate) gc_cut: bool,
+    /// The last GC step error, logged once per change.
+    pub(crate) gc_error: Option<String>,
 }
 
 impl Coord {
+    /// Takes what a collector call handed over: its moves for the next cut,
+    /// and its request for a cut (`GcProgress::cut_wanted`).
+    pub(crate) fn absorb(&mut self, p: GcProgress) {
+        self.moved.extend(p.moved);
+        self.gc_cut |= p.cut_wanted;
+    }
+
     pub(crate) fn new(
         rec: &Recovered,
         collector: Option<Box<dyn Collector>>,
@@ -109,6 +121,8 @@ impl Coord {
             last_space_urgent: None,
             space_backoff: crate::gc::SPACE_URGENT_MIN,
             moves_deferred: false,
+            gc_cut: false,
+            gc_error: None,
         }
     }
 }
@@ -234,11 +248,12 @@ impl Inner {
         let mut co = crate::engine::lock(&self.coord);
         if self.wanted(&mut co) {
             let res = self.commit(&mut co, false, None);
-            // A commit that failed without touching the map (no space, an
-            // index run still unpersisted, writes in flight) still steps the
-            // collector: a volume that cannot commit must still collect
-            // (M12c review S-3). `gc_step` does nothing unless the map is at
-            // the tip.
+            // A commit that failed before it changed the map (no space for
+            // the cut above all, an index run still unpersisted, writes in
+            // flight) still lets the collector work: a volume that cannot
+            // commit must still free what its condemned objects hold (M17.B
+            // stack review S-2, M12c review S-3). One rule: `gc_step` runs
+            // when the map is the tip's and does nothing otherwise.
             if res.is_err() && !self.is_failed() {
                 self.gc_step(&mut co);
             }
@@ -246,7 +261,7 @@ impl Inner {
         } else {
             // An idle volume still steps the collector (M17.A review minor
             // 4): a pass waiting in its grace finishes without a cut. Its
-            // moves make the next tick cut.
+            // moves (or a cut it asks for) make the next tick cut.
             if !self.is_failed() {
                 self.gc_step(&mut co);
             }
@@ -272,7 +287,7 @@ impl Inner {
     }
 
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.pending_named.is_empty() || co.index_unpersisted {
+        if !co.pending_named.is_empty() || co.index_unpersisted || co.gc_cut {
             return true;
         }
         let now = self.clock.monotonic();
@@ -335,7 +350,7 @@ impl Inner {
             c = c.min(poisoned.saturating_sub(1));
         }
         c = c.max(prev);
-        let idle = co.moved.is_empty() && co.pending_named.is_empty();
+        let idle = co.moved.is_empty() && co.pending_named.is_empty() && !co.gc_cut;
         if c == prev && !force && idle && size == co.tip.size {
             return Ok(CommitOutcome::Idle);
         }
@@ -584,6 +599,7 @@ impl Inner {
             co.upto_seg = Some(co.upto_seg.map_or(m, |u| u.max(m)));
         }
         co.pending_named.clear();
+        co.gc_cut = false;
         self.size.store(size, Ordering::Release);
         self.durable_cut.store(c, Ordering::Release);
         add(&self.stats.commits, 1);
@@ -833,11 +849,23 @@ impl Inner {
             return;
         }
         match self.with_collector(co, |c, v| c.step(v, budget)) {
-            Ok(p) => co.moved.extend(p.moved),
+            Ok(p) => {
+                co.absorb(p);
+                co.gc_error = None;
+            }
             // No collector, or the map ahead of the tip (the hook's
             // precondition, M17): nothing to step now.
             Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {}
-            Err(e) => tracing::warn!(error = %e, "gc step failed; the pass resumes later"),
+            // Moves sealed before the failure were taken by `with_collector`
+            // (M17.B stack review M-2). Once per distinct error, not at every
+            // tick (M-3).
+            Err(e) => {
+                let msg = e.to_string();
+                if co.gc_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "gc step failed; the pass resumes later");
+                    co.gc_error = Some(msg);
+                }
+            }
         }
     }
 }

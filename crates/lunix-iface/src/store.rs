@@ -363,6 +363,11 @@ pub trait GcStateStore: Send + Sync {
     /// The pass numbers that have an evidence object, ascending (the next pass
     /// is one above the last).
     fn evidence_passes(&self) -> Result<Vec<u64>>;
+
+    /// Deletes `gc/<pass:016x>` durably (unlink, directory sync) and returns
+    /// its size; a missing object frees 0. The collector prunes the oldest
+    /// objects beyond its local bound (gc.md).
+    fn delete_evidence(&self, pass: u64) -> Result<u64>;
 }
 
 /// What the open-time orphan sweep (N2) keeps.

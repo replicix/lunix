@@ -14,7 +14,8 @@
 //! * **Liveness.** `lunix-gc`'s mark ([`lunix_gc::liveness`]) runs over the
 //!   locked volume (the index is fsck's scratch copy) and fsck recounts the
 //!   live bytes of every segment: a mismatch in any segment is the error
-//!   `gc_liveness`. The recount is a second writing of the mark's resolution
+//!   `gc_liveness`, as is a pack fsck's walk from disk reaches that the mark
+//!   does not count live. The recount is a second writing of the mark's resolution
 //!   rule over fsck's own footer parse and a full walk of every root (the
 //!   mark walks with a skip set, 32 leaves per unit); it shares with the mark
 //!   the root set (the mark's own), the index and the map walker, so a wrong
@@ -390,7 +391,10 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
         }
     };
     match recount(&view, ctx.facts, &gc_live.roots) {
-        Ok(mine) => compare(&mine, &gc_live, out),
+        Ok(mine) => {
+            compare(&mine, &gc_live, out);
+            compare_packs(ctx.facts, &gc_live, out);
+        }
         Err(e) => out.push(Finding::new(
             code::GC_UNCHECKED,
             "gc",
@@ -529,6 +533,28 @@ fn compare(mine: &BTreeMap<ObjId, u64>, gc: &Liveness, out: &mut Vec<Finding>) {
                 format!("fsck counts {a} live bytes, lunix-gc's mark {b}"),
             ));
         }
+    }
+}
+
+/// Every pack fsck's own walk (from disk) reached from the retained roots and
+/// GC's retained set below `chain_floor` must be live in GC's mark (M17.B
+/// stack review B-1: a mark that walked a resident copy of a node missed the
+/// older root's pack). GC may keep more (pins); it may not keep less.
+fn compare_packs(facts: &Facts, gc: &Liveness, out: &mut Vec<Finding>) {
+    let Some(w) = &facts.walk else { return };
+    let mut missed: Vec<ObjId> = w
+        .used_packs
+        .iter()
+        .filter(|p| !gc.live_packs.contains(*p))
+        .copied()
+        .collect();
+    missed.sort_unstable();
+    for p in missed {
+        out.push(Finding::new(
+            code::GC_LIVENESS,
+            lpath::map_pack_sealed(p),
+            "a retained root reaches this pack (fsck's walk from disk), lunix-gc's mark does not: a pass would delete it",
+        ));
     }
 }
 

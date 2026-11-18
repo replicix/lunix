@@ -10,15 +10,23 @@ design is DESIGN §11 and plan M17; the byte layouts of the envelopes are in
 Every call of the collector runs under the engine's coordinator mutex,
 between cuts, with the in-memory map equal to the tip's root and no dirty
 leaf; that mutex makes each caller the single caller. The background calls
-are the coordinator's own: one budgeted `step` after every commit (C10) and on
-every tick, also a tick whose commit failed, as long as the map is at the tip.
+are the coordinator's own: one budgeted `step` after every commit (C10), on
+every idle tick, and after a commit that failed before it changed the map (no
+space for the cut above all, so a full volume can still free what its
+condemned objects hold): one rule, the step runs whenever the map is the
+tip's. Moves of a call that failed, and a cut the collector asks for
+(`GcProgress::cut_wanted`), reach the next cut whichever path called it.
 A step does small units of work until its budget (`gc_step_budget_ms`, default
 50 ms) is spent, so a background step never holds up a cut for longer than one
 unit past the budget. The urgent pass and a dry run are one call each and hold
 the coordinator for a whole mark (and the urgent pass's compaction).
 
-A pass runs when the previous one ended at least 30 s ago and something may
-have changed: a new tip, condemned objects waiting, or different pins.
+A pass runs when the
+previous one ended at least 30 s ago and something may have changed: a new
+tip, different pins, or condemned objects waiting after a pass that changed
+something. A pass that changed nothing (its only lines are `defer`) is not
+repeated until the tip or the pins change; the pins are then looked at once
+per interval, not at every tick.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -162,7 +170,10 @@ their map roots are not roots, so their data may go.
    only the tip names would go with the tip at `fsck --repair --truncate-tip`
    (the mount sweep deletes what the new chain does not name above its mark),
    so a compaction source is deleted one commit after the FULL that names its
-   output, and on an idle volume only after the next cut (M17.B review B-1). This rule is exact only while the engine
+   output (M17.B review B-1). On an idle volume the collector asks the
+   engine for that cut (`GcProgress::cut_wanted`, one empty FULL), so the
+   source goes at the next pass instead of being deferred at every pass
+   (M17.B stack review S-1). This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
@@ -200,11 +211,15 @@ segment that was not yet condemned).
 
 ## Compaction
 
-Candidates are segments with live bytes and a live fraction
-`u = live / file size` below `gc_live_threshold` (default 0.5), at or below the
-high-water mark, not condemned, not an unnamed output, and not introduced by
-the tip FULL (younger than one commit interval). They are ranked by LFS
-cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
+Candidates are segments with live bytes, a live fraction `live / file size`
+below `gc_live_threshold` (default 0.5), and an output at least 1 KiB smaller
+than the source (the output holds the live payload plus 128 bytes per extent
+and 512 bytes per segment of container overhead): a small segment whose dead
+bytes are mostly overhead would be rewritten into an output as large at every
+pass, and is left alone. Candidates are also at or below the high-water mark,
+not condemned, not an unnamed output, and not introduced by the tip FULL
+(younger than one commit interval). With `u = live / file size` they are
+ranked by LFS cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
 mark minus the segment id, best first; up to 1 GiB of live bytes per pass.
 
 Live extents are copied in chunk-number order (LBA locality). Each is read,
@@ -214,8 +229,12 @@ at a time. After the output is sealed, the index is told (`relocate`, which
 keeps the entry in memory until a durable commit names the output) and the
 moves are handed to the engine, which re-hints the map at its next cut and
 names the output in that FULL. Pending moves are a cut trigger even on an
-idle volume. Compaction reads at most `gc_rate` bytes per second (default
-64 MiB/s) plus one step's worth, and at most the step budget's bytes per step.
+idle volume. These cuts, and the one the collector asks for before a source
+can go, are ordinary FULLs: on an idle volume they consume the retained
+window, so the retained FULLs may soon all be GC cuts of the same data (M17.B
+stack review M-5). Compaction reads at most `gc_rate` bytes per second
+(default 64 MiB/s) plus one step's worth, and at most the step budget's bytes
+per step; a `gc_rate` of 0 compacts nothing.
 
 The source segments become dead once the index's current copies are in the
 output; the next pass condemns them.
@@ -268,8 +287,12 @@ Each entry:
 ## `gc/<pass:016x>`: the evidence object
 
 One sealed, create-only object per pass that condemned, un-condemned,
-deferred, deleted or compacted anything; a pass that found nothing writes
-none, and its number is used by the next. `pass` is one above the highest
+deleted or compacted anything; a pass that found nothing, or only deferred
+what it had deferred before, writes none, and its number is used by the
+next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
+new one deletes the oldest beyond that (`GcStateStore::delete_evidence`).
+Evidence objects are not in the ledger; the bound keeps them under 1 024 x
+48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and
 `bytes` = the pass's lines, written once at pass end (and once per urgent
 pass). A pass abandoned on an error (not a crash) writes what it has, best

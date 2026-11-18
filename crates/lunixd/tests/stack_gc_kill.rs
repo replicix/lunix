@@ -649,12 +649,13 @@ struct Tally {
 /// error, fails the run.
 ///
 /// * After a kill: what a crash leaves (temporary files, unnamed or
-///   unreferenced containers, an index behind the chain, journal residue),
-///   and `index_extra` after a kill between GC's unlink of a segment and its
-///   `drop_segment` (gc.md crash table: the open's catch-up drops the
-///   entries; at rest they are gone).
+///   unreferenced containers, an index behind the chain, journal residue);
+///   `index_extra` only after a kill at `gc.delete.after_unlink` (between
+///   GC's unlink of a segment and its `drop_segment`; gc.md crash table: the
+///   open's catch-up drops the entries, at rest they are gone).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
-const ALLOWED_AFTER_KILL: &[&str] = &[
+const ALLOWED_AFTER_KILL: &[&str] = &["leftover", "crash_leftover", "orphan", "index_missing"];
+const ALLOWED_AFTER_UNLINK: &[&str] = &[
     "leftover",
     "crash_leftover",
     "orphan",
@@ -702,7 +703,12 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// the kill), recovery under `refuse` against the oracle, writes and a
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    fsck_clean(&p.vol, "after-kill", what, ALLOWED_AFTER_KILL, tally);
+    let allowed = if what.contains("gc.delete.after_unlink:") {
+        ALLOWED_AFTER_UNLINK
+    } else {
+        ALLOWED_AFTER_KILL
+    };
+    fsck_clean(&p.vol, "after-kill", what, allowed, tally);
     let mut durable = 0usize;
     let mut durable_seq = 0u64;
     for l in std::fs::read_to_string(&p.progress)
@@ -764,6 +770,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
     assert!(back == actual, "{what}: read-back after recovery differs");
+    settle_gc(&stack, &mut d, &actual, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let stack = p
@@ -786,6 +793,38 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let r = p.vol.check().expect("store self-check runs");
     assert!(r.is_clean(), "{what}: store self-check: {r:?}");
     fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
+}
+
+/// After recovery: ticks through a grace and whole passes until GC has
+/// nothing condemned (the list is loaded with a fresh grace, the flags set
+/// again, the recheck un-condemns what the replayed journal made live, the
+/// deletes complete), then the device is read again against `actual`.
+fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], what: &str) {
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick after recovery");
+        let listed = lunix_iface::store::GcStateStore::load_condemned(&stack.store)
+            .expect("condemned list")
+            .as_ref()
+            .and_then(lunix_gc::CondemnedList::from_file)
+            .map_or(0, |l| l.entries.len());
+        if listed == 0 && start.elapsed() > Duration::from_secs(12) {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(90),
+            "{what}: GC does not finish after recovery ({listed} condemned)"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    stack.engine.release_read_cache();
+    let back = d
+        .read_all(actual.len() as u64)
+        .unwrap_or_else(|s| panic!("{what}: read after GC: {s:?}"));
+    assert!(
+        back == actual,
+        "{what}: the device differs after GC ran on the recovered volume"
+    );
 }
 
 /// Registered GC points the workload does not reach. The urgent pass's own

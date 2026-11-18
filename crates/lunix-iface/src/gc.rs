@@ -149,6 +149,11 @@ pub struct GcProgress {
     pub state: GcState,
     /// True when the pass is finished (the evidence object was written).
     pub done: bool,
+    /// The collector deferred a delete until a FULL **below the tip** names
+    /// the live copies (a compaction output only the tip names): the engine
+    /// cuts one FULL even on an idle volume, so the delete goes in the next
+    /// pass instead of being deferred at every pass.
+    pub cut_wanted: bool,
 }
 
 /// Counters across passes.
@@ -233,6 +238,13 @@ pub trait Collector: Send {
             stats: self.stats(),
             ..GcStatusSnapshot::default()
         }
+    }
+
+    /// Moves a failed `step` or `urgent` sealed before it failed (the step's
+    /// error carries none): the engine applies them at the next cut like any
+    /// other, so the output is named by that cut.
+    fn take_moved(&mut self) -> Vec<Moved> {
+        Vec::new()
     }
 }
 

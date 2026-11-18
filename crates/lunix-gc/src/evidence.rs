@@ -50,6 +50,8 @@ pub(crate) struct Evidence {
     bytes: Vec<u8>,
     lines: u64,
     dropped: u64,
+    /// Lines other than `defer`.
+    changes: u64,
 }
 
 impl Evidence {
@@ -64,6 +66,9 @@ impl Evidence {
     ) {
         debug_assert!(!reason.contains(['"', '\\', '\n']));
         self.lines += 1;
+        if action != Action::Defer {
+            self.changes += 1;
+        }
         if self.bytes.len() >= EVIDENCE_CAP {
             self.dropped += 1;
             return;
@@ -83,6 +88,12 @@ impl Evidence {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.lines == 0
+    }
+
+    /// The pass changed nothing: no line but `defer` (a repeated deferral is
+    /// not written; gc.md "the evidence object").
+    pub(crate) fn only_defers(&self) -> bool {
+        self.changes == 0
     }
 
     /// The body bytes; when lines were dropped, a last line says how many.

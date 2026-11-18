@@ -46,8 +46,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use lunix_engine::{CommitOutcome, OnJournalDamage};
+use std::sync::Arc;
+
+use lunix_engine::{CommitOutcome, EngineConfig, OnJournalDamage};
 use lunix_format::{CryptoMode, WriteSeq};
+use lunix_gc::GcConfig;
 use lunix_iface::block::BlockEngine;
 use lunixd::testsupport::{
     close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch,
@@ -272,13 +275,39 @@ impl Spec {
     }
 }
 
+/// GC runs through the workload (a pass every second, the smallest grace),
+/// so kills at engine, index and store points land while a pass is in flight:
+/// relocations in the memtable, pending moves, an unnamed output, condemned
+/// flags set, a delete half done (M17.B stack review S-4).
+fn gc_tune(c: &mut EngineConfig) {
+    if let Some(p) = &mut c.gc_params {
+        p.read_timeout = Duration::ZERO;
+        p.grace = Duration::from_secs(10);
+    }
+}
+
+fn fast_gc(o: &mut lunixd::stack::OpenParams) {
+    o.gc = Some(GcConfig {
+        pass_interval: Duration::from_secs(1),
+        ..GcConfig::default()
+    });
+}
+
 fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
-    VolumeBuilder::new(parent)
+    let mut b = VolumeBuilder::new(parent)
         .manual()
         .mode(mode)
         .chunk_size(cs)
         .size_bytes(SIZE0)
-        .queues(QUEUES)
+        .queues(QUEUES);
+    let manual = b.engine.clone();
+    b.engine = Some(Arc::new(move |c: &mut EngineConfig| {
+        if let Some(t) = &manual {
+            t(c);
+        }
+        gc_tune(c);
+    }));
+    b
 }
 
 /// Appends the durable prefix length and the driver's durable `write_seq`
@@ -289,7 +318,7 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
 fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) {
-    let mut stack = vol.open().expect("child open");
+    let mut stack = vol.open_with(fast_gc).expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
     progress(prog, base, &d);
@@ -357,7 +386,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             Step::Reopen => {
                 drop(d);
                 drop(stack);
-                stack = vol.open().expect("child reopen");
+                stack = vol.open_with(fast_gc).expect("child reopen");
                 d = Driver::new(&stack).expect("driver");
                 // Every request so far was recovered and synced.
                 bounds.fill(0);
@@ -542,6 +571,16 @@ struct Tally {
 ///   unreferenced containers, an index behind the chain, journal residue).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
 const ALLOWED_AFTER_KILL: &[&str] = &["leftover", "crash_leftover", "orphan", "index_missing"];
+/// After a kill between a segment's unlink (GC's delete runs while this loop
+/// writes) and its `drop_segment`: also `index_extra` (gc.md crash table; the
+/// open's catch-up drops the entries, at rest they are gone).
+const ALLOWED_AFTER_UNLINK: &[&str] = &[
+    "leftover",
+    "crash_leftover",
+    "orphan",
+    "index_missing",
+    "index_extra",
+];
 const ALLOWED_AT_REST: &[&str] = &[];
 
 fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally: &mut Tally) {
@@ -578,7 +617,14 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// the kill), recovery under `refuse` against the oracle, writes and a
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    fsck_clean(&p.vol, "after-kill", what, ALLOWED_AFTER_KILL, tally);
+    let allowed = if what.contains("store.delete.after_unlink:")
+        || what.contains("store.delete.after_dirsync:")
+    {
+        ALLOWED_AFTER_UNLINK
+    } else {
+        ALLOWED_AFTER_KILL
+    };
+    fsck_clean(&p.vol, "after-kill", what, allowed, tally);
     let mut durable = 0usize;
     let mut durable_seq = 0u64;
     for l in std::fs::read_to_string(&p.progress)
@@ -601,7 +647,10 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     tally.runs += 1;
     let stack = p
         .vol
-        .open_with(|o| o.on_journal_damage = OnJournalDamage::Refuse)
+        .open_with(|o| {
+            fast_gc(o);
+            o.on_journal_damage = OnJournalDamage::Refuse;
+        })
         .unwrap_or_else(|e| panic!("{what}: open after the kill (refuse): {e}"));
     let size = stack.engine.size_bytes();
     let mut d = Driver::new(&stack).expect("driver");
@@ -637,11 +686,15 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
     assert!(back == actual, "{what}: read-back after recovery differs");
+    settle_gc(&stack, &mut d, &actual, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let stack = p
         .vol
-        .open_with(|o| o.on_journal_damage = OnJournalDamage::Refuse)
+        .open_with(|o| {
+            fast_gc(o);
+            o.on_journal_damage = OnJournalDamage::Refuse;
+        })
         .unwrap_or_else(|e| panic!("{what}: second open: {e}"));
     let mut d = Driver::new(&stack).expect("driver");
     let again = d
@@ -656,6 +709,38 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let r = p.vol.check().expect("store self-check runs");
     assert!(r.is_clean(), "{what}: store self-check: {r:?}");
     fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
+}
+
+/// After recovery: ticks through a grace and whole passes until GC has
+/// nothing condemned (the list is loaded with a fresh grace, the flags set
+/// again, the recheck un-condemns what the replayed journal made live, the
+/// deletes complete), then the device is read again against `actual`.
+fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], what: &str) {
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick after recovery");
+        let listed = lunix_iface::store::GcStateStore::load_condemned(&stack.store)
+            .expect("condemned list")
+            .as_ref()
+            .and_then(lunix_gc::CondemnedList::from_file)
+            .map_or(0, |l| l.entries.len());
+        if listed == 0 && start.elapsed() > Duration::from_secs(12) {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(90),
+            "{what}: GC does not finish after recovery ({listed} condemned)"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    stack.engine.release_read_cache();
+    let back = d
+        .read_all(actual.len() as u64)
+        .unwrap_or_else(|s| panic!("{what}: read after GC: {s:?}"));
+    assert!(
+        back == actual,
+        "{what}: the device differs after GC ran on the recovered volume"
+    );
 }
 
 /// Registered points no workload of this loop reaches: the set-aside of a

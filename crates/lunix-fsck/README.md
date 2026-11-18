@@ -22,9 +22,9 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
 3. BLAKE3 goes through `CommitCodec::object_hash` (no `blake3` dependency).
 4. The journal is read with `lunix_format::journal::scan_file`, never through
    `Journal::recover` (its first lane open wipes tails).
-5. Orphan: no commit file on disk names it, no root of GC's retained set (down
-   to the lowest retained `chain_floor`, N24) references it and the condemned
-   list does not. `orphan` after a clean close, else `crash_leftover`.
+5. Orphan: above the high-water mark (below it, unreferenced is GC's garbage), no
+   commit file names it, no root of GC's retained set references it, not listed.
+   `orphan` after a clean close, else `crash_leftover`.
 6. Repairs run first, then the checks run again. `--truncate-tip` lowers the
    floor, sets the tip aside, then zeroes the checkpoint; it loses the journal
    records C9 already reclaimed, and says which. `--delete-orphans` is refused
