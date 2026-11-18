@@ -264,6 +264,24 @@ pub(crate) fn unlink_durable(inner: &Inner, path: &Path) -> Result<bool, Error> 
     Ok(removed)
 }
 
+/// [`unlink_durable`] for a sealed segment, with its own crash points
+/// `store.segment_delete.*`: a kill after the unlink and before the index
+/// drops the segment's entries leaves entries into a missing file, which a
+/// kill after any other unlink does not.
+pub(crate) fn unlink_segment_durable(inner: &Inner, path: &Path) -> Result<bool, Error> {
+    lunix_iface::crashpoint!("store.segment_delete.before_unlink");
+    let removed = match inner.fs.unlink(path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => false,
+        Err(e) => return Err(io_err(e)),
+    };
+    lunix_iface::crashpoint!("store.segment_delete.after_unlink");
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    inner.fs.fsync_dir(parent).map_err(io_err)?;
+    lunix_iface::crashpoint!("store.segment_delete.after_dirsync");
+    Ok(removed)
+}
+
 /// Reads a whole small file after checking its size against `max`, so a
 /// forged or runaway file is refused before anything is allocated.
 pub(crate) fn read_capped(path: &Path, max: u64, what: &'static str) -> Result<Vec<u8>, Error> {

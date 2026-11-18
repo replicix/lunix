@@ -73,7 +73,10 @@ impl Inner {
     pub(crate) fn delete_container(&self, kind: ContainerKind, id: ObjId) -> Result<u64> {
         let path = self.container_path(kind, id);
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let removed = crate::fsops::unlink_durable(self, &path)?;
+        let removed = match kind {
+            ContainerKind::Segment => crate::fsops::unlink_segment_durable(self, &path)?,
+            ContainerKind::MapPack => crate::fsops::unlink_durable(self, &path)?,
+        };
         self.cache().remove(id);
         Ok(if removed { size } else { 0 })
     }
