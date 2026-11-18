@@ -559,7 +559,8 @@ impl Inner {
                 return Err(e.into());
             }
         };
-        let map_actual = map_packs.iter().map(|(_, b)| *b).sum();
+        let map_actual: u64 = map_packs.iter().map(|(_, b)| *b).sum();
+        add(&self.stats.map_bytes_written, map_actual);
         self.settle(&mut acct, SpaceKind::Map, map_bound, map_actual);
         let map_packs: Vec<_> = map_packs.into_iter().map(|(p, _)| p).collect();
         point!(self.points, "engine.c5.map_sealed");

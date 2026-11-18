@@ -118,7 +118,9 @@ vm_churn() { # d i name
   part=$(lsblk -nrpo NAME,FSTYPE,SIZE -b "$loop" | awk '$2 ~ /ext4|xfs/ {print $3, $1}' | sort -nr | head -1 | cut -d' ' -f2); part=${part:-$loop}
   mount -o nosuid,nodev "$part" "$root" || return 1; VM_MOUNTS+=("$root")
   mount -t proc proc "$root/proc" && VM_MOUNTS+=("$root/proc")
-  # the host's /dev is bound read-only (apt and dpkg scripts need /dev/null); this is not a device from the image
+  # the host's /dev is bound read-only (apt and dpkg scripts need /dev/null); this is not a device from the image.
+  # This is the ONE exception to CONVENTIONS rule 3 (every mount nosuid,nodev under the scratch directory): a nodev
+  # mount cannot offer device nodes and mknod is forbidden inside it; accepted by the lead on 2026-11-18.
   mount --rbind -o ro /dev "$root/dev" 2>/dev/null && VM_MOUNTS+=("$root/dev")
   local cache="$LUNIX_SPIKE_DIR/apt-cache-img$i"; mkdir -p "$cache" "$root/var/cache/apt/archives"
   mount --bind "$cache" "$root/var/cache/apt/archives" && VM_MOUNTS+=("$root/var/cache/apt/archives")
@@ -137,6 +139,18 @@ vm_churn() { # d i name
   chroot "$root" dpkg-query -f '.\n' -W | wc -l > "$d/vm-img$i-pkgs-after.txt"
   sync; vm_unmount_all
   return $rc
+}
+
+# gc_idle NAME FILE: waits (at most GC_IDLE_CAP s, default 600) until the collector reports no pass in progress
+# (`lunix gc --status --json`: `.state == null`); the last status is kept in FILE.
+gc_idle() {
+  local t=$SECONDS
+  while :; do
+    lx gc "$1" --status --json > "$2" 2>&1
+    jq -e '.state == null' "$2" >/dev/null 2>&1 && return 0
+    [ $((SECONDS - t)) -lt "${GC_IDLE_CAP:-600}" ] || { say "- WARN gc still running after ${GC_IDLE_CAP:-600} s ($1)"; return 1; }
+    sleep 5
+  done
 }
 
 # ---- one cell ------------------------------------------------------------------------------------------------------
@@ -163,7 +177,12 @@ run_cell() { # workload chunk fs rep
   umount_fs "$MNT"; guest_fsck "$fs" "$CUR_DEV"; expect "$CELL: guest fsck clean" $? || true
   # final garbage collection and its grace, then the exact recount
   local p
-  for p in $(seq 1 "$GC_PASSES"); do lx gc "$vol" --json > "$D/gc-$p.json" 2>&1; [ "$p" = "$GC_PASSES" ] || sleep "$GC_WAIT"; done
+  # `lunix gc NAME --json` runs a pass to its end (it waits out the grace itself); `lunix gc NAME --status --json` has
+  # `state: null` when the collector is idle: wait for that before the next pass and before the status snapshot.
+  for p in $(seq 1 "$GC_PASSES"); do
+    lx gc "$vol" --json > "$D/gc-$p.json" 2>&1; gc_idle "$vol" "$D/gc-status-$p.json"
+    [ "$p" = "$GC_PASSES" ] || sleep "$GC_WAIT"
+  done
   sleep "$GC_WAIT"; snap "$vol" "$D/status-2.json"
   detach_vol "$vol"; expect "$CELL: detach" $? || true
   lunix_fsck "$vol" "$(echo "$CELL" | tr '/' '_')"; local frc=$?

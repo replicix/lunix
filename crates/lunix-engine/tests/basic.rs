@@ -719,3 +719,33 @@ fn a_present_commit_that_does_not_authenticate_on_the_walk_is_a_fork_even_with_t
         "a refusal raises nothing"
     );
 }
+
+#[test]
+fn map_bytes_written_grows_per_commit_and_survives_a_reopen() {
+    for cs in CS {
+        let mut v = vol(cs);
+        let mut r = v.open().map_err(|e| e.0).expect("open");
+        assert_eq!(r.engine.stats().map_bytes_written, 0);
+        assert!(r.write(0, 0, &pattern(1, 4096), false).is_ok());
+        assert!(matches!(
+            r.engine.commit_now(false).expect("commit"),
+            CommitOutcome::Committed { .. }
+        ));
+        let first = r.engine.stats().map_bytes_written;
+        assert!(first > 0, "a map seal wrote pack bytes");
+        assert!(r.write(0, u64::from(cs), &pattern(2, 4096), false).is_ok());
+        assert!(matches!(
+            r.engine.commit_now(false).expect("commit"),
+            CommitOutcome::Committed { .. }
+        ));
+        let second = r.engine.stats().map_bytes_written;
+        assert!(second > first, "the second seal adds to the total");
+        let p = r.stop();
+        v.absorb(p, 1);
+        let r = v.open().map_err(|e| e.0).expect("reopen");
+        assert!(
+            r.engine.stats().map_bytes_written >= second,
+            "restored from the checkpoint like the other counters"
+        );
+    }
+}

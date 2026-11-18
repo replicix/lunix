@@ -59,6 +59,7 @@ counters!(
     dirty_leaves,
     commits,
     extent_auth_failures,
+    map_bytes_written,
 );
 
 /// Adds to a counter.

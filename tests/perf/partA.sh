@@ -27,6 +27,13 @@ here="$(cd "$(dirname "$0")" && pwd)"
 : "${CHUNKS:=65536 16384}" "${QUEUES_LIST:=4 8}" "${REPS:=3}" "${RUNTIME:=30}" "${RAMP:=5}" "${W_RUNTIME:=60}" "${WS_GIB:=4}" "${VOL_GIB:=32}"
 : "${DAEMON_CPUS:=0-7}" "${FIO_CPUS:=8-15}" "${QCPUS_4:=0-3}" "${QCPUS_8:=0-7}" "${VERIFY_READS:=1}" "${PERF:=1}" "${NULLBLK:=1}"
 : "${JOBS:=8}" "${VOLMODE:=integrity}"
+# Destage pool worker threads (lunixd.toml `destage_workers`, 1 to 64; the plan's "8 workers" of the seqw cell). A daemon
+# setting read at start: it holds for every cell of the run (recorded per cell). DESTAGE_WORKERS=default leaves the
+# daemon's own choice, max(2, cpus / 2) of the CPUs the daemon may run on.
+: "${DESTAGE_WORKERS:=8}"
+if [ "$DESTAGE_WORKERS" != default ]; then CFG_EXTRA="${CFG_EXTRA:+$CFG_EXTRA
+}destage_workers = $DESTAGE_WORKERS"; fi
+export CFG_EXTRA
 export JOURNAL_MAX="${JOURNAL_MAX:-1073741824}" DAEMON_CPUS FIO_CPUS
 read -ra _c <<< "$CHUNKS"; read -ra _q <<< "$QUEUES_LIST"
 export SCRIPT_CAP="${SCRIPT_CAP:-$((${#_c[@]} * ${#_q[@]} * 3600 + 3600))}"
@@ -34,6 +41,7 @@ export SCRIPT_CAP="${SCRIPT_CAP:-$((${#_c[@]} * ${#_q[@]} * 3600 + 3600))}"
 harness_init m16-parta
 JOBDIR="$REPO/bench/phase1/perf/fio"
 say "# M16 Part A ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $(nproc) cpus): chunks $CHUNKS, queues $QUEUES_LIST, $REPS reps"
+say "- destage_workers: $DESTAGE_WORKERS (lunixd.toml; seqw of the plan runs on 8 workers); read_cache_max left at the volume default (recorded per cell)"
 say "- daemon CPUs $DAEMON_CPUS (process), queue threads QCPUS_4=$QCPUS_4 / QCPUS_8=$QCPUS_8, fio CPUS $FIO_CPUS; script cap $SCRIPT_CAP s"
 NOISY=0; quiet_check; gov_set
 WS=$((WS_GIB * GIB)); SLICE=$((WS / JOBS))
@@ -75,11 +83,13 @@ fio_cell() { # chunkk q name job rep runtime qd
   local split; split=$(awk 'NR==FNR{a[$1]=$2; next} {d=$2-a[$1]; if (d>0.05) printf "%s=%.2f(%d) ", $1, d, $3}' "$d/threads-0.txt" "$d/threads-1.txt")
   local ju0 ju1=""; ju0=$(jq -r '.journal_used // ""' "$d/status-end.json" 2>/dev/null)
   case "$name" in w4k|seqw) sleep 10; snap "$VOL" "$d/status-idle10.json"; ju1=$(jq -r '.journal_used // ""' "$d/status-idle10.json" 2>/dev/null) ;; esac
+  local rcm cache_b mapb; rcm=$(jq -r '.read_cache_max // ""' "$(vol_dir "$VOL")/volume.json" 2>/dev/null)
+  cache_b=$(jq -r '.space.cache // ""' "$d/status-end.json" 2>/dev/null); mapb=$(jq -r '.stats.map_bytes_written // ""' "$d/status-end.json" 2>/dev/null)
   [ "$frc" = 0 ] && [ "$(fio_errors "$jf")" = 0 ]; local ok=$?
   say "- $cell: ${iops:-?} IOPS, $(awk -v b="${bw:-0}" 'BEGIN{printf "%.2f", b/1e9}') GB/s, p99 ${p99:-?} us, daemon CPU ${cpu_s}s (${cpu_us:-?} us/IO), rss ${rss1} KiB, split $split"
   rec "$cell" "$([ $ok = 0 ] && echo info || echo fail)" chunk_k="$ck" queues="$q" cell_name="$name" rep="$rep" runtime="$rt" iops="${iops:-}" bw_bytes="${bw:-}" \
       p50_us="${p50:-}" p99_us="${p99:-}" p999_us="${p999:-}" ios="${ios:-}" daemon_cpu_s="$cpu_s" window_s="$w" cpu_us_per_io="${cpu_us:-}" rss_kib_before="$rss0" \
-      rss_kib_after="$rss1" hwm_kib="$hwm" journal_used_end="${ju0:-}" journal_used_idle10="${ju1:-}" thread_split="$split" load1="$l1" fio_rc="$frc" noisy_host="$NOISY"
+      rss_kib_after="$rss1" hwm_kib="$hwm" journal_used_end="${ju0:-}" journal_used_idle10="${ju1:-}" thread_split="$split" load1="$l1" destage_workers="$DESTAGE_WORKERS" read_cache_max="${rcm:-}" cache_bytes_end="${cache_b:-}" map_bytes_written_end="${mapb:-}" fio_rc="$frc" noisy_host="$NOISY"
   [ "$ok" = 0 ] || FAIL=1
 }
 

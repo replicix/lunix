@@ -29,6 +29,7 @@
 //! | `max_locked_buffers` | 4 GiB | cap on queues × depth × `max_io_buf_bytes` of one attach |
 //! | `idle_trim_ms` | 10000 | once every volume has been idle this long, empty the read caches and trim the heap (0: never) |
 //! | `conn_idle_timeout_ms` | 60000 | close a control connection idle this long |
+//! | `destage_workers` | `max(2, cpus / 2)` | destage pool worker threads (hash, dedup, compress, seal) per attached volume; 1 to 64, 0 is refused |
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -95,7 +96,13 @@ pub struct DaemonConfig {
     pub idle_trim: Option<Duration>,
     /// Idle control connections are closed after this.
     pub conn_idle_timeout: Duration,
+    /// Destage pool worker threads per attached volume (`None`: the pool's
+    /// default, `max(2, cpus / 2)`).
+    pub destage_workers: Option<usize>,
 }
+
+/// Most destage worker threads the config accepts.
+pub const MAX_DESTAGE_WORKERS: u64 = 64;
 
 impl Default for DaemonConfig {
     fn default() -> Self {
@@ -122,6 +129,7 @@ impl Default for DaemonConfig {
             max_locked_buffers: 4 << 30,
             idle_trim: Some(Duration::from_secs(10)),
             conn_idle_timeout: Duration::from_secs(60),
+            destage_workers: None,
         }
     }
 }
@@ -304,6 +312,15 @@ impl DaemonConfig {
                 self.idle_trim = (t > 0).then(|| Duration::from_millis(t));
             }
             "conn_idle_timeout_ms" => self.conn_idle_timeout = ms(v)?,
+            "destage_workers" => {
+                let w = n(v)?;
+                if !(1..=MAX_DESTAGE_WORKERS).contains(&w) {
+                    return Err(format!(
+                        "destage_workers must be 1 to {MAX_DESTAGE_WORKERS}"
+                    ));
+                }
+                self.destage_workers = usize::try_from(w).ok();
+            }
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())
@@ -393,6 +410,22 @@ volume_roots = "/a, /b"
             "log_level = \"loud\"",
             "socket = \"/a",
             "just text",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn destage_workers_defaults_to_the_pool_and_is_bounded() {
+        assert_eq!(DaemonConfig::default().destage_workers, None);
+        let c = DaemonConfig::parse("destage_workers = 8").unwrap();
+        assert_eq!(c.destage_workers, Some(8));
+        let c = DaemonConfig::parse("destage_workers = 64").unwrap();
+        assert_eq!(c.destage_workers, Some(64));
+        for bad in [
+            "destage_workers = 0",
+            "destage_workers = 65",
+            "destage_workers = \"8\"",
         ] {
             assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
         }

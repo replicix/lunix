@@ -6,8 +6,9 @@
 Reads results.jsonl of tests/perf/chunksize.sh (and the raw files each cell directory holds). Per workload, chunk size and
 file system: logical bytes written (the status counter `bytes_written` over the workload), dedup and compression ratio
 (the recount of `lunix fsck --deep`), live data bytes, map pack bytes (per TiB mapped and per GiB written), the map seal
-write amplification proxy (the space ledger's map bytes before the final GC over the bytes written; there is no counter of
-cumulative map bytes written), the on-disk store after the final GC, daemon CPU seconds per GiB written (utime+stime of the
+write amplification (exact: the delta of the status counter `stats.map_bytes_written`, map pack bytes written by commits, over
+the bytes written; when an input lacks that counter the space ledger's map bytes over the bytes written is used instead and
+the cell is marked "proxy" under the table), the on-disk store after the final GC, daemon CPU seconds per GiB written (utime+stime of the
 process), partial-chunk RMW per 1 000 writes (`cold_rmw` over write operations), and the workload's own throughput and
 latency. Cells run more than once show median and min-max, noisy when max/min > 1.2; cells run once say so.
 
@@ -62,6 +63,10 @@ def cell_metrics(r):
     bw = (g(s1, "bytes_written") or 0) - (g(s0, "bytes_written") or 0)
     opsw = (g(s1, "ops_write") or 0) - (g(s0, "ops_write") or 0)
     rmw = (g(s1, "cold_rmw") or 0) - (g(s0, "cold_rmw") or 0)
+    if g(s1, "map_bytes_written") is not None:
+        mwa = ((g(s1, "map_bytes_written") or 0) - (g(s0, "map_bytes_written") or 0), "exact")
+    else:
+        mwa = ((s1.get("space") or {}).get("map"), "proxy")
     chunk = int(r["chunk"])
     mapped = ra.get("mapped_chunks") or 0
     store_gc = sum(by.get(k, 0) for k in ("segments", "map_packs", "commits", "index")) if by else None
@@ -72,7 +77,7 @@ def cell_metrics(r):
         "live_data_gib": live / GIB if live is not None else None, "map_gib": mp / GIB if mp is not None else None,
         "map_per_tib_mapped_gib": (mp / (mapped * chunk / TIB) / GIB) if mp is not None and mapped else None,
         "map_per_gib_written": (mp / (bw / GIB)) if mp is not None and bw else None,
-        "map_seal_wa_proxy": ((s1.get("space") or {}).get("map", 0) / bw) if bw else None,
+        "map_seal_wa": (mwa[0] / bw) if bw and mwa[0] is not None else None, "map_seal_wa_basis": mwa[1],
         "store_after_gc_gib": store_gc / GIB if store_gc is not None else None,
         "stored_per_logical_gib": ((live + mp) / (bw / GIB) / GIB) if live is not None and mp is not None and bw else None,
         "store_per_logical_gib_after_gc": (store_gc / (bw / GIB) / GIB) if store_gc is not None and bw else None,
@@ -125,7 +130,7 @@ def f(a, nd=3):
 
 COLS = [("logical GiB written", "logical_gib", 1), ("dedup", "dedup", 3), ("compression", "compression", 3), ("live data GiB", "live_data_gib", 2),
         ("map GiB", "map_gib", 3), ("map GiB per TiB mapped", "map_per_tib_mapped_gib", 2), ("map bytes per GiB written", "map_per_gib_written", 4),
-        ("map seal WA (proxy)", "map_seal_wa_proxy", 4), ("store after GC GiB", "store_after_gc_gib", 2),
+        ("map seal WA (map bytes written / bytes written)", "map_seal_wa", 4), ("store after GC GiB", "store_after_gc_gib", 2),
         ("stored (data+map) per logical GiB", "stored_per_logical_gib", 4), ("daemon CPU s per GiB", "cpu_s_per_gib", 2),
         ("cold RMW per 1000 writes", "rmw_per_1000_writes", 1), ("IOPS", "iops", 0), ("MB/s", "mb_s", 0), ("p99 ms", "p99_ms", 2), ("TPS", "tps", 0),
         ("pg p99 ms", "pg_p99_ms", 2)]
@@ -152,6 +157,9 @@ def main():
         for k in keys:
             ms = cells[k]
             out.append(f"| {k[2]} | {k[1] // 1024} | {len(ms)}{' (once: noise caveat)' if len(ms) == 1 else ''} | " + " | ".join(f(agg([m.get(c[1]) for m in ms]), c[2]) for c in COLS) + " |")
+        proxied = sorted({f"{k[2]} {k[1] // 1024} KiB" for k in keys for m in cells[k] if m.get("map_seal_wa_basis") == "proxy"})
+        if proxied:
+            out.append(f"\nmap seal WA is a PROXY (space ledger map bytes over bytes written; no `stats.map_bytes_written` in the input) for: {', '.join(proxied)}")
         if w == "pgbench":
             vs = {m.get("pg_version") for ms in cells.values() for m in ms if m.get("pg_version")}
             out.append(f"\nPostgreSQL: {', '.join(sorted(vs)) or 'version not recorded'}")

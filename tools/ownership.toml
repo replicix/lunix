@@ -229,7 +229,21 @@ paths = [
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 
 [m16]
-paths = ["tests/perf/**", "bench/phase1/perf/**", "bench/phase1/chunksize/**"]
+paths = [
+  "tests/perf/**",
+  "bench/phase1/perf/**",
+  "bench/phase1/chunksize/**",
+  "docs/plans/v1/reports/p1-m16.md",
+  "docs/plans/v1/reports/p1-m16-prep.md",
+  # code prep, lead-authorised 2026-11-18: map bytes written counter, destage_workers key
+  "crates/lunix-iface/src/stats.rs",
+  "crates/lunix-engine/src/stats.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/tests/basic.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "tools/ownership.toml",
+]
 
 [m18b]
 paths = [

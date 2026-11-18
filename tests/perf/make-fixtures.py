@@ -34,8 +34,8 @@ for chunk, f_store in ((65536, 1.0), (16384, 0.8)):
         d = f"{ck}/raw/{w}-{chunk // 1024}-{fs}"
         os.makedirs(d, exist_ok=True)
         bw = 30 * 2 ** 30
-        json.dump({"stats": {"bytes_written": 0, "ops_write": 0, "cold_rmw": 0}}, open(d + "/status-0.json", "w"))
-        json.dump({"stats": {"bytes_written": bw, "ops_write": 2_000_000, "cold_rmw": int(110000 * f_store)}, "space": {"map": int(2e8 / f_store)}}, open(d + "/status-1.json", "w"))
+        json.dump({"stats": {"bytes_written": 0, "ops_write": 0, "cold_rmw": 0, "map_bytes_written": 0}}, open(d + "/status-0.json", "w"))
+        json.dump({"stats": {"bytes_written": bw, "ops_write": 2_000_000, "cold_rmw": int(110000 * f_store), "map_bytes_written": int(3e8 / f_store)}, "space": {"map": int(2e8 / f_store)}}, open(d + "/status-1.json", "w"))
         json.dump({"ratios": {"chunk_size": chunk, "mapped_chunks": 1_000_000, "dedup_ratio": 1.4, "compression_ratio": 2.1, "unique_clen": int(12e9 * f_store),
                               "bytes": {"segments": int(14e9 * f_store), "map_packs": int(1.5e8 / f_store), "commits": 1e6, "index": 5e7}}}, open(d + "/fsck.json", "w"))
         if w == "pgbench":

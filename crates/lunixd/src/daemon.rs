@@ -877,6 +877,7 @@ impl Daemon {
         op.max_io_buf_bytes = Some(max_buf);
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
         op.lock_memory = self.cfg.harden;
+        op.destage_workers = self.cfg.destage_workers;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
         if o.allow_unverifiable_fork {
             tracing::warn!(

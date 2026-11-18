@@ -16,6 +16,9 @@ grep -q 'SHORTFALL' "$T/pa.md"; ck "perf analyze.py reports a shortfall row (w4k
 grep -q 'verify_reads = true' "$T/pa.md"; ck "perf analyze.py has the verify_reads table" $?
 python3 -I "$REPO/bench/phase1/chunksize/analyze.py" "$T/ck" --parta "$T/verdict.json" > "$T/ck.md"; ck "chunksize analyze.py" $?
 grep -q 'Recommendation by the rule' "$T/ck.md"; ck "chunksize analyze.py evaluates the rule" $?
+! grep -q 'PROXY' "$T/ck.md"; ck "chunksize analyze.py uses the exact map_bytes_written counter" $?
+for f in "$T"/ck/raw/*/status-1.json; do jq 'del(.stats.map_bytes_written)' "$f" > "$f.n" && mv "$f.n" "$f"; done
+python3 -I "$REPO/bench/phase1/chunksize/analyze.py" "$T/ck" > "$T/ck2.md"; grep -q 'PROXY' "$T/ck2.md"; ck "chunksize analyze.py labels the proxy when the counter is missing" $?
 rm -rf "$T"
 if command -v shellcheck > /dev/null; then shellcheck -x --source-path=SCRIPTDIR -S warning "$here"/*.sh; ck "shellcheck" $?; else echo "SKIP shellcheck (not installed here)"; fi
 exit "$FAIL"

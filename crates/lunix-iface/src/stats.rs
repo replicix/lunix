@@ -46,6 +46,8 @@ pub struct EngineStats {
     pub commits: u64,
     /// Extents whose tag or AEAD failed on read.
     pub extent_auth_failures: u64,
+    /// Map pack bytes written by commits (sealed map packs, cumulative).
+    pub map_bytes_written: u64,
     /// Nanoseconds spent per destage stage: hash, dedup, compress, seal, append.
     pub stage_ns: [u64; 5],
 }
@@ -60,7 +62,7 @@ pub struct SlotCountError {
 
 impl EngineStats {
     /// Number of checkpoint slots this layout uses (`<= 192`).
-    pub const SLOTS: usize = 24;
+    pub const SLOTS: usize = 25;
 
     /// The counters as checkpoint slots, in a fixed order.
     pub fn to_slots(&self) -> Vec<u64> {
@@ -84,6 +86,7 @@ impl EngineStats {
             self.dirty_leaves,
             self.commits,
             self.extent_auth_failures,
+            self.map_bytes_written,
         ];
         v.extend_from_slice(&self.stage_ns);
         debug_assert_eq!(v.len(), Self::SLOTS);
@@ -120,7 +123,8 @@ impl EngineStats {
             dirty_leaves: g(16),
             commits: g(17),
             extent_auth_failures: g(18),
-            stage_ns: [g(19), g(20), g(21), g(22), g(23)],
+            map_bytes_written: g(19),
+            stage_ns: [g(20), g(21), g(22), g(23), g(24)],
         })
     }
 }
