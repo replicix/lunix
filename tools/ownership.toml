@@ -229,6 +229,9 @@ paths = [
 # cache_max at volume creation).
 [bstop]
 paths = [
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_gc_ladder.rs",
+  "docs/explanation/DECISIONS.md",
   "crates/lunix-format/src/local.rs",
   "crates/lunix-format/tests/f14_local.rs",
   "crates/lunix-format/tests/golden/14-volume.json",

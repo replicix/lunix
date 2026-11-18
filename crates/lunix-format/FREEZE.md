@@ -202,13 +202,17 @@ row of on-disk-formats.md §21 changes with the implementation (T1).
 Maintainer sign-off 2026-11-18 (rule change, no layout change), given with
 the acceptance of ADR-32.
 
-**Rule change F2 (2026-11-18, ADR-32 N2).** `volume.json` records how the
-store's cap was set: `space.cache_max_percent` (a percentage of the volume
-size, 100 ..= 10 000) or `space.cache_max` (an absolute byte count), at most
-one of them non-null, both keys required. A grow recomputes a percentage
-cap from the new size; an absolute cap stays. A file without either key is
-refused (no default, no migration: Lunix keeps no backward compatibility
-while it is in progress). The golden `14-volume.json` gains the
-`"cache_max_percent": null` line; the rows of on-disk-formats.md §21 change
-with it. Maintainer sign-off 2026-11-18 (layout change of `volume.json`),
-given with the decision "Store % in volume.json".
+**Rule change F2 (2026-11-18, ADR-32 amendment "the cap percentage").**
+`volume.json` records how the store's cap was set:
+`space.cache_max_percent` (a percentage of the volume size, 100 ..= 10 000)
+or `space.cache_max` (an absolute byte count). At most one of them is
+non-null; both null means no cap. Both keys are required: a file that lacks
+one of the two keys is refused (no default, no migration: Lunix keeps no
+backward compatibility while it is in progress). A percentage means
+`percent` of the volume size, never below the size plus 2 ×
+`commit.dirty_bytes`; it is resolved against the size at every open, on
+`lunix space` and on every grow. An absolute cap stays as it is on a grow.
+The golden `14-volume.json` gains the `"cache_max_percent": null` line; the
+rows of on-disk-formats.md §21 change with it. Maintainer sign-off
+2026-11-18 (layout change of `volume.json`), given with the decision "Store %
+in volume.json".

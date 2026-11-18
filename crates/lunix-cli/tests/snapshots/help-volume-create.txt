@@ -19,7 +19,7 @@ Options:
       --key-file <FILE>              Use this existing key file for the first slot instead of a generated one
       --compress <POLICY>            Compression: auto, lz4, zstd:N (N from -7 to 22) or none [default: auto]
       --id-len <BYTES>               Length of the chunk-id prefix kept in the block map: 16 or 32 [default: 16]
-      --store-max-percent <PERCENT>  Cap the volume's local store (space.cache_max) at this percentage of its size, 100 to 10000, or 0 for no cap. Default: the daemon's store_max_percent (200). `lunix space --cache-max` changes it later
+      --store-max-percent <PERCENT>  Cap the volume's local store at this percentage of its size (space.cache_max_percent; the cap follows a grow), 100 to 10000, or 0 for no cap. Default: the daemon's store_max_percent (200). `lunix space --cache-max` replaces it with an absolute cap
   -h, --help                         Print help
 
 Modes: --encrypt, --integrity and --plain are mutually exclusive (default: integrity).

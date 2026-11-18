@@ -723,7 +723,7 @@ fn record_pins(
 /// `dirty_bytes` (until a cut the journal holds up to `commit.dirty_bytes`,
 /// counted twice during the cut, so a small volume's first fill must not
 /// reach the cap).
-pub fn cache_cap(size: u64, percent: u32, dirty_bytes: u64) -> u64 {
+pub(crate) fn cache_cap(size: u64, percent: u32, dirty_bytes: u64) -> u64 {
     let cap = u64::try_from(u128::from(size) * u128::from(percent) / 100).unwrap_or(u64::MAX);
     cap.max(size.saturating_add(dirty_bytes.saturating_mul(2)))
 }
@@ -792,8 +792,10 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // A percentage cap needs the volume size, which the engine knows only
-    // once it opened: no cap until then (recovery reserves nothing), the
-    // resolved one right after.
+    // once it opened: no cap until then, the resolved one right after. Safe
+    // because nothing can reserve in between: recovery only charges, and no
+    // queue handler exists before `open_volume` returns (a change that
+    // attached queues earlier would have to resolve the cap first).
     let mut early = json.space.clone();
     early.cache_max_percent = None;
     let mut space_cfg = SpaceConfig::new(early);

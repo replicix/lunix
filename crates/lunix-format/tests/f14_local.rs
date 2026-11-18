@@ -450,8 +450,30 @@ fn volume_json_golden_and_rejections() {
             .collect();
         lines.join("\n")
     };
-    assert!(VolumeJson::from_json(&without("cache_max_percent")).is_err());
-    assert!(VolumeJson::from_json(&without("cache_max")).is_err());
+    for key in ["cache_max_percent", "cache_max"] {
+        let e = VolumeJson::from_json(&without(key)).expect_err(key);
+        assert!(
+            e.to_string().contains("missing space.cache_max"),
+            "{key}: {e}"
+        );
+    }
+    // A `space` object that is absent altogether is refused the same way.
+    let mut skip = false;
+    let no_space: Vec<&str> = text
+        .lines()
+        .filter(|l| {
+            if l.trim_start().starts_with("\"space\"") {
+                skip = true;
+            }
+            let keep = !skip;
+            if skip && l.trim_start().starts_with('}') {
+                skip = false;
+            }
+            keep
+        })
+        .collect();
+    let e = VolumeJson::from_json(&no_space.join("\n")).expect_err("no space object");
+    assert!(e.to_string().contains("missing space.cache_max"), "{e}");
 
     // Unknown keys, top level and nested, are rejected; so is a wrong version.
     assert!(VolumeJson::from_json(&text.replace("\"retain_last\"", "\"retain_lastx\"")).is_err());

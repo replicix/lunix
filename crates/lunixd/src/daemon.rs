@@ -1089,18 +1089,23 @@ impl Daemon {
                 "the size must be a multiple of the chunk size",
             ));
         }
-        live.device
-            .grow(r.size_bytes)
-            .map_err(|e| device_error(&e))?;
+        let grown = live.device.grow(r.size_bytes);
+        // Whatever the grow reported, the engine may have committed a new
+        // size: the cap follows it before any later step can fail (review
+        // m2 of p1/bstop-fu; `grow_cache_max` writes nothing, cannot fail).
+        let new = live.stack.engine.size_bytes();
+        if new > cur {
+            if let Slot::Attached(live) = &mut *g {
+                self.grow_cache_max(&r.name, &mut live.stack, cur, new);
+            }
+        }
+        let live = Self::attached_live(&g, &r.name)?;
+        grown.map_err(|e| device_error(&e))?;
         if let Some(rec) = live.device.record() {
             live.stack
                 .store
                 .store_device_record(&rec)
                 .map_err(|e| err(ErrorCode::Io, format!("state/device: {e}")))?;
-        }
-        let new = live.stack.engine.size_bytes();
-        if let Slot::Attached(live) = &mut *g {
-            self.grow_cache_max(&r.name, &mut live.stack, cur, new);
         }
         Ok(Response::Resized { size_bytes: new })
     }
@@ -1179,15 +1184,23 @@ impl Daemon {
                 if change {
                     let mut json = st.json.clone();
                     apply(&mut json)?;
-                    st.space
-                        .reconfigure(&effective_space(&json, st.engine.size_bytes()))
-                        .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
-                    // The ring-full wait follows the new full_timeout too.
-                    st.engine.set_full_timeout(st.space.full_timeout());
+                    // The file first: a gate changed for a policy the file
+                    // does not hold would be undone silently by the next
+                    // grow or restart (review m3 of p1/bstop-fu).
                     st.store
                         .store_volume_json(&json)
                         .map_err(|e| err(ErrorCode::Io, e.to_string()))?;
                     st.json = json;
+                    st.space
+                        .reconfigure(&effective_space(&st.json, st.engine.size_bytes()))
+                        .map_err(|e| {
+                            err(
+                                ErrorCode::Invalid,
+                                format!("volume.json is written, the gate kept its policy: {e}"),
+                            )
+                        })?;
+                    // The ring-full wait follows the new full_timeout too.
+                    st.engine.set_full_timeout(st.space.full_timeout());
                 }
                 Ok(Response::Space(SpaceBody {
                     settings: st.json.space.clone(),
@@ -1343,6 +1356,13 @@ impl Daemon {
                     // space fail with ENOSPC and nothing parks, so the drain
                     // can finish.
                     live.stack.space.begin_close();
+                    if t <= COORD_PERIOD {
+                        tracing::warn!(
+                            volume = %name,
+                            quiesce_timeout_ms = u64::try_from(t.as_millis()).unwrap_or(u64::MAX),
+                            "quiesce_timeout_ms is 100 ms or less: writes parked for a full journal ring fail with EIO at once"
+                        );
+                    }
                     live.stack.engine.begin_close(close_ring_bound(t));
                     match live.device.quiesce(t) {
                         Ok(None) => quiesced += 1,
@@ -1667,12 +1687,19 @@ impl Drop for Running<'_> {
 }
 
 /// How long a write parked for a full journal ring may still wait for its
-/// cut once a quiesce began (review N3): two thirds of `quiesce_timeout`, so
-/// it is answered before `QUIESCE_DEV` gives up, whatever the timeout (no
-/// floor: a floor could reach the timeout itself, final review m-B).
+/// cut once a quiesce began (review N3): two thirds of `quiesce_timeout`,
+/// and at most the timeout less one coordinator period (100 ms, the latency
+/// of the answer), so the answer comes before `QUIESCE_DEV` gives up (final
+/// review m-B, p1/bstop-fu review m1). A timeout of 100 ms or less (the root
+/// fault scripts use 1 ms to make `QUIESCE_DEV` fail) gives 0: every ring
+/// wait is answered at once.
 pub(crate) fn close_ring_bound(quiesce_timeout: Duration) -> Duration {
-    quiesce_timeout * 2 / 3
+    (quiesce_timeout * 2 / 3).min(quiesce_timeout.saturating_sub(COORD_PERIOD))
 }
+
+/// The engine's `background_period` (`EngineConfig::new`): how often the
+/// coordinator wakes the queues that hold a ring-parked write.
+const COORD_PERIOD: Duration = Duration::from_millis(100);
 
 #[cfg(test)]
 mod tests {
@@ -1684,12 +1711,14 @@ mod tests {
             close_ring_bound(Duration::from_secs(30)),
             Duration::from_secs(20)
         );
-        // Always strictly inside the timeout, also for a small one.
-        for ms in [600u64, 1000, 3000] {
+        // The answer (the bound plus one coordinator period) comes inside
+        // the timeout whenever the timeout is above that period.
+        for ms in [150u64, 300, 600, 1000, 3000] {
             let t = Duration::from_millis(ms);
-            assert_eq!(close_ring_bound(t), t * 2 / 3);
-            assert!(close_ring_bound(t) < t);
+            assert!(close_ring_bound(t) + COORD_PERIOD <= t, "{ms} ms");
+            assert!(close_ring_bound(t) <= t * 2 / 3, "{ms} ms");
         }
+        assert_eq!(close_ring_bound(Duration::from_millis(1)), Duration::ZERO);
     }
 
     #[test]

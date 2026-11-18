@@ -406,18 +406,23 @@ fn response() -> impl Strategy<Value = Response> {
             }),
         Just(Response::Detached),
         any::<u64>().prop_map(|size_bytes| Response::Resized { size_bytes }),
-        (figures(), any::<u64>(), proptest::option::of(any::<u64>())).prop_map(
-            |(figures, headroom, cache_max)| {
+        (
+            figures(),
+            any::<u64>(),
+            proptest::option::of(any::<u64>()),
+            proptest::option::of(any::<u32>()),
+        )
+            .prop_map(|(figures, headroom, cache_max, cache_max_percent)| {
                 Response::Space(SpaceBody {
                     settings: SpaceSettings {
                         headroom,
                         cache_max,
+                        cache_max_percent,
                         ..SpaceSettings::default()
                     },
                     figures,
                 })
-            }
-        ),
+            }),
         any::<u32>().prop_map(|devices| Response::Quiesced { devices }),
         summary().prop_map(Response::Gc),
         gc_status().prop_map(Response::GcStatus),

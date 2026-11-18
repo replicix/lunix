@@ -480,6 +480,15 @@ fn reconfigure_applies_live_and_rejects_invalid_settings() {
         ..settings(0, OnFull::Wait, None)
     };
     assert_eq!(g.reconfigure(&bad).unwrap_err().kind(), ErrorKind::Invalid);
+    // FREEZE F2: a percentage cap reaches the gate resolved to bytes; one
+    // that is not is refused, by `reconfigure` and by `new`.
+    let pct = SpaceSettings {
+        cache_max_percent: Some(200),
+        ..settings(0, OnFull::Wait, None)
+    };
+    assert_eq!(g.reconfigure(&pct).unwrap_err().kind(), ErrorKind::Invalid);
+    let fs = Arc::new(lunix_space::SimFs::new(1000, 0));
+    assert!(LunixSpace::new(common::config(pct), fs, clock()).is_err());
     for p in ["101%", "x%", "%", "10", "-1%", "1000%"] {
         let bad = SpaceSettings {
             free_floor: FreeFloor::Percent(p.into()),

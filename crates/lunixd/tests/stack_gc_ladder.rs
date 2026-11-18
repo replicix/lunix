@@ -86,7 +86,10 @@ fn segment_bytes(stack: &VolumeStack) -> (usize, u64) {
 /// error`), which starts the ladder on the gate's thread, and waits for the
 /// compact step (the urgent pass) to end. Restores the settings.
 fn run_ladder(stack: &VolumeStack) {
-    let saved = stack.json.space.clone();
+    let saved = lunixd::stack::effective_space(
+        &stack.json,
+        lunix_iface::block::BlockEngine::size_bytes(&*stack.engine),
+    );
     let mut tight = saved.clone();
     tight.on_full = OnFull::Error;
     tight.cache_max = Some(stack.space.snapshot().used().max(1));
