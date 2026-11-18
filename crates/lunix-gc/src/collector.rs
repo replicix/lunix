@@ -194,6 +194,8 @@ struct Facts {
     /// `fsck --repair --truncate-tip` gives a complete volume (N12 (b)).
     keep_floor: CommitSeq,
     tip: CommitSeq,
+    /// Segments the tip FULL names: a cut makes their names count.
+    tip_named: BTreeSet<SegId>,
     /// `None` when `state/pins` could not be read.
     floor: Option<Option<RollbackFloor>>,
 }
@@ -225,6 +227,7 @@ impl Facts {
             named_high,
             keep_floor,
             tip: view.tip.commit_seq,
+            tip_named: crate::compact::tip_segments(view),
             floor,
         })
     }
@@ -233,6 +236,13 @@ impl Facts {
 /// The reason of a delete deferred until a FULL below the tip names the live
 /// copies of a segment's ids (the delete-time index invariant).
 const NOT_DURABLE_YET: &str = "live copies of its ids are not durable yet";
+/// The same, when no cut would help: the copies are in no unnamed output and
+/// not named by the tip, so the engine is not asked for a cut (it would cut
+/// an empty FULL at every pass; M17.B stack re-review M-1).
+const NOT_DURABLE_NO_CUT: &str = "live copies of its ids are not durable yet; a cut does not help";
+/// Evidence objects pruned per pass at most (one unlink and directory sync
+/// each, under the coordinator's mutex).
+const EVIDENCE_PRUNE_PER_PASS: usize = 16;
 
 /// `gc/` objects kept locally: the newest this many; older ones are deleted
 /// when a pass writes a new one (gc.md "the evidence object").
@@ -355,11 +365,24 @@ impl Judge<'_> {
     /// hints rely on must be in a segment a durable FULL named (at or below
     /// `named_high`) that is not an unnamed compaction output.
     fn segment_deletable(&self, s: SegId) -> Option<&'static str> {
-        let blocked = self.l.deps.get(&s).is_some_and(|deps| {
-            deps.iter()
-                .any(|d| d.raw() > self.f.named_high || self.outputs.contains(d))
-        });
-        blocked.then_some(NOT_DURABLE_YET)
+        let deps = self.l.deps.get(&s)?;
+        let blocking: Vec<&SegId> = deps
+            .iter()
+            .filter(|d| d.raw() > self.f.named_high || self.outputs.contains(*d))
+            .collect();
+        if blocking.is_empty() {
+            return None;
+        }
+        // A cut helps when it names an unnamed output, or gives the tip that
+        // names a copy a successor.
+        let helps = blocking
+            .iter()
+            .any(|d| self.outputs.contains(*d) || self.f.tip_named.contains(*d));
+        Some(if helps {
+            NOT_DURABLE_YET
+        } else {
+            NOT_DURABLE_NO_CUT
+        })
     }
 }
 
@@ -410,6 +433,8 @@ pub struct Gc {
     /// A delete was deferred until a FULL below the tip names the live copies
     /// (`GcProgress::cut_wanted`).
     cut_wanted: bool,
+    /// The tip a cut was last asked for: one request per tip.
+    cut_asked_at: Option<CommitSeq>,
     stats: GcStats,
     last_pass: Option<GcPassSummary>,
     totals: GcPassSummary,
@@ -461,6 +486,7 @@ impl Gc {
             last_pins: None,
             last_pass_changed: true,
             cut_wanted: false,
+            cut_asked_at: None,
             stats: GcStats::default(),
             last_pass: None,
             totals: GcPassSummary::default(),
@@ -747,10 +773,12 @@ impl Gc {
         let pass = passes.last().copied().unwrap_or(0) + 1;
         view.state
             .put_evidence(pass, &ctx.evidence.finish(view.clock.now()))?;
-        // The local bound: the newest EVIDENCE_KEEP objects stay.
+        // The local bound: the newest EVIDENCE_KEEP objects stay; at most
+        // EVIDENCE_PRUNE_PER_PASS older ones go per pass.
         let keep = EVIDENCE_KEEP.saturating_sub(1);
         if passes.len() > keep {
-            for &old in &passes[..passes.len() - keep] {
+            let excess = &passes[..passes.len() - keep];
+            for &old in excess.iter().take(EVIDENCE_PRUNE_PER_PASS) {
                 if let Err(e) = view.state.delete_evidence(old) {
                     tracing::warn!(error = %e, pass = old, "gc: an old evidence object was not pruned");
                     break;
@@ -778,8 +806,10 @@ impl Gc {
         self.phase = Phase::Idle;
         self.last_end = Some(view.clock.monotonic());
         // An abandoned pass may have done part of its work (a delete whose
-        // call failed): the next one runs even if nothing else changed.
+        // call failed) or none (an error in its first mark): the next one
+        // runs even if nothing else changed (re-review M-2).
         self.last_pass_changed = true;
+        self.last_tip = None;
     }
 
     fn note_heap(&mut self) {
@@ -1048,8 +1078,9 @@ impl Gc {
         match v {
             Verdict::Gone => self.forget(view, obj),
             Verdict::Defer(why) => {
-                if why == NOT_DURABLE_YET {
+                if why == NOT_DURABLE_YET && self.cut_asked_at != Some(view.tip.commit_seq) {
                     self.cut_wanted = true;
+                    self.cut_asked_at = Some(view.tip.commit_seq);
                 }
                 self.evidence(view, Action::Defer, obj, 0, why);
                 Ok(0)
