@@ -89,8 +89,9 @@ A **volume** is a thin block device of a given size. Its data path is:
   (s3/s3). fsync from the file system above arrives as FLUSH/FUA.
 - **Space policy:** `free_floor` (bytes or % of the host FS), `on_full =
   wait|error`, `full_timeout` (null: the daemon's `full_timeout_ms`, 60 s
-  by default; a write never waits for ever, ADR-32), `cache_max` (bytes;
-  `lunix volume create` writes 200 % of the size by default, ADR-32). The
+  by default; a write never waits for ever, ADR-32), `cache_max` (bytes) or `cache_max_percent` (of the size,
+  resolved at every open and grow; `lunix volume create` writes 200 % by
+  default, ADR-32 and its amendment). The
   local store never exceeds `min(cache_max, fs_free - free_floor)`, plus
   the reserved region and one cut in flight.
 - **Owner:** the host that holds the lease. Only the owner writes,

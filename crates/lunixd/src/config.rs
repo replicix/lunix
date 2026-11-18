@@ -30,7 +30,7 @@
 //! | `idle_trim_ms` | 10000 | once every volume has been idle this long, empty the read caches and trim the heap (0: never) |
 //! | `conn_idle_timeout_ms` | 60000 | close a control connection idle this long |
 //! | `full_timeout_ms` | 60000 | the wait at the limit of a volume whose `space.full_timeout_ms` is null (ADR-32); 1000 ..= 3600000, a warning above 100000 (the kernel's hung-task threshold is 120 s) |
-//! | `store_max_percent` | 200 | `space.cache_max` of new volumes, percent of the size (ADR-32, M2); 0 writes none, else 100 ..= 10000 |
+//! | `store_max_percent` | 200 | `space.cache_max_percent` of new volumes (ADR-32 M2, FREEZE F2); 0 writes no cap, else 100 ..= 10000 |
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -99,7 +99,7 @@ pub struct DaemonConfig {
     pub conn_idle_timeout: Duration,
     /// The wait at the limit when a volume's `space.full_timeout_ms` is null.
     pub full_timeout: Duration,
-    /// `space.cache_max` of new volumes in percent of their size (0: none).
+    /// `space.cache_max_percent` of new volumes (0: no cap).
     pub store_max_percent: u32,
 }
 

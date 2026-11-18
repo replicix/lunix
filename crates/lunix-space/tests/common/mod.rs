@@ -21,6 +21,7 @@ pub fn settings(headroom: u64, on_full: OnFull, timeout: Option<Duration>) -> Sp
         on_full,
         full_timeout_ms: timeout.map(|t| u64::try_from(t.as_millis()).expect("ms")),
         cache_max: None,
+        cache_max_percent: None,
         headroom,
     }
 }

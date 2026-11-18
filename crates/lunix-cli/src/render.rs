@@ -281,13 +281,12 @@ pub fn space(out: &mut dyn Write, name: &str, b: &SpaceBody) -> io::Result<()> {
             .full_timeout_ms
             .map_or_else(|| "none".to_owned(), format_duration_ms),
     )?;
-    kv(
-        out,
-        "cache max",
-        &b.settings
-            .cache_max
-            .map_or_else(|| "none".to_owned(), format_bytes),
-    )?;
+    let cap = match (b.settings.cache_max_percent, b.settings.cache_max) {
+        (Some(p), _) => format!("{p} % of the size"),
+        (None, Some(c)) => format_bytes(c),
+        (None, None) => "none".to_owned(),
+    };
+    kv(out, "cache max", &cap)?;
     kv(out, "headroom", &format_bytes(b.settings.headroom))?;
     figures(out, &b.figures)
 }

@@ -31,6 +31,13 @@ impl Policy {
         if s.full_timeout_ms == Some(0) {
             return Err(Error::invalid("space.full_timeout_ms must be at least 1"));
         }
+        // The gate knows no volume size: a percentage cap reaches it
+        // resolved to bytes (FREEZE F2; `lunixd::stack::effective_space`).
+        if s.cache_max_percent.is_some() {
+            return Err(Error::invalid(
+                "space.cache_max_percent must be resolved to cache_max against the volume size",
+            ));
+        }
         let floor = match &s.free_floor {
             FreeFloor::Bytes(b) => Floor::Bytes(*b),
             FreeFloor::Percent(p) => {

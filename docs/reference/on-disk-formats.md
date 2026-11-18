@@ -1565,7 +1565,8 @@ set, ADR-24); it is replaced atomically.
 | `space.free_floor` | integer (bytes) or string `"N%"` | `"10%"` | | DESIGN §2 |
 | `space.on_full` | string | `"wait"` | `wait`, `error` | |
 | `space.full_timeout_ms` | integer or null | null | ≥ 1 | the longest a write waits at the limit before `ENOSPC`; null means the daemon's `full_timeout_ms` (60 000 by default), never "for ever" (ADR-32, FREEZE rule change F1) |
-| `space.cache_max` | integer or null | null | bytes | the store's cap; `lunix volume create` writes `store_max_percent` (200 by default) of the size, at least the size plus 2 × `commit.dirty_bytes`, unless `--store-max-percent 0` (ADR-32, M2); a grow raises a cap equal to that default for the old size to the default for the new one, and keeps any other cap |
+| `space.cache_max` | integer or null | — (required key) | bytes | an absolute cap on the store (`lunix space --cache-max`); it stays on a grow. At most one of `cache_max` and `cache_max_percent` is non-null; both null means no cap (FREEZE F2) |
+| `space.cache_max_percent` | integer or null | — (required key) | 100 ..= 10 000 | a cap in percent of the volume size: `percent` of the size, at least the size plus 2 × `commit.dirty_bytes`, resolved at every open, on `lunix space` and on every grow. `lunix volume create` writes `store_max_percent` (200 by default), or null with `--store-max-percent 0`; `lunix space --cache-max` replaces it with an absolute cap. The switch is one-way through the control socket: a percentage comes back only by editing `volume.json` while the volume is detached (ADR-32 amendment; FREEZE F2). A file that lacks either key is refused |
 | `space.headroom` | integer | 268 435 456 | bytes | plan M8 |
 | `commit.interval_ms` | integer | 30 000 | ≥ 1 000 | `T` |
 | `commit.dirty_bytes` | integer | 1 073 741 824 | ≥ 1 MiB | `B` |

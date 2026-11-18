@@ -334,6 +334,12 @@ impl SpaceGate for MemSpace {
         if settings.full_timeout_ms == Some(0) {
             return Err(Error::invalid("full_timeout_ms must be at least 1"));
         }
+        // As the real gate: a percentage cap reaches a gate resolved.
+        if settings.cache_max_percent.is_some() {
+            return Err(Error::invalid(
+                "space.cache_max_percent must be resolved to cache_max against the volume size",
+            ));
+        }
         let mut st = lock(&self.st);
         if settings.headroom > st.cfg.capacity {
             return Err(Error::invalid("headroom exceeds the capacity"));

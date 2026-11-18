@@ -344,9 +344,12 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// The ledger now.
     fn snapshot(&self) -> SpaceSnapshot;
 
-    /// Live reconfiguration of the policy (`lunix space`).
+    /// Live reconfiguration of the policy (`lunix space`). A gate knows no
+    /// volume size: the caller resolves a `cache_max_percent` to
+    /// `cache_max` bytes first (FREEZE F2).
     ///
     /// # Errors
-    /// `Invalid` for a setting that fails `VolumeJson` validation.
+    /// `Invalid` for a setting that fails `VolumeJson` validation, or one
+    /// that still carries a `cache_max_percent`.
     fn reconfigure(&self, settings: &SpaceSettings) -> Result<()>;
 }

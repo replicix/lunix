@@ -200,13 +200,23 @@ pub fn a_wait_counts_from_the_arrival<
     clock.advance(Duration::from_millis(450));
     assert_eq!(g.tick(), 1, "due at its arrival plus full_timeout");
     assert_eq!(w.state(), WaiterState::TimedOut);
-    // Already past it: refused without parking.
+    // Already past it, on a fresh (unlatched) gate: refused without
+    // parking, and without latching the volume (it never waited in the gate).
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let mut setup = SpaceSetup::new(100, 0, OnFull::Wait);
+    setup.full_timeout = Some(Duration::from_secs(1));
+    let g = make(setup, clock.clone());
+    reserved(g.reserve(K, 100, None).expect("reserve"));
+    let arrived = clock.monotonic();
     clock.advance(Duration::from_secs(2));
+    assert!(!g.snapshot().full);
     assert!(matches!(
         g.reserve_since(K, 10, None, arrived).expect("reserve"),
         ReserveOutcome::NoSpace
     ));
-    assert_eq!(g.snapshot().waiters, 0);
+    let snap = g.snapshot();
+    assert_eq!(snap.waiters, 0);
+    assert!(!snap.full, "a late refusal does not latch");
 }
 
 /// Writes cannot take the headroom; commit-time reservations can.
