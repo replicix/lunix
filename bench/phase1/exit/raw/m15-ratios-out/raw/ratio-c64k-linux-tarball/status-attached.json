@@ -1,0 +1,63 @@
+{
+  "name": "r64klinuxtarball",
+  "uuid": "cdc9867b-2c29-4288-9ccf-55696107d595",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 65536,
+  "mode": "integrity",
+  "device": "<scratch>/m15-ratios-state/dev/r64klinuxtarball",
+  "stats": {
+    "bytes_written": 1809674240,
+    "bytes_read": 60186624,
+    "ops_read": 1089,
+    "ops_write": 7199,
+    "ops_flush": 20,
+    "ops_discard": 33,
+    "ops_write_zeroes": 176,
+    "flush_groups": 33,
+    "flush_group_waiters": 33,
+    "flush_group_max": 1,
+    "chunks_total": 561648,
+    "chunks_zero": 533848,
+    "dedup_hits": 55,
+    "stored_ulen": 1818296320,
+    "stored_clen": 297114616,
+    "cold_rmw": 89,
+    "dirty_leaves": 0,
+    "commits": 28,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      174883405,
+      5620417,
+      2234521418,
+      109370879,
+      238541885
+    ]
+  },
+  "space": {
+    "used": 383913111,
+    "limit": 259240823550,
+    "fs_free": 311112679424,
+    "journal": 78403776,
+    "segments": 300071189,
+    "cache": 0,
+    "map": 2654070,
+    "index": 2776400,
+    "commits": 7676,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 201326592,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 10,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 28,
+  "last_commit_ms": 1794936038232,
+  "dedup_ratio": 1.001982339160209,
+  "compression_ratio": 6.119848106025184,
+  "rollback_floor": {
+    "max_commit_seq": 28,
+    "tip_hash": "962f9094a5f053c7e1abefe9b6fc6a7eb29a24a19d9b18073e6a52cedb7745b6"
+  }
+}

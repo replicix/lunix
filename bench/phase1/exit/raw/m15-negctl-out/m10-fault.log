@@ -1,0 +1,10 @@
+df_guard: ok (286 GiB free, 4 GiB wanted)
+df_guard: ok (286 GiB free, 4 GiB wanted)
+== phase immediate count=2 delay=0 14:32:28
+phase immediate done: cycles=2 fio_rc=4 fsck_rc=4 verify_rc=121
+phase,cycles,fio_rc,fsck_rc,hb_errors,verify_rc(1=sha,10=ack-loss,100=fsyncer-err),notes
+immediate,2,4,4,0,121,
+| phase | n | daemon exec->recovered ms p50 | p99 | max | kill->ready ms p50 | max | heartbeat stall ms p50 | p99 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| immediate | 2 | 153 | 153 | 153 | 205 | 210 | 193 | 197 | 197 |
+overall rc=0 (CONTROL=fault: for a negative control 0 means it tripped as designed)

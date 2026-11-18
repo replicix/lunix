@@ -1,0 +1,63 @@
+{
+  "name": "r16kfioc90d90",
+  "uuid": "be6b16bb-41ed-434b-88cb-924eac058197",
+  "state": "detached",
+  "size_bytes": 34359738368,
+  "chunk_size": 16384,
+  "mode": "integrity",
+  "device": null,
+  "stats": {
+    "bytes_written": 0,
+    "bytes_read": 0,
+    "ops_read": 0,
+    "ops_write": 0,
+    "ops_flush": 0,
+    "ops_discard": 0,
+    "ops_write_zeroes": 0,
+    "flush_groups": 0,
+    "flush_group_waiters": 0,
+    "flush_group_max": 0,
+    "chunks_total": 0,
+    "chunks_zero": 0,
+    "dedup_hits": 0,
+    "stored_ulen": 0,
+    "stored_clen": 0,
+    "cold_rmw": 0,
+    "dirty_leaves": 0,
+    "commits": 0,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "space": {
+    "used": 0,
+    "limit": 0,
+    "fs_free": 0,
+    "journal": 0,
+    "segments": 0,
+    "cache": 0,
+    "map": 0,
+    "index": 0,
+    "commits": 0,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 0,
+  "journal_capacity": 0,
+  "journal_marks_written": 0,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 0,
+  "last_commit_seq": 68,
+  "last_commit_ms": null,
+  "dedup_ratio": null,
+  "compression_ratio": null,
+  "rollback_floor": {
+    "max_commit_seq": 68,
+    "tip_hash": "547f30fd239db47b72d6de438eae74c080202b77c2a86fafe6555c73e59d89e7"
+  }
+}

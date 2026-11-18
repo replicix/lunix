@@ -1,0 +1,5 @@
+RECOVER_FOUND id=0
+device reload json failed
+READY id=0 bdev=/dev/ublkb0 recovered=1 ms=153
+REPLY OK detached
+DETACHED

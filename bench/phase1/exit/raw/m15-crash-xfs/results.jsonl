@@ -1,0 +1,4 @@
+{"cell":"crash-kill/xfs/c64k/integrity/immediate","status":"pass","t":"2026-11-17T16:18:10Z","cycles":"25","fio_rc":"0","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","aborted":"","notes":""}
+{"cell":"crash-kill/xfs/c64k/integrity/delay1s","status":"pass","t":"2026-11-17T16:27:43Z","cycles":"12","fio_rc":"0","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","aborted":"","notes":""}
+{"cell":"crash-kill/xfs/c64k/integrity/delay10s","status":"pass","t":"2026-11-17T16:38:07Z","cycles":"5","fio_rc":"0","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","aborted":"","notes":""}
+{"cell":"crash-kill/xfs/c64k/integrity/double","status":"pass","t":"2026-11-17T16:49:14Z","cycles":"8","fio_rc":"0","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","aborted":"","notes":""}

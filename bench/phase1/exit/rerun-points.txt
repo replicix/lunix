@@ -1,0 +1,15 @@
+destage.after_segment_seal
+engine.c3.destaged
+engine.c4.named
+engine.c5.map_sealed
+engine.c6.committed
+engine.c7.checkpoint
+engine.c7.floor
+engine.c8.index
+journal.before_reclaim_delete
+journal.mark.after_sync
+store.checkpoint.after_dirsync
+store.delete.after_dirsync
+store.delete.after_unlink
+store.delete.before_unlink
+store.leftover.after_dirsync

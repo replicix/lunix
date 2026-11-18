@@ -1,0 +1,11 @@
+store.segment.before_fdatasync
+store.set_aside.after_dirsync
+store.set_aside.after_rename
+store.set_aside.before_rename
+store.state.after_dirsync
+store.state.after_fdatasync
+store.state.after_rename
+store.state.before_fdatasync
+ublk.after_fetch
+ublk.after_update_size
+ublk.before_commit

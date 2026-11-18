@@ -1,0 +1,11 @@
+# Tests that are never run by tests/exit/xfstests.sh, on the reference and on Lunix alike. Each line: test name, then
+# the reason after a hash. Only tests that cannot run safely or sensibly in this environment belong here; a test that
+# merely fails is NOT excluded (it is listed in the report as failing on both, or as a Lunix defect).
+# The list is empty on purpose until a reference run on the gate disk shows a test that hangs or damages the host;
+# `-x dangerous` already removes the group xfstests itself marks as able to harm the machine.
+# xfs only: see exclude.common for the rule.
+# the reason after a hash. Only tests that cannot run safely or sensibly in this environment belong here; a test that
+# merely fails is NOT excluded (it is listed in the report as failing on both, or as a Lunix defect).
+# The list is empty on purpose until a reference run on the gate disk shows a test that hangs or damages the host;
+# `-x dangerous` already removes the group xfstests itself marks as able to harm the machine.
+xfs/118  # hung for 4 h on the plain loop reference (2026-11-17): its `falloc 0 40000k` fails with ENOSPC on its 50 MB file system and a later step (the unbounded `dd` or `xfs_fsr`) never ended, cause not determined; excluded from the reference and from Lunix alike

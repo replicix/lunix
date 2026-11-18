@@ -1,0 +1,5 @@
+phase,cycles,fio_rc,fio_errors,fsck_rc,verify_rc,lunix_fsck_rc,notes
+immediate,25,0,0,0,0,0,
+delay1s,12,0,0,0,0,0,
+delay10s,5,0,0,0,0,0,
+double,8,0,0,0,0,0,

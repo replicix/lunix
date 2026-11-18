@@ -1,0 +1,11 @@
+store.checkpoint.before_write
+store.commit.after_dirsync
+store.commit.after_fdatasync
+store.commit.after_rename
+store.commit.before_fdatasync
+store.delete.after_dirsync
+store.delete.after_unlink
+store.delete.before_unlink
+store.evidence.after_dirsync
+store.evidence.after_fdatasync
+store.evidence.after_rename

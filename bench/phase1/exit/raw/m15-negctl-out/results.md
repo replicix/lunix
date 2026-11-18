@@ -1,0 +1,22 @@
+# M15 negative controls (2026-11-17T14:31:32Z)
+- PASS N1 M10 control noreissue tripped (run-crash-loop.sh rc 0; 0 = tripped as designed)
+- PASS N1 M10 control fault tripped (run-crash-loop.sh rc 0; 0 = tripped as designed)
+- PASS create volume neg (8 GiB, chunk 65536, integrity)
+- PASS attach neg (4 queues)
+- device /dev/ublkb0
+- PASS N2 setup: verified write of 256 MiB (rc 0)
+- PASS N2 control precondition: verify_only passes before the corruption (rc 0)
+- PASS N2 control tripped: verify_only after one overwritten 4 KiB block failed (rc 1)
+- PASS N3 setup: fsyncer ran and stopped cleanly (rc 0)
+- PASS N3 control precondition: acknowledged blocks verify before the tampering (rc 0)
+- PASS N3 control tripped: an acknowledged index beyond what was written is reported (rc 1)
+- PASS detach neg
+- PASS lunix fsck --deep clean after detach (exit 0) [neg]
+- PASS create volume neg4 (8 GiB, chunk 65536, integrity)
+- PASS attach neg4 (4 queues)
+- device /dev/ublkb0
+- PASS N4 precondition: a verified write passes while the hook is not armed (rc 0)
+- PASS N4 control tripped: the verified write fails while WRITEs are acknowledged and dropped (rc 1)
+- PASS detach neg4
+- PASS lunix fsck --deep clean after detach (exit 0) [neg4]
+overall FAIL=0

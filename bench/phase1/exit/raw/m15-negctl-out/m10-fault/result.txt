@@ -1,0 +1,1 @@
+overall rc=0 (CONTROL=fault: for a negative control 0 means it tripped as designed)

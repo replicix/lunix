@@ -1,0 +1,11 @@
+store.evidence.before_fdatasync
+store.leftover.after_dirsync
+store.leftover.after_unlink
+store.leftover.before_unlink
+store.pack.after_dirsync
+store.pack.after_fdatasync
+store.pack.after_rename
+store.pack.before_fdatasync
+store.segment.after_dirsync
+store.segment.after_fdatasync
+store.segment.after_rename
