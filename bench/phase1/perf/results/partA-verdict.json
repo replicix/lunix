@@ -1,0 +1,14 @@
+{
+ "c16k": {
+  "r4k": false,
+  "w4k": false,
+  "seqw": false,
+  "seqr": false
+ },
+ "c64k": {
+  "r4k": false,
+  "w4k": false,
+  "seqw": false,
+  "seqr": true
+ }
+}

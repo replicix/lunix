@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 5K of event 'cpu/cycles/P'
+# Event count (approx.): 206678901639
+#
+# Overhead  Command       Shared Object      Symbol                                                                                                                                                                                                                                                                             
+# ........  ............  .................  ...................................................................................................................................................................................................................................................................................
+#
+     8.42%  lunix-read-1  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.21%--0
+               |          
+               |--2.62%--0x10
+               |          
+               |--1.28%--0x30
+               |          
+                --1.23%--0x20
+
+     8.08%  lunix-read-2  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.24%--0
+               |          
+               |--2.43%--0x10
+               |          
+               |--1.29%--0x20
+               |          
+                --1.10%--0x30
+
+     7.99%  lunix-read-0  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.53%--0
+               |          
+               |--2.19%--0x10
+               |          
+               |--1.25%--0x30
+               |          
+                --1.01%--0x20
+
+     7.69%  lunix-read-3  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.03%--0
+               |          
+               |--2.50%--0x10
+               |          
+               |--1.28%--0x30
+               |          
+                --0.85%--0x20
+
+     3.22%  lunix-read-3  lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+            |          
+            |--2.29%--ZSTD_copy4 (inlined)
+            |          ZSTD_overlapCopy8 (inlined)
+            |          ZSTD_execSequence (inlined)
+            |          ZSTD_decompressSequences_body (inlined)
+            |          ZSTD_decompressSequences_bmi2.constprop.0
+            |          ZSTD_decompressFrame (inlined)
+            |          ZSTD_decompressMultiFrame
+            |          ZSTD_decompressDCtx
+            |          <zstd_safe::DCtx>::decompress::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::DCtx>::decompress<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::DCtx>::decompress::<[u8]> (inlined)
+            |          <zstd::bulk::decompressor::Decompressor>::decompress_to_buffer::<[u8]> (inlined)
+            |          lunix_crypto::codec::decompress_into::{closure#1} (inlined)
+            |          <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::try_with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>> (inlined)
+            |          <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>>
+            |          
+             --0.72%--ZSTD_wildcopy (inlined)
+                       ZSTD_execSequence (inlined)
+                       ZSTD_decompressSequences_body (inlined)

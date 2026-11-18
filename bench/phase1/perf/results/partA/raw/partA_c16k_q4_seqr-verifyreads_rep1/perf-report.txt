@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3K of event 'cpu/cycles/P'
+# Event count (approx.): 103620335546
+#
+# Overhead  Command       Shared Object      Symbol                                                                                                                                                                                                                                                                               
+# ........  ............  .................  .....................................................................................................................................................................................................................................................................................
+#
+     5.33%  lunix-read-3  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+                --5.31%--0
+
+     4.89%  lunix-read-1  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     4.81%  lunix-read-2  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     4.79%  lunix-read-0  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     3.47%  lunix-q3      libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     3.37%  lunix-q2      libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     2.92%  lunix-read-0  lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.57%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.59%  lunix-read-2  lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.25%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.35%  lunix-read-1  lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.03%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.34%  lunix-q2      [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x2
+               0x7f0f50000db0
+
+     2.33%  lunix-read-3  lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.89%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.09%  lunix-q3      [kernel.kallsyms]  [k] _copy_from_iter
+            |

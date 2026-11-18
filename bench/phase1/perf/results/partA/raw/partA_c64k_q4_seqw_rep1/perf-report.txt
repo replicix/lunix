@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 441  of event 'cpu/cycles/P'
+# Event count (approx.): 1188393037
+#
+# Overhead  Command          Shared Object      Symbol                                         
+# ........  ...............  .................  ...............................................
+#
+    20.53%  lunix-coord      lunixd             [.] ZSTD_compressBlock_fast
+            |          
+            |--8.51%--ZSTD_selectAddr (inlined)
+            |          ZSTD_match4Found_cmov (inlined)
+            |          ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_6_1 (inlined)
+            |          ZSTD_compressBlock_fast
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+            |--7.10%--ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_6_1 (inlined)
+            |          ZSTD_compressBlock_fast
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+             --4.92%--ZSTD_match4Found_cmov (inlined)
+                       ZSTD_compressBlock_fast_noDict_generic (inlined)
+                       ZSTD_compressBlock_fast_noDict_6_1 (inlined)
+                       ZSTD_compressBlock_fast
+                       ZSTD_buildSeqStore
+                       ZSTD_compressBlock_internal
+                       ZSTD_compress_frameChunk
+                       ZSTD_compressContinue_internal (inlined)
+                       ZSTD_compressEnd_public
+                       ZSTD_compressStream_generic
+                       ZSTD_compressStream2 (inlined)
+                       ZSTD_compressStream2_simpleArgs (inlined)
+                       ZSTD_compress2
+                       <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+                       <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+                       <zstd_safe::CCtx>::compress2::<[u8]>
+
+    18.67%  lunix-coord      lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.76%--0x10
+               |          
+               |--3.72%--0
+               |          
+               |--3.65%--0x1e8
+               |          
+               |--3.17%--0x2890
+               |          
+               |--2.36%--0xf56
+               |          
+                --1.94%--0x30
+

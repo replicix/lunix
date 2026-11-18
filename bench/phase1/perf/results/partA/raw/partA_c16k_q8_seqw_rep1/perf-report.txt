@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 481  of event 'cpu/cycles/P'
+# Event count (approx.): 2975467379
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                          
+# ........  ...............  .................  ................................................................................................................................
+#
+    21.91%  lunix-coord      lunixd             [.] ZSTD_compressBlock_fast_noDict_5_1
+            |          
+            |--5.33%--ZSTD_selectAddr (inlined)
+            |          ZSTD_match4Found_cmov (inlined)
+            |          ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_5_1
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+            |--4.65%--ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_5_1
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+            |--4.49%--ZSTD_match4Found_cmov (inlined)
+            |          ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_5_1
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+            |--3.67%--ZSTD_hash5 (inlined)
+            |          ZSTD_hash5Ptr (inlined)
+            |          ZSTD_hashPtr (inlined)
+            |          ZSTD_compressBlock_fast_noDict_generic (inlined)
+            |          ZSTD_compressBlock_fast_noDict_5_1
+            |          ZSTD_buildSeqStore
+            |          ZSTD_compressBlock_internal
+            |          ZSTD_compress_frameChunk
+            |          ZSTD_compressContinue_internal (inlined)
+            |          ZSTD_compressEnd_public
+            |          ZSTD_compressStream_generic
+            |          ZSTD_compressStream2 (inlined)
+            |          ZSTD_compressStream2_simpleArgs (inlined)
+            |          ZSTD_compress2
+            |          <zstd_safe::CCtx>::compress2::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::CCtx>::compress2<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::CCtx>::compress2::<[u8]>
+            |          
+            |--1.54%--ZSTD_count (inlined)

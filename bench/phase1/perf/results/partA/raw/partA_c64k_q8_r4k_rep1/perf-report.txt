@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 5K of event 'cpu/cycles/P'
+# Event count (approx.): 198748341002
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                               
+# ........  ...............  .................  .....................................................................................................................................................................................................................................................................................
+#
+     3.41%  lunix-read-2     libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+               |          
+                --0.60%--realloc
+                          <alloc::raw_vec::RawVecInner>::finish_grow
+
+     3.38%  lunix-read-1     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--1.84%--0
+               |          
+                --1.54%--0x10
+
+     3.37%  lunix-read-0     libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     3.33%  lunix-read-0     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.01%--0
+               |          
+                --1.31%--0x10
+
+     3.26%  lunix-read-2     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--1.88%--0
+               |          
+                --1.36%--0x10
+
+     3.17%  lunix-read-3     lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+            |          
+            |--1.67%--ZSTD_copy4 (inlined)
+            |          ZSTD_overlapCopy8 (inlined)
+            |          ZSTD_execSequence (inlined)
+            |          ZSTD_decompressSequences_body (inlined)
+            |          ZSTD_decompressSequences_bmi2.constprop.0
+            |          ZSTD_decompressFrame (inlined)
+            |          ZSTD_decompressMultiFrame
+            |          ZSTD_decompressDCtx
+            |          <zstd_safe::DCtx>::decompress::<[u8]>::{closure#0} (inlined)
+            |          <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::DCtx>::decompress<[u8]>::{closure#0}> (inlined)
+            |          <zstd_safe::DCtx>::decompress::<[u8]> (inlined)
+            |          <zstd::bulk::decompressor::Decompressor>::decompress_to_buffer::<[u8]> (inlined)
+            |          lunix_crypto::codec::decompress_into::{closure#1} (inlined)
+            |          <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::try_with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>> (inlined)
+            |          <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>>
+            |          
+             --1.08%--ZSTD_wildcopy (inlined)
+                       ZSTD_execSequence (inlined)
+                       ZSTD_decompressSequences_body (inlined)
+                       ZSTD_decompressSequences_bmi2.constprop.0
+                       ZSTD_decompressFrame (inlined)
+                       ZSTD_decompressMultiFrame
+                       ZSTD_decompressDCtx
+                       <zstd_safe::DCtx>::decompress::<[u8]>::{closure#0} (inlined)
+                       <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::DCtx>::decompress<[u8]>::{closure#0}> (inlined)
+                       <zstd_safe::DCtx>::decompress::<[u8]> (inlined)
+                       <zstd::bulk::decompressor::Decompressor>::decompress_to_buffer::<[u8]> (inlined)
+                       lunix_crypto::codec::decompress_into::{closure#1} (inlined)
+                       <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::try_with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>> (inlined)
+                       <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>>
+
+     3.12%  lunix-read-3     libc.so.6          [.] __memmove_avx512_unaligned_erms

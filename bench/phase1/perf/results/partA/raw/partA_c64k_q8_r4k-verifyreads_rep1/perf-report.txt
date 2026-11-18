@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 6K of event 'cpu/cycles/P'
+# Event count (approx.): 219574963323
+#
+# Overhead  Command       Shared Object      Symbol                                                                                                                                                                                                                                                                             
+# ........  ............  .................  ...................................................................................................................................................................................................................................................................................
+#
+     7.23%  lunix-read-3  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--3.22%--0
+               |          
+               |--1.98%--0x10
+               |          
+               |--1.18%--0x30
+               |          
+                --0.82%--0x20
+
+     7.19%  lunix-read-2  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.71%--0
+               |          
+               |--2.55%--0x10
+               |          
+               |--1.10%--0x30
+               |          
+                --0.81%--0x20
+
+     7.18%  lunix-read-1  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.76%--0
+               |          
+               |--2.36%--0x10
+               |          
+               |--1.05%--0x20
+               |          
+                --0.96%--0x30
+
+     6.77%  lunix-read-0  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.60%--0
+               |          
+               |--1.97%--0x10
+               |          
+               |--1.11%--0x20
+               |          
+                --1.08%--0x30
+
+     2.70%  lunix-read-0  libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     2.70%  lunix-read-2  libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     2.69%  lunix-read-3  libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     2.55%  lunix-read-0  lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+            |          
+            |--1.61%--ZSTD_copy4 (inlined)
+            |          ZSTD_overlapCopy8 (inlined)
+            |          ZSTD_execSequence (inlined)
+            |          ZSTD_decompressSequences_body (inlined)
+            |          ZSTD_decompressSequences_bmi2.constprop.0
+            |          ZSTD_decompressFrame (inlined)
+            |          ZSTD_decompressMultiFrame

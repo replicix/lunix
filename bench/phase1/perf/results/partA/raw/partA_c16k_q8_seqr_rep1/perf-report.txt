@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 4K of event 'cpu/cycles/P'
+# Event count (approx.): 101297753492
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                             
+# ........  ...............  .................  ...................................................................................................................................................................................................................................................................................
+#
+     2.97%  lunix-read-1     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.87%  lunix-read-0     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+                --2.84%--0
+
+     2.79%  lunix-read-2     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+                --2.77%--0
+
+     2.69%  lunix-read-0     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.08%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.66%  lunix-q4         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     2.62%  lunix-read-3     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.54%  lunix-read-3     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.16%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.38%  lunix-read-1     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.96%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.28%  lunix-read-2     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.99%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.88%  lunix-q6         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     1.75%  lunix-read-2     libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     1.75%  lunix-q7         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     1.72%  lunix-q5         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     1.66%  lunix-read-1     libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     1.58%  lunix-read-3     libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms

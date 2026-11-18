@@ -1,0 +1,30 @@
+1795008443891 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795008443891 INFO  lunixd: lunixd started socket=$SCRATCH/m16-parta-state/ctl.sock
+1795008443891 INFO  lunixd::server: control socket ready
+1795008443998 INFO  lunixd::audit: {"ts_ms":1795008443998,"uid":0,"gid":0,"pid":2126795,"method":"volume_create","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795008459559 INFO  lunixd::daemon: volume opened volume="pa16k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795008459619 INFO  lunixd::daemon: attached volume="pa16k" recovered=false ms=15613
+1795008459619 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa16k locked_bytes=582094848
+1795008459619 INFO  lunixd::audit: {"ts_ms":1795008459619,"uid":0,"gid":0,"pid":2126810,"method":"attach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795009393287 INFO  lunixd::audit: {"ts_ms":1795009393287,"uid":0,"gid":0,"pid":2142562,"method":"detach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795009400722 INFO  lunixd::daemon: volume opened volume="pa16k" tip=154 replayed=0 swept_segments=0
+device reload json failed
+1795009400777 INFO  lunixd::daemon: attached volume="pa16k" recovered=false ms=7476
+1795009400777 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa16k locked_bytes=582094848
+1795009400777 INFO  lunixd::audit: {"ts_ms":1795009400777,"uid":0,"gid":0,"pid":2142590,"method":"attach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795009478372 INFO  lunixd::audit: {"ts_ms":1795009478372,"uid":0,"gid":0,"pid":2144416,"method":"detach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795009509899 INFO  lunixd::daemon: volume opened volume="pa16k" tip=154 replayed=0 swept_segments=0
+device reload json failed
+1795009509981 INFO  lunixd::daemon: attached volume="pa16k" recovered=false ms=15589
+1795009509981 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa16k locked_bytes=1161039872
+1795009509981 INFO  lunixd::audit: {"ts_ms":1795009509981,"uid":0,"gid":0,"pid":2144459,"method":"attach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795010399532 INFO  lunixd::audit: {"ts_ms":1795010399532,"uid":0,"gid":0,"pid":2161997,"method":"detach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795010411429 INFO  lunixd::daemon: volume opened volume="pa16k" tip=314 replayed=0 swept_segments=0
+device reload json failed
+1795010411500 INFO  lunixd::daemon: attached volume="pa16k" recovered=false ms=11954
+1795010411500 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa16k locked_bytes=1161039872
+1795010411500 INFO  lunixd::audit: {"ts_ms":1795010411500,"uid":0,"gid":0,"pid":2162032,"method":"attach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795010489985 INFO  lunixd::audit: {"ts_ms":1795010489985,"uid":0,"gid":0,"pid":2164086,"method":"detach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795010525692 INFO  lunixd::server: signal: quiescing every device
+1795010525692 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

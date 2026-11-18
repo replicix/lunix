@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 5K of event 'cpu/cycles/P'
+# Event count (approx.): 212863329555
+#
+# Overhead  Command       Shared Object      Symbol                                                                                                                                                                                                                                                                             
+# ........  ............  .................  ...................................................................................................................................................................................................................................................................................
+#
+     6.91%  lunix-q2      [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x2
+               0x7f0684000db0
+
+     6.62%  lunix-q2      libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     6.58%  lunix-q3      libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     6.26%  lunix-q3      [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x3
+               0x7f0684000db0
+
+     5.45%  lunix-read-3  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.29%--0
+               |          
+               |--1.33%--0x10
+               |          
+               |--0.94%--0x30
+               |          
+                --0.85%--0x20
+
+     5.37%  lunix-read-1  lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--2.18%--0
+               |          
+               |--1.75%--0x10
+               |          
+               |--0.74%--0x30
+               |          
+                --0.65%--0x20
+
+     5.37%  lunix-read-0  lunixd             [.] _blake3_hash_many_avx512

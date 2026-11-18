@@ -70,7 +70,9 @@ pgb() { runuser -u "$PG_USER" -- "$PGBIN/$1" -h "$PGSOCK" -p "$PG_PORT" "${@:2}"
 wl_pgbench() {
   local d=$1
   export LC_ALL=C.UTF-8 LANG=C.UTF-8   # the host may not have the login locale generated; the data is not locale sensitive
-  PGBIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1); [ -x "$PGBIN/initdb" ] || { echo "no PostgreSQL server installed" > "$d/skipped.txt"; return 3; }
+  [ -n "${PGBIN:-}" ] || PGBIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)   # Debian layout
+  [ -n "$PGBIN" ] || { [ -x /usr/bin/initdb ] && PGBIN=/usr/bin; }   # distro packages that put the server in /usr/bin
+  [ -x "$PGBIN/initdb" ] || { echo "no PostgreSQL server installed" > "$d/skipped.txt"; return 3; }
   PGDATA="$MNT/pgdata"; mkdir -p "$PGSOCK" "$d/pg"; chown "$PG_USER":"$PG_USER" "$PGSOCK" "$d/pg"
   install -d -o "$PG_USER" -m 700 "$PGDATA"
   "$PGBIN/postgres" --version > "$d/pg-version.txt"
@@ -169,7 +171,17 @@ run_cell() { # workload chunk fs rep
   sleep 3; snap "$vol" "$D/status-0.json"
   local rss0 c0 c1; rss0=$(rss_kb "$DPID"); c0=$(cpu_secs "$DPID"); thread_cpu "$DPID" > "$D/threads-0.txt"
   local wt0=$SECONDS
+  # store and GC over time (every STORE_SAMPLE s, default 60): the lead asked for it because GC can fall behind under random
+  # overwrite; the cap guard stops the workload (fio, pgbench) if the store passes STORE_CAP_GIB (default 90) of the 100 GiB budget
+  local vdir sp; vdir=$(vol_dir "$vol"); : > "$D/store-timeline.tsv"
+  ( while sleep "${STORE_SAMPLE:-60}"; do
+      sb=$(du -s --block-size=1 "$vdir" 2>/dev/null | cut -f1)
+      printf '%s\t%s\t%s\t%s\n' "$((SECONDS - wt0))" "${sb:-}" "$(status_json "$vol" 2>/dev/null | jq -c '[.journal_used, .space.map, .space.cache, .stats.bytes_written]' 2>/dev/null)" \
+        "$(lx gc "$vol" --status --json 2>/dev/null | jq -c '.state' 2>/dev/null)" >> "$D/store-timeline.tsv"
+      if [ "${sb:-0}" -gt $((${STORE_CAP_GIB:-90} * GIB)) ]; then echo "store ${sb} B over the cap" > "$D/STORE_CAP"; pkill -TERM -x fio; pkill -TERM -x pgbench; fi
+    done ) & sp=$!
   "wl_$w" "$D"; local wrc=$?
+  kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null
   local wsecs=$((SECONDS - wt0))
   c1=$(cpu_secs "$DPID"); thread_cpu "$DPID" > "$D/threads-1.txt"
   local rss1 hwm; rss1=$(rss_kb "$DPID"); hwm=$(hwm_kb "$DPID")

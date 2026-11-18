@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 5K of event 'cpu/cycles/P'
+# Event count (approx.): 142330496965
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+# ........  ...............  .................  .........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+     2.29%  lunix-read-1     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.09%  lunix-read-3     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     1.98%  lunix-read-2     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.61%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.93%  lunix-read-2     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     1.92%  lunix-read-0     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     1.87%  lunix-read-0     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.65%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.80%  lunix-read-1     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.47%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.77%  lunix-read-3     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.63%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.44%  lunix-read-3     lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+            |          
+             --0.57%--ZSTD_copy4 (inlined)
+                       ZSTD_overlapCopy8 (inlined)
+                       ZSTD_execSequence (inlined)
+                       ZSTD_decompressSequences_body (inlined)
+                       ZSTD_decompressSequences_bmi2.constprop.0
+                       ZSTD_decompressFrame (inlined)
+                       ZSTD_decompressMultiFrame
+                       ZSTD_decompressDCtx
+                       <zstd_safe::DCtx>::decompress::<[u8]>::{closure#0} (inlined)
+                       <[u8] as zstd_safe::WriteBuf>::write_from::<<zstd_safe::DCtx>::decompress<[u8]>::{closure#0}> (inlined)
+                       <zstd_safe::DCtx>::decompress::<[u8]> (inlined)
+                       <zstd::bulk::decompressor::Decompressor>::decompress_to_buffer::<[u8]> (inlined)
+                       lunix_crypto::codec::decompress_into::{closure#1} (inlined)
+                       <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::try_with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>> (inlined)
+                       <std::thread::local::LocalKey<core::cell::RefCell<core::option::Option<zstd::bulk::decompressor::Decompressor>>>>::with::<lunix_crypto::codec::decompress_into::{closure#1}, core::result::Result<usize, lunix_iface::error::Error>>
+
+     1.12%  lunix-read-1     lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+     1.08%  lunix-q4         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+            |
+            ---__pv_queued_spin_lock_slowpath
+               |          
+                --1.05%--raw_spin_rq_lock_nested
+                          ___task_rq_lock
+                          try_to_wake_up
+                          |          
+                           --0.92%--autoremove_wake_function
+                                     __wake_up_common

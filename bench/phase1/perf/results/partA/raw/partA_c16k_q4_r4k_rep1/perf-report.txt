@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3K of event 'cpu/cycles/P'
+# Event count (approx.): 109340622896
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                             
+# ........  ...............  .................  ...................................................................................................................................................................................................................................................................................
+#
+     2.95%  lunix-read-1     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.59%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.92%  lunix-read-3     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.90%  lunix-read-0     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.51%  lunix-read-1     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.38%  lunix-read-2     lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.35%  lunix-read-0     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.00%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.30%  lunix-read-2     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.88%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.01%  lunix-read-3     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --1.74%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     1.89%  lunix-q3         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+            |
+            ---__pv_queued_spin_lock_slowpath
+               |          
+                --1.84%--raw_spin_rq_lock_nested
+                          ___task_rq_lock
+                          try_to_wake_up
+                          |          
+                           --1.71%--autoremove_wake_function
+                                     __wake_up_common
+                                     __wake_up
+                                     sbitmap_queue_wake_up
+                                     sbitmap_queue_clear
+                                     __blk_mq_free_request
+                                     ublk_ch_uring_cmd_local
+                                     io_uring_cmd
+                                     __io_issue_sqe
+                                     io_issue_sqe
+                                     io_submit_sqe
+                                     io_submit_sqes
+                                     __do_sys_io_uring_enter
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     syscall
+                                     0x3
+                                     0x7f0f50000db0
+
+     1.66%  lunix-q2         [kernel.kallsyms]  [k] __smp_call_single_queue
+            |

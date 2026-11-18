@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3K of event 'cpu/cycles/P'
+# Event count (approx.): 97411238220
+#
+# Overhead  Command          Shared Object                                   Symbol                                                                                                                                                                                                                                                                               
+# ........  ...............  ..............................................  .....................................................................................................................................................................................................................................................................................
+#
+     4.19%  lunix-q2         libc.so.6                                       [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     3.58%  lunix-q3         libc.so.6                                       [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     3.01%  lunix-read-0     lunixd                                          [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.83%  lunix-read-2     lunixd                                          [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.46%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.82%  lunix-q2         [kernel.kallsyms]                               [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x2
+               0x7f0f50000db0
+
+     2.77%  lunix-read-3     lunixd                                          [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.42%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.72%  lunix-read-3     lunixd                                          [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               0
+
+     2.68%  lunix-read-0     lunixd                                          [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.17%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.57%  lunix-read-1     lunixd                                          [.] <lunix_engine::cache::ChunkCache>::insert
+            |          
+             --2.17%--<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+                       <lunix_engine::cache::ChunkCache>::insert
+
+     2.51%  lunix-q3         [kernel.kallsyms]                               [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64

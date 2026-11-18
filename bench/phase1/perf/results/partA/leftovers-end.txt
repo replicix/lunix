@@ -1,0 +1,4 @@
+registered (this run): /dev/nullb0
+note: module ublk_drv loaded
+note: module null_blk loaded
+ublk-leftovers: clean
