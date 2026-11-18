@@ -84,6 +84,12 @@ run_cell() { # target chunk mode
     [ "$trc" = 0 ]; expect "$cell p$i: trimcheck (discard, write-zeroes) rc $trc" $? || bad=1
     [ "$frc" = 0 ] && [ "$errs" = 0 ] && [ "$trc" = 0 ] || bad=1
     if [ "$bad" != 0 ]; then notes="$notes;p$i"; break; fi
+    # GC runs on its own (M17.B, M12c): record the collector state and the space ledger after every profile; the store of a
+    # cell must stay below STORE_CAP_GIB (the plan's 100 GiB for the whole of M15) or the cell stops and fails
+    status_json "$vol" > "$d/status-p$i.json" 2>/dev/null; lx gc "$vol" --status --json > "$d/gc-status-p$i.json" 2>&1
+    local sbx; sbx=$(store_bytes "$vol")
+    say "- p$i: store $((sbx >> 30)) GiB, space used $(jq -r '(.space.used // 0) / 1073741824 | floor' "$d/status-p$i.json" 2>/dev/null) GiB, gc $(jq -c '{state,condemned_pending,last_pass}' "$d/gc-status-p$i.json" 2>/dev/null | cut -c1-160)"
+    if [ $((sbx >> 30)) -gt "${STORE_CAP_GIB:-80}" ]; then fail "$cell p$i: the store is above ${STORE_CAP_GIB:-80} GiB (GC is not keeping up)"; bad=1; notes="$notes;store-cap p$i"; break; fi
     i=$((i + 1))
   done
   local profiles_done=$i
