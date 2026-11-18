@@ -134,7 +134,12 @@ one_run() {
   WL_STOPPED=1; kill -TERM "$FIO_PID" 2>/dev/null
   wl_finish "$fs" 600
   detach_vol "$vol"; local drc=$?
-  if [ "$drc" != 0 ]; then wait_ping 90; detach_vol "$vol"; drc=$?; fi
+  if [ "$drc" != 0 ]; then
+    # a crash during the detach: the daemon closed the connection. The new daemon either still has the volume attached (the
+    # retry detaches it) or the detach had completed (the retry says "not attached"); fsck below refuses an attached volume.
+    wait_ping 90; detach_vol "$vol"; drc=$?
+    if [ "$drc" != 0 ] && grep -q "is not attached" "$OUT/lx.$_cn.detach-$vol.txt" 2>/dev/null; then drc=0; RUN_NOTES="$RUN_NOTES;crash during detach, the retry found it detached"; fi
+  fi
   lunix_fsck "$vol" "$label"; local frc=$?
   # `index_missing` is a warning by design after a crash: the index lags the commit chain and "mount's catch-up restores
   # it" (fsck code table). Accepted only when it is the sole finding above a note, no `index_lost` or error exists, and one
@@ -183,12 +188,15 @@ while read -r p; do
   if [ -s "$COUNTS" ]; then
     c=$(awk -v p="$p" '$1==p{print $2}' "$COUNTS"); c=${c:-0}
     if [ "$c" = 0 ]; then say "- UNREACHED $p: the counting run never executed it"; rec "crashpoint/$p" unreached why=count0; continue; fi
-    hits="first:1 mid:$(((c + 1) / 2)) last:$((c * 8 / 10))"
+    l=$((c * 8 / 10)); [ "$l" -ge 1 ] || l=1
+    hits="first:1 mid:$(((c + 1) / 2)) last:$l"
   else hits="first:$(echo "$HITS_FALLBACK" | cut -d' ' -f1) mid:$(echo "$HITS_FALLBACK" | cut -d' ' -f2) last:$(echo "$HITS_FALLBACK" | cut -d' ' -f3)"; fi
   fss="ext4"; case "$p" in engine.c*) fss="ext4 xfs" ;; esac
   for fs in $fss; do
+    seen=""
     for hk in $hits; do
       kind=${hk%%:*}; hit=${hk##*:}
+      case " $seen " in *" $hit "*) continue ;; esac; seen="$seen $hit"   # counts of 1 or 2 make first, mid and last the same hit
       budget_left || { say "- BUDGET reached before $p:$hit ($fs)"; rec "crashpoint/$p/$kind/$fs" skip why=budget; continue; }
       cell="crashpoint/$p/$kind-$hit/$fs"; say ""; say "## $cell"
       one_run "$(echo "$p-$kind-$fs" | tr '.' '_')" "$fs" "LUNIX_CRASH_AT=$p:$hit"

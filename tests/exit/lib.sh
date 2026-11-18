@@ -288,7 +288,9 @@ stop_fio() {
   FIO_PIDS=()
 }
 # fio_json FILE: the JSON part of a fio output file (fio may print warnings in front of it)
-fio_json() { sed -n '/^{/,$p' "$1"; }
+# A fio that was stopped with TERM can leave its "select() call in helper thread failed" message glued in front of the
+# opening brace (same line), so the JSON is taken from the line that holds "fio version" onwards.
+fio_json() { echo '{'; sed -n '/"fio version"/,$p' "$1"; }
 # fio_errors FILE: sum of the job-level error codes in a fio JSON report (0 = every job ended without error, a verify
 # failure is a nonzero job error); 999 when the report cannot be read
 fio_errors() {
