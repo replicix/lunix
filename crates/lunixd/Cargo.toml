@@ -19,6 +19,7 @@ crashpoints = [
   "lunix-journal/crashpoints",
   "lunix-destage/crashpoints",
   "lunix-ublk/crashpoints",
+  "lunix-gc/crashpoints",
 ]
 # The in-process volume builder (`lunixd::testsupport`) for the stack tests
 # (M12b), fsck (M14) and GC (M17.B). Test code only.

@@ -648,6 +648,70 @@ fn gc_pass_dry_run_and_status() {
     assert!(o.stdout.contains("grace"), "{}", o.stdout);
     let j = env.run(&["gc", "vol1", "--status", "--json"]);
     assert!(serde_json::from_str::<serde_json::Value>(&j.stdout).is_ok());
+    // `--json` of a pass, a dry run and the status: the response bodies as
+    // the daemon sends them (M12c), every field present.
+    env.ok("Gc", Response::Gc(pass.clone()));
+    let j = env.run(&["gc", "vol1", "--json"]);
+    assert_eq!(j.code, 0, "{}", j.stderr);
+    let v: serde_json::Value = serde_json::from_str(&j.stdout).unwrap();
+    assert_eq!(v["pass"], 7);
+    assert_eq!(v["dry_run"], false);
+    assert_eq!(v["segments_deleted"], 2);
+    assert_eq!(v["bytes_freed"], 5 << 20);
+    for k in [
+        "segments_condemned",
+        "packs_deleted",
+        "runs_deleted",
+        "commits_deleted",
+        "segments_compacted",
+        "bytes_moved",
+    ] {
+        assert!(v[k].is_u64(), "{k}: {v}");
+    }
+    assert_eq!(serde_json::from_value::<GcPassSummary>(v).unwrap(), pass);
+    env.ok(
+        "Gc",
+        Response::Gc(GcPassSummary {
+            dry_run: true,
+            ..pass.clone()
+        }),
+    );
+    let j = env.run(&["gc", "vol1", "--dry-run", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&j.stdout).unwrap();
+    assert_eq!(v["dry_run"], true);
+    assert_eq!(v["pass"], 7);
+    let status = GcStatusSnapshot {
+        state: None,
+        condemned_pending: 1,
+        moved_pending: 2,
+        last_pass: Some(pass.clone()),
+        stats: lunix_iface::gc::GcStats {
+            passes: 3,
+            live_bytes: 40 << 20,
+            dead_bytes: 1 << 20,
+            bytes_freed: 9 << 20,
+            segments_compacted: 1,
+            compaction_read: 2 << 20,
+            compaction_written: 1 << 20,
+        },
+        last_finished_ms: Some(1_767_225_600_000),
+        requests: 1,
+    };
+    env.ok("GcStatus", Response::GcStatus(status.clone()));
+    let o = env.run(&["gc", "vol1", "--status"]);
+    assert_eq!(o.code, 0);
+    common::assert_snapshot("gc-status.txt", &o.stdout);
+    env.ok("GcStatus", Response::GcStatus(status.clone()));
+    let j = env.run(&["gc", "vol1", "--status", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&j.stdout).unwrap();
+    assert!(v["state"].is_null(), "{v}");
+    assert_eq!(v["stats"]["passes"], 3);
+    assert_eq!(v["last_pass"]["pass"], 7);
+    assert_eq!(v["requests"], 1);
+    assert_eq!(
+        serde_json::from_value::<GcStatusSnapshot>(v).unwrap(),
+        status
+    );
     assert_eq!(env.run(&["gc", "vol1", "--status", "--dry-run"]).code, 2);
     let reqs = env.server.requests();
     assert_eq!(

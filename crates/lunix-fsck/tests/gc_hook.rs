@@ -741,3 +741,135 @@ fn truncate_tip_and_gc_in_one_run_leave_a_clean_volume() {
     assert!(!r.has(code::GC_LIVENESS) && !r.has(code::GC_UNCHECKED));
     assert!(r.exit_code() <= 1, "{}", r.render_text());
 }
+
+// ---------------------------------------------------------------------------
+// The orphan and index_lost rules of the M17.B stack round (re-review M-3).
+
+/// An unreferenced segment below the high-water mark whose naming commit is
+/// gone (as GC leaves it) is GC's garbage, not an `orphan`: the dry run
+/// counts it. A sealed segment above the mark that nothing names is one.
+#[test]
+fn below_the_mark_unreferenced_is_gc_garbage_above_it_an_orphan() {
+    let dead = dead_segments();
+    let b = build(&churn_spec(CryptoMode::Integrity));
+    // GC's retained set under tip 4 reaches down to commit 2: commits 0 and
+    // 1 go first, the dead segments they named stay until a pass.
+    std::fs::remove_file(b.path(&b.commit_rel(0))).expect("rm");
+    std::fs::remove_file(b.path(&b.commit_rel(1))).expect("rm");
+    let r = b.fsck(&b.opts());
+    assert!(!r.has(code::ORPHAN), "{}", r.render_text());
+    assert_eq!(r.exit_code(), 0, "{}", r.render_text());
+    let dry = codes(&r, code::GC_DRY_RUN);
+    assert!(
+        dry.iter().any(|m| !m.contains("condemn 0 segments")),
+        "the dry run counts the dead segments: {dry:?}"
+    );
+    assert!(!dead.is_empty());
+
+    // A sealed segment above the mark that nothing names: an orphan.
+    let store = b.open_store();
+    let id = b.crypto.extents().chunk_id(ExtentKind::Data, b"orphan");
+    let mut ext = Vec::new();
+    b.crypto
+        .extents()
+        .seal(
+            ExtentKind::Data,
+            &id,
+            &EncodingDesc {
+                codec: Codec::Raw,
+                level: Level(0),
+                ulen: 6,
+                dict_id: None,
+            },
+            b"orphan",
+            &mut ext,
+        )
+        .expect("seal");
+    let mut w = store.open_segment().expect("segment");
+    w.append_extent(&id, None, &ext).expect("append");
+    w.seal(None).expect("seal");
+    drop(store);
+    let r = b.fsck(&b.opts());
+    assert!(r.has(code::ORPHAN), "{}", r.render_text());
+}
+
+/// Footers with one chunk id left out: an index rebuilt through it lacks
+/// that id's entry.
+struct Without {
+    store: lunix_store::LocalVolume,
+    id: ChunkId,
+}
+
+impl SegmentFooters for Without {
+    fn segment_footer(
+        &self,
+        seg: lunix_format::SegId,
+    ) -> lunix_iface::Result<lunix_format::segment::FooterBody> {
+        let mut f = self.store.segment_footer(seg)?;
+        f.entries.retain(|e| e.chunk_id != self.id);
+        Ok(f)
+    }
+}
+
+/// A segment the tip's chain does not name that holds a live and a dead
+/// extent: `(segment, a live id, a dead id)`.
+fn mixed_segment(b: &Built) -> (ObjId, ChunkId, ChunkId) {
+    let tip = b.known.tip;
+    let live: BTreeSet<(ObjId, u32)> = (2..=tip)
+        .flat_map(|q| entries(b, q))
+        .map(|(_, e)| (e.seg, e.off))
+        .collect();
+    let chain: BTreeSet<ObjId> = (tip - 1..=tip)
+        .flat_map(|q| full(b, q).new_segments)
+        .collect();
+    let store = b.open_store();
+    for &seg in &b.known.segments {
+        if chain.contains(&seg) {
+            continue;
+        }
+        let Ok(f) = store.segment_footer(seg) else {
+            continue;
+        };
+        let l = f.entries.iter().find(|e| live.contains(&(seg, e.off)));
+        let d = f.entries.iter().find(|e| !live.contains(&(seg, e.off)));
+        if let (Some(l), Some(d)) = (l, d) {
+            return (seg, l.chunk_id, d.chunk_id);
+        }
+    }
+    panic!("no segment with a live and a dead extent");
+}
+
+/// Rebuilds the index without `id`.
+fn rebuild_without(b: &Built, id: ChunkId) {
+    let store = b.open_store();
+    let segs: Vec<ObjId> = SegmentStore::list(&store)
+        .expect("list")
+        .iter()
+        .map(|s| s.seg)
+        .collect();
+    let idx = LsmIndex::open(&b.dir, store.ids(), b.spec.id_len).expect("index");
+    idx.rebuild(
+        &segs,
+        &Without {
+            store: store.clone(),
+            id,
+        },
+    )
+    .expect("rebuild");
+}
+
+/// `index_lost` counts only live extents: a dead id of a segment in use
+/// without an entry is not lost (nothing needs it), a live one is.
+#[test]
+fn index_lost_counts_only_live_extents() {
+    let mut spec = churn_spec(CryptoMode::Integrity);
+    spec.segment_target = 64 * 1024;
+    let b = build(&spec);
+    let (_seg, live, dead) = mixed_segment(&b);
+    rebuild_without(&b, dead);
+    let r = b.fsck(&b.opts());
+    assert!(!r.has(code::INDEX_LOST), "{}", r.render_text());
+    rebuild_without(&b, live);
+    let r = b.fsck(&b.opts());
+    assert!(r.has(code::INDEX_LOST), "{}", r.render_text());
+}

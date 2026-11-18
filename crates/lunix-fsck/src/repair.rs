@@ -157,7 +157,7 @@ pub(crate) fn run(
             facts,
             repair: true,
         };
-        let fs = gc::check_gc(&ctx);
+        let fs = gc::check_gc(&ctx).findings;
         let ran = fs.iter().any(|f| f.code == code::GC_REPAIRED);
         for f in fs {
             refusals.push(f);
@@ -253,14 +253,18 @@ fn truncate_tip(
     let not_retained =
         facts.tip.is_none() && facts.json.as_ref().is_some_and(|j| j.retain_last < 2);
     let prev_hash = s.commit_codec().object_hash(&prev_bytes);
-    if let Err(why) = previous_root_resolves(s, facts, &prev_commit, prev.seq, prev_hash) {
-        refuse(
-            sink,
-            what,
-            format!("the previous commit's map does not resolve completely ({why}); nothing was changed"),
-        );
-        return false;
-    }
+    let prev_high_water = match previous_root_resolves(s, facts, &prev_commit, prev.seq, prev_hash)
+    {
+        Ok(hw) => hw,
+        Err(why) => {
+            refuse(
+                    sink,
+                    what,
+                    format!("the previous commit's map does not resolve completely ({why}); nothing was changed"),
+                );
+            return false;
+        }
+    };
     let new_floor = RollbackFloor {
         max_commit_seq: prev.seq,
         tip_hash: prev_hash,
@@ -347,6 +351,32 @@ fn truncate_tip(
         Some(_) => "the journal still holds every record above the new cut".to_owned(),
         None => "the journal holds no record above the new cut; writes between the new tip's cut and the old one, if there were any, are lost".to_owned(),
     };
+    // The index for the new tip before the tip goes (final review S-1). A
+    // dropped tip may name a compaction output whose relocations the index
+    // points at; the next open sweeps that output (above the new mark) and
+    // those ids would lose their entries. Rebuilt from the good segments at
+    // or below the previous commit's mark, the index is right for the new
+    // tip; should the set-aside not happen (a crash, an error), the old tip
+    // is still the tip and the mount's catch-up adds the entries of the
+    // segments only it names (fsck says `index_missing` until then).
+    match indexcheck::rebuild_upto(s, facts, prev_high_water) {
+        Ok(n) => actions.push(RepairAction {
+            action: "rebuild_index",
+            detail: format!(
+                "rebuilt for commit {} from every good segment at or below its high-water mark: {n} entries",
+                prev.seq.0
+            ),
+        }),
+        Err(e) => {
+            refuse(
+                sink,
+                what,
+                format!("the index could not be rebuilt for the previous commit ({e}); the tip was not set aside"),
+            );
+            return false;
+        }
+    }
+    lunix_iface::crashpoint!("fsck.truncate_tip.after_rebuild");
     if let Err(e) = s.vol.set_aside(tip.seq) {
         // The floor may already be lowered (an action says so): nothing else
         // runs on a volume whose tip is in question.
@@ -411,7 +441,7 @@ fn previous_root_resolves(
     prev: &lunix_format::commit::Full,
     seq: lunix_format::CommitSeq,
     hash: [u8; 32],
-) -> std::result::Result<(), String> {
+) -> std::result::Result<u64, String> {
     // The new tip's retained chain: what mount keeps. Everything above its
     // high-water mark that it does not name is swept at the next mount
     // (DESIGN 4.4), so a root must not resolve into it (M17.B review B-1).
@@ -483,7 +513,7 @@ fn previous_root_resolves(
                 "its roots resolve into object {:016x}, which only the dropped tip names: the next mount would delete it",
                 id.raw()
             )),
-            None => Ok(()),
+            None => Ok(high_water),
         },
     }
 }

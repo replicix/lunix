@@ -395,6 +395,9 @@ impl GcStateStore for TStore {
     fn evidence_passes(&self) -> Result<Vec<u64>> {
         Ok(lock(&self.st).evidence.keys().copied().collect())
     }
+    fn delete_evidence(&self, pass: u64) -> Result<bool> {
+        Ok(lock(&self.st).evidence.remove(&pass).is_some())
+    }
 }
 
 impl PinSource for TStore {

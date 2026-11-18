@@ -16,7 +16,7 @@ use lunix_iface::crypto::{CommitCodec, ExtentCodec};
 use lunix_iface::gc::{Collector, GcState};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::map::ChunkNo;
-use lunix_iface::store::{CommitStore, SegmentStore, VolumeDir};
+use lunix_iface::store::{CommitStore, GcStateStore, SegmentStore, VolumeDir};
 use lunix_iface::{Error, Result};
 
 use super::sim::{data_of, high_water, Sim, SimCfg, GRACE};
@@ -423,6 +423,74 @@ fn a_floor_that_fails_after_the_recheck_still_keeps_the_commits() {
     s.quiesce().unwrap();
     assert!(!s.commit_exists(1));
     let _ = CommitSeq(0);
+}
+
+/// Final review M-1: commits condemned while the floor is unreadable are
+/// deferred at every pass; those passes are repeated (the floor may come
+/// back) but write no evidence object, so the local bound keeps the objects
+/// that recorded real changes.
+#[test]
+fn passes_deferred_for_an_unreadable_floor_repeat_without_evidence() {
+    let mut s = sim();
+    let flaky = Arc::new(Flaky {
+        fail: AtomicBool::new(false),
+        store: s.store.clone(),
+    });
+    s.gc = Gc::new(flaky.clone(), s.cfg.gc);
+    for i in 0..8 {
+        s.write(i, i);
+        s.commit().unwrap();
+    }
+    s.clock.advance(Duration::from_secs(5));
+    // Until a commit is condemned.
+    for _ in 0..100_000 {
+        if s.gc
+            .condemned()
+            .iter()
+            .any(|o| matches!(o, ObjectRef::Commit(_)))
+        {
+            break;
+        }
+        s.unit().unwrap();
+        s.clock.advance(Duration::from_secs(1));
+    }
+    let condemned: Vec<ObjectRef> =
+        s.gc.condemned()
+            .into_iter()
+            .filter(|o| matches!(o, ObjectRef::Commit(_)))
+            .collect();
+    assert!(!condemned.is_empty(), "a commit is condemned");
+    flaky.fail.store(true, Ordering::SeqCst);
+    // The pass in progress ends; after it, only deferrals for the floor.
+    s.pass().unwrap();
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    let evidence = s.store.evidence_passes().unwrap().len();
+    let passes = s.gc.stats().passes;
+    for _ in 0..10 {
+        s.clock.advance(Duration::from_secs(2));
+        s.pass().unwrap();
+    }
+    assert!(
+        s.gc.stats().passes >= passes + 10,
+        "a floor deferral is retried at every interval ({} -> {})",
+        passes,
+        s.gc.stats().passes
+    );
+    assert_eq!(
+        s.store.evidence_passes().unwrap().len(),
+        evidence,
+        "no evidence object for passes that only deferred for the floor"
+    );
+    for o in &condemned {
+        if let ObjectRef::Commit(c) = o {
+            assert!(s.commit_exists(c.0), "commit {} kept", c.0);
+        }
+    }
+    // The floor back: the next pass deletes them and writes its evidence.
+    flaky.fail.store(false, Ordering::SeqCst);
+    s.quiesce().unwrap();
+    assert!(s.store.evidence_passes().unwrap().len() > evidence);
 }
 
 /// M4: an extent that does not open is skipped and reported; the pass, and

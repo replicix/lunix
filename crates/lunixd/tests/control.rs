@@ -273,20 +273,36 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
     let ij = std::fs::read_to_string(voldir_of(&mut d, "i").join("volume.json")).unwrap();
     assert!(ij.contains("\"error\""), "{ij}");
 
-    // GC: no collector in this build; status is idle.
+    // GC: a dry run on the attached volume changes nothing; status answers
+    // (control_gc.rs has the churn volume). Not attached: `gc` is refused,
+    // status is idle.
+    match ok(call(
+        &mut d,
+        Request::Gc(GcRequest {
+            name: "i".into(),
+            dry_run: true,
+        }),
+    )) {
+        Response::Gc(s) => assert!(s.dry_run && s.pass == 0, "{s:?}"),
+        r => panic!("{r:?}"),
+    }
+    assert!(matches!(
+        ok(call(&mut d, Request::GcStatus(name("i")))),
+        Response::GcStatus(_)
+    ));
     assert_eq!(
         code(call(
             &mut d,
             Request::Gc(GcRequest {
-                name: "i".into(),
-                dry_run: true
+                name: "p".into(),
+                dry_run: false,
             })
         ))
         .0,
         ErrorCode::Invalid
     );
     assert!(
-        matches!(ok(call(&mut d, Request::GcStatus(name("i")))), Response::GcStatus(s) if s.state.is_none())
+        matches!(ok(call(&mut d, Request::GcStatus(name("p")))), Response::GcStatus(s) if s.state.is_none() && s.last_pass.is_none())
     );
 
     // Detach of a busy volume is Busy and changes nothing.

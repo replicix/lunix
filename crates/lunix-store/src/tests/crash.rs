@@ -67,7 +67,7 @@ fn table() -> Vec<(&'static str, Vec<String>)> {
             .map(|s| format!("store.checkpoint.{s}"))
             .collect(),
         ),
-        ("delete_segment", del("store.delete")),
+        ("delete_segment", del("store.segment_delete")),
         ("delete_pack", del("store.delete")),
         ("delete_commit", del("store.delete")),
         ("leftovers", del("store.leftover")),

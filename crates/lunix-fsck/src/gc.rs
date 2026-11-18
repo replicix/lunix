@@ -14,7 +14,8 @@
 //! * **Liveness.** `lunix-gc`'s mark ([`lunix_gc::liveness`]) runs over the
 //!   locked volume (the index is fsck's scratch copy) and fsck recounts the
 //!   live bytes of every segment: a mismatch in any segment is the error
-//!   `gc_liveness`. The recount is a second writing of the mark's resolution
+//!   `gc_liveness`, as is a pack fsck's walk from disk reaches that the mark
+//!   does not count live. The recount is a second writing of the mark's resolution
 //!   rule over fsck's own footer parse and a full walk of every root (the
 //!   mark walks with a skip set, 32 leaves per unit); it shares with the mark
 //!   the root set (the mark's own), the index and the map walker, so a wrong
@@ -78,24 +79,39 @@ pub struct GcContext<'a> {
     pub(crate) repair: bool,
 }
 
-/// The GC-specific checks, or with `repair` the offline pass. Returns the
-/// findings (notes such as `gc_pending` included).
-pub fn check_gc(ctx: &GcContext<'_>) -> Vec<Finding> {
+/// What the GC hook found.
+pub struct GcCheck {
+    /// The findings (notes such as `gc_pending` included).
+    pub findings: Vec<Finding>,
+    /// What a pass would do now, when the dry run ran (the report's
+    /// `gc_dry_run`; all zero on a volume without GC work).
+    pub dry_run: Option<GcPassSummary>,
+}
+
+/// The GC-specific checks, or with `repair` the offline pass.
+pub fn check_gc(ctx: &GcContext<'_>) -> GcCheck {
     let mut out = Vec::new();
+    let mut dry_run = None;
     if ctx.repair {
         repair(ctx, &mut out);
-        return out;
+        return GcCheck {
+            findings: out,
+            dry_run,
+        };
     }
     let list = decode_list(ctx.facts, &mut out);
     let marked = if ready(ctx.facts) {
-        compare_and_dry_run(ctx, &mut out)
+        compare_and_dry_run(ctx, &mut out, &mut dry_run)
     } else {
         None
     };
     if let Some(list) = &list {
         pending(ctx, list, marked.as_ref(), &mut out);
     }
-    out
+    GcCheck {
+        findings: out,
+        dry_run,
+    }
 }
 
 /// The ids of segments, packs and index runs the condemned list names, so
@@ -359,7 +375,11 @@ fn floor_source(s: &Session) -> Arc<dyn FloorSource> {
 }
 
 /// Returns `lunix-gc`'s mark when it ran.
-fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Liveness> {
+fn compare_and_dry_run(
+    ctx: &GcContext<'_>,
+    out: &mut Vec<Finding>,
+    dry: &mut Option<GcPassSummary>,
+) -> Option<Liveness> {
     let s = ctx.session;
     // The scratch copy: a dry run and a mark change nothing, and fsck never
     // writes to the volume's index without a repair flag. Its damage was
@@ -390,7 +410,10 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
         }
     };
     match recount(&view, ctx.facts, &gc_live.roots) {
-        Ok(mine) => compare(&mine, &gc_live, out),
+        Ok(mine) => {
+            compare(&mine, &gc_live, out);
+            compare_packs(ctx.facts, &gc_live, out);
+        }
         Err(e) => out.push(Finding::new(
             code::GC_UNCHECKED,
             "gc",
@@ -403,6 +426,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
             if let Some(text) = summary_text(&sum) {
                 out.push(Finding::new(code::GC_DRY_RUN, "gc", text));
             }
+            *dry = Some(sum);
         }
         Err(e) => out.push(Finding::new(
             code::GC_UNCHECKED,
@@ -529,6 +553,28 @@ fn compare(mine: &BTreeMap<ObjId, u64>, gc: &Liveness, out: &mut Vec<Finding>) {
                 format!("fsck counts {a} live bytes, lunix-gc's mark {b}"),
             ));
         }
+    }
+}
+
+/// Every pack fsck's own walk (from disk) reached from the retained roots and
+/// GC's retained set below `chain_floor` must be live in GC's mark (M17.B
+/// stack review B-1: a mark that walked a resident copy of a node missed the
+/// older root's pack). GC may keep more (pins); it may not keep less.
+fn compare_packs(facts: &Facts, gc: &Liveness, out: &mut Vec<Finding>) {
+    let Some(w) = &facts.walk else { return };
+    let mut missed: Vec<ObjId> = w
+        .used_packs
+        .iter()
+        .filter(|p| !gc.live_packs.contains(*p))
+        .copied()
+        .collect();
+    missed.sort_unstable();
+    for p in missed {
+        out.push(Finding::new(
+            code::GC_LIVENESS,
+            lpath::map_pack_sealed(p),
+            "a retained root reaches this pack (fsck's walk from disk), lunix-gc's mark does not: a pass would delete it",
+        ));
     }
 }
 

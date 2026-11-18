@@ -186,7 +186,9 @@ pub trait BlockEngine: Send + Sync {
 
     /// Called after the ublk layer stopped delivering requests (detach, or
     /// before a quiesce handover): performs the final cut and commit. Dropping
-    /// the engine afterwards loses nothing. Idempotent. Control thread, may
+    /// the engine afterwards loses nothing. Idempotent. An implementation may
+    /// end background work for good here (the engine ends its GC calls), so
+    /// the engine is not expected to serve on afterwards. Control thread, may
     /// block. There is no `detach` here: stopping and deleting the device
     /// belongs to the ublk layer (W1, W2).
     ///

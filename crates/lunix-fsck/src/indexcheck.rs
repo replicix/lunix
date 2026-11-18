@@ -251,7 +251,18 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
         )
     };
     let mut caught = ids_of(&|id| chain_named.contains(id));
-    let mut lost = ids_of(&|id| in_use(id) && !chain_named.contains(id));
+    // Lost: a live extent (a retained root resolved to it) of a segment in
+    // use that the chain does not name. A dead id of such a segment may have
+    // lost its entry with a deleted newer copy, and nothing needs it (M17.B
+    // review B-4).
+    let mut lost = IdSet::new(
+        facts
+            .segments
+            .iter()
+            .filter(|(id, c)| c.good && in_use(id) && !chain_named.contains(id))
+            .flat_map(|(_, c)| c.exts.iter().filter(|e| e.live).map(|e| e.id))
+            .collect(),
+    );
     let mut all_footer_ids: Option<IdSet> = None;
     let (mut stale, mut extra) = (0u64, 0u64);
     let mut first_stale: Option<String> = None;
@@ -328,6 +339,17 @@ pub(crate) fn compare(view: &IndexView, facts: &Facts, sink: &mut Sink) {
 /// durable commit covers, atomically and durably (`ChunkIndex::rebuild`).
 /// Returns the number of entries in the new index.
 pub(crate) fn rebuild(s: &Session, facts: &Facts) -> lunix_iface::Result<u64> {
+    rebuild_upto(s, facts, facts.high_water)
+}
+
+/// As [`rebuild`], from the good segments at or below `high_water` only
+/// (`--truncate-tip` rebuilds for the previous commit's mark before it sets
+/// the tip aside).
+pub(crate) fn rebuild_upto(
+    s: &Session,
+    facts: &Facts,
+    high_water: u64,
+) -> lunix_iface::Result<u64> {
     let idx = LsmIndex::open(&s.dir, s.vol.ids(), s.desc.id_len)?;
     // Every good sealed segment at or below the high-water mark (DESIGN 4.4
     // step 4, M17 rule 7): a stale hint is resolved only through the index,
@@ -338,7 +360,7 @@ pub(crate) fn rebuild(s: &Session, facts: &Facts) -> lunix_iface::Result<u64> {
     let segs: Vec<ObjId> = facts
         .segments
         .iter()
-        .filter(|(id, c)| c.good && id.raw() <= facts.high_water)
+        .filter(|(id, c)| c.good && id.raw() <= high_water)
         .map(|(id, _)| *id)
         .collect();
     let footers: &dyn SegmentFooters = &s.vol;
