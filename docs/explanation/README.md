@@ -13,7 +13,7 @@ Included here are:
   resize, security, CSI, the failure matrix and the performance targets.
 - [Decisions (ADRs)](DECISIONS.md): what was chosen, what was rejected,
   and why. All accepted on 2026-11-12, except ADR-32 (write back-pressure),
-  proposed on 2026-11-18.
+  accepted on 2026-11-18.
 
 ## Research notes
 
@@ -54,5 +54,5 @@ source.
 - [Write back-pressure and the full volume](research/2026-11-18-write-backpressure.md):
   why a write can park for ever today, the rate law of a store with a GC
   grace, prior art (OpenZFS, RocksDB, LFS, SSDs, dm-thin), the paced
-  admission band and bounded full-volume behaviour proposed as ADR-32,
+  admission band and bounded full-volume behaviour accepted as ADR-32,
   with the test list and an implementation sketch.

@@ -35,9 +35,9 @@ carry a second block for the maintainer's tamper-resistance decisions (keyed
 chunk ids in `integrity` mode, OS randomness, rules R1-R4, the hostile
 keyring cost policy), and ADR-31 records the rollback anchor.
 
-**Proposed 2026-11-18:** [ADR-32](#adr-32-write-back-pressure-a-paced-admission-band-below-the-limit-and-a-bounded-full-volume)
-(write back-pressure and the full volume) is **proposed, not accepted**. It
-amends ADR-14's ladder if accepted.
+**Accepted 2026-11-18:** [ADR-32](#adr-32-write-back-pressure-a-paced-admission-band-below-the-limit-and-a-bounded-full-volume)
+(write back-pressure and the full volume) was **accepted by the maintainer on
+2026-11-18** with every recommended option (M1-M9). It amends ADR-14's ladder.
 
 **Terminology.** Two sequence numbers exist. `write_seq` numbers writes
 and cuts (the `seq` of ADR-3, 4, 10, 26, 27 and 28, and `cut_seq`).
@@ -2356,8 +2356,9 @@ is not an anchor.
 
 ## ADR-32: Write back-pressure: a paced admission band below the limit, and a bounded full volume
 
-**Status: proposed (2026-11-18), for the maintainer's decision.** Nothing in
-it is implemented. If accepted it amends ADR-14 (the ladder's order and
+**Status: accepted (2026-11-18, the maintainer, every recommended option
+M1-M9).** Not implemented yet: T1/T2 (bounded stop, discard path) land on
+`main` first, the paced band after `p1/gcrate`. It amends ADR-14 (the ladder's order and
 `on_full`) and DESIGN §2, §4.3, §19 and §20. The evidence, the analysis, the
 prior art, the alternatives in full, the test list and the implementation
 sketch are in
@@ -2386,7 +2387,7 @@ sketch are in
   `L` therefore fixes the sustained write rate at `(L - live store) / τ`,
   whatever the mechanism (the note, §3).
 
-**Decision (proposed):**
+**Decision:**
 - **Signal: the headroom** `H = limit - used`, read from the ledger. No rate
   estimate and no GC statistic is a control input in phase 1.
 - **Three marks, relative to the limit:**

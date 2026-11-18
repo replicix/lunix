@@ -1,15 +1,15 @@
 # Write back-pressure and the full volume
 
-Date: 2026-11-18. Status: design note for the **proposed**
+Date: 2026-11-18. Status: design note for
 [ADR-32](../DECISIONS.md#adr-32-write-back-pressure-a-paced-admission-band-below-the-limit-and-a-bounded-full-volume).
 It carries the evidence, the analysis, the prior art, the alternatives and
-the implementation sketch. Nothing here is decided until the maintainer
-accepts the ADR.
+the implementation sketch. The maintainer accepted the ADR on 2026-11-18
+with every recommended option (M1-M9).
 
 Method and limits. The code claims come from reading `main` at `6d16fbf` and
 `p1/gcrate` at `5773f3a` (crates `lunix-space`, `lunix-engine`, `lunix-gc`,
 `lunix-ublk`, `lunixd`, `lunix-iface`). Nothing was compiled, run or measured
-for this note: the three observations in §1 are the maintainer's runs of
+for this note: the three observations in §1 are the project's test runs of
 2026-11-18, and every "why" attached to them is derived from the code and
 marked as such. The prior-art numbers were checked against the OpenZFS, RocksDB
 and kernel device-mapper documentation on 2026-11-18 where a page states them;
