@@ -767,9 +767,11 @@ const EXPECTED_UNREACHED: &[&str] = &[
 ];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
-    if std::env::var_os("LUNIX_STACK_REQUIRE_FSCK").is_some() {
-        assert!(fsck_binary().is_some(), "lunix-fsck is not built");
-    }
+    // fsck is part of every recovery check: a missing binary fails the loop.
+    assert!(
+        fsck_binary().is_some(),
+        "lunix-fsck is not built: cargo build --release -p lunix-fsck"
+    );
     let all_hits = std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
     let only: Vec<String> = std::env::var("LUNIX_KILL_POINTS")
         .map(|v| v.split(',').map(str::to_owned).collect())
