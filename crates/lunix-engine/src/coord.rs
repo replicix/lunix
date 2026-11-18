@@ -82,15 +82,17 @@ pub(crate) struct Coord {
     /// freed bytes, at most the floor grace after one that condemned, else
     /// doubling to a maximum.
     pub(crate) space_backoff: Duration,
-    /// The last `apply_moved` left moves for want of room under the map's
-    /// dirty-leaf cap: moves alone then trigger a cut only once per commit
-    /// interval (each such cut walks the tip's leaves).
+    /// The last `apply_moved` left moves (for want of room under the map's
+    /// dirty-leaf cap) or failed: moves alone then trigger a cut only once
+    /// per commit interval (each such cut walks the tip's leaves).
     pub(crate) moves_deferred: bool,
     /// The collector asked for a cut (`GcProgress::cut_wanted`): a FULL below
     /// the tip must name a compaction output before its source can go.
     pub(crate) gc_cut: bool,
     /// The last GC step error, logged once per change.
     pub(crate) gc_error: Option<String>,
+    /// The last error of `apply_moved`, logged once per change.
+    pub(crate) rehint_error: Option<String>,
 }
 
 impl Coord {
@@ -123,6 +125,7 @@ impl Coord {
             moves_deferred: false,
             gc_cut: false,
             gc_error: None,
+            rehint_error: None,
         }
     }
 }
@@ -252,9 +255,13 @@ impl Inner {
             // the cut above all, an index run still unpersisted, writes in
             // flight) still lets the collector work: a volume that cannot
             // commit must still free what its condemned objects hold (M17.B
-            // stack review S-2, M12c review S-3). One rule: `gc_step` runs
-            // when the map is the tip's and does nothing otherwise.
-            if res.is_err() && !self.is_failed() {
+            // stack review S-2, M12c review S-3). So does a commit that had
+            // nothing to cut after all (`Idle`, e.g. a cut held below a
+            // poisoned write; M12c merge review M-3). One rule: `gc_step`
+            // runs when the map is the tip's and does nothing otherwise; a
+            // committed cut stepped it at C10 already.
+            let committed = matches!(res, Ok(CommitOutcome::Committed { .. }));
+            if !committed && !self.is_failed() {
                 self.gc_step(&mut co);
             }
             res
@@ -481,8 +488,19 @@ impl Inner {
         // applied); a later failure of this cut leaves them applied in
         // memory, pointing at sealed segments, still to be named
         // (`pending_named`).
-        if let Err(e) = self.apply_moved(co) {
-            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
+        match self.apply_moved(co) {
+            Ok(()) => co.rehint_error = None,
+            Err(e) => {
+                // Whatever failed (the leaf walk, the transaction), the moves
+                // wait: retried once per commit interval, not at every tick
+                // (M12c merge review M-2); logged once per distinct error.
+                co.moves_deferred = true;
+                let msg = e.to_string();
+                if co.rehint_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "compaction re-hints deferred to a later cut; their outputs are named by this cut");
+                    co.rehint_error = Some(msg);
+                }
+            }
         }
         self.points
             .hit("engine.c3.destaged")

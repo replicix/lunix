@@ -168,6 +168,7 @@ paths = [
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/src/lib.rs",
   "crates/lunix-engine/tests/gc_control.rs",
+  "crates/lunix-engine/tests/review.rs",
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/src/server.rs",
   "crates/lunixd/src/stack/mod.rs",

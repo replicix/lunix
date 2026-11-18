@@ -15,7 +15,8 @@ use lunix_format::commit::Commit;
 use lunix_format::Hint;
 use lunix_iface::crypto::CommitCodec;
 use lunix_iface::gc::{
-    Collector, GcBudget, GcParams, GcPassSummary, GcProgress, GcState, GcStats, GcView, Moved,
+    Collector, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcState, GcStats, GcView,
+    Moved,
 };
 use lunix_iface::map::{entry_hint, BlockMap, ChunkNo};
 use lunix_iface::store::CommitStore;
@@ -178,4 +179,191 @@ fn rehints_that_do_not_fit_the_dirty_leaf_cap_go_in_batches_not_all_deferred() {
     }
     assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
     assert!(!r.engine.is_stopped());
+}
+
+// ------------------------------------------- handover of failed calls (M-1)
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Mode {
+    /// `step` seals a move, then fails once.
+    FailStep,
+    /// `urgent` seals a move, then fails once.
+    FailUrgent,
+    /// `urgent` asks for one cut.
+    UrgentCut,
+}
+
+/// A collector for the handover paths of `GcControl`: moves of a failed
+/// call (`take_moved`) and a cut asked for (`cut_wanted`).
+struct Handover {
+    mode: Mode,
+    done: bool,
+    /// A pass was asked for: only then does `FailStep` fail (the background
+    /// steps of the setup's commits do nothing).
+    requested: bool,
+    outbox: Vec<Moved>,
+}
+
+fn idle_progress(cut_wanted: bool) -> GcProgress {
+    GcProgress {
+        moved: Vec::new(),
+        freed: 0,
+        state: GcState::Idle,
+        done: true,
+        cut_wanted,
+    }
+}
+
+impl Handover {
+    /// Copies chunk 0 into a new segment and relocates it; the move goes to
+    /// the outbox, as a collector holds it until its step returns.
+    fn move_chunk0(&mut self, view: &GcView<'_>) -> Result<()> {
+        let e = view.map.get(ChunkNo(0))?.expect("chunk 0");
+        let old = entry_hint(&e);
+        let mut bytes = Vec::new();
+        view.segments.read_extent(&old, &mut bytes)?;
+        let id = view
+            .index
+            .get_by_prefix(&e.prefix)?
+            .into_iter()
+            .find(|x| x.hint == old)
+            .expect("indexed")
+            .id;
+        let mut w = view.segments.open_segment()?;
+        let new = w.append_extent(&id, None, &bytes)?;
+        w.seal(None)?;
+        view.index.relocate(&id, &old, &new)?;
+        self.outbox.push(Moved { id, old, new });
+        Ok(())
+    }
+
+    fn fail_once(&mut self, view: &GcView<'_>, mode: Mode) -> Result<GcProgress> {
+        if self.mode == mode && !self.done {
+            self.done = true;
+            self.move_chunk0(view)?;
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "the call failed after sealing its output",
+            )));
+        }
+        Ok(idle_progress(false))
+    }
+}
+
+impl Collector for Handover {
+    fn step(&mut self, view: &GcView<'_>, _b: GcBudget) -> Result<GcProgress> {
+        if !self.requested {
+            return Ok(idle_progress(false));
+        }
+        self.fail_once(view, Mode::FailStep)
+    }
+    fn urgent(&mut self, view: &GcView<'_>, _w: u64) -> Result<GcProgress> {
+        if self.mode == Mode::UrgentCut {
+            return Ok(idle_progress(!std::mem::replace(&mut self.done, true)));
+        }
+        self.fail_once(view, Mode::FailUrgent)
+    }
+    fn dry_run(&mut self, _v: &GcView<'_>) -> Result<GcPassSummary> {
+        Ok(GcPassSummary::default())
+    }
+    fn stats(&self) -> GcStats {
+        GcStats::default()
+    }
+    fn request_pass(&mut self) -> bool {
+        self.requested = true;
+        true
+    }
+    fn take_moved(&mut self) -> Vec<Moved> {
+        std::mem::take(&mut self.outbox)
+    }
+}
+
+fn handover_vol(mode: Mode) -> (Vol, Running) {
+    let mut v = Vol::create(CS, 64, 1, JournalMode::Mixed(13));
+    v.tweak = gc_on;
+    *lock(&v.collector) = Some(Box::new(Handover {
+        mode,
+        done: false,
+        requested: false,
+        outbox: Vec::new(),
+    }));
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    assert!(r.write(0, 0, &pattern(5, CS as usize), false).is_ok());
+    assert!(matches!(
+        r.engine.commit_now(false).expect("commit"),
+        CommitOutcome::Committed { .. }
+    ));
+    assert_eq!(
+        r.engine.commit_now(false).expect("idle"),
+        CommitOutcome::Idle
+    );
+    (v, r)
+}
+
+fn tip_seq(r: &Running) -> lunix_format::CommitSeq {
+    CommitStore::tip(&r.store).unwrap().unwrap()
+}
+
+fn tip_names(v: &Vol, r: &Running) -> Vec<lunix_format::SegId> {
+    let tip = tip_seq(r);
+    let bytes = CommitStore::get(&r.store, tip).unwrap();
+    match v.codec.open_commit(tip, &bytes).unwrap() {
+        Commit::Full(f) => f.new_segments,
+        _ => panic!("FULL"),
+    }
+}
+
+/// The move a failed call sealed reaches the next cut: that cut names the
+/// output and re-hints chunk 0, once; the next commit has nothing to do.
+fn assert_moved_once(v: &Vol, r: &mut Running) {
+    let old = tip_hint(v, r, 0);
+    assert!(matches!(
+        r.engine
+            .commit_now(false)
+            .expect("the cut the move asks for"),
+        CommitOutcome::Committed { .. }
+    ));
+    let new = tip_hint(v, r, 0);
+    assert_ne!(new, old, "chunk 0 re-hinted");
+    assert!(tip_names(v, r).contains(&new.seg), "the output is named");
+    assert_eq!(
+        r.engine.commit_now(false).expect("idle"),
+        CommitOutcome::Idle
+    );
+    assert_eq!(r.read(0, 0, CS).1, pattern(5, CS as usize));
+}
+
+#[test]
+fn moves_of_a_failed_urgent_pass_reach_the_next_cut() {
+    let (v, mut r) = handover_vol(Mode::FailUrgent);
+    assert!(GcControl::run_urgent(&r.engine, 1 << 20).is_err());
+    assert_moved_once(&v, &mut r);
+}
+
+#[test]
+fn moves_of_a_failed_step_of_a_requested_pass_reach_the_next_cut() {
+    let (v, mut r) = handover_vol(Mode::FailStep);
+    assert!(GcControl::run_pass(&r.engine, false).is_err());
+    assert_moved_once(&v, &mut r);
+}
+
+#[test]
+fn a_cut_asked_for_by_an_urgent_pass_is_one_full_on_an_idle_volume() {
+    let (_v, r) = handover_vol(Mode::UrgentCut);
+    let before = tip_seq(&r);
+    assert_eq!(
+        GcControl::run_urgent(&r.engine, 1 << 20).expect("urgent"),
+        0
+    );
+    assert!(matches!(
+        r.engine.tick().expect("tick"),
+        CommitOutcome::Committed { .. }
+    ));
+    assert_eq!(tip_seq(&r).0, before.0 + 1, "exactly one FULL");
+    assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    assert_eq!(
+        GcControl::run_urgent(&r.engine, 1 << 20).expect("urgent"),
+        0
+    );
+    assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    assert_eq!(tip_seq(&r).0, before.0 + 1, "no FULL without a request");
 }
