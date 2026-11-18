@@ -313,13 +313,16 @@ impl Inner {
             return true;
         }
         let now = self.clock.monotonic();
-        // While a pass is still compacting (`gc_busy`), pending moves cut at
-        // most once per `MOVES_CUT_GAP`: with outputs sealed back to back a
-        // cut per tick would leave the coordinator to the cuts, and each FULL
-        // leaves a commit object and packs to collect (milestone gcrate).
-        // Otherwise they cut at once, as before.
+        // Under writes (new writes since the tip) while a pass is still
+        // compacting (`gc_busy`), pending moves cut at most once per
+        // `MOVES_CUT_GAP`: with outputs sealed back to back a cut per tick
+        // would leave the coordinator to the cuts, and each FULL leaves a
+        // commit object and packs to collect (milestone gcrate). Otherwise,
+        // an idle volume above all, they cut at once, as before.
         let since = now.saturating_sub(co.last_commit_at);
-        let paced = !self.gc_busy.load(Ordering::Acquire)
+        let writing = self.journal.last_issued() > co.tip.cut_seq;
+        let paced = !writing
+            || !self.gc_busy.load(Ordering::Acquire)
             || since >= MOVES_CUT_GAP.min(self.cfg.commit_interval);
         if !co.moved.is_empty()
             && paced

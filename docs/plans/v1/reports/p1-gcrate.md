@@ -88,9 +88,9 @@ the floor any schedule has while the grace is 60 s: at 38 MiB/s, 2.2 GiB.
 5. **Compaction throughput** (root check). The daemon's per-step byte allowance was `gc_rate x 50 ms`
    (3.2 MiB): with few steps per second compaction ran at about 12 MiB/s. It is now one second of
    `gc_rate`: the step's time budget bounds a step and the collector's own rate cap keeps the mean at
-   `gc_rate` (`crates/lunixd/src/stack/mod.rs`). Pending moves cut at most once a second while a pass is
-   busy (a cut per tick left the coordinator to the cuts; review m-5); otherwise they cut at once as
-   before. The daemon compacts 256 MiB per pass instead of 1 GiB, so a pass's compaction phase does not
+   `gc_rate` (`crates/lunixd/src/stack/mod.rs`). Under writes, pending moves cut at most once a second
+   while a pass is busy (a cut per tick left the coordinator to the cuts; review m-5); on an idle volume,
+   or when no pass is busy, they cut at once as before. The daemon compacts 256 MiB per pass instead of 1 GiB, so a pass's compaction phase does not
    hold back the deletes the next pass makes.
 6. **A pass profile line** (`gc pass done`; INFO for a pass that wrote evidence, DEBUG otherwise): wall
    time, steps (now counted correctly), per phase the active time, units and when the pass entered it.
@@ -218,7 +218,7 @@ Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches r
 | m-2 failing pass retried every 5 s | `abort_pass` clears busy; the grace trigger waits `pass_interval` after an abort. |
 | m-3 todo condemned late | Pipelined order is now mark, condemn, delete, compact. |
 | m-4 busy ticking at the rate cap | Not busy when a compaction step read, moved and freed nothing. |
-| m-5 cuts during compaction | Move cuts at most once a second while a pass is busy. Commits per second, raw 64K integrity cells: not separated from the dirty-data cuts in the logs; the 256 MiB repro made 0.35 commits/s on `main` and 0.87/s on 5773f3a. |
+| m-5 cuts during compaction | Under writes, move cuts at most once a second while a pass is busy. Commits per second, raw 64K integrity cells: not separated from the dirty-data cuts in the logs; the 256 MiB repro made 0.35 commits/s on `main` and 0.87/s on 5773f3a. |
 | m-6 list rewrite every pipelined delete phase | Stored only when an entry went. |
 | m-7 idle polling at 5 s | The idle check clears busy. |
 | m-8 evidence history | gc.md says how long 1 024 objects last now and that condemn and delete lines are in different objects. |
@@ -233,6 +233,11 @@ Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches r
 - `tools/remote.sh`: ids `^[a-z][a-z0-9]*$` with an ownership entry (above).
 - `GcConfig::default()` keeps the whole sequence (the collector's harnesses and `fsck --repair --gc`
   rely on a pass deleting what it condemned).
+- The root cells' "final" binaries paced move cuts whenever a pass was busy; the committed code paces
+  them only while the volume is also being written (new writes since the tip). The unconditional form
+  made `stack_gc`'s `compaction_then_truncate_*` fail about half the time (a cut for the remaining
+  moves of a pass landed inside the next pass on an idle volume, which the B-1 sequence forbids); the
+  root cells were under writes throughout, where the two forms behave the same.
 - The root check's sampler and the copy of M15's harness lived in the worktree untracked for the runs
   and are not committed (the harness is `p1/m15`'s). The harness ignores a TERM after its teardown:
   `teardown` clears the traps and returns, and the script goes on to the next cell (seen when a run was
