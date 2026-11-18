@@ -43,8 +43,8 @@ use lunix_gc::GcConfig;
 use lunix_iface::block::BlockEngine;
 use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
 use lunixd::testsupport::{
-    close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch,
-    TestRng, TestVolume, VolumeBuilder,
+    assert_no_gc_work, close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver,
+    ModelOp, Scratch, TestRng, TestVolume, VolumeBuilder,
 };
 
 const BLOCK: u64 = 4096;
@@ -657,7 +657,8 @@ struct Tally {
 /// * After a kill: what a crash leaves (temporary files, unnamed or
 ///   unreferenced containers, an index behind the chain, journal residue);
 ///   `index_extra` only after a kill between a segment's unlink and its
-///   `drop_segment` (`store.segment_delete.after_*`, `gc.delete.after_unlink`;
+///   `drop_segment` in a GC delete (`store.segment_delete.after_*`, which
+///   the open's sweep does not fire, and `gc.delete.after_unlink`;
 ///   gc.md crash table: the open's catch-up drops the entries, at rest they
 ///   are gone).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
@@ -802,8 +803,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let r = p.vol.check().expect("store self-check runs");
     assert!(r.is_clean(), "{what}: store self-check: {r:?}");
     fsck_clean(&p.vol, "at-rest", what, ALLOWED_AT_REST, tally);
-    let f = fsck(&p.vol).unwrap_or_else(|| panic!("{what}: lunix-fsck is not built"));
-    assert_no_gc_work(&f.text, what);
+    assert_no_gc_work(&p.vol, what);
 }
 
 /// After recovery: ticks through a grace and whole passes until GC has
@@ -844,21 +844,6 @@ fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], 
         back == actual,
         "{what}: the device differs after GC ran on the recovered volume"
     );
-}
-
-/// At rest after GC settled: `lunix-fsck`'s dry run finds nothing to condemn
-/// or delete (an unreferenced container below the mark is not an `orphan`
-/// any more, so this is the leak check; re-review M-3).
-fn assert_no_gc_work(text: &str, what: &str) {
-    for l in text.lines().filter(|l| l.contains("gc_dry_run")) {
-        assert!(
-            !l.contains("would condemn")
-                || l.contains(
-                    "condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 0 commits"
-                ),
-            "{what}: GC left work at rest: {l}"
-        );
-    }
 }
 
 /// Registered GC points the workload does not reach. The urgent pass's own

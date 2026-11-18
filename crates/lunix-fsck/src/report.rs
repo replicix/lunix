@@ -200,6 +200,11 @@ pub struct Report {
     /// The figures of step 7, when the tip's map could be walked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ratios: Option<Ratios>,
+    /// What a GC pass would do now (the GC hook's dry run), when it ran: the
+    /// structured form of the `gc_dry_run` note, all zero when GC has no
+    /// work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gc_dry_run: Option<lunix_iface::gc::GcPassSummary>,
     /// What was looked at.
     pub stats: Stats,
     /// Repairs applied, in order.

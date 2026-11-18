@@ -10,6 +10,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compiled out unless on (see lunix_iface::crashpoint): the stack tests build
+# the binary with it to kill `--truncate-tip` between its steps.
+crashpoints = ["lunix-iface/crashpoints"]
+
 [dependencies]
 lunix-format.workspace = true
 lunix-iface.workspace = true

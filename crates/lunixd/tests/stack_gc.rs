@@ -14,6 +14,8 @@
 //!   pack plus one segment target.
 //! * **Compaction, then `--truncate-tip` while only the tip names the output**
 //!   (the B-1 sequence of the M17.B review): ticks only, no forced commit.
+//! * **`--truncate-tip` killed between its index rebuild and the set-aside**
+//!   (final review S-1), then a mount: `--deep` finds no `index_lost`.
 //! * **An idle volume after compaction settles** without a forced commit: the
 //!   source goes after the one cut the collector asks for, the evidence
 //!   objects stop growing (M17.B stack review S-1).
@@ -28,7 +30,7 @@
 //! `testsupport` feature and a built `lunix-fsck` (the tests fail without it):
 //!
 //! ```text
-//! cargo build --release -p lunix-fsck
+//! cargo build --release -p lunix-fsck --features crashpoints
 //! cargo test --release -p lunixd --features testsupport --test stack_gc -- --nocapture
 //! ```
 //!
@@ -49,8 +51,8 @@ use lunix_gc::GcConfig;
 use lunix_iface::store::{GcStateStore, SegmentStore};
 use lunixd::stack::{OpenParams, VolumeStack};
 use lunixd::testsupport::{
-    close, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch, TestRng, TestVolume,
-    VolumeBuilder,
+    assert_no_gc_work, close, fsck, fsck_binary, payload, DeviceModel, Driver, ModelOp, Scratch,
+    TestRng, TestVolume, VolumeBuilder,
 };
 
 const BLOCK: u64 = 4096;
@@ -324,8 +326,8 @@ fn churn(mode: CryptoMode, cs: u32) {
     fsck_ok(&vol, &tag, true);
     let deep = fsck_json(&vol, &["--deep"]);
     assert_eq!(deep["exit"].as_i64(), Some(0), "{tag}: --deep: {deep}");
+    assert_no_gc_work(&vol, &tag);
     let v = fsck_json(&vol, &[]);
-    assert!(no_gc_work(&v), "{tag}: GC left work at rest: {v}");
     let r = &v["ratios"];
     let live = r["unique_clen"].as_u64().expect("unique_clen");
     let b = &r["bytes"];
@@ -440,8 +442,13 @@ fn low_live(
 /// The B-1 sequence of the M17.B review on the stack: compaction, the cut
 /// that names the output, a whole pass while only the tip names it (the
 /// source must stay), then `--truncate-tip` drops the tip.
-fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
-    let tag = format!("m17b-trunc-{mode:?}-{}k", cs >> 10).to_lowercase();
+fn compaction_then_truncate(mode: CryptoMode, cs: u32, killed: bool) {
+    let tag = format!(
+        "m17b-trunc{}-{mode:?}-{}k",
+        if killed { "-killed" } else { "" },
+        cs >> 10
+    )
+    .to_lowercase();
     let t = Scratch::new(&tag);
     let size = 64u64 << 20;
     let vol = builder(t.path(), mode, cs, size).create().expect("create");
@@ -525,6 +532,38 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
     let _ = vol.crash(stack, 0x6c17);
     fsck_ok(&vol, &tag, false);
 
+    if killed {
+        // Final review S-1: `--truncate-tip` killed between its index rebuild
+        // (for the previous commit) and the set-aside. The old tip stays the
+        // tip; its mount's catch-up adds the entries of the segments only it
+        // names, so nothing is lost after the mount.
+        fsck_killed(
+            &vol,
+            &["--repair", "--truncate-tip"],
+            "fsck.truncate_tip.after_rebuild",
+        );
+        let v = fsck_json(&vol, &[]);
+        assert_eq!(
+            v["tip"].as_u64(),
+            Some(named_at.0),
+            "{tag}: the tip stays: {v}"
+        );
+        let stack = vol
+            .open_with(fast_gc)
+            .expect("open after the killed repair");
+        let mut d = Driver::new(&stack).expect("driver");
+        check_all(
+            &stack,
+            &mut d,
+            &model,
+            &format!("{tag} after the killed repair"),
+        );
+        drop(d);
+        close(stack).expect("close");
+        deep_clean(&vol, &format!("{tag} after the killed repair"));
+        return;
+    }
+
     // Drop that tip: the output is above the new chain's mark and the open
     // sweeps it; the older roots read through the sources, which GC kept.
     let v = fsck_json(&vol, &["--repair", "--truncate-tip"]);
@@ -537,6 +576,12 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
         v["tip"].as_u64(),
         Some(named_at.0 - 1),
         "{tag}: the naming FULL dropped"
+    );
+    assert!(
+        v["repairs"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|r| r["action"] == "rebuild_index")),
+        "{tag}: the truncation rebuilt the index: {v}"
     );
     let stack = vol.open_with(fast_gc).expect("open the predecessor");
     for o in &outputs {
@@ -552,29 +597,104 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
         &model,
         &format!("{tag} after --truncate-tip"),
     );
+    // GC on the truncated volume (final review M-4): the first pass finds
+    // the sources referenced again and un-condemns them; then they are
+    // compacted again and go after a FULL below the tip names the new
+    // output.
+    let start = Instant::now();
+    let e0 = evidence(&stack);
+    while evidence(&stack) == e0 {
+        assert!(
+            start.elapsed() < GRACE + Duration::from_secs(60),
+            "{tag}: no pass after the truncation"
+        );
+        stack.engine.tick().expect("tick");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        listed(&stack).is_disjoint(&written),
+        "{tag}: the sources are un-condemned after the truncation"
+    );
+    assert!(
+        written.is_subset(&segments(&stack)),
+        "{tag}: no source went"
+    );
+    check_all(
+        &stack,
+        &mut d,
+        &model,
+        &format!("{tag} after the first pass"),
+    );
+    while written.is_subset(&segments(&stack)) {
+        assert!(
+            start.elapsed() < Duration::from_secs(240),
+            "{tag}: the sources were not compacted again"
+        );
+        stack.engine.tick().expect("tick");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    check_all(
+        &stack,
+        &mut d,
+        &model,
+        &format!("{tag} after the second compaction"),
+    );
     drop(d);
     close(stack).expect("close");
-    let deep = fsck_json(&vol, &["--deep"]);
+    deep_clean(&vol, &format!("{tag} after --truncate-tip"));
+}
+
+/// `lunix-fsck --deep`: exit <= 1, no error, no `index_lost`.
+fn deep_clean(vol: &TestVolume, what: &str) {
+    let deep = fsck_json(vol, &["--deep"]);
     assert!(
         deep["exit"].as_i64().is_some_and(|e| e <= 1),
-        "{tag}: --deep after the truncation: {deep}"
+        "{what}: --deep: {deep}"
     );
     assert!(
         !codes(&deep)
             .iter()
             .any(|c| c.contains("index_lost") || c.contains("\"error\"")),
-        "{tag}: {deep}"
+        "{what}: {deep}"
+    );
+}
+
+/// Runs `lunix-fsck` with `LUNIX_CRASH_AT=<point>`: it must die there (the
+/// binary is built with `--features crashpoints`, as `ci.sh` does).
+fn fsck_killed(vol: &TestVolume, extra: &[&str], point: &str) {
+    use std::os::unix::process::ExitStatusExt as _;
+    let bin = fsck_binary().expect("lunix-fsck is not built");
+    let args = vol.fsck_args().expect("lunix-fsck runs on this volume");
+    let out = Command::new(&bin)
+        .args(args)
+        .args(extra)
+        .arg(&vol.voldir)
+        .env("LUNIX_CRASH_AT", point)
+        .output()
+        .expect("run lunix-fsck");
+    assert_eq!(
+        out.status.signal(),
+        Some(9),
+        "lunix-fsck did not die at {point} (build it with: cargo build --release -p lunix-fsck --features crashpoints): {}",
+        String::from_utf8_lossy(&out.stdout)
     );
 }
 
 #[test]
 fn compaction_then_truncate_tip_integrity_16k() {
-    compaction_then_truncate(CryptoMode::Integrity, 16 << 10);
+    compaction_then_truncate(CryptoMode::Integrity, 16 << 10, false);
+}
+
+/// Final review S-1: `--truncate-tip` killed between its index rebuild and
+/// the set-aside, then a mount: `--deep` without `index_lost`.
+#[test]
+fn compaction_then_truncate_tip_killed_after_the_rebuild_plain_16k() {
+    compaction_then_truncate(CryptoMode::Plain, 16 << 10, true);
 }
 
 #[test]
 fn compaction_then_truncate_tip_encrypted_64k() {
-    compaction_then_truncate(CryptoMode::Encrypted, 64 << 10);
+    compaction_then_truncate(CryptoMode::Encrypted, 64 << 10, false);
 }
 
 /// M17.B stack review S-1: after a compaction an idle volume (ticks only)
@@ -643,23 +763,7 @@ fn an_idle_volume_after_compaction_settles() {
     close(stack).expect("close");
     fsck_ok(&vol, tag, true);
     // Nothing left for a pass to condemn or delete (the leak check).
-    assert!(
-        no_gc_work(&fsck_json(&vol, &[])),
-        "{tag}: GC left work at rest"
-    );
-}
-
-/// `lunix-fsck`'s dry run finds nothing to condemn or delete.
-fn no_gc_work(v: &serde_json::Value) -> bool {
-    v["findings"].as_array().is_none_or(|a| {
-        a.iter().filter(|f| f["code"] == "gc_dry_run").all(|f| {
-            let m = f["message"].as_str().unwrap_or("");
-            !m.contains("would condemn")
-                || m.contains(
-                    "condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 0 commits",
-                )
-        })
-    })
+    assert_no_gc_work(&vol, tag);
 }
 
 /// M17.B stack review B-1 on the stack: leaf 0 goes `X -> Y -> X` (chunk 0

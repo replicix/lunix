@@ -87,11 +87,12 @@ step "lunixd with testsupport: clippy, then the stack tests in release with luni
 # `cargo test --workspace` builds lunixd without `testsupport`, so the stack
 # tests compile to nothing there. They run in release (the debug profile
 # spends most of its time scanning ring files at every open), with a release
-# lunix-fsck next to them that they must find (LUNIX_STACK_REQUIRE_FSCK). The
-# kill loops (stack_kill, crashpoints, minutes) stay out of CI; their command
+# lunix-fsck next to them that they must find (LUNIX_STACK_REQUIRE_FSCK),
+# built with crashpoints (stack_gc kills `--truncate-tip` between its steps;
+# inert without LUNIX_CRASH_AT). The kill loops (stack_kill, crashpoints, minutes) stay out of CI; their command
 # is in the M12b report.
 cargo clippy -j "$jobs" -p lunixd --all-targets --features testsupport,crashpoints -- -D warnings
-cargo build -j "$jobs" --release -p lunix-fsck
+cargo build -j "$jobs" --release -p lunix-fsck --features crashpoints
 stack_tests=(--lib)
 for t in stack_support stack_model stack_gc stack_gc_ladder control_gc; do
   [ -f "crates/lunixd/tests/$t.rs" ] && stack_tests+=(--test "$t")

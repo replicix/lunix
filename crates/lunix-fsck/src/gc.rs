@@ -79,24 +79,39 @@ pub struct GcContext<'a> {
     pub(crate) repair: bool,
 }
 
-/// The GC-specific checks, or with `repair` the offline pass. Returns the
-/// findings (notes such as `gc_pending` included).
-pub fn check_gc(ctx: &GcContext<'_>) -> Vec<Finding> {
+/// What the GC hook found.
+pub struct GcCheck {
+    /// The findings (notes such as `gc_pending` included).
+    pub findings: Vec<Finding>,
+    /// What a pass would do now, when the dry run ran (the report's
+    /// `gc_dry_run`; all zero on a volume without GC work).
+    pub dry_run: Option<GcPassSummary>,
+}
+
+/// The GC-specific checks, or with `repair` the offline pass.
+pub fn check_gc(ctx: &GcContext<'_>) -> GcCheck {
     let mut out = Vec::new();
+    let mut dry_run = None;
     if ctx.repair {
         repair(ctx, &mut out);
-        return out;
+        return GcCheck {
+            findings: out,
+            dry_run,
+        };
     }
     let list = decode_list(ctx.facts, &mut out);
     let marked = if ready(ctx.facts) {
-        compare_and_dry_run(ctx, &mut out)
+        compare_and_dry_run(ctx, &mut out, &mut dry_run)
     } else {
         None
     };
     if let Some(list) = &list {
         pending(ctx, list, marked.as_ref(), &mut out);
     }
-    out
+    GcCheck {
+        findings: out,
+        dry_run,
+    }
 }
 
 /// The ids of segments, packs and index runs the condemned list names, so
@@ -360,7 +375,11 @@ fn floor_source(s: &Session) -> Arc<dyn FloorSource> {
 }
 
 /// Returns `lunix-gc`'s mark when it ran.
-fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Liveness> {
+fn compare_and_dry_run(
+    ctx: &GcContext<'_>,
+    out: &mut Vec<Finding>,
+    dry: &mut Option<GcPassSummary>,
+) -> Option<Liveness> {
     let s = ctx.session;
     // The scratch copy: a dry run and a mark change nothing, and fsck never
     // writes to the volume's index without a repair flag. Its damage was
@@ -407,6 +426,7 @@ fn compare_and_dry_run(ctx: &GcContext<'_>, out: &mut Vec<Finding>) -> Option<Li
             if let Some(text) = summary_text(&sum) {
                 out.push(Finding::new(code::GC_DRY_RUN, "gc", text));
             }
+            *dry = Some(sum);
         }
         Err(e) => out.push(Finding::new(
             code::GC_UNCHECKED,

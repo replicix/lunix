@@ -49,7 +49,7 @@ use lunix_iface::{Error, ErrorKind, Result};
 use crate::compact::{self, Compactor};
 use crate::condemned::{CondemnedEntry, CondemnedList, GraceStarts, ObjectRef, MAX_ENTRIES};
 use crate::config::{self, FloorSource, GcConfig, GcHooks, NoHooks};
-use crate::evidence::{Action, Evidence};
+use crate::evidence::{Action, Deferral, Evidence};
 use crate::mark::{Liveness, Mark};
 use crate::points::{point, Points};
 
@@ -105,7 +105,7 @@ enum Verdict {
     /// Already gone: drop from the list.
     Gone,
     /// Keep condemned, decide in a later pass.
-    Defer(&'static str),
+    Defer(&'static str, Deferral),
 }
 
 #[derive(Debug)]
@@ -351,12 +351,14 @@ impl Judge<'_> {
         match keep {
             None => match obj {
                 ObjectRef::Segment(s) => match self.segment_deletable(s) {
-                    Some(why) => Verdict::Defer(why),
+                    Some(why) => Verdict::Defer(why, Deferral::ForFull),
                     None => Verdict::Delete,
                 },
                 _ => Verdict::Delete,
             },
-            Some(Keep::FloorUnreadable) => Verdict::Defer(Keep::FloorUnreadable.reason()),
+            Some(Keep::FloorUnreadable) => {
+                Verdict::Defer(Keep::FloorUnreadable.reason(), Deferral::Retry)
+            }
             Some(k) => Verdict::Uncondemn(k),
         }
     }
@@ -853,6 +855,12 @@ impl Gc {
         self.peak_heap = self.peak_heap.max(h);
     }
 
+    fn defer(&mut self, view: &GcView<'_>, obj: ObjectRef, why: &'static str, kind: Deferral) {
+        if let Some(ctx) = &mut self.ctx {
+            ctx.evidence.defer(view.clock.now(), obj, why, kind);
+        }
+    }
+
     fn evidence(
         &mut self,
         view: &GcView<'_>,
@@ -1072,7 +1080,7 @@ impl Gc {
             .get(&obj)
             .is_some_and(|&t| t != Duration::MAX && t.saturating_add(grace) <= l.started);
         if !elapsed {
-            return Ok(Verdict::Defer("grace not over"));
+            return Ok(Verdict::Defer("grace not over", Deferral::Grace));
         }
         Ok(Judge {
             f,
@@ -1086,12 +1094,12 @@ impl Gc {
     fn apply_verdict(&mut self, view: &GcView<'_>, obj: ObjectRef, v: Verdict) -> Result<u64> {
         match v {
             Verdict::Gone => self.forget(view, obj),
-            Verdict::Defer(why) => {
+            Verdict::Defer(why, kind) => {
                 if why == NOT_DURABLE_YET && self.cut_asked_at != Some(view.tip.commit_seq) {
                     self.cut_wanted = true;
                     self.cut_asked_at = Some(view.tip.commit_seq);
                 }
-                self.evidence(view, Action::Defer, obj, 0, why);
+                self.defer(view, obj, why, kind);
                 Ok(0)
             }
             Verdict::Uncondemn(keep) => {
@@ -1181,7 +1189,7 @@ impl Gc {
             Err(e) if e.kind() == ErrorKind::Refused => {
                 // Nothing changed (the commit store's own floor check).
                 self.uncertain.remove(&obj);
-                self.evidence(view, Action::Defer, obj, 0, "refused by the store");
+                self.defer(view, obj, "refused by the store", Deferral::Retry);
                 return Ok(0);
             }
             Err(e) => return Err(e),
@@ -1391,7 +1399,7 @@ impl Gc {
             point!(self.points, "gc.evidence.after_put");
         }
         ctx.summary.pass = pass;
-        self.last_pass_changed = !ctx.evidence.only_defers();
+        self.last_pass_changed = ctx.evidence.wants_retry();
         self.stats.passes += 1;
         self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);

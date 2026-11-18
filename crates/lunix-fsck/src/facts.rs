@@ -54,6 +54,8 @@ pub(crate) struct Facts {
     pub(crate) packs: BTreeMap<ObjId, Container>,
     pub(crate) walk: Option<WalkOut>,
     pub(crate) ratios: Option<Ratios>,
+    /// The GC hook's dry run, when it ran.
+    pub(crate) gc_dry_run: Option<lunix_iface::gc::GcPassSummary>,
     pub(crate) stats: Stats,
     /// Segments and packs some retained commit names.
     pub(crate) named_segments: HashSet<ObjId>,

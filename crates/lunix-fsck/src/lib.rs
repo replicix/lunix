@@ -203,9 +203,11 @@ fn run_checks(s: &session::Session, opts: &Options, sink: &mut Sink) -> Facts {
         facts: &facts,
         repair: false,
     };
-    for f in gc::check_gc(&ctx) {
+    let gc_check = gc::check_gc(&ctx);
+    for f in gc_check.findings {
         sink.push(f);
     }
+    facts.gc_dry_run = gc_check.dry_run;
     let bytes = resolve::category_bytes(s, &facts);
     if let Some(r) = &mut facts.ratios {
         r.bytes = bytes;
@@ -291,6 +293,7 @@ pub fn check(dir: &Path, opts: &Options) -> Report {
         findings,
         counts,
         ratios: facts.ratios,
+        gc_dry_run: facts.gc_dry_run,
         stats: facts.stats,
         repairs,
         uncovered: {
