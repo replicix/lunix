@@ -116,6 +116,9 @@ enum Phase {
         todo: Vec<(ObjectRef, u64)>,
         listed: bool,
         next: usize,
+        /// Wait out the grace in this pass (the whole sequence); else go on
+        /// to compaction (a pipelined pass).
+        wait: bool,
     },
     Grace {
         until: Duration,
@@ -123,9 +126,28 @@ enum Phase {
     Rechecking(Box<Mark>),
     Deleting {
         queue: VecDeque<ObjectRef>,
+        /// A pipelined pass: objects whose grace has not ended are skipped
+        /// without a line, and `todo` is condemned afterwards.
+        then: Option<Vec<(ObjectRef, u64)>>,
     },
     Compacting(Option<Box<Compactor>>),
     Finishing,
+}
+
+impl Phase {
+    /// The profile slot of the phase (`None` between passes).
+    fn index(&self) -> Option<usize> {
+        Some(match self {
+            Self::Idle => return None,
+            Self::Marking(_) => 0,
+            Self::Condemning { .. } => 1,
+            Self::Grace { .. } => 2,
+            Self::Rechecking(_) => 3,
+            Self::Deleting { .. } => 4,
+            Self::Compacting(_) => 5,
+            Self::Finishing => 6,
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -133,6 +155,55 @@ struct PassCtx {
     summary: GcPassSummary,
     evidence: Evidence,
     liveness: Option<Liveness>,
+}
+
+/// Where one pass spent its time (diagnostics: the `gc pass done` log line).
+/// Measured on the process's real clock, whatever clock the view carries.
+#[derive(Debug, Default)]
+struct PassProfile {
+    /// When the pass started.
+    started: Option<std::time::Instant>,
+    /// Time inside units, per phase (`Phase::index`).
+    active: [Duration; PHASES],
+    /// Units run, per phase.
+    units: [u64; PHASES],
+    /// When the pass first entered each phase, from `started`.
+    entered: [Option<Duration>; PHASES],
+    /// `step` calls that ran a unit of this pass.
+    steps: u64,
+}
+
+/// Phases a pass profile tracks.
+const PHASES: usize = 7;
+
+/// Phase names, by `Phase::index`.
+const PHASE_NAMES: [&str; PHASES] = [
+    "mark", "condemn", "grace", "recheck", "delete", "compact", "finish",
+];
+
+impl PassProfile {
+    fn ms(d: Duration) -> u64 {
+        u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// `name=active_ms/units@entered_ms` per phase, space separated.
+    fn phases(&self) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        for (i, name) in PHASE_NAMES.iter().enumerate() {
+            if let Some(at) = self.entered[i] {
+                let _ = write!(
+                    out,
+                    "{}{name}={}ms/{}u@{}ms",
+                    if out.is_empty() { "" } else { " " },
+                    Self::ms(self.active[i]),
+                    self.units[i],
+                    Self::ms(at)
+                );
+            }
+        }
+        out
+    }
 }
 
 /// What one unit asks of the step loop.
@@ -447,6 +518,17 @@ pub struct Gc {
     peak_heap: usize,
     unit_count: u64,
     last_compacted: Vec<compact::Candidate>,
+    /// Where the current pass spends its time.
+    prof: PassProfile,
+    /// The current pass runs the whole sequence (a request, or `pipeline`
+    /// off).
+    whole: bool,
+    /// The last pass changed something: with `pipeline`, the next is due
+    /// after `busy_interval`.
+    last_pass_busy: bool,
+    /// When the last mark of a scheduled pass began: a listed object whose
+    /// grace ends after it waits for the next mark.
+    last_mark_start: Option<Duration>,
 }
 
 impl std::fmt::Debug for Gc {
@@ -500,6 +582,10 @@ impl Gc {
             peak_heap: 0,
             unit_count: 0,
             last_compacted: Vec::new(),
+            prof: PassProfile::default(),
+            whole: true,
+            last_pass_busy: false,
+            last_mark_start: None,
         }
     }
 
@@ -746,15 +832,36 @@ impl Gc {
         Ok(())
     }
 
+    /// A listed object's grace ended at or before `now` and after the last
+    /// mark began: the next mark can delete it.
+    fn grace_ended_since_mark(&self, grace: Duration, now: Duration) -> bool {
+        self.grace
+            .values()
+            .filter(|&&t| t != Duration::MAX)
+            .map(|t| t.saturating_add(grace))
+            .any(|end| end <= now && self.last_mark_start.is_none_or(|m| m < end))
+    }
+
     fn due(&mut self, view: &GcView<'_>) -> Result<bool> {
         if self.forced {
             return Ok(true);
         }
         let now = view.clock.monotonic();
-        if self
-            .last_end
-            .is_some_and(|end| now < end.saturating_add(self.cfg.pass_interval))
+        let waited = |d: Duration| self.last_end.is_none_or(|end| now >= end.saturating_add(d));
+        let busy = self.cfg.busy_interval.min(self.cfg.pass_interval);
+        // Pipelined: a grace that ended since the last mark began makes its
+        // object deletable by the next mark; it does not wait for
+        // `pass_interval`.
+        if self.cfg.pipeline && waited(busy) && self.grace_ended_since_mark(view.params.grace, now)
         {
+            return Ok(true);
+        }
+        let interval = if self.cfg.pipeline && self.last_pass_busy {
+            busy
+        } else {
+            self.cfg.pass_interval
+        };
+        if !waited(interval) {
             return Ok(false);
         }
         if self.last_tip != Some(view.tip.commit_seq)
@@ -830,7 +937,9 @@ impl Gc {
         h += match &self.phase {
             Phase::Marking(m) | Phase::Rechecking(m) => m.heap_bytes(),
             Phase::Condemning { todo, .. } => todo.capacity() * 24,
-            Phase::Deleting { queue } => queue.capacity() * 16,
+            Phase::Deleting { queue, then } => {
+                queue.capacity() * 16 + then.as_ref().map_or(0, |t| t.capacity() * 24)
+            }
             Phase::Compacting(Some(c)) => c.heap_bytes(),
             _ => 0,
         };
@@ -876,7 +985,63 @@ impl Gc {
 
     // ------------------------------------------------------------ units
 
+    /// One unit, timed into the pass profile; logs the profile when the
+    /// pass ends.
     fn unit(
+        &mut self,
+        view: &GcView<'_>,
+        budget: &GcBudget,
+        freed: &mut u64,
+        step_bytes: &mut u64,
+    ) -> Result<Flow> {
+        let before = self.phase.index();
+        let t = std::time::Instant::now();
+        let res = self.unit_inner(view, budget, freed, step_bytes);
+        if before.is_none() && self.phase.index().is_some() {
+            self.prof = PassProfile {
+                started: Some(t),
+                ..PassProfile::default()
+            };
+        }
+        if let Some(i) = before {
+            self.prof.active[i] += t.elapsed();
+            self.prof.units[i] += 1;
+        }
+        if let (Some(j), Some(st)) = (self.phase.index(), self.prof.started) {
+            self.prof.entered[j].get_or_insert_with(|| st.elapsed());
+        }
+        if matches!(res, Ok(Flow::PassDone)) {
+            self.log_pass("step");
+        }
+        res
+    }
+
+    /// The `gc pass done` line: where the pass spent its time.
+    fn log_pass(&self, how: &'static str) {
+        let Some(p) = &self.last_pass else {
+            return;
+        };
+        let wall = self.prof.started.map_or(Duration::ZERO, |s| s.elapsed());
+        tracing::info!(
+            how,
+            pass = p.pass,
+            wall_ms = PassProfile::ms(wall),
+            steps = self.prof.steps,
+            phases = %self.prof.phases(),
+            condemned = p.segments_condemned,
+            segments_deleted = p.segments_deleted,
+            packs_deleted = p.packs_deleted,
+            runs_deleted = p.runs_deleted,
+            commits_deleted = p.commits_deleted,
+            compacted = p.segments_compacted,
+            bytes_freed = p.bytes_freed,
+            bytes_moved = p.bytes_moved,
+            pending = self.list.entries.len(),
+            "gc pass done"
+        );
+    }
+
+    fn unit_inner(
         &mut self,
         view: &GcView<'_>,
         budget: &GcBudget,
@@ -889,6 +1054,7 @@ impl Gc {
                 if !self.due(view)? {
                     return Ok(Flow::Yield);
                 }
+                self.whole = !self.cfg.pipeline || self.forced;
                 self.forced = false;
                 self.reconcile(view)?;
                 self.ctx = Some(PassCtx::default());
@@ -913,16 +1079,40 @@ impl Gc {
                         .dead(&self.list, room),
                         None => Vec::new(),
                     };
+                    let started = l.started;
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
-                    self.phase = if todo.is_empty() && self.list.entries.is_empty() {
-                        Phase::Compacting(None)
+                    self.phase = if self.whole {
+                        if todo.is_empty() && self.list.entries.is_empty() {
+                            Phase::Compacting(None)
+                        } else {
+                            Phase::Condemning {
+                                todo,
+                                listed: false,
+                                next: 0,
+                                wait: true,
+                            }
+                        }
                     } else {
-                        Phase::Condemning {
-                            todo,
-                            listed: false,
-                            next: 0,
+                        // Pipelined: this mark is the recheck of the listed
+                        // objects whose grace ended before it began, then
+                        // the newly dead are condemned.
+                        self.last_mark_start = Some(started);
+                        if !self.list.entries.is_empty() {
+                            Phase::Deleting {
+                                queue: self.list.entries.keys().copied().collect(),
+                                then: Some(todo),
+                            }
+                        } else if !todo.is_empty() {
+                            Phase::Condemning {
+                                todo,
+                                listed: false,
+                                next: 0,
+                                wait: false,
+                            }
+                        } else {
+                            Phase::Compacting(None)
                         }
                     };
                 } else {
@@ -930,13 +1120,19 @@ impl Gc {
                 }
                 Flow::Continue
             }
-            Phase::Condemning { todo, listed, next } => {
+            Phase::Condemning {
+                todo,
+                listed,
+                next,
+                wait,
+            } => {
                 if !listed {
                     self.list_condemned(view, &todo)?;
                     self.phase = Phase::Condemning {
                         todo,
                         listed: true,
                         next: 0,
+                        wait,
                     };
                 } else if let Some(&(obj, _)) = todo.get(next) {
                     if let ObjectRef::Segment(s) = obj {
@@ -946,15 +1142,22 @@ impl Gc {
                         todo,
                         listed: true,
                         next: next + 1,
+                        wait,
                     };
                 } else {
                     let until = self.start_graces(view, &todo);
-                    // The condemn mark is not needed again: the recheck
-                    // makes its own.
-                    if let Some(ctx) = &mut self.ctx {
-                        ctx.liveness = None;
-                    }
-                    self.phase = Phase::Grace { until };
+                    self.phase = if wait {
+                        // The condemn mark is not needed again: the recheck
+                        // makes its own.
+                        if let Some(ctx) = &mut self.ctx {
+                            ctx.liveness = None;
+                        }
+                        Phase::Grace { until }
+                    } else {
+                        // Pipelined: the graces run into the next passes;
+                        // compaction works from this pass's mark.
+                        Phase::Compacting(None)
+                    };
                 }
                 Flow::Continue
             }
@@ -971,26 +1174,42 @@ impl Gc {
                 if m.unit(view)? {
                     let l = m.into_liveness();
                     self.after_mark(&l);
+                    self.last_mark_start = Some(l.started);
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
                     let queue = self.list.entries.keys().copied().collect();
-                    self.phase = Phase::Deleting { queue };
+                    self.phase = Phase::Deleting { queue, then: None };
                 } else {
                     self.phase = Phase::Rechecking(m);
                 }
                 Flow::Continue
             }
-            Phase::Deleting { mut queue } => {
+            Phase::Deleting { mut queue, then } => {
                 match queue.pop_front() {
                     Some(obj) => {
                         let v = self.recheck_verdict(view, obj, view.params.grace)?;
-                        *freed += self.apply_verdict(view, obj, v)?;
-                        self.phase = Phase::Deleting { queue };
+                        // Pipelined: a grace still running is no news; a
+                        // later pass decides (`due` starts it when the grace
+                        // ends).
+                        let skip =
+                            then.is_some() && matches!(v, Verdict::Defer(_, Deferral::Grace));
+                        if !skip {
+                            *freed += self.apply_verdict(view, obj, v)?;
+                        }
+                        self.phase = Phase::Deleting { queue, then };
                     }
                     None => {
                         self.store_list(view)?;
-                        self.phase = Phase::Compacting(None);
+                        self.phase = match then {
+                            Some(todo) if !todo.is_empty() => Phase::Condemning {
+                                todo,
+                                listed: false,
+                                next: 0,
+                                wait: false,
+                            },
+                            _ => Phase::Compacting(None),
+                        };
                     }
                 }
                 Flow::Continue
@@ -1400,6 +1619,7 @@ impl Gc {
         }
         ctx.summary.pass = pass;
         self.last_pass_changed = ctx.evidence.wants_retry();
+        self.last_pass_busy = !ctx.evidence.only_defers();
         self.stats.passes += 1;
         self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);
@@ -1424,21 +1644,32 @@ impl Gc {
         let mut step_bytes = 0u64;
         self.load(view)?;
         self.observe_named(view)?;
-        loop {
-            match self.unit(view, budget, freed, &mut step_bytes)? {
-                Flow::Continue => {}
-                Flow::Yield => return Ok(false),
-                Flow::PassDone => return Ok(true),
+        let units_before: u64 = self.prof.units.iter().sum();
+        let res = loop {
+            match self.unit(view, budget, freed, &mut step_bytes) {
+                Ok(Flow::Continue) => {}
+                Ok(Flow::Yield) => break Ok(false),
+                Ok(Flow::PassDone) => break Ok(true),
+                Err(e) => break Err(e),
             }
             if view.clock.monotonic() >= deadline {
-                return Ok(false);
+                break Ok(false);
             }
+        };
+        if self.prof.units.iter().sum::<u64>() != units_before {
+            self.prof.steps += 1;
         }
+        res
     }
 
     // ------------------------------------------------------------ urgent
 
     fn urgent_inner(&mut self, view: &GcView<'_>, want: u64, freed: &mut u64) -> Result<()> {
+        self.prof = PassProfile {
+            started: Some(std::time::Instant::now()),
+            steps: 1,
+            ..PassProfile::default()
+        };
         self.load(view)?;
         self.observe_named(view)?;
         self.reconcile(view)?;
@@ -1449,6 +1680,7 @@ impl Gc {
         point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
         self.after_mark(&l);
+        self.last_mark_start = Some(l.started);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
         self.facts(view)?;
         let todo = match &self.facts {
@@ -1529,7 +1761,9 @@ impl Gc {
                 self.compaction_done(view, &c);
             }
         }
-        self.finish_pass(view)
+        self.finish_pass(view)?;
+        self.log_pass("urgent");
+        Ok(())
     }
 }
 

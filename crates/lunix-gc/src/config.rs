@@ -67,6 +67,24 @@ pub struct GcConfig {
 
     /// Decoded segment footers kept by the mark (default 32).
     pub footer_cache: usize,
+
+    /// Overlap the grace with the next passes (default off; the daemon turns
+    /// it on, [`GcConfig::daemon`]). Off, a pass marks, condemns, waits out
+    /// the grace, marks again for the recheck and deletes: whatever dies
+    /// during that wait is condemned only by the next pass and waits a whole
+    /// grace again, so under sustained overwrite the store holds about two
+    /// graces plus a pass interval of writes. On, a scheduled pass does not
+    /// wait: its one mark is the recheck of every listed object whose grace
+    /// ended before the mark began (as in the urgent pass), then it condemns
+    /// what is newly dead and compacts. An object waits one grace plus at
+    /// most two pass periods. A pass on request (`request_pass`) always runs
+    /// the whole sequence.
+    pub pipeline: bool,
+    /// With `pipeline`: the time between a pass that changed something
+    /// (condemned, deleted or compacted) and the next one, instead of
+    /// `pass_interval` (default 5 s), so passes follow each other while
+    /// garbage keeps coming.
+    pub busy_interval: Duration,
 }
 
 impl Default for GcConfig {
@@ -77,6 +95,18 @@ impl Default for GcConfig {
             leaves_per_unit: 32,
             finish_per_unit: 1 << 18,
             footer_cache: 32,
+            pipeline: false,
+            busy_interval: Duration::from_secs(5),
+        }
+    }
+}
+
+impl GcConfig {
+    /// The daemon's settings: the defaults with `pipeline` on.
+    pub fn daemon() -> Self {
+        Self {
+            pipeline: true,
+            ..Self::default()
         }
     }
 }

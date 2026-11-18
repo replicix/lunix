@@ -46,7 +46,7 @@ die() { echo "remote.sh: $*" >&2; exit 2; }
 [ -n "${LUNIX_HOST:-}" ] || die "LUNIX_HOST is not set"
 [ -n "${LUNIX_HOST_BASE:-}" ] || die "LUNIX_HOST_BASE is not set"
 [ -n "$m" ] || die "milestone not given (-m or LUNIX_M)"
-[[ "$m" =~ ^m[0-9]+[a-z0-9]*$ ]] || die "bad milestone id '$m'"
+[[ "$m" =~ ^[a-z][a-z0-9]*$ ]] || die "bad milestone id '$m'"
 [ $# -ge 1 ] || die "missing subcommand"
 sub="$1"; shift
 

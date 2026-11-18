@@ -4,6 +4,7 @@
 mod crash;
 mod liveness;
 mod oracle;
+mod pipeline;
 mod review;
 mod scale;
 mod scenarios;

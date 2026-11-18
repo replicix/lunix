@@ -225,6 +225,26 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# gcrate: GC reclaim rate under sustained overwrite (the pipelined schedule,
+# the busy tick, the pass profile line, the amplification test).
+[gcrate]
+paths = [
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/crash.rs",
+  "crates/lunix-gc/src/tests/pipeline.rs",
+  "crates/lunix-gc/src/tests/sim.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_gc_rate.rs",
+  "docs/reference/gc.md",
+  "tools/ci.sh",
+  "tools/remote.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 

@@ -18,8 +18,12 @@ tip's. Moves of a call that failed, and a cut the collector asks for
 (`GcProgress::cut_wanted`), reach the next cut whichever path called it.
 A step does small units of work until its budget (`gc_step_budget_ms`, default
 50 ms) is spent, so a background step never holds up a cut for longer than one
-unit past the budget. The urgent pass and a dry run are one call each and hold
-the coordinator for a whole mark (and the urgent pass's compaction).
+unit past the budget. While the pass in progress has work a step can do now
+(it is not idle and not waiting out its grace) the background thread ticks
+every 10 ms instead of every 100 ms, so the collector gets most of the
+coordinator's time and the cuts still come between its steps. The urgent pass
+and a dry run are one call each and hold the coordinator for a whole mark
+(and the urgent pass's compaction).
 
 A pass runs when the
 previous one ended at least 30 s ago and something may have changed: a new
@@ -29,6 +33,22 @@ for a FULL) is not repeated until the tip or the pins change; the pins are
 then looked at once per interval, not at every tick. A pass abandoned on an
 error, or one that deferred for the store or the rollback floor, is retried
 one interval later (a deferral for the store or the floor writes no evidence).
+
+**The daemon's schedule is pipelined** (`GcConfig::daemon`, milestone gcrate).
+A scheduled pass does not wait out the grace in the middle of the pass: its
+one mark is the recheck of every listed object whose grace ended before the
+mark began (the urgent pass's rule, with the full grace), it deletes those,
+then condemns what is newly dead and compacts. Objects whose grace still runs
+are left alone without an evidence line. A pass that changed something is
+followed by the next after 5 s (`busy_interval`) instead of 30 s, and a grace
+that ends starts a pass without waiting for a new tip or the 30 s. A dead
+object therefore waits one grace plus at most two pass periods; in the M17
+sequence (every pass waits out its grace, then 30 s) it waits up to two graces
+plus 30 s plus two passes, and under sustained overwrite the store holds that
+many seconds of writes. A pass asked for (`lunix gc NAME`, `request_pass`)
+still runs the whole sequence: condemn, grace, recheck, delete. The
+collector's default (`GcConfig::default`, which the tests and the offline
+`fsck --repair --gc` use) is the whole sequence for every pass.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -267,7 +287,8 @@ scratch is bounded.
 | `gc_live_threshold` | 0.5 | compact segments whose live fraction is below this |
 | `gc_step_budget_ms` | 50 | time one step may spend |
 
-Not in `volume.json` (`GcConfig` in the code): 30 s between passes, 1 GiB of
+Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
+daemon's), 30 s between passes and 5 s after a pass that changed something, 1 GiB of
 live bytes compacted per pass, a root walked in at most 64 leaf batches of at
 least 16 leaves, 32 decoded footers cached.
 

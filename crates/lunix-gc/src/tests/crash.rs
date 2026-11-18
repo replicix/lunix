@@ -77,12 +77,19 @@ fn actions(s: &mut Sim, z: &mut u64, n: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn sweep(chunk_size: u32, id_len: IdLen, workloads: u64) -> BTreeMap<&'static str, u64> {
+fn sweep(
+    chunk_size: u32,
+    id_len: IdLen,
+    workloads: u64,
+    pipeline: bool,
+) -> BTreeMap<&'static str, u64> {
     let mut hits: BTreeMap<&'static str, u64> = BTreeMap::new();
     for (pi, &point) in CRASH_POINTS.iter().enumerate() {
         for w in 0..workloads {
             let mut z = (pi as u64) << 32 | w;
-            let mut s = Sim::new(SimCfg::new(chunk_size, id_len));
+            let mut cfg = SimCfg::new(chunk_size, id_len);
+            cfg.gc.pipeline = pipeline;
+            let mut s = Sim::new(cfg);
             s.hooks.arm(point, 1 + w % 3);
             let mut crashed = None;
             for _ in 0..40 {
@@ -116,12 +123,18 @@ fn sweep(chunk_size: u32, id_len: IdLen, workloads: u64) -> BTreeMap<&'static st
 }
 
 fn check(chunk_size: u32, id_len: IdLen) {
+    check_with(chunk_size, id_len, false);
+}
+
+fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool) {
     let workloads = std::env::var("LUNIX_GC_CRASH_WORKLOADS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let hits = sweep(chunk_size, id_len, workloads);
-    eprintln!("gc crash sweep: chunk {chunk_size}, id_len {id_len:?}: {hits:?}");
+    let hits = sweep(chunk_size, id_len, workloads, pipeline);
+    eprintln!(
+        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}: {hits:?}"
+    );
     for p in CRASH_POINTS {
         let needed = if id_len == IdLen::Zero && p.starts_with("gc.compact.") {
             // Lean volumes never compact.
@@ -150,4 +163,11 @@ fn every_crash_point_64k() {
 #[test]
 fn every_crash_point_lean() {
     check(16 << 10, IdLen::Zero);
+}
+
+/// The daemon's pipelined schedule (milestone gcrate): the scheduled passes
+/// delete with their condemn mark as the recheck.
+#[test]
+fn every_crash_point_pipelined_16k() {
+    check_with(16 << 10, IdLen::Sixteen, true);
 }

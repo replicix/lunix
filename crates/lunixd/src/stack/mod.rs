@@ -489,8 +489,8 @@ pub struct OpenParams {
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
     pub journal_tweak: Option<JournalTweak>,
-    /// The collector's own settings (`None`: [`lunix_gc::GcConfig`]'s
-    /// defaults). The GC settings of `volume.json` reach it through the
+    /// The collector's own settings (`None`: the daemon's,
+    /// [`lunix_gc::GcConfig::daemon`]). The GC settings of `volume.json` reach it through the
     /// engine's `gc_params`; tests shorten the pass interval here.
     pub gc: Option<lunix_gc::GcConfig>,
 }
@@ -839,7 +839,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         // directory.
         collector: Some(Box::new(lunix_gc::Gc::new(
             Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
-            p.gc.unwrap_or_default(),
+            p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon),
         ))),
         hooks: Arc::new(NoHooks),
     };

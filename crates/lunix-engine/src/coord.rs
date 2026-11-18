@@ -35,7 +35,7 @@ use std::time::Duration;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
-use lunix_iface::gc::{Collector, GcProgress, Moved};
+use lunix_iface::gc::{Collector, GcProgress, GcState, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
@@ -872,16 +872,23 @@ impl Inner {
         }
         match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => {
+                // Work left that a step can do now: the background thread
+                // ticks again soon (`GC_BUSY_PERIOD`).
+                let busy = !p.done && !matches!(p.state, GcState::Idle | GcState::Grace);
+                self.gc_busy.store(busy, Ordering::Release);
                 co.absorb(p);
                 co.gc_error = None;
             }
             // No collector, or the map ahead of the tip (the hook's
             // precondition, M17): nothing to step now.
-            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {}
+            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {
+                self.gc_busy.store(false, Ordering::Release);
+            }
             // Moves sealed before the failure were taken by `with_collector`
             // (M17.B stack review M-2). Once per distinct error, not at every
             // tick (M-3).
             Err(e) => {
+                self.gc_busy.store(false, Ordering::Release);
                 let msg = e.to_string();
                 if co.gc_error.as_deref() != Some(msg.as_str()) {
                     tracing::warn!(error = %msg, "gc step failed; the pass resumes later");
