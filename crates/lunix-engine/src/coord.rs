@@ -241,6 +241,7 @@ impl Inner {
                     "destage cannot complete this cut: no more commits in this process; writes fail, reads continue"
                 );
                 self.failed.store(true, Ordering::Release);
+                self.signal_queues();
                 CutFail::Other(f.error)
             }
         }
@@ -251,15 +252,20 @@ impl Inner {
             tracing::error!(step, error = %e, "commit failed after the map changed: no more commits in this process");
         }
         self.failed.store(true, Ordering::Release);
+        self.signal_queues();
     }
 
     /// The trigger check (plan M11 step 5): `T`, `B`, journal fill, a full
     /// ring, pending `moved` records. An idle volume cuts nothing.
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
         let mut co = crate::engine::lock(&self.coord);
-        if self.wanted(&mut co) {
+        let wanted = self.wanted(&mut co);
+        // ADR-32 T2: a full volume cuts its discards and turns the window.
+        let space_cut = self.space_cut(&co);
+        if wanted || space_cut.is_some() {
             let cut_started = self.clock.monotonic();
-            let res = self.commit(&mut co, false, None);
+            let res = self.commit(&mut co, space_cut == Some(true), None);
+            self.after_space_cut(&co, space_cut, &res);
             // A commit that failed before it changed the map (no space for
             // the cut above all, an index run still unpersisted, writes in
             // flight) still lets the collector work: a volume that cannot
@@ -354,6 +360,7 @@ impl Inner {
         new_size: Option<u64>,
     ) -> Result<CommitOutcome> {
         let res = self.commit_once(co, force, new_size);
+        self.full.note_commit(&res, self.clock.monotonic());
         match &res {
             Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
             Err(_) => {}
@@ -635,6 +642,7 @@ impl Inner {
         );
         co.tip = full;
         co.tip_hash = sealed.hash;
+        self.full.note_cut(prev, c, commit_seq.0);
         co.retained.push(commit);
         co.retained.retain(|r| r.common().commit_seq >= chain_floor);
         co.last_commit_at = self.clock.monotonic();
@@ -710,20 +718,21 @@ impl Inner {
         self.true_up_index(Some(&mut acct));
         point!(self.points, "engine.c8.index");
         // C9: reclaim the journal below the cut, release the overlay.
+        // The ring files are the journal's to recycle; the charge of every
+        // record at or below the cut goes now, whichever files were reused
+        // (ADR-32 review M4): the ledger then equals what a restart charges.
         match &tail {
-            Ok(t) => match self.journal.reclaim(t) {
-                Ok(rep) => {
-                    let held = self.journal_charged.load(Ordering::Acquire);
-                    let give = rep.bytes.min(held);
-                    self.journal_charged.fetch_sub(give, Ordering::AcqRel);
-                    self.space.release(SpaceKind::JournalReserved, give);
+            Ok(t) => {
+                if let Err(e) = self.journal.reclaim(t) {
+                    tracing::warn!(error = %e, "journal reclaim failed; retried at the next cut");
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "journal reclaim failed; retried at the next cut")
-                }
-            },
+            }
             Err(e) => tracing::warn!(error = %e, "journal tail unknown; nothing reclaimed"),
         }
+        let held = self.journal_charged.load(Ordering::Acquire);
+        let give = self.jcharges.take_upto(c).min(held);
+        self.journal_charged.fetch_sub(give, Ordering::AcqRel);
+        self.space.release(SpaceKind::JournalReserved, give);
         self.overlay.release(&cut);
         self.abandon(acct);
         self.journal_full.store(false, Ordering::Release);

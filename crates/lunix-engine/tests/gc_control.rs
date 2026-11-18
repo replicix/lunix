@@ -348,7 +348,7 @@ fn moves_of_a_failed_step_of_a_requested_pass_reach_the_next_cut() {
 
 #[test]
 fn a_cut_asked_for_by_an_urgent_pass_is_one_full_on_an_idle_volume() {
-    let (_v, r) = handover_vol(Mode::UrgentCut);
+    let (v, r) = handover_vol(Mode::UrgentCut);
     let before = tip_seq(&r);
     assert_eq!(
         GcControl::run_urgent(&r.engine, 1 << 20).expect("urgent"),
@@ -360,6 +360,8 @@ fn a_cut_asked_for_by_an_urgent_pass_is_one_full_on_an_idle_volume() {
     ));
     assert_eq!(tip_seq(&r).0, before.0 + 1, "exactly one FULL");
     assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    // Past the ladder's back-off (ADR-32): the second urgent pass runs.
+    v.clock.advance(std::time::Duration::from_secs(61));
     assert_eq!(
         GcControl::run_urgent(&r.engine, 1 << 20).expect("urgent"),
         0

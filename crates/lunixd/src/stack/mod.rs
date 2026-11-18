@@ -493,6 +493,9 @@ pub struct OpenParams {
     /// [`lunix_gc::GcConfig::daemon`]). The GC settings of `volume.json` reach it through the
     /// engine's `gc_params`; tests shorten the pass interval here.
     pub gc: Option<lunix_gc::GcConfig>,
+    /// The wait at the limit when `space.full_timeout_ms` is null (the
+    /// daemon's `full_timeout_ms`, ADR-32).
+    pub full_timeout: std::time::Duration,
 }
 
 impl OpenParams {
@@ -511,6 +514,7 @@ impl OpenParams {
             store_fs: None,
             journal_tweak: None,
             gc: None,
+            full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
         }
     }
 }
@@ -763,8 +767,10 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         tracing::warn!(volume = %uuid, fell_back = report.fell_back, discarded = report.discarded_runs.len(), "index manifest fell back; catch-up rebuilds it");
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let mut space_cfg = SpaceConfig::new(json.space.clone());
+    space_cfg.full_timeout = p.full_timeout;
     let space = LunixSpace::new(
-        SpaceConfig::new(json.space.clone()),
+        space_cfg,
         Arc::new(StatvfsProbe::new(&voldir)),
         Arc::clone(&clock),
     )?;
@@ -784,6 +790,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.map_fanout = u32::from(desc.map_fanout);
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
+    cfg.full_timeout = space.full_timeout();
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
     // idle ticks, with the settings of volume.json. A step may compact up to
     // one second of `gc_rate`: its time budget bounds it, and the collector's

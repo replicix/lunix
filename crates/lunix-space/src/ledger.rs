@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use lunix_format::local::OnFull;
 use lunix_iface::space::{SpaceKind, SpaceSnapshot, Waiter, WaiterState};
 use lunix_iface::{Error, Result};
 
@@ -13,13 +14,15 @@ use crate::probe::FsStat;
 
 const HEADROOM: usize = SpaceKind::Headroom as usize;
 
-/// A parked reservation.
+/// A parked reservation. Every one has a deadline (ADR-32): its arrival plus
+/// the policy's `full_timeout`, recomputed when the policy changes.
 #[derive(Debug)]
 pub(crate) struct Parked {
     pub waiter: Waiter,
     pub kind: SpaceKind,
     pub bytes: u64,
-    pub deadline: Option<Duration>,
+    pub arrived: Duration,
+    pub deadline: Duration,
 }
 
 /// The last file-system reading and the ledger level it was taken at.
@@ -40,6 +43,14 @@ pub(crate) struct Ledger {
     /// 2 x segment size, added to `policy.headroom`.
     pub segment_reserve: u64,
     pub read_only: bool,
+    /// Latched full (ADR-32): a wait for space expired, so writes fail at
+    /// once until the headroom reaches [`Ledger::resume_mark`].
+    pub full: bool,
+    /// A quiesce began (`LunixSpace::begin_close`): nothing parks any more,
+    /// a reservation that does not fit fails at once (decision M5).
+    pub closing: bool,
+    /// Times the volume latched full since the gate was built.
+    pub fulls: u64,
 }
 
 impl Ledger {
@@ -51,6 +62,9 @@ impl Ledger {
             fs: FsView::default(),
             segment_reserve: segment_size.saturating_mul(2),
             read_only: false,
+            full: false,
+            closing: false,
+            fulls: 0,
         }
     }
 
@@ -79,6 +93,44 @@ impl Ledger {
     pub fn limit(&self) -> u64 {
         let fs = self.fs_ceiling().saturating_sub(self.reserve_region());
         self.policy.cache_max.map_or(fs, |c| c.min(fs))
+    }
+
+    /// `limit - used`, the headroom below the limit (ADR-32's signal).
+    pub fn headroom(&self) -> u64 {
+        self.limit().saturating_sub(self.used())
+    }
+
+    /// The resume mark of the full latch: the larger of 4 segments and 1 % of
+    /// the limit, and never more than half the limit (so a small test volume
+    /// can come back at all).
+    pub fn resume_mark(&self) -> u64 {
+        let limit = self.limit();
+        self.segment_reserve
+            .saturating_mul(2)
+            .max(limit / 100)
+            .min(limit / 2)
+    }
+
+    /// Opens the latch once the headroom reached the resume mark.
+    pub fn update_latch(&mut self) {
+        // At least one byte of headroom: at a zero limit the mark is 0, and
+        // the latch must not open in the call that closed it.
+        if self.full && self.headroom() >= self.resume_mark().max(1) {
+            self.full = false;
+        }
+    }
+
+    /// What the ladder should try to free: every waiting reservation plus
+    /// the resume mark, less the headroom there is (ADR-32 §5.6).
+    pub fn ladder_want(&self) -> u64 {
+        let waiting = self
+            .waiters
+            .iter()
+            .filter(|p| p.waiter.state() == WaiterState::Pending)
+            .fold(0u64, |a, p| a.saturating_add(p.bytes));
+        waiting
+            .saturating_add(self.resume_mark())
+            .saturating_sub(self.headroom())
     }
 
     pub fn fits(&self, bytes: u64) -> bool {
@@ -129,6 +181,7 @@ impl Ledger {
     /// Grants parked requests that now fit, strictly first in, first out.
     /// A granted request is charged before it is told.
     pub fn grant_waiters(&mut self) {
+        self.update_latch();
         loop {
             self.prune_front();
             let Some(front) = self.waiters.front() else {
@@ -149,25 +202,65 @@ impl Ledger {
         }
     }
 
-    /// Expires waiters whose deadline is at or before `now`; returns how many
-    /// this call expired, then lets the ones behind them be granted.
+    /// Expires waiters whose deadline is at or before `now`. The first expiry
+    /// latches the volume full and fails every other request waiting for
+    /// space with it (ADR-32). Returns how many this call failed, then lets
+    /// what fits be granted (none is left unless the latch opened).
     pub fn expire(&mut self, now: Duration) -> usize {
-        let n = self
+        let due = self
             .waiters
             .iter()
-            .filter(|p| p.deadline.is_some_and(|d| d <= now) && p.waiter.expire())
-            .count();
-        self.waiters
-            .retain(|p| p.waiter.state() == WaiterState::Pending);
+            .any(|p| p.deadline <= now && p.waiter.state() == WaiterState::Pending);
+        if !due {
+            return 0;
+        }
+        let n = self.fail_waiters();
+        self.full = true;
+        self.fulls += 1;
         self.grant_waiters();
         n
     }
 
+    /// Fails every pending request with `TimedOut` (the queue answers
+    /// `ENOSPC`); returns how many.
+    pub fn fail_waiters(&mut self) -> usize {
+        self.waiters.drain(..).filter(|p| p.waiter.expire()).count()
+    }
+
+    /// The earliest deadline of a pending request.
+    pub fn next_deadline(&self) -> Option<Duration> {
+        self.waiters
+            .iter()
+            .filter(|p| p.waiter.state() == WaiterState::Pending)
+            .map(|p| p.deadline)
+            .min()
+    }
+
+    /// Re-judges every parked request under the current policy (after
+    /// `reconfigure`): deadlines count from each arrival with the new
+    /// `full_timeout`; what fits now is granted; under `on_full = error` (or
+    /// once closing) the rest fail now, else the overdue ones expire (and
+    /// latch). Returns how many failed.
+    pub fn rejudge(&mut self, now: Duration) -> usize {
+        if self.policy.on_full == OnFull::Error {
+            // `error` refuses per request; a latch from `wait` ends here.
+            self.full = false;
+        }
+        let t = self.policy.full_timeout;
+        for p in &mut self.waiters {
+            p.deadline = p.arrived.saturating_add(t);
+        }
+        self.grant_waiters();
+        if self.policy.on_full == OnFull::Error || self.closing {
+            self.fail_waiters()
+        } else {
+            self.expire(now)
+        }
+    }
+
     /// Expires every parked request (the volume went read-only).
     pub fn expire_all(&mut self) {
-        for p in self.waiters.drain(..) {
-            p.waiter.expire();
-        }
+        self.fail_waiters();
     }
 
     /// `reserve_headroom`: bounded by the whole store (limit plus reserve),
@@ -224,6 +317,7 @@ impl Ledger {
             headroom_total: self.reserve_region(),
             waiters: self.pending_waiters(),
             read_only: self.read_only,
+            full: self.full,
         }
     }
 }
