@@ -5,10 +5,11 @@ use std::io::{self, Write};
 use lunix_format::local::FreeFloor;
 use lunix_format::local::OnFull;
 use lunix_iface::ctl::{
-    Attached, SpaceBody, SpaceFigures, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody,
-    VolumeSummary,
+    Attached, GcPressure, SpaceBody, SpaceFigures, ThrottleStatus, VolumeCreated, VolumeMode,
+    VolumeState, VolumeStatusBody, VolumeSummary,
 };
 use lunix_iface::gc::{GcPassSummary, GcState, GcStatusSnapshot};
+use lunix_iface::space::ThrottleState;
 
 use crate::error::sanitize;
 use crate::parse::{format_bytes, format_duration_ms, format_utc_ms};
@@ -225,7 +226,70 @@ pub fn status(out: &mut dyn Write, s: &VolumeStatusBody) -> io::Result<()> {
             &format!("{} extents failed verification", st.extent_auth_failures),
         )?;
     }
-    figures(out, &s.space)
+    figures(out, &s.space)?;
+    throttle(out, &s.throttle)
+}
+
+/// Milliseconds for the throttle line: `850 ms`, `42 s`, `2.4 s`; the long
+/// ones in the shared `1m`, `2h` form.
+fn human_ms(ms: u64) -> String {
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else if ms >= 100_000 {
+        format_duration_ms(ms)
+    } else if ms.is_multiple_of(1_000) {
+        format!("{} s", ms / 1_000)
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
+}
+
+/// The write throttle (ADR-32): one line when the state is not `open`, for
+/// example `slowdown for 42 s, 38 MiB/s, headroom 3.1 GiB of 48 GiB, 17
+/// writes waiting, longest wait 2.4 s`; an open volume that was throttled
+/// since the attach says how much.
+fn throttle(out: &mut dyn Write, t: &ThrottleStatus) -> io::Result<()> {
+    if t.state == ThrottleState::Open {
+        if t.throttled_ms > 0 || t.delayed_writes > 0 || t.enospc > 0 {
+            kv(
+                out,
+                "throttle",
+                &format!(
+                    "open; since the attach {} throttled, {} writes delayed (longest {}), {} refused with ENOSPC",
+                    human_ms(t.throttled_ms),
+                    t.delayed_writes,
+                    human_ms(t.delay_max_ms),
+                    t.enospc
+                ),
+            )?;
+        }
+        return Ok(());
+    }
+    let mut line = format!("{} for {}", t.state.name(), human_ms(t.state_for_ms));
+    if let Some(r) = t.rate {
+        line.push_str(&format!(", {}/s", format_bytes(r)));
+    }
+    line.push_str(&format!(
+        ", headroom {} of {}",
+        format_bytes(t.headroom),
+        format_bytes(t.limit)
+    ));
+    let waiting = t.paced_waiters + t.space_waiters;
+    if waiting > 0 {
+        line.push_str(&format!(", {waiting} writes waiting"));
+    }
+    line.push_str(&format!(", longest wait {}", human_ms(t.delay_max_ms)));
+    if t.gc_pressure != GcPressure::Normal {
+        line.push_str(&format!(
+            ", gc {}",
+            match t.gc_pressure {
+                GcPressure::Normal => "normal",
+                GcPressure::Raised => "raised",
+                GcPressure::Urgent => "urgent",
+            }
+        ));
+    }
+    kv(out, "throttle", &line)
 }
 
 fn figures(out: &mut dyn Write, f: &SpaceFigures) -> io::Result<()> {

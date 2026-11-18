@@ -169,14 +169,20 @@ impl Phase {
     fn index(&self) -> Option<usize> {
         Some(match self {
             Self::Idle => return None,
-            Self::Marking(_) => 0,
-            Self::Condemning { .. } => 1,
-            Self::Grace { .. } => 2,
-            Self::Rechecking(_) => 3,
-            Self::Deleting { .. } => 4,
-            Self::Compacting(_) => 5,
-            Self::Finishing => 6,
+            Self::Marking(_) => slot::MARK,
+            Self::Condemning { .. } => slot::CONDEMN,
+            Self::Grace { .. } => slot::GRACE,
+            Self::Rechecking(_) => slot::RECHECK,
+            Self::Deleting { .. } => slot::DELETE,
+            Self::Compacting(_) => slot::COMPACT,
+            Self::Finishing => slot::FINISH,
         })
+    }
+
+    /// True in a mark phase: the condemn mark or the recheck (what the duty
+    /// cap measures).
+    fn is_mark(&self) -> bool {
+        matches!(self, Self::Marking(_) | Self::Rechecking(_))
     }
 }
 
@@ -209,6 +215,17 @@ struct PassProfile {
 
 /// Phases a pass profile tracks.
 const PHASES: usize = 7;
+
+/// The profile slots of the phases (`Phase::index`).
+mod slot {
+    pub const MARK: usize = 0;
+    pub const CONDEMN: usize = 1;
+    pub const GRACE: usize = 2;
+    pub const RECHECK: usize = 3;
+    pub const DELETE: usize = 4;
+    pub const COMPACT: usize = 5;
+    pub const FINISH: usize = 6;
+}
 
 /// Phase names, by `Phase::index`.
 const PHASE_NAMES: [&str; PHASES] = [
@@ -1074,10 +1091,12 @@ impl Gc {
         step_bytes: &mut u64,
     ) -> Result<Flow> {
         let before = self.phase.index();
+        // By variant, before the unit moves the phase on.
+        let marking = self.phase.is_mark();
         let t = std::time::Instant::now();
         let v0 = view.clock.monotonic();
         let res = self.unit_inner(view, budget, freed, step_bytes);
-        if matches!(before, Some(0 | 3)) {
+        if marking {
             // A mark unit (the condemn mark or the recheck), on the view's
             // clock: the duty cap's measure.
             self.prof.mark_view += view.clock.monotonic().saturating_sub(v0);

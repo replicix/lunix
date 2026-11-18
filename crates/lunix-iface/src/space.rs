@@ -20,7 +20,9 @@
 //! 1. *Admission* of a write: `reserve(JournalReserved, journal::record_bytes(kind,
 //!    blocks))`, the encoded record length, before `JournalLane::try_reserve`
 //!    (released again if that returns `Full` or `NoSpace`). May park or
-//!    refuse; this is the only place a guest write waits for space.
+//!    refuse; this is the only place a guest write waits for space, and
+//!    inside the soft band below the limit the place where it is paced
+//!    (ADR-32: [`ReserveOutcome::Paced`]).
 //! 2. *C2* (cut taken): `reserve_headroom(Segments, ulen_of_nonzero_chunks)` as
 //!    an upper bound for the segments the cut will write, and
 //!    `reserve_headroom(Headroom, map_bound + commit_bound + index_bound)` for
@@ -49,6 +51,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use lunix_format::local::SpaceSettings;
+use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::wake::WakeFd;
@@ -176,6 +179,23 @@ impl Waiter {
     }
 }
 
+/// What a reservation is for, which decides whether the paced band slows it
+/// (ADR-32).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ReserveClass {
+    /// An ordinary write: paced inside the band.
+    #[default]
+    Bulk,
+    /// The write an `fsync` waits on (a FUA write of at most
+    /// [`SYNC_MAX_BYTES`] of data): admitted at once inside the band and
+    /// charged to its bucket. At the hard mark it waits like any write.
+    Sync,
+}
+
+/// The largest FUA write (data bytes) that is a [`ReserveClass::Sync`]
+/// reservation: the journal commit block of ext4, the log write of xfs.
+pub const SYNC_MAX_BYTES: u64 = 256 << 10;
+
 /// The answer to [`SpaceGate::reserve`].
 #[derive(Debug)]
 pub enum ReserveOutcome {
@@ -184,9 +204,86 @@ pub enum ReserveOutcome {
     /// Not enough space now (`on_full = wait`): the request is parked FIFO
     /// behind this handle and charged when it is granted.
     Parked(Waiter),
+    /// The request fits but the band paces it (ADR-32): parked FIFO behind
+    /// this handle, charged when the token bucket has its bytes or the delay
+    /// cap passes. Not a refusal for space: the volume is slow, not full.
+    Paced(Waiter),
     /// Refused (`on_full = error`, or the wait would exceed `full_timeout`
     /// at once): nothing charged.
     NoSpace,
+}
+
+/// The gate's write-throttle state (ADR-32).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThrottleState {
+    /// The headroom is above the soft mark (or the band is off): writes are
+    /// untouched.
+    #[default]
+    Open,
+    /// Inside the band: admission is paced.
+    Slowdown,
+    /// A write waits for space.
+    Stop,
+    /// Latched full: writes fail at once.
+    Full,
+}
+
+impl ThrottleState {
+    /// The state's name as the status prints it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Slowdown => "slowdown",
+            Self::Stop => "stop",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// The throttle's figures (ADR-32, research note section 7). The counters
+/// live in the gate and start at zero when it is built (the attach); the
+/// checkpoint holds none of them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ThrottleFigures {
+    /// The state now.
+    pub state: ThrottleState,
+    /// When the state was entered, in milliseconds of the gate's clock.
+    pub state_since_ms: u64,
+    /// `limit - used`, bytes.
+    pub headroom: u64,
+    /// The soft mark: pacing starts below this headroom (0 with the band off).
+    pub soft: u64,
+    /// The resume mark of the full latch.
+    pub resume: u64,
+    /// The bucket's rate now, bytes per second; `None` outside the band.
+    pub rate: Option<u64>,
+    /// Requests waiting for tokens.
+    pub paced_waiters: u64,
+    /// Requests waiting for space.
+    pub space_waiters: u64,
+    /// Requests that waited in the gate and were admitted.
+    pub delayed_writes: u64,
+    /// The summed wait of those, in milliseconds.
+    pub delayed_ms: u64,
+    /// The longest wait in the gate of one request (admitted or failed), ms.
+    pub delay_max_ms: u64,
+    /// Requests admitted by the delay cap.
+    pub delay_capped: u64,
+    /// FUA requests admitted at once inside the band.
+    pub bypassed_fua: u64,
+    /// Reservations that failed for space (a refusal, an expiry, the latch).
+    pub enospc: u64,
+    /// Times the gate entered `Stop`.
+    pub stops: u64,
+    /// Times the volume latched full.
+    pub fulls: u64,
+    /// Time spent outside `Open`, in milliseconds.
+    pub throttled_ms: u64,
+    /// Bytes admitted per second, a 10 s average.
+    pub ingest_rate: u64,
+    /// Bytes of store freed per second, a 10 s average.
+    pub reclaim_rate: u64,
 }
 
 /// A point-in-time view of the ledger.
@@ -208,6 +305,9 @@ pub struct SpaceSnapshot {
     /// once until the headroom reaches the resume mark. Nothing is parked
     /// while it holds.
     pub full: bool,
+    /// The write throttle (ADR-32). `waiters` counts both kinds of parked
+    /// request; `throttle.space_waiters` is the part that waits for space.
+    pub throttle: ThrottleFigures,
 }
 
 impl SpaceSnapshot {
@@ -276,7 +376,8 @@ pub trait SpaceEvents {
 pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// Charges `bytes` to `kind` if the ledger allows, else parks or refuses
     /// per `on_full`. `wake` is signalled when a parked request resolves.
-    /// Reads never call this.
+    /// Reads never call this. A bulk write; see
+    /// [`reserve_since`](Self::reserve_since) for the class.
     ///
     /// # Errors
     /// `ReadOnly` after `fatal_io`.
@@ -291,7 +392,8 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// `full_timeout` from its arrival). One that does not fit and is
     /// already past it is refused (`NoSpace`) without parking; that refusal
     /// does not latch the volume (it never waited in the gate). Required: a
-    /// gate that parks must honour `arrived`.
+    /// gate that parks must honour `arrived`. `class` tells a gate that
+    /// paces whether the band may slow the request.
     ///
     /// # Errors
     /// As [`reserve`](Self::reserve).
@@ -301,6 +403,7 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: std::time::Duration,
+        class: ReserveClass,
     ) -> Result<ReserveOutcome>;
 
     /// Charges `bytes` to `kind` from the reserved headroom: no limit check,

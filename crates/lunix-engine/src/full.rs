@@ -343,7 +343,8 @@ impl Inner {
     /// ledger is within 1 MiB of the limit.
     pub(crate) fn space_refusing(&self) -> bool {
         let snap = self.space.snapshot();
-        snap.waiters > 0
+        // Requests parked for pacing are not refused (ADR-32).
+        snap.waiters > snap.throttle.paced_waiters
             || snap.full
             || (self.full.blocked.load(Ordering::Relaxed)
                 && snap.used().saturating_add(NEAR_LIMIT) > snap.limit)

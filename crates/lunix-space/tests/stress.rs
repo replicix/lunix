@@ -104,7 +104,7 @@ fn reserve_release(run_for: Duration) {
                 let got = match g.reserve(k, bytes, None).unwrap() {
                     ReserveOutcome::Reserved => true,
                     ReserveOutcome::NoSpace => false,
-                    ReserveOutcome::Parked(w) => {
+                    ReserveOutcome::Parked(w) | ReserveOutcome::Paced(w) => {
                         let t0 = Instant::now();
                         let cancel_after = Duration::from_millis(rng(&mut x) % 300);
                         loop {

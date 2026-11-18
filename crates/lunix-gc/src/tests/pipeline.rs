@@ -435,13 +435,24 @@ fn the_next_pass_waits_three_times_the_last_mark() {
 }
 
 /// An abandoned pipelined pass: the next one waits `pass_interval`, also for
-/// a grace that has ended.
+/// a grace that has ended since the abandoned pass's mark began (the
+/// `last_aborted` term of `due`: without it the grace trigger would retry at
+/// the busy pace, every time a grace ends; gcrate final review F-2).
 #[test]
 fn after_an_abandoned_pass_the_next_waits_the_pass_interval() {
     let mut s = sim();
+    // A is listed at about t = 1 s (its grace ends at about 61 s).
     condemned_at_start(&mut s);
-    s.clock.advance(GRACE + Duration::from_secs(1));
+    // B is listed at about t = 31 s (its grace ends at about 91 s).
+    s.clock.advance(Duration::from_secs(30));
+    churn(&mut s, 1, 500);
+    pass_now(&mut s);
+    // t = 62 s: A's grace has ended, B's has not. The next pass's mark
+    // begins now and takes 35 s on the view's clock, so B's grace ends
+    // after the mark began and before the pass is abandoned.
+    s.clock.advance(Duration::from_secs(31));
     churn(&mut s, 1, 1000);
+    s.hooks.advance_at("gc.mark.end", Duration::from_secs(35));
     s.arm_fault("index.drop.before", 1, false);
     let mut failed = false;
     for _ in 0..10_000 {
@@ -456,8 +467,10 @@ fn after_an_abandoned_pass_the_next_waits_the_pass_interval() {
     }
     assert!(failed, "the armed delete fault was not hit");
     s.disarm_faults();
+    s.hooks.advance_at("gc.mark.end", Duration::ZERO);
     assert_eq!(s.gc.state(), GcState::Idle);
-    // Graces have ended and the tip is new, but the busy pace is off.
+    // B's grace has ended since the abandoned mark began: only the abandoned
+    // pass's pace holds the next pass back.
     s.clock.advance(Duration::from_secs(5));
     churn(&mut s, 1, 2000);
     assert!(!starts(&mut s), "a pass 5 s after an abandoned one");
@@ -465,6 +478,73 @@ fn after_an_abandoned_pass_the_next_waits_the_pass_interval() {
     assert!(starts(&mut s), "no retry after the pass interval");
     units_to_end(&mut s);
     s.check_roots().unwrap();
+}
+
+/// The duty cap's measure comes from the pass itself (gcrate final review
+/// F-1): the time its mark units took on the view's clock, and nothing of the
+/// delete units. A mark that takes 7 s makes the next gap 21 s; a pass whose
+/// time goes into deletes leaves it at the busy interval.
+#[test]
+fn a_pass_measures_its_mark_time_on_the_view_clock_and_not_its_deletes() {
+    let mut s = sim();
+    churn(&mut s, 6, 0);
+    s.clock.advance(Duration::from_secs(1));
+    s.hooks.advance_at("gc.mark.end", Duration::from_secs(7));
+    pass_now(&mut s);
+    assert_eq!(s.gc.last_mark, Duration::from_secs(7));
+    assert_eq!(s.gc.min_gap(), Duration::from_secs(21));
+    // A pass whose mark takes no time and whose deletes take 40 s each.
+    s.hooks.advance_at("gc.mark.end", Duration::ZERO);
+    s.hooks
+        .advance_at("gc.delete.before_unlink", Duration::from_secs(40));
+    s.clock.advance(GRACE + Duration::from_secs(1));
+    churn(&mut s, 1, 1000);
+    pass_now(&mut s);
+    assert!(s.gc.stats().bytes_freed > 0, "the pass deleted nothing");
+    assert_eq!(
+        s.gc.last_mark,
+        Duration::ZERO,
+        "deletes counted as mark time"
+    );
+    assert_eq!(s.gc.min_gap(), Duration::from_secs(2));
+}
+
+/// A grace shortened to the floor between condemn and verdict (what the
+/// engine does under write pressure; the note, §5.6) is compared with the
+/// mark's start on the same monotonic clock: nothing is deleted before the
+/// shortened grace ran, whatever the clock does during the pass.
+#[test]
+fn a_grace_shortened_between_condemn_and_verdict_deletes_nothing_early() {
+    let floor = Duration::from_secs(30);
+    let mut s = sim();
+    // Condemned at about t = 1 s under the full grace (60 s).
+    let condemned = condemned_at_start(&mut s);
+    s.grace = floor;
+    // A pass whose mark begins at t = 29 s, 2 s before the shortened grace
+    // ends, and runs 12 s on the view's clock: its deletes judge the mark's
+    // start, not the clock they run at.
+    s.clock.advance(Duration::from_secs(28));
+    churn(&mut s, 1, 1000);
+    s.hooks.advance_at("gc.mark.end", Duration::from_secs(12));
+    pass_now(&mut s);
+    s.hooks.advance_at("gc.mark.end", Duration::ZERO);
+    for o in &condemned {
+        assert!(s.gc.condemned().contains(o), "{o} went before its grace");
+    }
+    assert_eq!(s.gc.stats().bytes_freed, 0);
+    s.check_roots().unwrap();
+    // The next mark (after the duty gap, three times the 12 s mark) begins
+    // after the shortened grace: the objects go, a pass that began at 31 s
+    // or later instead of 61 s.
+    s.clock.advance(Duration::from_secs(40));
+    churn(&mut s, 1, 2000);
+    pass_now(&mut s);
+    for o in &condemned {
+        assert!(!s.gc.condemned().contains(o), "{o} is still listed");
+    }
+    assert!(s.gc.stats().bytes_freed > 0);
+    s.check_roots().unwrap();
+    s.check_ledger().unwrap();
 }
 
 /// An idle check after a busy pass clears "busy": a tip that moves later

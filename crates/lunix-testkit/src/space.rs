@@ -14,8 +14,8 @@ use std::time::Duration;
 use lunix_format::local::{OnFull, SpaceSettings};
 use lunix_iface::clock::Clock;
 use lunix_iface::space::{
-    Ladder, LadderStep, LadderStepKind, ReserveOutcome, SpaceEvents, SpaceGate, SpaceKind,
-    SpaceSnapshot, Urgency, Waiter, WaiterState,
+    Ladder, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceEvents, SpaceGate,
+    SpaceKind, SpaceSnapshot, ThrottleFigures, ThrottleState, Urgency, Waiter, WaiterState,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
@@ -89,6 +89,8 @@ struct State {
     waiters: VecDeque<Parked>,
     read_only: bool,
     full: bool,
+    /// What the snapshot reports as the throttle state (a test script).
+    throttle: ThrottleState,
 }
 
 impl State {
@@ -160,9 +162,17 @@ impl MemSpace {
                 waiters: VecDeque::new(),
                 read_only: false,
                 full: false,
+                throttle: ThrottleState::Open,
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// Scripts the throttle state the snapshot reports (the latch, when set,
+    /// reports `Full` on its own). This gate paces nothing; engine tests use
+    /// it to put the collector under pressure.
+    pub fn set_throttle_state(&self, state: ThrottleState) {
+        lock(&self.st).throttle = state;
     }
 
     /// Runs the registered steps, in ladder order, until one frees something.
@@ -203,7 +213,13 @@ impl SpaceGate for MemSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
-        self.reserve_since(kind, bytes, wake, self.clock.monotonic())
+        self.reserve_since(
+            kind,
+            bytes,
+            wake,
+            self.clock.monotonic(),
+            ReserveClass::Bulk,
+        )
     }
 
     /// The wait of a parked request counts from `arrived` (ADR-32).
@@ -213,6 +229,7 @@ impl SpaceGate for MemSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: Duration,
+        _class: ReserveClass,
     ) -> Result<ReserveOutcome> {
         let mut st = lock(&self.st);
         if st.read_only {
@@ -327,6 +344,14 @@ impl SpaceGate for MemSpace {
                 .count() as u64,
             read_only: st.read_only,
             full: st.full,
+            throttle: ThrottleFigures {
+                state: if st.full {
+                    ThrottleState::Full
+                } else {
+                    st.throttle
+                },
+                ..ThrottleFigures::default()
+            },
         }
     }
 

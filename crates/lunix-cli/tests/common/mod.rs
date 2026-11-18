@@ -125,6 +125,7 @@ pub fn status_body(name: &str, mode: VolumeMode) -> VolumeStatusBody {
         device: Some(format!("/dev/lunix/{name}")),
         stats: EngineStats::default(),
         space: SpaceFigures::default(),
+        throttle: Default::default(),
         journal_used: 4096,
         journal_capacity: 1 << 30,
         journal_marks_written: 0,

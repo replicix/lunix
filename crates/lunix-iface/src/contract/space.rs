@@ -9,7 +9,8 @@ use super::wait_until;
 use crate::clock::{Clock, ManualClock};
 use crate::error::ErrorKind;
 use crate::space::{
-    Freed, LadderStep, LadderStepKind, ReserveOutcome, SpaceGate, SpaceKind, Urgency, WaiterState,
+    Freed, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceGate, SpaceKind, Urgency,
+    WaiterState,
 };
 
 /// How to build the gate under test.
@@ -194,7 +195,10 @@ pub fn a_wait_counts_from_the_arrival<
     reserved(g.reserve(K, 100, None).expect("reserve"));
     let arrived = clock.monotonic();
     clock.advance(Duration::from_millis(600));
-    let ReserveOutcome::Parked(w) = g.reserve_since(K, 10, None, arrived).expect("reserve") else {
+    let ReserveOutcome::Parked(w) = g
+        .reserve_since(K, 10, None, arrived, ReserveClass::Bulk)
+        .expect("reserve")
+    else {
         panic!("expected a parked request");
     };
     clock.advance(Duration::from_millis(450));
@@ -211,7 +215,8 @@ pub fn a_wait_counts_from_the_arrival<
     clock.advance(Duration::from_secs(2));
     assert!(!g.snapshot().full);
     assert!(matches!(
-        g.reserve_since(K, 10, None, arrived).expect("reserve"),
+        g.reserve_since(K, 10, None, arrived, ReserveClass::Bulk)
+            .expect("reserve"),
         ReserveOutcome::NoSpace
     ));
     let snap = g.snapshot();

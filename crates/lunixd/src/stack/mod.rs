@@ -499,6 +499,12 @@ pub struct OpenParams {
     /// The wait at the limit when `space.full_timeout_ms` is null (the
     /// daemon's `full_timeout_ms`, ADR-32).
     pub full_timeout: std::time::Duration,
+    /// The paced band (the daemon's `throttle*` keys, ADR-32); `r_mid` comes
+    /// from the volume's `gc_rate` at open.
+    pub throttle: lunix_space::ThrottleConfig,
+    /// The compaction rate's multiple while writes are slowed (the daemon's
+    /// `gc_pressure_rate_factor`).
+    pub gc_pressure_rate_factor: u64,
 }
 
 impl OpenParams {
@@ -518,6 +524,8 @@ impl OpenParams {
             journal_tweak: None,
             gc: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
+            throttle: lunix_space::ThrottleConfig::default(),
+            gc_pressure_rate_factor: 4,
         }
     }
 }
@@ -800,6 +808,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     early.cache_max_percent = None;
     let mut space_cfg = SpaceConfig::new(early);
     space_cfg.full_timeout = p.full_timeout;
+    space_cfg.throttle = p.throttle.with_gc_rate(json.gc_rate);
     let space = LunixSpace::new(
         space_cfg,
         Arc::new(StatvfsProbe::new(&voldir)),
@@ -822,6 +831,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     cfg.full_timeout = space.full_timeout();
+    cfg.gc_pressure_rate_factor = p.gc_pressure_rate_factor;
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
     // idle ticks, with the settings of volume.json. A step may compact up to
     // one second of `gc_rate`: its time budget bounds it, and the collector's

@@ -93,7 +93,12 @@ A **volume** is a thin block device of a given size. Its data path is:
   resolved at every open and grow; `lunix volume create` writes 200 % by
   default, ADR-32 and its amendment). The
   local store never exceeds `min(cache_max, fs_free - free_floor)`, plus
-  the reserved region and one cut in flight.
+  the reserved region and one cut in flight. Below that limit writes are
+  paced (ADR-32, §4.3): inside a soft band of 15 % of the limit (at least
+  1 GiB, at most 64 GiB, at most half the limit) a token bucket admits the
+  journal reservations at a rate that falls with the headroom. The band
+  is the daemon's: `throttle*` and `gc_pressure_rate_factor` in
+  `lunixd.toml`, not a `volume.json` key.
 - **Owner:** the host that holds the lease. Only the owner writes,
   destages, commits and garbage-collects.
 
@@ -373,14 +378,36 @@ journal):
 
 `used = journal_reserved + segments + cache + map + index`.
 
-- **Admission:** a write reserves its journal bytes. If the reservation
-  would cross `min(cache_max, fs_free - free_floor)`, the space ladder
-  runs:
+- **Admission:** a write reserves its journal bytes. With the headroom
+  `H = limit - used` (`limit = min(cache_max, fs_free - free_floor)`) below
+  the soft mark, the reservation is **paced** (ADR-32):
+  - a token bucket admits bytes at `max(r_min, r_mid * x / (1 - x))` with
+    `x = H / soft`, `r_mid = max(gc_rate, 16 MiB/s)` and `r_min` 4 MiB/s
+    (`throttle_min_rate`): unbounded at the soft mark, `r_mid` in the
+    middle of the band, `r_min` near the limit;
+  - one request is delayed at most `throttle_max_delay_ms` (10 s) from its
+    arrival; past that it is admitted if it fits and the bucket carries
+    the debt, so the band can be overrun by many large requests in flight
+    and the hard mark then does the pacing;
+  - never paced: reads; FLUSH (it reserves nothing); a FUA write of at
+    most 256 KiB, the write an fsync waits on (admitted at once, charged
+    to the bucket; at the hard mark it waits like any write); discards and
+    write-zeroes; the commit path and GC;
+  - a paced write is not a refusal: it is granted by the gate's timer
+    thread, the window turn does not start for it and `ENOSPC` is not
+    in play;
+  - while the gate is not open, GC works harder: 4 times the step budget,
+    `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and the
+    floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms`,
+    until the gate has been open for 5 s (§11, `docs/reference/gc.md`).
+
+  If the reservation would cross the limit, the space ladder runs:
   1. Evict clean cache.
   2. Evict cold synced segments.
   3. Compact (local-only; a real step in phase 1, §11).
-  4. Throttle destage and upload (unused in phase 1; ADR-32 paces the
-     admission below the limit instead).
+  4. Throttle destage and upload (unused in phase 1: the pacing above is
+     this rung, moved in front of the limit and applied to admission, not
+     to destage).
   5. Apply `on_full` (ADR-32): `wait` parks the request FIFO for at most
      `full_timeout` from its arrival, then ENOSPC, and the volume
      **latches full**: every write waiting for space fails with it and
@@ -398,6 +425,10 @@ journal):
   discards or not, and its retained rollback points are then empty FULLs.
 - A reserve of 2 × the segment size, plus the commit and map headroom, is
   never handed to writes.
+- The gate's state is `open`, `slowdown` (inside the band), `stop` (a
+  write waits for space) or `full` (latched). `lunix status` prints one
+  line when it is not `open` and the JSON has the whole `throttle` object
+  (§18).
 
 ### 4.4 Open and recovery order
 
@@ -1645,6 +1676,20 @@ ADR-16 and ADR-22 set the shape.
   - per-backend lag, cursor, EWMA, error classes, request and egress
     counters with a cost estimate;
   - lease epoch and renewal health.
+- **Write throttle** (ADR-32): `lunix status NAME --json` has a `throttle`
+  object: the state and when it was entered, the headroom, the soft and
+  resume marks and the limit, the bucket's rate, the requests waiting for
+  tokens and for space, delayed writes and their summed and longest wait,
+  requests admitted by the delay cap, FUA writes that skipped the band,
+  holes admitted, `ENOSPC` count, stops and fulls, time throttled, 10 s
+  ingest and reclaim rates (reported, never control inputs), what GC is
+  getting (`normal`, `raised`, `urgent`) and the amplification (store
+  bytes over the live bytes of the last mark). The counters live in the
+  gate and start at the attach; the checkpoint holds none. One log line
+  per state change (transitions closer than 5 s are merged) and one every
+  30 s while the state is not `open`: `write throttle on` / `off`,
+  `writes wait for space` (warn), `volume full` (error), `volume no longer
+  full`.
 - **Exposure:** metrics go to `/metrics` (Prometheus) on a local port and
   to `lunix status`.
 - **Cost advisor:** SHARDS sampling estimates the miss-ratio curve for
@@ -1663,6 +1708,7 @@ ADR-16 and ADR-22 set the shape.
 | S3 unreachable, sync | FLUSH waits (hard) or EIO after `flush_timeout` | per-volume policy |
 | network partition, owner isolated | lease renewal fails → self-fence → read-only | the new owner steals after TTL; the zombie gets 412 |
 | two daemons attach the same volume | the second waits for the lease or fails | the EPOCH commit decides; there is never a double writer |
+| garbage outruns GC (the store nears its limit) | the paced band slows admission by the headroom; GC gets 4 × budget, 4 × rate and the floor grace; the sustained rate settles at the garbage room over the time a dead byte waits | §4.3, ADR-32 |
 | local FS full | space ladder → a bounded wait (`full_timeout`), then ENOSPC and the full latch until space returns | §4.3, ADR-32 |
 | host FS EIO / corruption | volume read-only, alert | re-import from the bucket |
 | bucket object corrupt | the fetch fails verification | read from a mirror; scrub repairs |
@@ -1675,7 +1721,14 @@ ADR-16 and ADR-22 set the shape.
 ## 20. Performance targets (to be validated in phase 0/1)
 
 These are per volume, on one NVMe-backed host with 8 queues and cache
-hits. They are targets, not measurements.
+hits. They are targets, not measurements. The write targets are **burst**
+targets (ADR-32): with a grace, garbage is proportional to the write rate
+(a store holds about `R x tau` of it, `tau` about 95 s with the defaults),
+so the sustained write rate of a volume is its garbage room, `limit` less
+the live store, over `tau`. 300 K 4 KiB IOPS sustained needs about 110 GiB
+of garbage room at the default grace, about 76 GiB at the floor grace. A
+write cell is valid only if it was not throttled (`throttled_ms` and
+`delayed_writes` are zero), and states the garbage room it needs.
 
 | workload | target |
 |---|---|

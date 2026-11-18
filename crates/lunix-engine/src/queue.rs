@@ -33,7 +33,9 @@ use lunix_iface::journal::{
 };
 use lunix_iface::map::{entry_hint, Cached, ChunkNo};
 use lunix_iface::overlay::{BlockRange, Piece, PieceSource};
-use lunix_iface::space::{ReserveOutcome, SpaceKind, Waiter, WaiterState};
+use lunix_iface::space::{
+    ReserveClass, ReserveOutcome, SpaceKind, Waiter, WaiterState, SYNC_MAX_BYTES,
+};
 use lunix_iface::wake::WakeFd;
 
 use crate::engine::Inner;
@@ -362,6 +364,14 @@ impl Queue {
             };
             let gen = r.gen;
             let req_lba = r.req.offset_bytes / BLOCK;
+            // The write an fsync waits on is not paced inside the band
+            // (ADR-32): a FUA write of at most 256 KiB.
+            let class =
+                if r.req.fua && r.req.op == IoOp::Write && u64::from(r.req.len) <= SYNC_MAX_BYTES {
+                    ReserveClass::Sync
+                } else {
+                    ReserveClass::Bulk
+                };
             let Kind::Mutate(m) = &mut r.kind else {
                 return Step::Done;
             };
@@ -429,6 +439,7 @@ impl Queue {
                         charge,
                         Some(&self.shared.wake),
                         m.arrived,
+                        class,
                     ) {
                         Ok(ReserveOutcome::Reserved) => {
                             inner.note_admitted();
@@ -436,6 +447,12 @@ impl Queue {
                         }
                         Ok(ReserveOutcome::Parked(w)) => {
                             let _ = inner.full.set_blocked(true, inner.clock.monotonic());
+                            m.space = SpaceWait::Waiting(w, charge);
+                            return Step::Parked;
+                        }
+                        // Paced, not refused: the volume is slow, not full
+                        // (no window turn, no refusal flag).
+                        Ok(ReserveOutcome::Paced(w)) => {
                             m.space = SpaceWait::Waiting(w, charge);
                             return Step::Parked;
                         }

@@ -524,6 +524,52 @@ fn status_human_json_and_all() {
 }
 
 #[test]
+fn status_prints_one_throttle_line_when_the_state_is_not_open() {
+    use lunix_iface::ctl::GcPressure;
+    use lunix_iface::space::ThrottleState;
+    let env = Env::new();
+    let mut s = status_body("vol1", VolumeMode::Plain);
+    s.throttle.state = ThrottleState::Slowdown;
+    s.throttle.state_for_ms = 42_000;
+    s.throttle.rate = Some(38 << 20);
+    s.throttle.headroom = 3 << 30;
+    s.throttle.limit = 48 << 30;
+    s.throttle.paced_waiters = 17;
+    s.throttle.delay_max_ms = 2_400;
+    s.throttle.gc_pressure = GcPressure::Raised;
+    env.ok("VolumeStatus", Response::VolumeStatus(Box::new(s)));
+    let o = env.run(&["status", "vol1"]);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    let line = o
+        .stdout
+        .lines()
+        .find(|l| l.starts_with("throttle"))
+        .unwrap_or_else(|| panic!("no throttle line in {}", o.stdout));
+    for part in [
+        "slowdown for 42 s",
+        "38 MiB/s",
+        "headroom 3 GiB of 48 GiB",
+        "17 writes waiting",
+        "longest wait 2.4 s",
+        "gc raised",
+    ] {
+        assert!(line.contains(part), "{part:?} missing from {line:?}");
+    }
+    // An open volume that never throttled prints nothing; the JSON has the object.
+    let env = Env::new();
+    env.ok(
+        "VolumeStatus",
+        Response::VolumeStatus(Box::new(status_body("vol1", VolumeMode::Plain))),
+    );
+    let o = env.run(&["status", "vol1"]);
+    assert!(!o.stdout.contains("throttle"), "{}", o.stdout);
+    let j = env.run(&["status", "vol1", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&j.stdout).unwrap();
+    assert_eq!(v["throttle"]["state"], "open");
+    assert_eq!(v["throttle"]["gc_pressure"], "normal");
+}
+
+#[test]
 fn status_without_a_rollback_floor_says_so() {
     let env = Env::new();
     let mut s = status_body("vol1", VolumeMode::Plain);

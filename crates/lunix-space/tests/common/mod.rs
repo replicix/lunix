@@ -26,11 +26,14 @@ pub fn settings(headroom: u64, on_full: OnFull, timeout: Option<Duration>) -> Sp
     }
 }
 
-/// No segment reserve, no background timers.
+/// No segment reserve, no background timers, and the paced band off (the
+/// bounded-stop tests and the reference model predate it; `pace.rs` turns it
+/// on).
 pub fn config(settings: SpaceSettings) -> SpaceConfig {
     let mut cfg = SpaceConfig::new(settings);
     cfg.segment_size = 0;
     cfg.background_timers = false;
+    cfg.throttle.enabled = false;
     cfg
 }
 
