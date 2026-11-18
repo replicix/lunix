@@ -131,8 +131,9 @@ their map roots are not roots, so their data may go.
    leaves a complete volume (N24). The truncation itself deletes the commit
    files below the new tip's `chain_floor` that would join the set only under
    the new tip (they were outside it under the old one and may be half
-   collected), and refuses when a root of the new chain resolves into an
-   object only the dropped tip names.
+   collected), refuses when a root of the new chain resolves into an
+   object only the dropped tip names, and rebuilds the index: GC moved the
+   entries of relocated ids into the output the next open sweeps.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice

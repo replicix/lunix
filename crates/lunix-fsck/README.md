@@ -27,8 +27,8 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
    `orphan` after a clean close, else `crash_leftover`.
 6. Repairs run first, then the checks run again. `--truncate-tip` lowers the
    floor, sets the tip aside, then zeroes the checkpoint; it loses the journal
-   records C9 already reclaimed, and says which. `--delete-orphans` is refused
-   with `--truncate-tip` (the zeroed checkpoint loses `id_high`).
+   records C9 already reclaimed, says which, rebuilds the index (gc.md).
+   `--delete-orphans` is refused with it (the zeroed checkpoint loses `id_high`).
 7. The floor is lowered only through `VolumeDir::reset_rollback_floor`
    (store opened with `allow_floor_reset` only for `--truncate-tip`,
    `--reset-floor` and `--repair-pins`; audited in `state/floor-resets.log`).

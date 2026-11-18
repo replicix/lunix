@@ -167,6 +167,8 @@ paths = [
   "crates/lunix-fsck/src/containers.rs",
   "crates/lunix-fsck/src/indexcheck.rs",
   "crates/lunix-fsck/src/resolve.rs",
+  "crates/lunix-fsck/src/repair.rs",
+  "crates/lunix-fsck/README.md",
   "crates/lunix-gc/src/collector.rs",
   "crates/lunix-gc/src/compact.rs",
   "crates/lunix-gc/src/evidence.rs",
