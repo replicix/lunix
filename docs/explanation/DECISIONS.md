@@ -2518,6 +2518,17 @@ sketch are in
   metadata bypass, a daemon-wide GC budget, and in phase 2 the unsynced
   bytes and the cache tier as further pressure sources of the same gate.
 
+**Amendment (2026-11-18, the maintainer: "Store % in volume.json"; FREEZE
+rule change F2).** M2's cap is recorded as a percentage, not as bytes:
+`lunix volume create` writes `space.cache_max_percent` (`store_max_percent`,
+200 by default) and the daemon resolves it against the volume size at every
+open, on `lunix space` and on every grow (`percent` of the size, never below
+the size plus 2 × `commit.dirty_bytes`), so the cap follows a grow. An
+absolute `space.cache_max` (`lunix space --cache-max`) replaces the
+percentage and stays fixed. Both keys are required in `volume.json`, at most
+one non-null; no backward compatibility (the maintainer: "no need for
+backwards compatibility").
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |

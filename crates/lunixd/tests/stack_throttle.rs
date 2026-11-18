@@ -334,7 +334,10 @@ fn e1_a_switch_to_on_full_error_releases_the_parked_writes_at_once() {
     assert_eq!(stack.space.full_timeout(), Duration::from_secs(60));
     let mut q = Queue::new(&stack);
     fill_and_park(&mut q, &stack, 31);
-    let mut s = stack.json.space.clone();
+    let mut s = lunixd::stack::effective_space(
+        &stack.json,
+        lunix_iface::block::BlockEngine::size_bytes(&*stack.engine),
+    );
     s.on_full = OnFull::Error;
     let start = Instant::now();
     stack.space.reconfigure(&s).expect("reconfigure");
@@ -470,5 +473,30 @@ fn a_discard_on_a_full_volume_brings_the_space_back_and_writes_succeed() {
     }
     if let Some(f) = fsck(&vol) {
         assert!(f.no_errors(), "lunix-fsck:\n{}", f.text);
+    }
+}
+
+#[test]
+fn a_percentage_cap_is_resolved_at_every_open() {
+    // FREEZE F2 (review M1 of p1/bstop-fu): a percentage volume gets its cap
+    // from the size once the engine opened, at the first open and after a
+    // restart. 200 % of 64 MiB wins over the floor (64 MiB + 2 x 1 MiB).
+    let t = Scratch::new("bstop-pct");
+    let mut b = VolumeBuilder::new(t.path())
+        .mode(CryptoMode::Integrity)
+        .chunk_size(CS)
+        .size_bytes(64 << 20);
+    b.json = Some(Box::new(|j: &mut VolumeJson| {
+        j.space.cache_max = None;
+        j.space.cache_max_percent = Some(200);
+        j.space.free_floor = lunix_format::local::FreeFloor::Bytes(0);
+        j.commit.dirty_bytes = 1 << 20;
+    }));
+    let vol = b.create().expect("create");
+    for open in ["the first open", "a reopen"] {
+        let stack = vol.open().expect("open");
+        assert_eq!(stack.json.space.cache_max_percent, Some(200));
+        assert_eq!(stack.space.snapshot().limit, 128 << 20, "{open}");
+        close(stack).expect("close");
     }
 }

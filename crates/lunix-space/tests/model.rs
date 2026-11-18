@@ -355,6 +355,7 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
 fn check(g: &LunixSpace, m: &mut Model, waiters: &[Waiter]) {
     m.update_latch();
     assert_eq!(g.is_full(), m.full, "the full latch");
+    assert_eq!(g.snapshot().full, m.full, "the snapshot's latch");
     // Every parked request has a deadline, and none is pending past it.
     for w in m.q.iter().filter(|w| w.st == St::Pending) {
         assert!(

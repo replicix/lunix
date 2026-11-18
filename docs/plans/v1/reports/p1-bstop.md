@@ -203,3 +203,46 @@ Gate of this round: full `tools/ci.sh` on the host, `ci: all green`, 1868 passed
 ignored (summed over the `test result` lines; parallel test output interleaves, so the sum is
 approximate), `check-ownership: bstop ok (50 changed paths)`. The remote target was deleted
 afterwards.
+
+## Follow-up p1/bstop-fu (01-p1-bstop-final-review.md, verdict MERGE)
+
+Cut from `main` 871e187. It also carries N2, decided by the maintainer on 2026-11-18 ("Store % in
+volume.json", FREEZE sign-off with the choice; "no need for backwards compatibility").
+
+| finding | fix | test |
+|---|---|---|
+| m-A | `set_blocked(true, now)` resets the ladder back-off to 2 s when writes had been admitted for 5 s, before it zeroes that fact | unit `a_new_episode_after_a_long_admitted_stretch_starts_at_the_minimum` |
+| m-B | `close_ring_bound` is two thirds of `quiesce_timeout` with no floor: always strictly inside it | the daemon unit test checks 600 ms, 1 s and 3 s |
+| m-C | the contract's late-refusal step runs on a fresh, unlatched gate and asserts it stays unlatched with no waiter | contract `a_wait_counts_from_the_arrival` |
+| m-D | `full.rs` module doc names `SpaceSnapshot::full`; `note_refused` has its own doc comment again; the long doc line is wrapped | |
+| m-E | `model.rs` checks `LunixSpace::snapshot().full` against the model after every step | the 5 000-sequence model test |
+| m-F | the `full.rs` module doc says a `MapFull` or `Corrupt` failure does not shorten a ring wait, and what the wait then is | |
+| N2 | `volume.json` gains the required key `space.cache_max_percent` next to `space.cache_max`; at most one is non-null. `create` writes the percentage (`store_max_percent`, 200 by default; none for 0). `lunixd::stack::effective_space` resolves it against the size (percent of the size, at least the size + 2 × `commit.dirty_bytes`) for the gate, at open (after the engine knows the size), on `lunix space` and on every grow; the gate refuses an unresolved percentage. `lunix space --cache-max` writes an absolute cap and clears the percentage; an absolute cap stays on a grow, with the warning when below the new size + 2 commits. A grow changes nothing in `volume.json` (it keeps the percentage), so there is nothing to store before the gate is reconfigured. `VolumeJson::from_json` refuses a file without either key (no serde default, no migration). Golden `14-volume.json` gains `"cache_max_percent": null`; on-disk-formats §21 rows; FREEZE.md rule change F2. `lunix space` prints "N % of the size" | `f14_local.rs` (range, both set, either key missing); daemon units `a_percentage_cap_follows_the_size_and_an_absolute_one_stays`; `control.rs` (create writes 200 %, the limit follows the grow, an absolute cap replaces it and stays on the next grow) |
+
+### Review of 5de27ca (01-p1-bstop-fu-review.md, verdict "merge after fixes")
+
+| finding | fix | test |
+|---|---|---|
+| **M1** no test ties an opened percentage volume to its cap | stack test `a_percentage_cap_is_resolved_at_every_open` (`stack_throttle.rs`): 64 MiB at 200 % with `commit.dirty_bytes` 1 MiB and a zero floor; the gate's limit is exactly 128 MiB at the first open and after a reopen (fails without the resolve after `Engine::open`). `control.rs` `a_percentage_cap_is_in_force_at_every_attach`: zero floor set first, so the guard is exact; the limit equals the cap at the first attach, after a grow and after a re-attach | both |
+| m1 | **deviation:** no lower bound on `quiesce_timeout_ms`. The root scripts `m12a-faults.sh` (500 ms) and `m12a-lifecycle.sh` (1 ms) set small values on purpose to make `QUIESCE_DEV` fail, and changing them needs root runs. Instead `close_ring_bound` is `min(2/3 × timeout, timeout − 100 ms)`, so the answer (bound + one coordinator period) fits inside any timeout above 100 ms; at 100 ms or less the bound is 0 (every ring wait answered at once) and `QuiesceAll` logs a warning that writes parked for the ring fail with EIO. Accepted by the lead | daemon unit test: 150 ms to 3 s, and 1 ms gives 0 |
+| m2 | `resize` resolves the cap from the engine's size right after `device.grow`, whatever it returned, before `state/device` is written | (ordering; `control.rs` grow) |
+| m3 | `lunix space` on an attached volume writes `volume.json` first, then reconfigures the gate (an error then says the file is written) | |
+| m4 | FREEZE F2 states the floor rule, "both null = no cap", "a file that lacks one of the two keys is refused", where it is resolved, and cites the ADR-32 amendment; DECISIONS.md ADR-32 gains the amendment paragraph for the maintainer's decision | |
+| m5 | §21: the default column says "— (required key)"; the row says `lunix space` re-resolves | |
+| m6 | stale "space.cache_max" text in `cli.rs` (help snapshot regenerated), `msg.rs`, `config.rs`, DESIGN §2; `SpaceGate::reconfigure` docs say an unresolved percentage is refused | |
+| m9 | `MemSpace::reconfigure` refuses an unresolved percentage like `LunixSpace`; `stack_gc_kill.rs`, `stack_gc_ladder.rs` and `stack_throttle.rs` hand `effective_space(..)` to `reconfigure` | |
+| m11 | the missing-key tests assert the message; an absent `space` object is refused the same way | `f14_local.rs` |
+| m13 | the comment at the early gate says why the window is safe: no queue handler exists before `open_volume` returns | |
+| m7 (optional) | done: the ctl round-trip strategy carries `cache_max_percent` | `ctl.rs` |
+| m8 (optional) | partly: the gate refusing an unresolved percentage (`behaviour.rs`, `new` and `reconfigure`); `store_max_percent` 150 and 0 reaching the file and a detached `--cache-max` clearing the percentage (`control.rs`). **Skipped:** the CLI render branches "N % of the size" and "none" have no snapshot | |
+| m10 (optional) | `cache_cap` is `pub(crate)`; `effective_space` stays `pub` (the stack tests use it) | |
+| m12 (optional) | documented in §21 (the switch to an absolute cap is one-way through the socket); no `--cache-max-percent` added | |
+| m7, second half (optional) | **skipped:** the `space` response does not report the resolved bytes of a percentage cap | |
+
+Gate of the follow-up: full `tools/ci.sh` on the host, `ci: all green`, 1892 passed, 0 failed, 27
+ignored (summed `test result` lines), `check-ownership: bstop ok`. The remote target was deleted
+afterwards.
+
+Gate after the review fixes of 5de27ca: full `tools/ci.sh` on the host, `ci: all green`, 1891
+passed, 0 failed, 27 ignored (summed `test result` lines), `check-ownership: bstop ok`. The remote
+target was deleted afterwards.

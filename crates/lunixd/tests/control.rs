@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use common::{scratch, Daemon};
-use lunix_format::local::OnFull;
+use lunix_format::local::{FreeFloor, OnFull};
 use lunix_iface::ctl::{
     Attach, Compress, Credential, ErrorCode, GcRequest, NameParam, Outcome, Request, Resize,
     Response, Secret, SpaceRequest, VolumeCreate, VolumeMode, VolumeState,
@@ -249,9 +249,10 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         r => panic!("{r:?}"),
     }
 
-    // ADR-32 M2 and review M6: `create` wrote the default cap (200 %, at
-    // least the size plus twice `commit.dirty_bytes`); a grow raises a
-    // default cap to the new size and keeps an explicit one.
+    // ADR-32 M2 and FREEZE F2: `create` wrote the default cap as a
+    // percentage (200 %), so the gate's limit followed the grow above
+    // (2 x SIZE, floored at the size plus twice `commit.dirty_bytes`); an
+    // absolute cap set later replaces the percentage and stays on a grow.
     let cap_req = |cache_max: Option<u64>| {
         Request::Space(SpaceRequest {
             name: "i".into(),
@@ -261,20 +262,27 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
             cache_max,
         })
     };
-    let cap = |r: Response| match r {
-        Response::Space(b) => b.settings.cache_max,
+    let body = |r: Response| match r {
+        Response::Space(b) => b,
         r => panic!("{r:?}"),
     };
     let floor = 2u64 << 30;
+    let b = body(ok(call(&mut d, cap_req(None))));
+    assert_eq!(b.settings.cache_max_percent, Some(200));
+    assert_eq!(b.settings.cache_max, None);
+    if b.figures.fs_free > 2 * (2 * SIZE + floor) {
+        assert_eq!(
+            b.figures.limit,
+            2 * SIZE + floor,
+            "the cap follows the grow"
+        );
+    }
+    let explicit = 1u64 << 30;
+    let b = body(ok(call(&mut d, cap_req(Some(explicit)))));
+    assert_eq!(b.settings.cache_max, Some(explicit));
     assert_eq!(
-        cap(ok(call(&mut d, cap_req(None)))),
-        Some(2 * SIZE + floor),
-        "raised with the grow"
-    );
-    let explicit = 10u64 << 30;
-    assert_eq!(
-        cap(ok(call(&mut d, cap_req(Some(explicit))))),
-        Some(explicit)
+        b.settings.cache_max_percent, None,
+        "the absolute cap replaces it"
     );
     match ok(call(
         &mut d,
@@ -286,11 +294,13 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         Response::Resized { size_bytes } => assert_eq!(size_bytes, 3 * SIZE),
         r => panic!("{r:?}"),
     }
+    let b = body(ok(call(&mut d, cap_req(None))));
     assert_eq!(
-        cap(ok(call(&mut d, cap_req(None)))),
+        b.settings.cache_max,
         Some(explicit),
-        "an explicit cap stays"
+        "an absolute cap stays"
     );
+    assert!(b.figures.limit <= explicit);
 
     // Space: query, change (attached and detached).
     let space = |n: &str, on_full: Option<OnFull>| {
@@ -446,6 +456,92 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
             assert!(!text.contains(&needle), "secret found in the {what}");
         }
     }
+}
+
+/// ADR-32 M2, FREEZE F2: the percentage `create` writes is the gate's cap
+/// at the first attach, after a grow and after a re-attach (review M1 of
+/// p1/bstop-fu); a request's own percentage and `0` reach the file; a
+/// detached `--cache-max` replaces a percentage.
+#[test]
+fn a_percentage_cap_is_in_force_at_every_attach() {
+    let Some(t) = scratch("cap") else { return };
+    let vols = t.path().join("vols");
+    let mut d = Daemon::start(t.path(), "");
+    let floor = 2u64 << 30;
+    let cap_of = |size: u64| size + floor;
+    let space = |n: &str, cache_max: Option<u64>, free_floor: Option<FreeFloor>| {
+        Request::Space(SpaceRequest {
+            name: n.into(),
+            free_floor,
+            on_full: None,
+            full_timeout_ms: None,
+            cache_max,
+        })
+    };
+    let body = |r: Response| match r {
+        Response::Space(b) => b,
+        r => panic!("{r:?}"),
+    };
+    ok(d.call(create_req("c", &vols, VolumeMode::Plain, None)));
+    // A zero floor, so the host file system's bound is its free space less
+    // the reserved region: the cap is the smaller bound on any host with a
+    // few GiB free, and the check below is exact.
+    let b = body(ok(d.call(space("c", None, Some(FreeFloor::Bytes(0))))));
+    assert_eq!(b.settings.cache_max_percent, Some(200));
+    assert_eq!(b.settings.cache_max, None);
+    let limit = |d: &mut Daemon| {
+        let b = body(ok(d.call(space("c", None, None))));
+        (b.figures.limit, b.figures.fs_free)
+    };
+    let check = |d: &mut Daemon, size: u64, what: &str| {
+        let (l, free) = limit(d);
+        if free > cap_of(size) + (1 << 30) {
+            assert_eq!(l, cap_of(size), "{what}");
+        } else {
+            assert!(l <= cap_of(size), "{what}: {l}");
+        }
+    };
+    ok(d.call(attach_req("c", None)));
+    check(&mut d, SIZE, "the first attach");
+    match ok(d.call(Request::Resize(Resize {
+        name: "c".into(),
+        size_bytes: 2 * SIZE,
+    }))) {
+        Response::Resized { size_bytes } => assert_eq!(size_bytes, 2 * SIZE),
+        r => panic!("{r:?}"),
+    }
+    check(&mut d, 2 * SIZE, "after the grow");
+    ok(d.call(Request::Detach(name("c"))));
+    ok(d.call(attach_req("c", None)));
+    check(&mut d, 2 * SIZE, "after a re-attach");
+    ok(d.call(Request::Detach(name("c"))));
+    // Detached: an absolute cap replaces the percentage in the file.
+    let b = body(ok(d.call(space("c", Some(1 << 30), None))));
+    assert_eq!(
+        (b.settings.cache_max, b.settings.cache_max_percent),
+        (Some(1 << 30), None)
+    );
+
+    // A request's own percentage, and 0 (no cap), reach the file.
+    let with = |n: &str, pct: u32| {
+        let Request::VolumeCreate(mut c) = create_req(n, &vols, VolumeMode::Plain, None) else {
+            unreachable!()
+        };
+        c.store_max_percent = Some(pct);
+        Request::VolumeCreate(c)
+    };
+    ok(d.call(with("p150", 150)));
+    ok(d.call(with("p0", 0)));
+    let b = body(ok(d.call(space("p150", None, None))));
+    assert_eq!(
+        (b.settings.cache_max, b.settings.cache_max_percent),
+        (None, Some(150))
+    );
+    let b = body(ok(d.call(space("p0", None, None))));
+    assert_eq!(
+        (b.settings.cache_max, b.settings.cache_max_percent),
+        (None, None)
+    );
 }
 
 #[test]

@@ -175,9 +175,9 @@ pub struct VolumeCreate {
     /// A passphrase slot (for volumes that move).
     #[serde(default)]
     pub passphrase: Option<Secret>,
-    /// `space.cache_max` in percent of the size (ADR-32, M2): 0 writes no
-    /// cap, else 100 ..= 10000; `None` takes the daemon's
-    /// `store_max_percent` (200 by default).
+    /// `space.cache_max_percent` of the new volume (ADR-32 M2, FREEZE F2;
+    /// the cap follows a grow): 0 writes no cap, else 100 ..= 10000; `None`
+    /// takes the daemon's `store_max_percent` (200 by default).
     #[serde(default)]
     pub store_max_percent: Option<u32>,
 }
