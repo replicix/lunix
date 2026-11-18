@@ -336,10 +336,12 @@ fn a_requested_pass_starts_although_none_is_due() {
     assert_eq!(s.gc.stats().passes, before + 1);
     assert_eq!(s.gc.status().state, None);
     // An urgent pass answers a pending request: no second pass follows it.
+    // The step comes within the pass interval of the urgent pass, so only a
+    // request left over could start one (a pass due for its own reasons, the
+    // urgent pass's condemned list, may follow after the interval).
     assert!(s.gc.request_pass());
     s.urgent(1).unwrap();
     assert_eq!(s.gc.stats().passes, before + 2);
-    s.clock.advance(Duration::from_secs(5));
     s.step().unwrap();
     assert_eq!(s.gc.stats().passes, before + 2);
     assert_eq!(Collector::status(&s.gc), s.gc.status());
