@@ -43,14 +43,17 @@ use lunix_engine::{
 };
 use lunix_format::commit::{Commit, Full, MapRoot};
 use lunix_format::keyring::RootKind;
-use lunix_format::local::{LocalPins, LocalPinsFile, Pin, RollbackFloor, VolumeJson};
+use lunix_format::local::{
+    LocalPins, LocalPinsFile, Pin, RollbackFloor, SpaceSettings, VolumeJson,
+};
 use lunix_format::paths::local as lpath;
 use lunix_format::volume::{CodecPolicy, VolumeDescriptor, BLOCK_SIZE};
 use lunix_format::{CommitSeq, CryptoMode, DekGen, FamilyId, IdLen, Profile, VolumeUuid};
+use lunix_iface::block::BlockEngine;
 use lunix_iface::clock::{Clock, SystemClock};
 use lunix_iface::crypto::{CommitCodec, ExtentCodec, MetaCodec};
 use lunix_iface::map::{BlockMap, NodeSource};
-use lunix_iface::space::{Ladder, LadderStepKind};
+use lunix_iface::space::{Ladder, LadderStepKind, SpaceGate};
 use lunix_iface::store::{CommitStore, PackRead, VolumeDir};
 use lunix_iface::Error;
 use lunix_index::LsmIndex;
@@ -715,6 +718,27 @@ fn record_pins(
     Ok(())
 }
 
+/// The cap a percentage `percent` of a volume of `size` bytes gives (ADR-32
+/// M2, FREEZE F2): `percent` of the size, never below the size plus twice
+/// `dirty_bytes` (until a cut the journal holds up to `commit.dirty_bytes`,
+/// counted twice during the cut, so a small volume's first fill must not
+/// reach the cap).
+pub fn cache_cap(size: u64, percent: u32, dirty_bytes: u64) -> u64 {
+    let cap = u64::try_from(u128::from(size) * u128::from(percent) / 100).unwrap_or(u64::MAX);
+    cap.max(size.saturating_add(dirty_bytes.saturating_mul(2)))
+}
+
+/// The space settings the gate gets for a volume of `size` bytes: a
+/// percentage cap (`space.cache_max_percent`) resolved to `cache_max` bytes
+/// (FREEZE F2). The gate knows no size and refuses an unresolved one.
+pub fn effective_space(json: &VolumeJson, size: u64) -> SpaceSettings {
+    let mut s = json.space.clone();
+    if let Some(p) = s.cache_max_percent.take() {
+        s.cache_max = Some(cache_cap(size, p, json.commit.dirty_bytes));
+    }
+    s
+}
+
 /// Opens a volume: the attach check, the store, every component, the
 /// engine (recovery), then the pins. See the module docs for the order.
 ///
@@ -767,7 +791,12 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         tracing::warn!(volume = %uuid, fell_back = report.fell_back, discarded = report.discarded_runs.len(), "index manifest fell back; catch-up rebuilds it");
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let mut space_cfg = SpaceConfig::new(json.space.clone());
+    // A percentage cap needs the volume size, which the engine knows only
+    // once it opened: no cap until then (recovery reserves nothing), the
+    // resolved one right after.
+    let mut early = json.space.clone();
+    early.cache_max_percent = None;
+    let mut space_cfg = SpaceConfig::new(early);
     space_cfg.full_timeout = p.full_timeout;
     let space = LunixSpace::new(
         space_cfg,
@@ -851,6 +880,9 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         hooks: Arc::new(NoHooks),
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);
+    if json.space.cache_max_percent.is_some() {
+        space.reconfigure(&effective_space(&json, engine.size_bytes()))?;
+    }
     // The ladder's compact step is GC's urgent pass (plan M12 step 12).
     let compact_runs = Arc::new(AtomicU64::new(0));
     let borrows = Arc::new(Borrows::default());

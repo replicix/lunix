@@ -203,3 +203,22 @@ Gate of this round: full `tools/ci.sh` on the host, `ci: all green`, 1868 passed
 ignored (summed over the `test result` lines; parallel test output interleaves, so the sum is
 approximate), `check-ownership: bstop ok (50 changed paths)`. The remote target was deleted
 afterwards.
+
+## Follow-up p1/bstop-fu (01-p1-bstop-final-review.md, verdict MERGE)
+
+Cut from `main` 871e187. It also carries N2, decided by the maintainer on 2026-11-18 ("Store % in
+volume.json", FREEZE sign-off with the choice; "no need for backwards compatibility").
+
+| finding | fix | test |
+|---|---|---|
+| m-A | `set_blocked(true, now)` resets the ladder back-off to 2 s when writes had been admitted for 5 s, before it zeroes that fact | unit `a_new_episode_after_a_long_admitted_stretch_starts_at_the_minimum` |
+| m-B | `close_ring_bound` is two thirds of `quiesce_timeout` with no floor: always strictly inside it | the daemon unit test checks 600 ms, 1 s and 3 s |
+| m-C | the contract's late-refusal step runs on a fresh, unlatched gate and asserts it stays unlatched with no waiter | contract `a_wait_counts_from_the_arrival` |
+| m-D | `full.rs` module doc names `SpaceSnapshot::full`; `note_refused` has its own doc comment again; the long doc line is wrapped | |
+| m-E | `model.rs` checks `LunixSpace::snapshot().full` against the model after every step | the 5 000-sequence model test |
+| m-F | the `full.rs` module doc says a `MapFull` or `Corrupt` failure does not shorten a ring wait, and what the wait then is | |
+| N2 | `volume.json` gains the required key `space.cache_max_percent` next to `space.cache_max`; at most one is non-null. `create` writes the percentage (`store_max_percent`, 200 by default; none for 0). `lunixd::stack::effective_space` resolves it against the size (percent of the size, at least the size + 2 × `commit.dirty_bytes`) for the gate, at open (after the engine knows the size), on `lunix space` and on every grow; the gate refuses an unresolved percentage. `lunix space --cache-max` writes an absolute cap and clears the percentage; an absolute cap stays on a grow, with the warning when below the new size + 2 commits. A grow changes nothing in `volume.json` (it keeps the percentage), so there is nothing to store before the gate is reconfigured. `VolumeJson::from_json` refuses a file without either key (no serde default, no migration). Golden `14-volume.json` gains `"cache_max_percent": null`; on-disk-formats §21 rows; FREEZE.md rule change F2. `lunix space` prints "N % of the size" | `f14_local.rs` (range, both set, either key missing); daemon units `a_percentage_cap_follows_the_size_and_an_absolute_one_stays`; `control.rs` (create writes 200 %, the limit follows the grow, an absolute cap replaces it and stays on the next grow) |
+
+Gate of the follow-up: full `tools/ci.sh` on the host, `ci: all green`, 1892 passed, 0 failed, 27
+ignored (summed `test result` lines), `check-ownership: bstop ok`. The remote target was deleted
+afterwards.

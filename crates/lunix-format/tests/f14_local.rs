@@ -400,6 +400,20 @@ fn volume_json_golden_and_rejections() {
         "percent text",
     );
     bad(&|v| v.space.full_timeout_ms = Some(0), "timeout 0");
+    // FREEZE F2: a percentage cap is 100 ..= 10 000, and only one of the
+    // two cap keys is set.
+    bad(&|v| v.space.cache_max_percent = Some(99), "cap percent 99");
+    bad(
+        &|v| v.space.cache_max_percent = Some(10_001),
+        "cap percent 10001",
+    );
+    bad(
+        &|v| {
+            v.space.cache_max_percent = Some(200);
+            v.space.cache_max = Some(1 << 30);
+        },
+        "both caps",
+    );
     bad(&|v| v.commit.interval_ms = 999, "interval");
     bad(&|v| v.commit.dirty_bytes = (1 << 20) - 1, "dirty bytes");
     bad(&|v| v.retain_last = 0, "retain_last 0");
@@ -419,6 +433,25 @@ fn volume_json_golden_and_rejections() {
     ok.space.full_timeout_ms = Some(5000);
     ok.space.on_full = OnFull::Error;
     assert!(VolumeJson::from_json(&ok.to_json_pretty().unwrap()).is_ok());
+    ok.space.cache_max_percent = Some(200);
+    assert_eq!(
+        VolumeJson::from_json(&ok.to_json_pretty().unwrap()).unwrap(),
+        ok
+    );
+    ok.space.cache_max_percent = None;
+    ok.space.cache_max = Some(1 << 30);
+    assert!(VolumeJson::from_json(&ok.to_json_pretty().unwrap()).is_ok());
+
+    // FREEZE F2: both cap keys are required (no default for a missing one).
+    let without = |key: &str| {
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with(&format!("\"{key}\"")))
+            .collect();
+        lines.join("\n")
+    };
+    assert!(VolumeJson::from_json(&without("cache_max_percent")).is_err());
+    assert!(VolumeJson::from_json(&without("cache_max")).is_err());
 
     // Unknown keys, top level and nested, are rejected; so is a wrong version.
     assert!(VolumeJson::from_json(&text.replace("\"retain_last\"", "\"retain_lastx\"")).is_err());

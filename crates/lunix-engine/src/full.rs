@@ -15,9 +15,13 @@
 //!   bound the daemon gives (two thirds of `quiesce_timeout`) otherwise, so a
 //!   quiesce can drain. Only `NoSpace` and `Io` failures count anywhere: a
 //!   benign one (writes in flight at the cut) neither shortens nor ends a
-//!   ring wait. The close is one-way: after the bound every later ring-full
-//!   park fails at once (a failed quiesce leaves the device refusing I/O). The background coordinator wakes the
-//!   queues that hold a ring-parked request.
+//!   ring wait, and neither does one of another kind (`MapFull`, `Corrupt`):
+//!   with such a failure on every attempt a ring-parked write waits
+//!   `max(full_timeout, 60 s)`, or the whole bound at quiesce, instead of
+//!   `full_timeout` (bounded; a stopped engine still fails it at once). The
+//!   close is one-way: after the bound every later ring-full park fails at
+//!   once (a failed quiesce leaves the device refusing I/O). The background
+//!   coordinator wakes the queues that hold a ring-parked request.
 //! * **A discard frees space on a full volume** (path P4, decision M6). Hole
 //!   records are charged with `SpaceGate::charge` (the 64 bytes go into a
 //!   preallocated ring file), never refused for space, and do not queue
@@ -34,10 +38,10 @@
 //!   below the cut, whichever ring files the journal recycled. The ledger
 //!   then equals what a restart charges (the records above the cut).
 //!
-//! "Refused or parked for space" is the gate's waiter count, or a queue-side
-//! flag (a write was refused or expired and none admitted since) confirmed
-//! by the ledger being within 1 MiB of the limit, so the iface
-//! `SpaceSnapshot` needs no new field until T5.
+//! "Refused or parked for space" is the gate's waiter count, its full latch
+//! (`SpaceSnapshot::full`), or a queue-side flag (a write was refused or
+//! expired and none admitted since) confirmed by the ledger being within
+//! 1 MiB of the limit.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -159,6 +163,17 @@ impl FullState {
             return false;
         }
         self.blocked.store(blocked, Ordering::Relaxed);
+        if blocked {
+            // A new episode after writes were admitted for a while starts
+            // with the shortest pause (final review m-A): the "admitted"
+            // fact is about to be zeroed.
+            let since = self.admitted_since_ms.load(Ordering::Relaxed);
+            if since > 0
+                && ms(now).saturating_add(1).saturating_sub(since) >= BACKOFF_RESET_AFTER_MS
+            {
+                self.set_ladder_backoff(crate::gc::SPACE_URGENT_MIN);
+            }
+        }
         let since = if blocked {
             0
         } else {
@@ -401,9 +416,6 @@ impl Inner {
         }
     }
 
-    /// A write was refused or expired for space: the first one of an
-    /// episode is logged with the ledger, so the operator sees why (review
-    /// m1; the gate's own transition lines are T5's).
     /// A write was admitted (reserved or granted). A load on the hot path.
     pub(crate) fn note_admitted(&self) {
         if self.full.blocked.load(Ordering::Relaxed) {
@@ -411,6 +423,10 @@ impl Inner {
         }
     }
 
+    /// A write was refused or expired for space: the first one of an
+    /// episode is logged with the ledger (at most one line per 5 s), so the
+    /// operator sees why (review m1; the gate's own transition lines are
+    /// T5's).
     pub(crate) fn note_refused(&self) {
         let now = self.clock.monotonic();
         if !self.full.set_blocked(true, now) {
@@ -479,6 +495,29 @@ mod tests {
         assert_eq!(
             f.ladder_backoff_at(Duration::from_secs(36)),
             crate::gc::SPACE_URGENT_MIN
+        );
+    }
+
+    #[test]
+    fn a_new_episode_after_a_long_admitted_stretch_starts_at_the_minimum() {
+        // Final review m-A: the next refusal comes before any ladder pass
+        // asked for the back-off; the long admitted stretch still counts.
+        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        f.set_ladder_backoff(Duration::from_secs(60));
+        assert!(f.set_blocked(true, Duration::from_secs(1)));
+        assert!(f.set_blocked(false, Duration::from_secs(10)));
+        assert!(f.set_blocked(true, Duration::from_secs(86_400)));
+        assert_eq!(
+            f.ladder_backoff_at(Duration::from_secs(86_401)),
+            crate::gc::SPACE_URGENT_MIN
+        );
+        // A short admitted stretch keeps it.
+        f.set_ladder_backoff(Duration::from_secs(16));
+        assert!(f.set_blocked(false, Duration::from_secs(86_402)));
+        assert!(f.set_blocked(true, Duration::from_secs(86_403)));
+        assert_eq!(
+            f.ladder_backoff_at(Duration::from_secs(86_404)),
+            Duration::from_secs(16)
         );
     }
 }

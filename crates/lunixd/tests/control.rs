@@ -249,9 +249,10 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         r => panic!("{r:?}"),
     }
 
-    // ADR-32 M2 and review M6: `create` wrote the default cap (200 %, at
-    // least the size plus twice `commit.dirty_bytes`); a grow raises a
-    // default cap to the new size and keeps an explicit one.
+    // ADR-32 M2 and FREEZE F2: `create` wrote the default cap as a
+    // percentage (200 %), so the gate's limit followed the grow above
+    // (2 x SIZE, floored at the size plus twice `commit.dirty_bytes`); an
+    // absolute cap set later replaces the percentage and stays on a grow.
     let cap_req = |cache_max: Option<u64>| {
         Request::Space(SpaceRequest {
             name: "i".into(),
@@ -261,20 +262,27 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
             cache_max,
         })
     };
-    let cap = |r: Response| match r {
-        Response::Space(b) => b.settings.cache_max,
+    let body = |r: Response| match r {
+        Response::Space(b) => b,
         r => panic!("{r:?}"),
     };
     let floor = 2u64 << 30;
+    let b = body(ok(call(&mut d, cap_req(None))));
+    assert_eq!(b.settings.cache_max_percent, Some(200));
+    assert_eq!(b.settings.cache_max, None);
+    if b.figures.fs_free > 2 * (2 * SIZE + floor) {
+        assert_eq!(
+            b.figures.limit,
+            2 * SIZE + floor,
+            "the cap follows the grow"
+        );
+    }
+    let explicit = 1u64 << 30;
+    let b = body(ok(call(&mut d, cap_req(Some(explicit)))));
+    assert_eq!(b.settings.cache_max, Some(explicit));
     assert_eq!(
-        cap(ok(call(&mut d, cap_req(None)))),
-        Some(2 * SIZE + floor),
-        "raised with the grow"
-    );
-    let explicit = 10u64 << 30;
-    assert_eq!(
-        cap(ok(call(&mut d, cap_req(Some(explicit))))),
-        Some(explicit)
+        b.settings.cache_max_percent, None,
+        "the absolute cap replaces it"
     );
     match ok(call(
         &mut d,
@@ -286,11 +294,13 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         Response::Resized { size_bytes } => assert_eq!(size_bytes, 3 * SIZE),
         r => panic!("{r:?}"),
     }
+    let b = body(ok(call(&mut d, cap_req(None))));
     assert_eq!(
-        cap(ok(call(&mut d, cap_req(None)))),
+        b.settings.cache_max,
         Some(explicit),
-        "an explicit cap stays"
+        "an absolute cap stays"
     );
+    assert!(b.figures.limit <= explicit);
 
     // Space: query, change (attached and detached).
     let space = |n: &str, on_full: Option<OnFull>| {
