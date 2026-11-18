@@ -469,21 +469,50 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
     };
     let outputs: BTreeSet<u64> = segments(&stack).difference(&written).copied().collect();
     assert!(!outputs.is_empty(), "{tag}: the cut names an output");
-    // A whole pass (condemn, grace, recheck) while only the tip names the
-    // output: the source must stay. The collector then asks for one cut;
-    // stop at it (the tip it makes is the one --truncate-tip drops).
-    let start = Instant::now();
-    let asked = loop {
-        assert!(
-            start.elapsed() < GRACE + Duration::from_secs(40),
-            "{tag}: the collector never asked for the cut that names the output below the tip"
-        );
-        if let CommitOutcome::Committed { commit_seq, .. } = stack.engine.tick().expect("tick") {
-            break commit_seq;
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    // A whole pass while only the tip names the output: a source is
+    // condemned, then the pass ends (its evidence object) after the grace
+    // and the recheck. The source must still be there: under the B-1 rule
+    // the recheck defers it and asks for a cut, which the next tick would
+    // make; under the old rule the recheck deleted it.
+    let listed = |stack: &VolumeStack| -> BTreeSet<u64> {
+        stack
+            .store
+            .load_condemned()
+            .expect("list")
+            .as_ref()
+            .and_then(lunix_gc::CondemnedList::from_file)
+            .map(|l| l.entries.keys().map(|o| o.raw()).collect())
+            .unwrap_or_default()
     };
-    assert_eq!(asked.0, named_at.0 + 1, "{tag}: the collector's cut");
+    let start = Instant::now();
+    while listed(&stack).is_disjoint(&written) {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{tag}: no source was condemned"
+        );
+        assert!(
+            matches!(stack.engine.tick().expect("tick"), CommitOutcome::Idle),
+            "{tag}: a cut before the source's pass"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let e0 = evidence(&stack);
+    while evidence(&stack) == e0 {
+        assert!(
+            start.elapsed() < GRACE + Duration::from_secs(60),
+            "{tag}: the source's pass did not end"
+        );
+        assert!(
+            matches!(stack.engine.tick().expect("tick"), CommitOutcome::Idle),
+            "{tag}: a cut inside the source's pass"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        stack.engine.tip().0,
+        named_at,
+        "{tag}: the tip still names the output"
+    );
     assert!(
         written.is_subset(&segments(&stack)),
         "{tag}: a source went while only the tip (commit {}) named its output",
@@ -491,24 +520,24 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32) {
     );
     check_all(&stack, &mut d, &model, &tag);
     drop(d);
-    close(stack).expect("close");
-    fsck_ok(&vol, &tag, true);
+    // A crash now (a close would make the cut the collector asked for): the
+    // tip is the FULL that alone names the output.
+    let _ = vol.crash(stack, 0x6c17);
+    fsck_ok(&vol, &tag, false);
 
-    // Drop every commit down to the one before the output was named: the
-    // output is then above the chain's mark and the open sweeps it, and
-    // the older roots need the sources (still there) again.
-    let mut tip = fsck_json(&vol, &[])["tip"].as_u64().expect("tip");
-    while tip >= named_at.0 {
-        let v = fsck_json(&vol, &["--repair", "--truncate-tip"]);
-        let refused: Vec<String> = codes(&v)
-            .into_iter()
-            .filter(|c| c.contains("repair_refused"))
-            .collect();
-        assert!(refused.is_empty(), "{tag}: --truncate-tip refused: {v}");
-        let now = v["tip"].as_u64().expect("tip");
-        assert_eq!(now + 1, tip, "{tag}: one commit dropped");
-        tip = now;
-    }
+    // Drop that tip: the output is above the new chain's mark and the open
+    // sweeps it; the older roots read through the sources, which GC kept.
+    let v = fsck_json(&vol, &["--repair", "--truncate-tip"]);
+    let refused: Vec<String> = codes(&v)
+        .into_iter()
+        .filter(|c| c.contains("repair_refused"))
+        .collect();
+    assert!(refused.is_empty(), "{tag}: --truncate-tip refused: {v}");
+    assert_eq!(
+        v["tip"].as_u64(),
+        Some(named_at.0 - 1),
+        "{tag}: the naming FULL dropped"
+    );
     let stack = vol.open_with(fast_gc).expect("open the predecessor");
     for o in &outputs {
         assert!(
