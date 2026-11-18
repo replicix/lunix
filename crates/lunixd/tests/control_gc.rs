@@ -181,6 +181,7 @@ fn gc_on_request_frees_space_dry_run_deletes_nothing_status_reports() {
         map_fanout: None,
         key_file: None,
         passphrase: None,
+        store_max_percent: None,
     })));
     let voldir = voldir_of(&mut d);
     let parent = voldir.parent().expect("parent").to_path_buf();

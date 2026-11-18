@@ -96,7 +96,9 @@ pub fn journal_bytes(voldir: &Path) -> Vec<(String, Vec<u8>)> {
 pub fn torn_tail_volume(t: &Path) -> (CreatedVolume, Vec<Vec<u8>>) {
     let mode = CryptoMode::Plain;
     let v = create(t, mode, 64 << 10);
-    let s = open(&v, mode);
+    // No journal marks: one written while the host is slow between a flush
+    // and the next write takes a number and shifts the ones tests assert.
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     let marks: Vec<Vec<u8>> = (0..3).map(|i| pattern(2000 + i, 4096)).collect();
     for (i, m) in marks.iter().enumerate() {

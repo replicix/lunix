@@ -97,6 +97,16 @@ impl SpaceGate for TSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
+        self.reserve_since(kind, bytes, wake, self.clock.monotonic())
+    }
+
+    fn reserve_since(
+        &self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: std::time::Duration,
+    ) -> Result<ReserveOutcome> {
         let mut st = lock(&self.st);
         if st.read_only {
             return Err(Error::ReadOnly);
@@ -111,7 +121,11 @@ impl SpaceGate for TSpace {
         let want =
             (Self::used(&st) + bytes).saturating_sub(self.setup.capacity - self.setup.headroom);
         let waiter = Waiter::new(wake.cloned());
-        let deadline = self.setup.full_timeout.map(|t| self.clock.monotonic() + t);
+        let now = self.clock.monotonic();
+        let deadline = self.setup.full_timeout.map(|t| arrived.min(now) + t);
+        if deadline.is_some_and(|d| d <= now) {
+            return Ok(ReserveOutcome::NoSpace);
+        }
         st.waiters.push_back(Parked {
             waiter: waiter.clone(),
             kind,
@@ -189,6 +203,7 @@ impl SpaceGate for TSpace {
                 .filter(|p| p.waiter.state() == WaiterState::Pending)
                 .count() as u64,
             read_only: st.read_only,
+            full: false,
         }
     }
 

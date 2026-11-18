@@ -37,6 +37,7 @@ fn create_req(name: &str, dir: &Path, mode: VolumeMode, passphrase: Option<&str>
         map_fanout: None,
         key_file: None,
         passphrase: passphrase.map(Secret::from_text),
+        store_max_percent: None,
     })
 }
 
@@ -247,6 +248,49 @@ fn every_request_type_returns_its_documented_result_and_secrets_stay_out() {
         Response::VolumeStatus(s) => assert!(s.last_commit_seq >= 1 && s.size_bytes == 2 * SIZE),
         r => panic!("{r:?}"),
     }
+
+    // ADR-32 M2 and review M6: `create` wrote the default cap (200 %, at
+    // least the size plus twice `commit.dirty_bytes`); a grow raises a
+    // default cap to the new size and keeps an explicit one.
+    let cap_req = |cache_max: Option<u64>| {
+        Request::Space(SpaceRequest {
+            name: "i".into(),
+            free_floor: None,
+            on_full: None,
+            full_timeout_ms: None,
+            cache_max,
+        })
+    };
+    let cap = |r: Response| match r {
+        Response::Space(b) => b.settings.cache_max,
+        r => panic!("{r:?}"),
+    };
+    let floor = 2u64 << 30;
+    assert_eq!(
+        cap(ok(call(&mut d, cap_req(None)))),
+        Some(2 * SIZE + floor),
+        "raised with the grow"
+    );
+    let explicit = 10u64 << 30;
+    assert_eq!(
+        cap(ok(call(&mut d, cap_req(Some(explicit))))),
+        Some(explicit)
+    );
+    match ok(call(
+        &mut d,
+        Request::Resize(Resize {
+            name: "i".into(),
+            size_bytes: 3 * SIZE,
+        }),
+    )) {
+        Response::Resized { size_bytes } => assert_eq!(size_bytes, 3 * SIZE),
+        r => panic!("{r:?}"),
+    }
+    assert_eq!(
+        cap(ok(call(&mut d, cap_req(None)))),
+        Some(explicit),
+        "an explicit cap stays"
+    );
 
     // Space: query, change (attached and detached).
     let space = |n: &str, on_full: Option<OnFull>| {

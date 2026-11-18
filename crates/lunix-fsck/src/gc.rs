@@ -289,6 +289,16 @@ impl SpaceGate for OfflineSpace {
         Ok(ReserveOutcome::Reserved)
     }
 
+    fn reserve_since(
+        &self,
+        _kind: SpaceKind,
+        _bytes: u64,
+        _wake: Option<&WakeFd>,
+        _arrived: std::time::Duration,
+    ) -> Result<ReserveOutcome> {
+        Ok(ReserveOutcome::Reserved)
+    }
+
     fn reserve_headroom(&self, _kind: SpaceKind, _bytes: u64) -> Result<()> {
         Ok(())
     }

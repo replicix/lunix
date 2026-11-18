@@ -29,6 +29,7 @@ use crate::deps::{EngineDeps, RollbackFloorStore};
 use crate::destage::Destager;
 use crate::error::OpenError;
 use crate::flush::FlushGroups;
+use crate::full::{FullState, JournalCharges};
 use crate::points::Points;
 use crate::queue::{Queue, QueueShared};
 use crate::read::{ExtentReader, ReadCtx, ReadPool};
@@ -114,7 +115,8 @@ pub(crate) struct Inner {
     pub(crate) durable_cut: AtomicU64,
     /// A write found the journal ring full (a cut is wanted).
     pub(crate) journal_full: AtomicBool,
-    /// `JournalReserved` bytes the engine holds (admissions minus reclaims).
+    /// `JournalReserved` bytes the engine holds: the records admitted and not
+    /// yet at or below a durable cut (C9 releases per cut, `jcharges`).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
     /// The collector's status after its last call (`GcControl::status` and
@@ -135,6 +137,11 @@ pub(crate) struct Inner {
     pub(crate) gc_requests: AtomicU64,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
+    /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
+    pub(crate) full: FullState,
+    /// The `JournalReserved` charge of every record above the last cut,
+    /// released per cut at C9 (ADR-32 review M4).
+    pub(crate) jcharges: JournalCharges,
 }
 
 impl Inner {
@@ -158,6 +165,8 @@ impl Inner {
     pub(crate) fn poison(&self, seq: u64, what: &str) {
         self.poisoned_at.fetch_min(seq, Ordering::AcqRel);
         self.space.fatal_io(what);
+        // Writes parked for the ring fail now (ADR-32).
+        self.signal_queues();
         tracing::error!(
             write_seq = seq,
             what,
@@ -311,6 +320,8 @@ impl Engine {
             gc_requests: AtomicU64::new(0),
             resize_hook: Mutex::new(None),
             report: rec.report,
+            full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
+            jcharges: JournalCharges::new(lanes, rec.journal_charges),
             cfg,
         });
         let engine = Self {
@@ -343,6 +354,10 @@ impl Engine {
                 let Some(inner) = weak.upgrade() else {
                     return;
                 };
+                // Writes parked for a full ring see their deadline, or the
+                // stopped engine, without new I/O (ADR-32); only the queues
+                // that hold one are woken.
+                inner.signal_ring_parked();
                 if inner.is_failed() {
                     continue;
                 }
@@ -400,6 +415,34 @@ impl Engine {
     /// [`GcStatusHandle`]).
     pub fn gc_status_handle(&self) -> GcStatusHandle {
         GcStatusHandle(Arc::clone(&self.inner.gc_status))
+    }
+
+    /// Sets the ring-full deadline (the volume's resolved `full_timeout`)
+    /// live, after `lunix space` changed it (ADR-32).
+    pub fn set_full_timeout(&self, full_timeout: Duration) {
+        self.inner.full.set_full_timeout(full_timeout);
+    }
+
+    /// FULLs the full volume's window turn owes after a discard (ADR-32,
+    /// decision M6) while writes are refused or parked for space; 0 when
+    /// they are not.
+    pub fn window_turn_left(&self) -> u64 {
+        let co = lock(&self.inner.coord);
+        self.inner.window_turn_left(&co)
+    }
+
+    /// The volume is about to quiesce (ADR-32 review M3, beside
+    /// `LunixSpace::begin_close`): a write parked for a full journal ring
+    /// fails as soon as a commit attempt fails for space or I/O, and after
+    /// `ring_bound` otherwise (the daemon gives two thirds of its
+    /// `quiesce_timeout`), so the queues can drain while a slow but healthy
+    /// cut still gets its time. One-way: after the bound every ring-full park
+    /// fails at once.
+    pub fn begin_close(&self, ring_bound: Duration) {
+        self.inner
+            .full
+            .begin_close(self.inner.clock.monotonic(), ring_bound);
+        self.inner.signal_queues();
     }
 
     /// The `JournalReserved` bytes the engine believes it holds.

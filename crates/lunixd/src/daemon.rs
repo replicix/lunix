@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lunix_crypto::{Argon2Cost, AttachError};
 use lunix_engine::{GcStatusHandle, OnJournalDamage};
@@ -537,6 +537,21 @@ impl Daemon {
         let key_file = c.key_file.as_deref().map(Path::new);
         let pass = c.passphrase.as_ref().map(|s| s.expose());
         let (jmax, interval) = (self.cfg.journal_max, self.cfg.commit_interval_ms);
+        let percent = c.store_max_percent.unwrap_or(self.cfg.store_max_percent);
+        if percent != 0 && !(100..=10_000).contains(&percent) {
+            return Err(err(
+                ErrorCode::Invalid,
+                "store_max_percent must be 0, or 100 to 10000",
+            ));
+        }
+        if (1..200).contains(&percent) {
+            tracing::warn!(
+                volume = %c.name,
+                store_max_percent = percent,
+                "a cap below 200 % of the size may not hold a full volume at the default compaction threshold (ADR-32)"
+            );
+        }
+        let size = c.size_bytes;
         let tweak = move |j: &mut VolumeJson| {
             if let Some(m) = jmax {
                 j.journal_max = m;
@@ -544,6 +559,7 @@ impl Daemon {
             if let Some(i) = interval {
                 j.commit.interval_ms = i;
             }
+            j.space.cache_max = default_cache_max(size, percent, j.commit.dirty_bytes);
         };
         let params = CreateParams {
             name: &c.name,
@@ -878,6 +894,7 @@ impl Daemon {
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
         op.lock_memory = self.cfg.harden;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
+        op.full_timeout = self.cfg.full_timeout;
         if o.allow_unverifiable_fork {
             tracing::warn!(
                 volume = name,
@@ -1055,7 +1072,7 @@ impl Daemon {
     fn resize(&self, r: &Resize) -> Result<Response, CtlError> {
         self.entry(&r.name)?;
         let slot = self.slot(&r.name);
-        let g = lock(&slot);
+        let mut g = lock(&slot);
         let live = Self::attached_live(&g, &r.name)?;
         let cur = live.stack.engine.size_bytes();
         if r.size_bytes < cur {
@@ -1079,9 +1096,71 @@ impl Daemon {
                 .store_device_record(&rec)
                 .map_err(|e| err(ErrorCode::Io, format!("state/device: {e}")))?;
         }
-        Ok(Response::Resized {
-            size_bytes: live.stack.engine.size_bytes(),
-        })
+        let new = live.stack.engine.size_bytes();
+        if let Slot::Attached(live) = &mut *g {
+            self.grow_cache_max(&r.name, &mut live.stack, cur, new);
+        }
+        Ok(Response::Resized { size_bytes: new })
+    }
+
+    /// After a grow from `old` to `new` bytes: a default cap (ADR-32, M2)
+    /// follows the size; an explicit one stays (review M6). A cap is the
+    /// default when it equals what `create` writes for the old size with the
+    /// daemon's `store_max_percent` (`default_cache_max`); anything else (a
+    /// `--store-max-percent` other than the daemon's, a `lunix space
+    /// --cache-max`) was chosen by the operator. No cap stays no cap. The
+    /// grow itself is done: a failure here is logged, not returned.
+    fn grow_cache_max(&self, name: &str, st: &mut VolumeStack, old: u64, new: u64) {
+        let pct = self.cfg.store_max_percent;
+        let Some(cap) = st.json.space.cache_max else {
+            return;
+        };
+        let dirty = st.json.commit.dirty_bytes;
+        if pct == 0 || new <= old || default_cache_max(old, pct, dirty) != Some(cap) {
+            if new > old {
+                if cap < new.saturating_add(dirty.saturating_mul(2)) {
+                    tracing::warn!(
+                        volume = name,
+                        cache_max = cap,
+                        size = new,
+                        "grown; the cache_max stays and is below the new size plus two commits: the volume will refuse writes before it is full (raise it with lunix space --cache-max)"
+                    );
+                } else {
+                    tracing::info!(
+                        volume = name,
+                        cache_max = cap,
+                        "grown; the explicit cache_max stays"
+                    );
+                }
+            }
+            return;
+        }
+        let Some(next) = default_cache_max(new, pct, dirty).filter(|n| *n > cap) else {
+            return;
+        };
+        let mut json = st.json.clone();
+        json.space.cache_max = Some(next);
+        // volume.json first: a cap raised in the gate only would be lost at
+        // the next restart (review m9).
+        let done = st
+            .store
+            .store_volume_json(&json)
+            .map_err(|e| e.to_string())
+            .and_then(|()| st.space.reconfigure(&json.space).map_err(|e| e.to_string()));
+        match done {
+            Ok(()) => {
+                st.json = json;
+                tracing::info!(
+                    volume = name,
+                    old_cache_max = cap,
+                    cache_max = next,
+                    "grown: the default cache_max follows the size"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(volume = name, error = %e, "grown, but cache_max was not raised")
+            }
+        }
     }
 
     fn space(&self, s: &SpaceRequest) -> Result<Response, CtlError> {
@@ -1114,6 +1193,8 @@ impl Daemon {
                     st.space
                         .reconfigure(&json.space)
                         .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+                    // The ring-full wait follows the new full_timeout too.
+                    st.engine.set_full_timeout(st.space.full_timeout());
                     st.store
                         .store_volume_json(&json)
                         .map_err(|e| err(ErrorCode::Io, e.to_string()))?;
@@ -1268,15 +1349,22 @@ impl Daemon {
                 Slot::Attached(live) if !live.device.needs_quiesce() => {
                     tracing::info!(volume = %name, "device is stopping or deleted (a detach got past TRY_STOP_DEV): no started request, nothing to quiesce");
                 }
-                Slot::Attached(live) => match live.device.quiesce(t) {
-                    Ok(None) => quiesced += 1,
-                    Ok(Some(e)) => {
-                        quiesced += 1;
-                        engine_failures += 1;
-                        tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                Slot::Attached(live) => {
+                    // The quiesce rule (ADR-32, M5): requests waiting for
+                    // space fail with ENOSPC and nothing parks, so the drain
+                    // can finish.
+                    live.stack.space.begin_close();
+                    live.stack.engine.begin_close(close_ring_bound(t));
+                    match live.device.quiesce(t) {
+                        Ok(None) => quiesced += 1,
+                        Ok(Some(e)) => {
+                            quiesced += 1;
+                            engine_failures += 1;
+                            tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                        }
+                        Err(e) => failed.push((i, e.to_string())),
                     }
-                    Err(e) => failed.push((i, e.to_string())),
-                },
+                }
                 Slot::Orphan { dev_id, .. } => orphans.push(*dev_id),
                 Slot::Detached => {}
             }
@@ -1589,9 +1677,58 @@ impl Drop for Running<'_> {
     }
 }
 
+/// The `space.cache_max` a new volume of `size` bytes gets (ADR-32, M2):
+/// `percent` of the size, 0 for none. Never below the size plus twice the
+/// commit's dirty-bytes trigger: until a cut, the journal holds up to
+/// `commit.dirty_bytes` of writes, and during the cut they are counted twice
+/// (journal and segments), so a small volume's first fill must not reach the
+/// cap.
+pub(crate) fn default_cache_max(size: u64, percent: u32, dirty_bytes: u64) -> Option<u64> {
+    if percent == 0 {
+        return None;
+    }
+    let cap = u64::try_from(u128::from(size) * u128::from(percent) / 100).unwrap_or(u64::MAX);
+    Some(cap.max(size.saturating_add(dirty_bytes.saturating_mul(2))))
+}
+
+/// How long a write parked for a full journal ring may still wait for its
+/// cut once a quiesce began (review N3): two thirds of `quiesce_timeout`,
+/// so it is answered before `QUIESCE_DEV` gives up, and at least 1 s.
+pub(crate) fn close_ring_bound(quiesce_timeout: Duration) -> Duration {
+    (quiesce_timeout * 2 / 3).max(Duration::from_secs(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ring_bound_at_quiesce_is_two_thirds_of_quiesce_timeout() {
+        assert_eq!(
+            close_ring_bound(Duration::from_secs(30)),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            close_ring_bound(Duration::from_millis(600)),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn a_new_volume_gets_twice_its_size_as_cache_max_by_default() {
+        const GIB: u64 = 1 << 30;
+        // ADR-32 M2: 200 % of the size...
+        assert_eq!(default_cache_max(32 * GIB, 200, GIB), Some(64 * GIB));
+        assert_eq!(default_cache_max(32 * GIB, 150, GIB), Some(48 * GIB));
+        // ...never below the size plus two commits' worth of journal.
+        assert_eq!(default_cache_max(GIB, 200, GIB), Some(3 * GIB));
+        assert_eq!(
+            default_cache_max(64 << 20, 200, GIB),
+            Some((64 << 20) + 2 * GIB)
+        );
+        // 0: no cap.
+        assert_eq!(default_cache_max(32 * GIB, 0, GIB), None);
+    }
 
     #[test]
     fn fingerprints_and_cpu_lists_parse() {

@@ -6,20 +6,21 @@ Arguments:
   <NAME>  The volume name (letters, digits, `.`, `_`, `-`; at most 64)
 
 Options:
-      --size <SIZE>         Volume size (a multiple of 4096 bytes), such as 200G
-      --socket <PATH>       The control socket of lunixd [default: /run/lunix/ctl.sock]
-      --dir <DIR>           The directory that holds the volume's files (made absolute here: the daemon does not share this process's working directory)
-      --timeout <T>         How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
-      --chunk <SIZE>        Chunk size: a power of two from 16K to 1M [default: 64K]
-      --encrypt             Encrypted volume: AEAD extents and sealed metadata. Takes the same key options as the default mode
-      --integrity           Integrity volume (the default): keyed tags and HMACs detect tampering by anyone without the key; the contents are not encrypted. A random key is written to <dir>/<uuid>/integrity.key (0600) unless --key-file or --passphrase says otherwise, and attach finds it by itself
-      --plain               Plain volume: unkeyed checksums detect corruption only and protect against nobody who can write the storage. No key material is created, so it cannot be combined with --key-file or --passphrase
-      --passphrase          Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
-      --passphrase-fd <FD>  Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
-      --key-file <FILE>     Use this existing key file for the first slot instead of a generated one
-      --compress <POLICY>   Compression: auto, lz4, zstd:N (N from -7 to 22) or none [default: auto]
-      --id-len <BYTES>      Length of the chunk-id prefix kept in the block map: 16 or 32 [default: 16]
-  -h, --help                Print help
+      --size <SIZE>                  Volume size (a multiple of 4096 bytes), such as 200G
+      --socket <PATH>                The control socket of lunixd [default: /run/lunix/ctl.sock]
+      --dir <DIR>                    The directory that holds the volume's files (made absolute here: the daemon does not share this process's working directory)
+      --timeout <T>                  How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
+      --chunk <SIZE>                 Chunk size: a power of two from 16K to 1M [default: 64K]
+      --encrypt                      Encrypted volume: AEAD extents and sealed metadata. Takes the same key options as the default mode
+      --integrity                    Integrity volume (the default): keyed tags and HMACs detect tampering by anyone without the key; the contents are not encrypted. A random key is written to <dir>/<uuid>/integrity.key (0600) unless --key-file or --passphrase says otherwise, and attach finds it by itself
+      --plain                        Plain volume: unkeyed checksums detect corruption only and protect against nobody who can write the storage. No key material is created, so it cannot be combined with --key-file or --passphrase
+      --passphrase                   Use a passphrase. It is prompted on the terminal without echo, or read from --passphrase-fd; it is never taken from the command line or the environment
+      --passphrase-fd <FD>           Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
+      --key-file <FILE>              Use this existing key file for the first slot instead of a generated one
+      --compress <POLICY>            Compression: auto, lz4, zstd:N (N from -7 to 22) or none [default: auto]
+      --id-len <BYTES>               Length of the chunk-id prefix kept in the block map: 16 or 32 [default: 16]
+      --store-max-percent <PERCENT>  Cap the volume's local store (space.cache_max) at this percentage of its size, 100 to 10000, or 0 for no cap. Default: the daemon's store_max_percent (200). `lunix space --cache-max` changes it later
+  -h, --help                         Print help
 
 Modes: --encrypt, --integrity and --plain are mutually exclusive (default: integrity).
 The default writes a random key to <dir>/<uuid>/integrity.key (0600); attach reads it

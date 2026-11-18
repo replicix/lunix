@@ -419,8 +419,9 @@ pub struct ReclaimReport {
     /// Ring files recycled or deleted.
     pub files: u32,
     /// The sum of the **encoded record lengths** ([`record_bytes`]) of the
-    /// records in the recycled files: the amount for
-    /// `SpaceGate::release(JournalReserved, ..)`.
+    /// records in the recycled files. Informational: the engine releases
+    /// `JournalReserved` per cut, by record, not by this figure (ADR-32; the
+    /// accounting walk-through of `space`, step 5).
     pub bytes: u64,
 }
 
