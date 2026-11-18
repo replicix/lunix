@@ -22,7 +22,8 @@ tip, different pins, or condemned objects waiting after a pass that changed
 something. A pass that changed nothing (its only lines are deferrals that wait
 for a FULL) is not repeated until the tip or the pins change; the pins are
 then looked at once per interval, not at every tick. A pass abandoned on an
-error, or one that deferred for the store or the rollback floor, is retried.
+error, or one that deferred for the store or the rollback floor, is retried
+one interval later (a deferral for the store or the floor writes no evidence).
 
 ## What is kept
 
@@ -132,8 +133,12 @@ their map roots are not roots, so their data may go.
    files below the new tip's `chain_floor` that would join the set only under
    the new tip (they were outside it under the old one and may be half
    collected), refuses when a root of the new chain resolves into an
-   object only the dropped tip names, and rebuilds the index: GC moved the
-   entries of relocated ids into the output the next open sweeps.
+   object only the dropped tip names, and rebuilds the index for the
+   previous commit before it sets the tip aside: GC moved the entries of
+   relocated ids into the output the next open sweeps. A crash or an error
+   between the two leaves the old tip, and its mount's catch-up adds the
+   entries of the segments only that tip names; a rebuild that fails refuses
+   the truncation.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
@@ -237,8 +242,9 @@ Each entry:
 ## `gc/<pass:016x>`: the evidence object
 
 One sealed, create-only object per pass that condemned, un-condemned,
-deleted or compacted anything; a pass that found nothing, or only deferred
-what it had deferred before, writes none, and its number is used by the
+deleted or compacted anything, or deferred for the grace; a pass that found
+nothing, or only deferred for a FULL, the store or the rollback floor, writes
+none, and its number is used by the
 next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
 new one deletes the oldest beyond that, at most 16 per pass
 (`GcStateStore::delete_evidence`).

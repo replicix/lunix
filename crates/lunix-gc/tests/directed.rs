@@ -282,6 +282,41 @@ fn a_failed_step_hands_its_moves_over() {
     );
     assert!(v.gc.unnamed_outputs().contains(&moved[0].new.seg));
     assert!(v.gc.take_moved().is_empty(), "once");
+    // The abandoned pass is retried one interval later, without a new tip.
+    let (tip, passes) = (v.tip.common.commit_seq, v.gc.stats().passes);
+    v.passes(1).expect("the retried pass");
+    assert_eq!(v.tip.common.commit_seq, tip);
+    assert!(
+        v.gc.stats().passes > passes,
+        "an abandoned pass is retried without a new tip"
+    );
+}
+
+/// The prune is bounded (final review M-3): with a backlog of 1 064 objects,
+/// one pass that writes evidence deletes the 16 oldest, not all 41 beyond the
+/// bound.
+#[test]
+fn the_evidence_prune_takes_at_most_16_per_pass() {
+    use lunix_iface::store::GcStateStore;
+    let mut v = Vol::new(1);
+    for pass in 1..=1064u64 {
+        v.store.put_evidence(pass, b"{}\n").expect("put");
+    }
+    // Passes until one writes an evidence object (a pass that changed
+    // nothing writes none).
+    let mut seed = 7;
+    while v.evidence().last() == Some(&1064) {
+        assert!(seed < 40, "no pass wrote evidence");
+        v.write(0, seed);
+        v.commit().expect("commit");
+        v.passes(1).expect("a pass");
+        seed += 1;
+    }
+    let passes = v.evidence();
+    let last = *passes.last().expect("evidence");
+    assert_eq!(last, 1065, "numbered on from the newest");
+    assert_eq!(passes.len(), 1065 - 16, "16 pruned");
+    assert_eq!(passes.first(), Some(&17), "the oldest first");
 }
 
 /// `worth_compacting` at its edges (re-review S-2).

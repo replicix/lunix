@@ -40,6 +40,21 @@ impl Action {
     }
 }
 
+/// Why a condemned object stays condemned for now: what the deferral waits
+/// for decides whether its pass writes evidence and is repeated.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Deferral {
+    /// A FULL that names a copy durably: the pass after the next commit
+    /// decides again. No evidence, no retry (the tip changes).
+    ForFull,
+    /// The rollback floor or the store refused for now: the pass is retried
+    /// one interval later, but writes no evidence (a degraded volume would
+    /// otherwise put one object per pass and push out the real ones).
+    Retry,
+    /// The grace runs: written, and the pass repeats until it ends.
+    Grace,
+}
+
 /// Lines beyond this many bytes are counted, not kept, so the object stays
 /// well under the 64 MiB body cap of a `gc/` object.
 const EVIDENCE_CAP: usize = 48 << 20;
@@ -50,13 +65,46 @@ pub(crate) struct Evidence {
     bytes: Vec<u8>,
     lines: u64,
     dropped: u64,
-    /// Lines other than `defer`.
+    /// Lines other than `defer`, and grace deferrals.
     changes: u64,
+    /// Deferrals that ask for the pass to be repeated without a new tip.
+    retries: u64,
 }
 
 impl Evidence {
-    /// Appends one line. `reason` is a fixed ASCII phrase without quotes.
+    /// A `defer` line; `kind` says whether it is a change and whether the
+    /// pass is repeated.
+    pub(crate) fn defer(
+        &mut self,
+        time: TimeMs,
+        obj: ObjectRef,
+        reason: &'static str,
+        kind: Deferral,
+    ) {
+        match kind {
+            Deferral::ForFull => {}
+            Deferral::Retry => self.retries += 1,
+            Deferral::Grace => self.changes += 1,
+        }
+        self.line(time, Action::Defer, obj, 0, reason);
+    }
+
+    /// Appends one line other than `defer`. `reason` is a fixed ASCII phrase
+    /// without quotes.
     pub(crate) fn add(
+        &mut self,
+        time: TimeMs,
+        action: Action,
+        obj: ObjectRef,
+        bytes: u64,
+        reason: &'static str,
+    ) {
+        debug_assert!(action != Action::Defer, "a deferral goes through defer");
+        self.changes += 1;
+        self.line(time, action, obj, bytes, reason);
+    }
+
+    fn line(
         &mut self,
         time: TimeMs,
         action: Action,
@@ -66,13 +114,6 @@ impl Evidence {
     ) {
         debug_assert!(!reason.contains(['"', '\\', '\n']));
         self.lines += 1;
-        // A deferral that waits for a FULL is no change; one that waits for
-        // the store or the rollback floor is retried at the next pass.
-        if action != Action::Defer
-            || !reason.starts_with("live copies of its ids are not durable yet")
-        {
-            self.changes += 1;
-        }
         if self.bytes.len() >= EVIDENCE_CAP {
             self.dropped += 1;
             return;
@@ -94,10 +135,16 @@ impl Evidence {
         self.lines == 0
     }
 
-    /// The pass changed nothing: no line but a `defer` that waits for a FULL
-    /// (a repeated deferral is not written; gc.md "the evidence object").
+    /// The pass changed nothing: no line but a `defer` that waits for a FULL,
+    /// the floor or the store (not written; gc.md "the evidence object").
     pub(crate) fn only_defers(&self) -> bool {
         self.changes == 0
+    }
+
+    /// The pass is repeated without a new tip: it changed something, or a
+    /// deferral waits for the floor or the store.
+    pub(crate) fn wants_retry(&self) -> bool {
+        self.changes > 0 || self.retries > 0
     }
 
     /// The body bytes; when lines were dropped, a last line says how many.
