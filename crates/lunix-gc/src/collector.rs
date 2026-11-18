@@ -25,7 +25,10 @@
 //!   (at or below the highest id the FULLs read since start name, and not an
 //!   unnamed output): the delete-time index invariant; otherwise the delete
 //!   is deferred.
-//! * Commit objects are deleted only below the durable tip's `chain_floor`,
+//! * GC's retained set is every FULL from the lowest `chain_floor` any
+//!   retained FULL records up to the tip (N12 (b)): all of them are roots and
+//!   nothing they name is condemned.
+//! * Commit objects are deleted only below that lowest `chain_floor`,
 //!   below the rollback floor's `max_commit_seq` while a floor exists (an
 //!   unreadable floor defers every commit delete), and never when pinned.
 
@@ -46,7 +49,7 @@ use lunix_iface::{Error, ErrorKind, Result};
 use crate::compact::{self, Compactor};
 use crate::condemned::{CondemnedEntry, CondemnedList, GraceStarts, ObjectRef, MAX_ENTRIES};
 use crate::config::{self, FloorSource, GcConfig, GcHooks, NoHooks};
-use crate::evidence::{Action, Evidence};
+use crate::evidence::{Action, Deferral, Evidence};
 use crate::mark::{Liveness, Mark};
 use crate::points::{point, Points};
 
@@ -102,7 +105,7 @@ enum Verdict {
     /// Already gone: drop from the list.
     Gone,
     /// Keep condemned, decide in a later pass.
-    Defer(&'static str),
+    Defer(&'static str, Deferral),
 }
 
 #[derive(Debug)]
@@ -139,22 +142,23 @@ enum Flow {
     PassDone,
 }
 
-/// Objects any currently retained FULL names (rule 12 (ii)).
-fn named_by_retained(view: &GcView<'_>) -> BTreeSet<u64> {
+/// Objects any FULL of GC's retained set names (rule 12 (ii), N12), and
+/// that set's commit seqs.
+fn named_by_retained(view: &GcView<'_>) -> Result<(BTreeSet<u64>, BTreeSet<CommitSeq>)> {
     let mut s = BTreeSet::new();
-    for c in view.retained {
-        if let Commit::Full(f) = c {
-            s.extend(
-                f.new_segments
-                    .iter()
-                    .chain(&f.map_packs)
-                    .chain(&f.index_packs)
-                    .chain(f.map_root.pack.iter())
-                    .map(|id| id.raw()),
-            );
-        }
+    let mut seqs = BTreeSet::new();
+    for f in crate::mark::retained_fulls(view)? {
+        seqs.insert(f.common.commit_seq);
+        s.extend(
+            f.new_segments
+                .iter()
+                .chain(&f.map_packs)
+                .chain(&f.index_packs)
+                .chain(f.map_root.pack.iter())
+                .map(|id| id.raw()),
+        );
     }
-    s
+    Ok((s, seqs))
 }
 
 fn object_bytes(l: &Liveness, obj: ObjectRef) -> Option<u64> {
@@ -186,16 +190,23 @@ struct Facts {
     /// The highest id a durable FULL is known to name (see `Gc::named_high`).
     named_high: u64,
     /// The lowest `chain_floor` of any retained FULL: commit objects from it
-    /// up are kept, so that `fsck --repair --truncate-tip` can mount the
-    /// predecessor (N12).
+    /// up are kept, and so is what those FULLs reach and name, so that
+    /// `fsck --repair --truncate-tip` gives a complete volume (N12 (b)).
     keep_floor: CommitSeq,
     tip: CommitSeq,
+    /// Segments the tip FULL names: a cut makes their names count.
+    tip_named: BTreeSet<SegId>,
     /// `None` when `state/pins` could not be read.
     floor: Option<Option<RollbackFloor>>,
 }
 
 impl Facts {
-    fn read(view: &GcView<'_>, floor_src: &dyn FloorSource, named_high: u64) -> Result<Self> {
+    fn read(
+        view: &GcView<'_>,
+        floor_src: &dyn FloorSource,
+        named_high: u64,
+        by_retained: (BTreeSet<u64>, BTreeSet<CommitSeq>),
+    ) -> Result<Self> {
         let floor = match floor_src.current_floor() {
             Ok(f) => Some(f),
             Err(e) => {
@@ -203,32 +214,39 @@ impl Facts {
                 None
             }
         };
-        let keep_floor = view
-            .retained
-            .iter()
-            .filter_map(|c| match c {
-                Commit::Full(f) => Some(f.chain_floor),
-                _ => None,
-            })
-            .chain(std::iter::once(view.tip.chain_floor))
-            .min()
-            .unwrap_or(view.tip.chain_floor);
+        let keep_floor = crate::mark::keep_floor(view);
+        let (named, mut retained) = by_retained;
+        retained.extend(view.retained.iter().map(|c| c.common().commit_seq));
         Ok(Self {
-            named: named_by_retained(view),
+            named,
             manifest: view.index.runs()?.iter().map(|r| r.id).collect(),
-            retained: view
-                .retained
-                .iter()
-                .map(|c| c.common().commit_seq)
-                .collect(),
+            retained,
             hwm: view.tip.high_water_mark,
-            named_high: named_high.max(view.tip.high_water_mark),
+            // Only FULLs below the tip count (`observe_named`): a copy the
+            // tip alone names goes with the tip at `--truncate-tip` (B-1).
+            named_high,
             keep_floor,
             tip: view.tip.commit_seq,
+            tip_named: crate::compact::tip_segments(view),
             floor,
         })
     }
 }
+
+/// The reason of a delete deferred until a FULL below the tip names the live
+/// copies of a segment's ids (the delete-time index invariant).
+const NOT_DURABLE_YET: &str = "live copies of its ids are not durable yet";
+/// The same, when no cut would help: the copies are in no unnamed output and
+/// not named by the tip, so the engine is not asked for a cut (it would cut
+/// an empty FULL at every pass; M17.B stack re-review M-1).
+const NOT_DURABLE_NO_CUT: &str = "live copies of its ids are not durable yet; a cut does not help";
+/// Evidence objects pruned per pass at most (one unlink and directory sync
+/// each, under the coordinator's mutex).
+const EVIDENCE_PRUNE_PER_PASS: usize = 16;
+
+/// `gc/` objects kept locally: the newest this many; older ones are deleted
+/// when a pass writes a new one (gc.md "the evidence object").
+const EVIDENCE_KEEP: usize = 1024;
 
 /// Condemn, recheck and delete decisions over one mark.
 struct Judge<'a> {
@@ -333,12 +351,14 @@ impl Judge<'_> {
         match keep {
             None => match obj {
                 ObjectRef::Segment(s) => match self.segment_deletable(s) {
-                    Some(why) => Verdict::Defer(why),
+                    Some(why) => Verdict::Defer(why, Deferral::ForFull),
                     None => Verdict::Delete,
                 },
                 _ => Verdict::Delete,
             },
-            Some(Keep::FloorUnreadable) => Verdict::Defer(Keep::FloorUnreadable.reason()),
+            Some(Keep::FloorUnreadable) => {
+                Verdict::Defer(Keep::FloorUnreadable.reason(), Deferral::Retry)
+            }
             Some(k) => Verdict::Uncondemn(k),
         }
     }
@@ -347,11 +367,24 @@ impl Judge<'_> {
     /// hints rely on must be in a segment a durable FULL named (at or below
     /// `named_high`) that is not an unnamed compaction output.
     fn segment_deletable(&self, s: SegId) -> Option<&'static str> {
-        let blocked = self.l.deps.get(&s).is_some_and(|deps| {
-            deps.iter()
-                .any(|d| d.raw() > self.f.named_high || self.outputs.contains(d))
-        });
-        blocked.then_some("live copies of its ids are not durable yet")
+        let deps = self.l.deps.get(&s)?;
+        let blocking: Vec<&SegId> = deps
+            .iter()
+            .filter(|d| d.raw() > self.f.named_high || self.outputs.contains(*d))
+            .collect();
+        if blocking.is_empty() {
+            return None;
+        }
+        // A cut helps when it names an unnamed output, or gives the tip that
+        // names a copy a successor.
+        let helps = blocking
+            .iter()
+            .any(|d| self.outputs.contains(*d) || self.f.tip_named.contains(*d));
+        Some(if helps {
+            NOT_DURABLE_YET
+        } else {
+            NOT_DURABLE_NO_CUT
+        })
     }
 }
 
@@ -369,13 +402,19 @@ pub struct Gc {
     grace: GraceStarts,
     outputs: BTreeSet<SegId>,
     /// The highest id named by a FULL read by `observe_named` that has a
-    /// successor FULL (or the tip's mark). Every segment at or below it was
-    /// named by a durable FULL, except compaction outputs still in `outputs`
-    /// and segments no index entry points into (orphans): ids are allocated
-    /// in order and a cut names everything it wrote.
+    /// successor FULL; the tip's own names never count. Every segment at or
+    /// below it was named by a durable FULL below the tip, except compaction
+    /// outputs still in `outputs` and segments no index entry points into
+    /// (orphans): ids are allocated in order and a cut names everything it
+    /// wrote. A copy only the tip names is not durable for this rule: after
+    /// `fsck --repair --truncate-tip` it is above the new chain's mark and the
+    /// mount sweep deletes it.
     named_high: u64,
     /// The newest commit `observe_named` has read.
     scanned: Option<CommitSeq>,
+    /// [`named_by_retained`] for one tip: the FULLs below the tip's
+    /// `chain_floor` are read from the store once per tip, not every step.
+    retained_cache: Option<(CommitSeq, BTreeSet<u64>, BTreeSet<CommitSeq>)>,
     /// Facts of the current step (`None` between steps).
     facts: Option<Facts>,
     /// Objects whose delete call failed: the file may be gone without its
@@ -384,11 +423,23 @@ pub struct Gc {
     /// Compaction sources with an extent that does not open.
     bad_sources: BTreeSet<SegId>,
     outbox: Vec<Moved>,
+    /// A pass was asked for (`request_pass`): the next idle step starts one
+    /// whether or not it is due.
+    forced: bool,
     phase: Phase,
     ctx: Option<PassCtx>,
     last_end: Option<Duration>,
     last_tip: Option<CommitSeq>,
     last_pins: Option<BTreeSet<CommitSeq>>,
+    /// The last pass changed something (a line other than `defer`). A pass
+    /// that changed nothing is not repeated until the tip or the pins change
+    /// (M17.B stack review S-1).
+    last_pass_changed: bool,
+    /// A delete was deferred until a FULL below the tip names the live copies
+    /// (`GcProgress::cut_wanted`).
+    cut_wanted: bool,
+    /// The tip a cut was last asked for: one request per tip.
+    cut_asked_at: Option<CommitSeq>,
     stats: GcStats,
     last_pass: Option<GcPassSummary>,
     totals: GcPassSummary,
@@ -428,15 +479,20 @@ impl Gc {
             outputs: BTreeSet::new(),
             named_high: 0,
             scanned: None,
+            retained_cache: None,
             facts: None,
             uncertain: BTreeMap::new(),
             bad_sources: BTreeSet::new(),
             outbox: Vec::new(),
+            forced: false,
             phase: Phase::Idle,
             ctx: None,
             last_end: None,
             last_tip: None,
             last_pins: None,
+            last_pass_changed: true,
+            cut_wanted: false,
+            cut_asked_at: None,
             stats: GcStats::default(),
             last_pass: None,
             totals: GcPassSummary::default(),
@@ -459,6 +515,7 @@ impl Gc {
             last_pass: self.last_pass.clone(),
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
+            requests: 0,
         }
     }
 
@@ -554,9 +611,25 @@ impl Gc {
     }
 
     /// The facts of this step.
+    /// The objects and commit seqs of GC's retained set, cached per tip.
+    fn retained_names(
+        &mut self,
+        view: &GcView<'_>,
+    ) -> Result<(BTreeSet<u64>, BTreeSet<CommitSeq>)> {
+        if let Some((tip, named, seqs)) = &self.retained_cache {
+            if *tip == view.tip.commit_seq {
+                return Ok((named.clone(), seqs.clone()));
+            }
+        }
+        let (named, seqs) = named_by_retained(view)?;
+        self.retained_cache = Some((view.tip.commit_seq, named.clone(), seqs.clone()));
+        Ok((named, seqs))
+    }
+
     fn facts(&mut self, view: &GcView<'_>) -> Result<&Facts> {
         if self.facts.is_none() {
-            self.facts = Some(Facts::read(view, &*self.floor, self.named_high)?);
+            let by = self.retained_names(view)?;
+            self.facts = Some(Facts::read(view, &*self.floor, self.named_high, by)?);
         }
         self.facts
             .as_ref()
@@ -627,14 +700,17 @@ impl Gc {
 
     /// Reads the FULLs committed since the last call that have a successor
     /// (the tip is read once the next FULL exists): every id they name
-    /// raises `named_high`. Requiring a successor is conservative while the
-    /// engine may not persist a FULL's index entries at its own C8 (N13). A
+    /// raises `named_high`. Requiring a successor keeps a copy that only the
+    /// tip names from counting as durable: `--truncate-tip` may drop the tip,
+    /// and the mount sweep then deletes everything above the new chain's mark
+    /// (M17.B review B-1); it also covers an engine that has not persisted a
+    /// FULL's index entries at its own C8 (N13). A
     /// compaction output a retained or read FULL names is no longer pending.
     /// Commit objects are durable when they exist, and GC deletes none it
     /// has not seen here first (a commit is condemned only in a pass, after
     /// this ran), so no FULL is missed.
     fn observe_named(&mut self, view: &GcView<'_>) -> Result<()> {
-        let named = named_by_retained(view);
+        let (named, _) = self.retained_names(view)?;
         self.outputs.retain(|o| !named.contains(&o.raw()));
         let Some(last) = view.tip.commit_seq.0.checked_sub(1).map(CommitSeq) else {
             return Ok(());
@@ -671,6 +747,9 @@ impl Gc {
     }
 
     fn due(&mut self, view: &GcView<'_>) -> Result<bool> {
+        if self.forced {
+            return Ok(true);
+        }
         let now = view.clock.monotonic();
         if self
             .last_end
@@ -678,22 +757,44 @@ impl Gc {
         {
             return Ok(false);
         }
-        if self.last_tip != Some(view.tip.commit_seq) || !self.list.entries.is_empty() {
+        if self.last_tip != Some(view.tip.commit_seq)
+            || (!self.list.entries.is_empty() && self.last_pass_changed)
+            || !self.uncertain.is_empty()
+        {
             return Ok(true);
         }
         let pins: BTreeSet<CommitSeq> = view.pins.roots()?.iter().map(|p| p.commit_seq).collect();
-        Ok(self.last_pins.as_ref() != Some(&pins))
+        if self.last_pins.as_ref() != Some(&pins) {
+            return Ok(true);
+        }
+        // Nothing changed: look again (the pins too) one interval from now,
+        // not at every idle tick.
+        self.last_end = Some(now);
+        Ok(false)
     }
 
     /// Writes the pass's evidence object when it has lines; returns its
     /// number (0 when nothing was written).
     fn write_evidence(&self, view: &GcView<'_>, ctx: &PassCtx) -> Result<u64> {
-        if ctx.evidence.is_empty() {
+        if ctx.evidence.is_empty() || ctx.evidence.only_defers() {
             return Ok(0);
         }
-        let pass = view.state.evidence_passes()?.last().copied().unwrap_or(0) + 1;
+        let passes = view.state.evidence_passes()?;
+        let pass = passes.last().copied().unwrap_or(0) + 1;
         view.state
             .put_evidence(pass, &ctx.evidence.finish(view.clock.now()))?;
+        // The local bound: the newest EVIDENCE_KEEP objects stay; at most
+        // EVIDENCE_PRUNE_PER_PASS older ones go per pass.
+        let keep = EVIDENCE_KEEP.saturating_sub(1);
+        if passes.len() > keep {
+            let excess = &passes[..passes.len() - keep];
+            for &old in excess.iter().take(EVIDENCE_PRUNE_PER_PASS) {
+                if let Err(e) = view.state.delete_evidence(old) {
+                    tracing::warn!(error = %e, pass = old, "gc: an old evidence object was not pruned");
+                    break;
+                }
+            }
+        }
         Ok(pass)
     }
 
@@ -714,6 +815,11 @@ impl Gc {
         }
         self.phase = Phase::Idle;
         self.last_end = Some(view.clock.monotonic());
+        // An abandoned pass may have done part of its work (a delete whose
+        // call failed) or none (an error in its first mark): the next one
+        // runs even if nothing else changed (re-review M-2).
+        self.last_pass_changed = true;
+        self.last_tip = None;
     }
 
     fn note_heap(&mut self) {
@@ -749,6 +855,12 @@ impl Gc {
         self.peak_heap = self.peak_heap.max(h);
     }
 
+    fn defer(&mut self, view: &GcView<'_>, obj: ObjectRef, why: &'static str, kind: Deferral) {
+        if let Some(ctx) = &mut self.ctx {
+            ctx.evidence.defer(view.clock.now(), obj, why, kind);
+        }
+    }
+
     fn evidence(
         &mut self,
         view: &GcView<'_>,
@@ -777,6 +889,7 @@ impl Gc {
                 if !self.due(view)? {
                     return Ok(Flow::Yield);
                 }
+                self.forced = false;
                 self.reconcile(view)?;
                 self.ctx = Some(PassCtx::default());
                 self.last_compacted.clear();
@@ -967,7 +1080,7 @@ impl Gc {
             .get(&obj)
             .is_some_and(|&t| t != Duration::MAX && t.saturating_add(grace) <= l.started);
         if !elapsed {
-            return Ok(Verdict::Defer("grace not over"));
+            return Ok(Verdict::Defer("grace not over", Deferral::Grace));
         }
         Ok(Judge {
             f,
@@ -981,8 +1094,12 @@ impl Gc {
     fn apply_verdict(&mut self, view: &GcView<'_>, obj: ObjectRef, v: Verdict) -> Result<u64> {
         match v {
             Verdict::Gone => self.forget(view, obj),
-            Verdict::Defer(why) => {
-                self.evidence(view, Action::Defer, obj, 0, why);
+            Verdict::Defer(why, kind) => {
+                if why == NOT_DURABLE_YET && self.cut_asked_at != Some(view.tip.commit_seq) {
+                    self.cut_wanted = true;
+                    self.cut_asked_at = Some(view.tip.commit_seq);
+                }
+                self.defer(view, obj, why, kind);
                 Ok(0)
             }
             Verdict::Uncondemn(keep) => {
@@ -1072,7 +1189,7 @@ impl Gc {
             Err(e) if e.kind() == ErrorKind::Refused => {
                 // Nothing changed (the commit store's own floor check).
                 self.uncertain.remove(&obj);
-                self.evidence(view, Action::Defer, obj, 0, "refused by the store");
+                self.defer(view, obj, "refused by the store", Deferral::Retry);
                 return Ok(0);
             }
             Err(e) => return Err(e),
@@ -1111,7 +1228,9 @@ impl Gc {
         l: &Liveness,
         budget: u64,
     ) -> Vec<compact::Candidate> {
-        if config::compaction_refused(&view.params) {
+        // No compaction without an id prefix, nor at a rate of 0 (it would
+        // read one step's bytes and wait for ever; M17.B stack review M-1).
+        if config::compaction_refused(&view.params) || view.params.rate_bytes_per_s == 0 {
             return Vec::new();
         }
         let young = compact::tip_segments(view);
@@ -1280,6 +1399,7 @@ impl Gc {
             point!(self.points, "gc.evidence.after_put");
         }
         ctx.summary.pass = pass;
+        self.last_pass_changed = ctx.evidence.wants_retry();
         self.stats.passes += 1;
         self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);
@@ -1295,6 +1415,7 @@ impl Gc {
             freed,
             state: self.state(),
             done,
+            cut_wanted: std::mem::take(&mut self.cut_wanted),
         }
     }
 
@@ -1325,7 +1446,7 @@ impl Gc {
         self.last_compacted.clear();
         let mut m = Mark::new(self.cfg);
         m.run(view)?;
-        point!(self.points, "gc.mark.end");
+        point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
         self.after_mark(&l);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
@@ -1434,6 +1555,8 @@ impl Collector for Gc {
     fn urgent(&mut self, view: &GcView<'_>, want_bytes: u64) -> Result<GcProgress> {
         self.precheck(view)?;
         self.abort_pass(view);
+        // An urgent pass is a whole pass: it answers a pending request too.
+        self.forced = false;
         self.facts = None;
         let mut freed = 0u64;
         let res = self.urgent_inner(view, want_bytes, &mut freed);
@@ -1460,7 +1583,8 @@ impl Collector for Gc {
         self.precheck(view)?;
         self.load(view)?;
         let l = crate::mark::liveness(view, self.cfg)?;
-        let facts = Facts::read(view, &*self.floor, self.named_high)?;
+        let by = self.retained_names(view)?;
+        let facts = Facts::read(view, &*self.floor, self.named_high, by)?;
         let judge = Judge {
             f: &facts,
             l: &l,
@@ -1505,5 +1629,18 @@ impl Collector for Gc {
 
     fn stats(&self) -> GcStats {
         self.stats
+    }
+
+    fn request_pass(&mut self) -> bool {
+        self.forced = true;
+        true
+    }
+
+    fn status(&self) -> GcStatusSnapshot {
+        Gc::status(self)
+    }
+
+    fn take_moved(&mut self) -> Vec<Moved> {
+        std::mem::take(&mut self.outbox)
     }
 }

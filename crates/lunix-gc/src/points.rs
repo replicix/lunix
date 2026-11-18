@@ -20,6 +20,9 @@ pub const CRASH_POINTS: &[&str] = &[
     "gc.compact.after_segment_seal",
     "gc.compact.after_relocate",
     "gc.evidence.after_put",
+    // The urgent pass's mark (one name per site: the registry rejects a
+    // name used twice, and kill loops count hits by name).
+    "gc.urgent.after_mark",
 ];
 
 /// Marks a durable step: `point!(points, "gc.x.y")`. Returns from the

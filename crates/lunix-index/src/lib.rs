@@ -51,7 +51,7 @@ mod manifest;
 mod merge;
 mod run;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::io::Write;
@@ -845,7 +845,7 @@ impl ChunkIndex for LsmIndex {
     fn rebuild(&self, segments: &[SegId], footers: &dyn SegmentFooters) -> Result<()> {
         let mut committed = self.writer();
         let ordered: BTreeSet<SegId> = segments.iter().copied().collect();
-        let mut mem = Mem::default();
+        let mut mem: BTreeMap<ChunkId, Hint> = BTreeMap::new();
         for &seg in &ordered {
             let fb = footers.segment_footer(seg)?;
             if fb.object_id != seg {
@@ -866,14 +866,33 @@ impl ChunkIndex for LsmIndex {
                 );
             }
         }
+        // Atomic (M14 re-review R-1): the new run is written and synced
+        // first, then one manifest swap replaces every old run. A crash
+        // leaves the old manifest or the new one, never an empty index that
+        // mount's catch-up would only partly refill.
+        let mut new_runs = Vec::new();
+        if !mem.is_empty() {
+            let id = self.ids.allocate()?;
+            let mut w = RunWriter::create(&self.dir, id, mem.len() as u64)?;
+            let mut covered = BTreeSet::new();
+            for (cid, h) in &mem {
+                w.push(&entry_of(*cid, *h))?;
+                covered.insert(h.seg);
+            }
+            let covered: Vec<SegId> = covered.into_iter().collect();
+            let run = w
+                .finish(&covered)?
+                .ok_or(Error::invalid("rebuild produced an empty run"))?;
+            new_runs.push(run);
+        }
         let mut next = committed.clone();
-        next.runs.clear();
+        next.runs = new_runs.iter().map(meta_of).collect();
         next.dropped.clear();
         swap_manifest(&self.dir, &mut committed, next)?;
         let mut g = self.wr();
-        g.mem = mem;
+        g.mem.clear();
         g.shadow.clear();
-        g.runs.clear();
+        g.runs = new_runs.into_iter().map(Arc::new).collect();
         g.dropped.clear();
         Ok(())
     }

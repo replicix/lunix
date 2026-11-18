@@ -56,16 +56,24 @@ step "lunix-ublk with crashpoints: clippy and unit tests (lead, M10; root cells 
 cargo clippy -j "$jobs" -p lunix-ublk --all-targets --features crashpoints -- -D warnings
 cargo test -j "$jobs" -p lunix-ublk --features crashpoints
 
+step "lunix-index with crashpoints: clippy and the rebuild kill tests (lead, M17.B review B-3)"
+cargo clippy -j "$jobs" -p lunix-index --all-targets --features crashpoints -- -D warnings
+cargo test -j "$jobs" -p lunix-index --features crashpoints --test rebuild_crash
+
 step "lunix-gc with crashpoints: clippy (lead, M17.A)"
 cargo clippy -j "$jobs" -p lunix-gc --all-targets --features crashpoints -- -D warnings
 
 step "lunix-crypto library lint without test features (lead, M2 review)"
 cargo clippy -j "$jobs" -p lunix-crypto --lib -- -D warnings
 
-step "allow_floor_reset is set only by lunix-fsck (ADR-31: only offline repair lowers the floor)"
-if grep -rnE 'allow_floor_reset[[:space:]]*(:|=)[[:space:]]*true' crates --include=*.rs \
-    | grep -vE '^crates/(lunix-fsck/|lunix-store/src/tests/|lunix-testkit/)'; then
-  echo "allow_floor_reset must not be enabled outside lunix-fsck and the store and testkit tests" >&2
+step "allow_floor_reset is used only by lunix-fsck (ADR-31: only offline repair lowers the floor)"
+# The identifier itself, in any form (`: true`, `: flag`, a struct update),
+# outside the store that defines it, lunix-fsck and the testkit; doc comments
+# that name it are not uses.
+if grep -rnw 'allow_floor_reset' crates --include=*.rs \
+    | grep -vE '^crates/(lunix-fsck/|lunix-store/src/|lunix-testkit/)' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//'; then
+  echo "allow_floor_reset must not be used outside lunix-store, lunix-fsck and lunix-testkit" >&2
   exit 1
 fi
 
@@ -79,13 +87,14 @@ step "lunixd with testsupport: clippy, then the stack tests in release with luni
 # `cargo test --workspace` builds lunixd without `testsupport`, so the stack
 # tests compile to nothing there. They run in release (the debug profile
 # spends most of its time scanning ring files at every open), with a release
-# lunix-fsck next to them that they must find (LUNIX_STACK_REQUIRE_FSCK). The
-# kill loops (stack_kill, crashpoints, minutes) stay out of CI; their command
+# lunix-fsck next to them that they must find (LUNIX_STACK_REQUIRE_FSCK),
+# built with crashpoints (stack_gc kills `--truncate-tip` between its steps;
+# inert without LUNIX_CRASH_AT). The kill loops (stack_kill, crashpoints, minutes) stay out of CI; their command
 # is in the M12b report.
 cargo clippy -j "$jobs" -p lunixd --all-targets --features testsupport,crashpoints -- -D warnings
-cargo build -j "$jobs" --release -p lunix-fsck
+cargo build -j "$jobs" --release -p lunix-fsck --features crashpoints
 stack_tests=(--lib)
-for t in stack_support stack_model; do
+for t in stack_support stack_model stack_gc stack_gc_ladder control_gc; do
   [ -f "crates/lunixd/tests/$t.rs" ] && stack_tests+=(--test "$t")
 done
 LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features testsupport "${stack_tests[@]}"

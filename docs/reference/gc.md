@@ -7,23 +7,92 @@ design is DESIGN §11 and plan M17; the byte layouts of the envelopes are in
 
 ## Where it runs
 
-The engine's commit coordinator calls the collector between cuts, with the
-in-memory map equal to the tip's root and no dirty leaf. Nothing else calls
-it: the control socket's `Gc` request and the space ladder's compact step post
-a request to the coordinator. One call (`step`) does small units of work until
-its budget (`gc_step_budget_ms`, default 50 ms) is spent, so a pass never holds
-up a cut for longer than one unit past the budget.
+Every call of the collector runs under the engine's coordinator mutex,
+between cuts, with the in-memory map equal to the tip's root and no dirty
+leaf; that mutex makes each caller the single caller. The background calls
+are the coordinator's own: one budgeted `step` after every commit (C10), on
+every idle tick, and after a commit that failed before it changed the map (no
+space for the cut above all, so a full volume can still free what its
+condemned objects hold): one rule, the step runs whenever the map is the
+tip's. Moves of a call that failed, and a cut the collector asks for
+(`GcProgress::cut_wanted`), reach the next cut whichever path called it.
+A step does small units of work until its budget (`gc_step_budget_ms`, default
+50 ms) is spent, so a background step never holds up a cut for longer than one
+unit past the budget. The urgent pass and a dry run are one call each and hold
+the coordinator for a whole mark (and the urgent pass's compaction).
 
-A pass runs when the previous one ended at least 30 s ago and something may
-have changed: a new tip, condemned objects waiting, or different pins.
+A pass runs when the
+previous one ended at least 30 s ago and something may have changed: a new
+tip, different pins, or condemned objects waiting after a pass that changed
+something. A pass that changed nothing (its only lines are deferrals that wait
+for a FULL) is not repeated until the tip or the pins change; the pins are
+then looked at once per interval, not at every tick. A pass abandoned on an
+error, or one that deferred for the store or the rollback floor, is retried
+one interval later (a deferral for the store or the floor writes no evidence).
+
+The daemon reaches the collector in three ways (the engine's `GcControl`; the
+calling thread runs the collector under the coordinator mutex):
+
+- **`lunix gc NAME`** (`Gc`) asks for a pass now (due or not) and steps it to
+  its end. Between two steps it releases the coordinator and pauses (5 ms, or
+  100 ms in the grace or when compaction is at its rate cap), so cuts, a
+  quiesce and the ladder get in. It returns once a pass that started after
+  the call ended: when the collector was idle, the next pass to end (the
+  requested one, or an urgent pass); when a pass was in progress (its view
+  predates the call), the one after it (an urgent pass that aborts the pass
+  in progress counts as that pass). The answer covers **every pass that ended
+  while the call waited**: the counts summed, `bytes_freed` and
+  `segments_compacted` from the collector's counters, `pass` the newest
+  evidence number. A call that finds a pass waiting out its grace therefore
+  reports what that pass deleted too. It takes at least the grace and is not
+  cut off by the daemon's `call_timeout`; the client's `--timeout` (default
+  600 s) still applies. When the client hangs up, the daemon stops waiting for
+  it within a second and the pass goes on in the daemon. One such call per
+  volume runs at a time; a second answers `Busy`.
+  Other answers: `Invalid` when the volume is not attached; `Busy` when the
+  volume is detached or quiesced meanwhile, or when the map stays ahead of the
+  tip for 50 steps; `Refused` when the collector dropped the pass four times
+  (errors, see the log). After a quiesce no collector call starts (requested,
+  urgent or background step). A detach waits for the call (and for a running
+  compact step) to let go of the engine, so the engine's threads are stopped
+  and `LOCK` is free when the detach answers, **except** when such a call is
+  still running after 30 s (a collector unit stuck in I/O): the detach then
+  answers with a warning in the log and `LOCK` is released only when that
+  call ends. **`--dry-run`** is one call that marks and reports what a pass
+  would condemn, delete and compact, changing nothing.
+- **`lunix gc NAME --status`** (`GcStatus`) reads the status the collector
+  published after its last call, without waiting for the coordinator or the
+  engine. A volume that is not attached is idle, with empty counters.
+- **The space ladder's compact step** is the urgent pass (below): the gate
+  runs it on its own thread when a reservation does not fit. A commit that
+  fails for space at any step (a destage `NoSpace` from a full host file
+  system, an index run that cannot be written) runs it too, from the
+  coordinator, at least 2 s after the end of the last urgent pass (either
+  kind). The pause doubles, up to 60 s, while those passes free nothing; it
+  is at most the floor grace after a pass that condemned something, and back
+  to 2 s after a successful commit or a pass that freed bytes.
+  Compaction re-hints are applied only after a cut's destage succeeded, so a
+  cut that fails for space leaves the map at the tip and GC can run. They
+  share the map's dirty-leaf cap with the cut: they are applied in leaf order,
+  as many leaves as fit (at most `max_leaves_per_cut`, halved on `MapFull`),
+  and the rest wait; moves that wait for want of room trigger a cut on their
+  own only once per commit interval.
 
 ## What is kept
 
 **Roots** are pinned when a mark starts:
 
-- the retained FULL commits (`retain_last`, default 2: the tip and its
-  predecessor, so an offline `fsck --repair --truncate-tip` can drop a
-  damaged tip; the engine sets `chain_floor` to the older one);
+- GC's **retained set**: every FULL from the lowest `chain_floor` any
+  retained FULL records up to the tip (N24, lead decision of 2026-11-14).
+  With `retain_last` = 2 the engine retains the tip and its predecessor and
+  sets `chain_floor` to the older one; the predecessor's own `chain_floor` is
+  one commit lower, so GC keeps three FULLs. An offline `fsck --repair
+  --truncate-tip` then leaves a complete volume: both roots of the
+  predecessor are readable and every object they name exists. GC reads the
+  FULLs below the tip's `chain_floor` from the commit store (the view
+  carries only the engine's window); a missing one ends that walk (after a
+  truncation the floor commit's own floor may be gone), one that exists but
+  does not open stops the mark;
 - the commits that snapshot, reader and hold pins name. In phase 1 these
   directories are empty, but they are read on every pass, and a pin that
   cannot be read stops the pass.
@@ -35,7 +104,7 @@ An object is **live** when a root reaches it:
 | segment | it holds the live copy of a chunk some root references (below) |
 | map pack | it stores a node of some root (a full node walk of every root) |
 | index run | the index manifest names it |
-| commit | `commit_seq >=` the lowest `chain_floor` any retained FULL records, or a pin names it, or it is in the rollback-floor window (below) |
+| commit | `commit_seq >=` the lowest `chain_floor` any retained FULL records (GC's retained set), or a pin names it, or it is in the rollback-floor window (below) |
 
 **The live copy of a chunk.** A leaf entry resolves through its hint when the
 hint's segment exists and its authenticated footer holds, at exactly that
@@ -56,7 +125,7 @@ Besides liveness, these are never condemned:
 - an object whose id is above the tip's **high-water mark** (the highest id
   any retained commit names): an open segment, sealed but uncommitted
   output or an orphan the open-time sweep will remove;
-- an object a **currently** retained commit names (`new_segments`,
+- an object a FULL of GC's **current** retained set names (`new_segments`,
   `map_packs`, `index_packs`, the root's pack);
 - a compaction output whose moves the engine has not yet named in a FULL.
   The collector keeps that set itself and clears an output when a FULL
@@ -99,12 +168,30 @@ their map roots are not roots, so their data may go.
    FULL has named (the delete-time index invariant): at or below the highest
    id named by a FULL that has a successor FULL (the collector reads each new
    commit once) and not an unnamed compaction output; otherwise it stays
-   condemned for a later pass. This rule is exact only while the engine
+   condemned for a later pass. **The tip's own names never count**: a copy
+   only the tip names would go with the tip at `fsck --repair --truncate-tip`
+   (the mount sweep deletes what the new chain does not name above its mark),
+   so a compaction source is deleted one commit after the FULL that names its
+   output (M17.B review B-1). On an idle volume the collector asks the
+   engine for that cut (`GcProgress::cut_wanted`, one empty FULL), so the
+   source goes at the next pass instead of being deferred at every pass
+   (M17.B stack review S-1), and only when a cut helps: the blocking copy is
+   in an unnamed output or named by the tip (re-review M-1). This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
-   them down to the lowest `chain_floor` of a retained FULL, so that `fsck
-   --repair --truncate-tip` can mount the predecessor (N12).
+   them down to the lowest `chain_floor` of a retained FULL, together with
+   everything those FULLs reach, so that `fsck --repair --truncate-tip`
+   leaves a complete volume (N24). The truncation itself deletes the commit
+   files below the new tip's `chain_floor` that would join the set only under
+   the new tip (they were outside it under the old one and may be half
+   collected), refuses when a root of the new chain resolves into an
+   object only the dropped tip names, and rebuilds the index for the
+   previous commit before it sets the tip aside: GC moved the entries of
+   relocated ids into the output the next open sweeps. A crash or an error
+   between the two leaves the old tip, and its mount's catch-up adds the
+   entries of the segments only that tip names; a rebuild that fails refuses
+   the truncation.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
@@ -132,11 +219,15 @@ segment that was not yet condemned).
 
 ## Compaction
 
-Candidates are segments with live bytes and a live fraction
-`u = live / file size` below `gc_live_threshold` (default 0.5), at or below the
-high-water mark, not condemned, not an unnamed output, and not introduced by
-the tip FULL (younger than one commit interval). They are ranked by LFS
-cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
+Candidates are segments with live bytes, a live fraction `live / file size`
+below `gc_live_threshold` (default 0.5), and an output at least 1 KiB smaller
+than the source (the output holds the live payload plus 128 bytes per extent
+and 512 bytes per segment of container overhead): a small segment whose dead
+bytes are mostly overhead would be rewritten into an output as large at every
+pass, and is left alone. Candidates are also at or below the high-water mark,
+not condemned, not an unnamed output, and not introduced by the tip FULL
+(younger than one commit interval). With `u = live / file size` they are
+ranked by LFS cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
 mark minus the segment id, best first; up to 1 GiB of live bytes per pass.
 
 Live extents are copied in chunk-number order (LBA locality). Each is read,
@@ -146,8 +237,12 @@ at a time. After the output is sealed, the index is told (`relocate`, which
 keeps the entry in memory until a durable commit names the output) and the
 moves are handed to the engine, which re-hints the map at its next cut and
 names the output in that FULL. Pending moves are a cut trigger even on an
-idle volume. Compaction reads at most `gc_rate` bytes per second (default
-64 MiB/s) plus one step's worth, and at most the step budget's bytes per step.
+idle volume. These cuts, and the one the collector asks for before a source
+can go, are ordinary FULLs: on an idle volume they consume the retained
+window, so the retained FULLs may soon all be GC cuts of the same data (M17.B
+stack review M-5). Compaction reads at most `gc_rate` bytes per second
+(default 64 MiB/s) plus one step's worth, and at most the step budget's bytes
+per step; a `gc_rate` of 0 compacts nothing.
 
 The source segments become dead once the index's current copies are in the
 output; the next pass condemns them.
@@ -200,8 +295,14 @@ Each entry:
 ## `gc/<pass:016x>`: the evidence object
 
 One sealed, create-only object per pass that condemned, un-condemned,
-deferred, deleted or compacted anything; a pass that found nothing writes
-none, and its number is used by the next. `pass` is one above the highest
+deleted or compacted anything, or deferred for the grace; a pass that found
+nothing, or only deferred for a FULL, the store or the rollback floor, writes
+none, and its number is used by the
+next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
+new one deletes the oldest beyond that, at most 16 per pass
+(`GcStateStore::delete_evidence`).
+Evidence objects are not in the ledger; the bound keeps them under 1 024 x
+48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and
 `bytes` = the pass's lines, written once at pass end (and once per urgent
 pass). A pass abandoned on an error (not a crash) writes what it has, best
@@ -231,6 +332,7 @@ count in `bytes`.
 | point | after it |
 |---|---|
 | `gc.mark.end` | the mark is complete (nothing durable yet) |
+| `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
 | `gc.delete.before_unlink` | nothing deleted |
 | `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of the segment: `catch_up` drops them at open, a later pass removes the list entry |
@@ -261,6 +363,18 @@ skip-set lookup per leaf of the root); the sort of about 262 144 live extents;
 the condemn list (one write); one index flag; one recheck-and-delete decision;
 one compaction copy or seal; the evidence write. The step-wide facts (retained
 names, the index manifest, the rollback floor) are read once per step.
+
+**The cost of the leaf walk grows with the square of the root (N25).** A
+leaf unit resolves only its 32 new leaves, but it reaches them through
+`walk_leaves_skipping`, which traverses the whole root and does one skip-set
+lookup per leaf of the root. A mark therefore costs about `leaves² / 32`
+lookups per root. At 16 KiB chunks and fanout 512 a 1 TiB volume has about
+125 000 leaves: about 4 000 units of about 125 000 lookups each, fine per
+unit at 1 TiB, over the step budget per unit near 8 TiB, and tens of seconds
+of CPU per mark well before that. The fix is a range walk in the map
+interface (walk leaves `from..from + n` of a root, or a resumable cursor), so
+a unit costs its own leaves only; it is a plan item (N25), and M17.B measures
+a 64 M-chunk mark against the budget.
 
 ## What the wiring must do
 

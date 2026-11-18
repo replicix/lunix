@@ -639,9 +639,9 @@ impl Sim {
     /// Keeps the model of commits that are roots or still exist.
     fn prune_model(&mut self) {
         let keep: BTreeSet<u64> = self
-            .retained
+            .gc_retained()
             .iter()
-            .map(|c| c.common().commit_seq.0)
+            .map(|f| f.common.commit_seq.0)
             .chain(self.pins.iter().map(|p| p.commit_seq.0))
             .collect();
         self.model.retain(|k, _| keep.contains(k));
@@ -816,15 +816,42 @@ impl Sim {
         None
     }
 
-    /// The roots: retained FULLs and pinned commits.
-    pub(crate) fn roots(&self) -> Vec<(u64, MapRoot)> {
-        let mut r: Vec<(u64, MapRoot)> = self
+    /// GC's retained set as the model states it (N12 (b)), independently of
+    /// `lunix-gc`: the engine's retained FULLs plus every FULL from the
+    /// lowest `chain_floor` they record up to the tip's `chain_floor`, read
+    /// back from the store (one that is gone ends the walk down).
+    pub(crate) fn gc_retained(&self) -> Vec<Full> {
+        let mut out: Vec<Full> = self
             .retained
             .iter()
             .filter_map(|c| match c {
-                Commit::Full(f) => Some((f.common.commit_seq.0, f.map_root)),
+                Commit::Full(f) => Some(f.clone()),
                 _ => None,
             })
+            .collect();
+        let mut seq = self.tip.chain_floor.0;
+        while seq > self.keep_floor() {
+            seq -= 1;
+            if out.iter().any(|f| f.common.commit_seq.0 == seq) {
+                continue;
+            }
+            let Ok(bytes) = self.store.get(CommitSeq(seq)) else {
+                break;
+            };
+            if let Ok(Commit::Full(f)) = self.commit_codec.open_commit(CommitSeq(seq), &bytes) {
+                out.push(f);
+            }
+        }
+        out.sort_by_key(|f| f.common.commit_seq);
+        out
+    }
+
+    /// The roots: GC's retained FULLs and pinned commits.
+    pub(crate) fn roots(&self) -> Vec<(u64, MapRoot)> {
+        let mut r: Vec<(u64, MapRoot)> = self
+            .gc_retained()
+            .iter()
+            .map(|f| (f.common.commit_seq.0, f.map_root))
             .collect();
         for p in &self.pins {
             if r.iter().any(|(s, _)| *s == p.commit_seq.0) {
@@ -908,23 +935,21 @@ impl Sim {
             .iter()
             .map(|x| x.pack)
             .collect();
-        for c in &self.retained {
-            if let Commit::Full(f) = c {
-                for s in &f.new_segments {
-                    if !segs.contains(s) {
-                        return Err(format!(
-                            "commit {} names missing segment {s:?}",
-                            f.common.commit_seq.0
-                        ));
-                    }
+        for f in &self.gc_retained() {
+            for s in &f.new_segments {
+                if !segs.contains(s) {
+                    return Err(format!(
+                        "commit {} names missing segment {s:?}",
+                        f.common.commit_seq.0
+                    ));
                 }
-                for p in f.map_packs.iter().chain(f.map_root.pack.iter()) {
-                    if !packs.contains(p) {
-                        return Err(format!(
-                            "commit {} names missing pack {p:?}",
-                            f.common.commit_seq.0
-                        ));
-                    }
+            }
+            for p in f.map_packs.iter().chain(f.map_root.pack.iter()) {
+                if !packs.contains(p) {
+                    return Err(format!(
+                        "commit {} names missing pack {p:?}",
+                        f.common.commit_seq.0
+                    ));
                 }
             }
         }
@@ -1044,8 +1069,8 @@ impl Sim {
         out
     }
 
-    /// Objects kept regardless of liveness: named by a retained commit or
-    /// above the tip's high-water mark.
+    /// Objects kept regardless of liveness: named by a FULL of GC's retained
+    /// set or above the tip's high-water mark.
     pub(crate) fn kept_by_rule(&self) -> BTreeSet<u64> {
         let hwm = high_water(&self.retained);
         let mut s: BTreeSet<u64> = self
@@ -1054,24 +1079,22 @@ impl Sim {
             .map(|(_, id)| id)
             .filter(|&id| id > hwm)
             .collect();
-        for c in &self.retained {
-            if let Commit::Full(f) = c {
-                s.extend(
-                    f.new_segments
-                        .iter()
-                        .chain(&f.map_packs)
-                        .chain(&f.index_packs)
-                        .chain(f.map_root.pack.iter())
-                        .map(|i| i.raw()),
-                );
-            }
+        for f in &self.gc_retained() {
+            s.extend(
+                f.new_segments
+                    .iter()
+                    .chain(&f.map_packs)
+                    .chain(&f.index_packs)
+                    .chain(f.map_root.pack.iter())
+                    .map(|i| i.raw()),
+            );
         }
         s
     }
 
     /// Commits a quiescent volume must hold, and may hold no more than.
     /// The lowest `chain_floor` of any retained FULL: commits from it up
-    /// stay so that `--truncate-tip` can mount the predecessor (N12).
+    /// stay so that `--truncate-tip` can mount the predecessor (N24).
     pub(crate) fn keep_floor(&self) -> u64 {
         self.retained
             .iter()

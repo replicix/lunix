@@ -9,6 +9,7 @@ use lunix_format::{CommitSeq, WriteSeq};
 use lunix_iface::block::{BlockEngine, QueueConfig, QueueHandler, ResizeHook};
 use lunix_iface::clock::Clock;
 use lunix_iface::crypto::{CommitCodec, ExtentCodec};
+use lunix_iface::gc::{GcControl, GcPassSummary, GcStatusSnapshot};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::journal::{Journal, LaneId};
 use lunix_iface::map::BlockMap;
@@ -36,6 +37,26 @@ use crate::stats::Counters;
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The error of every call after a failure stopped the commits.
+pub(crate) fn stopped() -> Error {
+    Error::Io(std::io::Error::other(
+        "the engine stopped committing after a failure",
+    ))
+}
+
+/// The collector's last published status, readable without the engine: the
+/// daemon keeps one per attached volume for `GcStatus`, so a status call
+/// never holds (or becomes the last owner of) an engine.
+#[derive(Clone, Debug)]
+pub struct GcStatusHandle(Arc<Mutex<GcStatusSnapshot>>);
+
+impl GcStatusHandle {
+    /// The status now.
+    pub fn get(&self) -> GcStatusSnapshot {
+        lock(&self.0).clone()
+    }
 }
 
 /// What a coordinator run did.
@@ -96,6 +117,22 @@ pub(crate) struct Inner {
     /// `JournalReserved` bytes the engine holds (admissions minus reclaims).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
+    /// The collector's status after its last call (`GcControl::status` and
+    /// [`GcStatusHandle`] read it without the coordinator mutex).
+    pub(crate) gc_status: Arc<Mutex<GcStatusSnapshot>>,
+    /// `quiesce` was called: the engine is about to be dropped (detach, a
+    /// quiesce handover). One-way: after it no collector call starts (a
+    /// requested pass ends `Closed`, the ladder's urgent pass frees nothing,
+    /// a commit that fails for space runs no urgent pass), also when the
+    /// final commit failed and the engine lives on (the device refuses I/O
+    /// then). Read under the coordinator mutex by every GC entry; `quiesce`
+    /// sets it before it takes that mutex.
+    pub(crate) closing: AtomicBool,
+    /// What a requested GC pass waits on between steps; `quiesce` notifies it
+    /// (under its mutex, after setting `closing`).
+    pub(crate) gc_wake: (Mutex<()>, Condvar),
+    /// Requested passes being waited for (`GcStatusSnapshot::requests`).
+    pub(crate) gc_requests: AtomicU64,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
 }
@@ -233,6 +270,7 @@ impl Engine {
             cfg.read_helpers,
         );
         let lanes = usize::from(deps.journal.lanes());
+        let gc_status = collector.as_ref().map(|c| c.status()).unwrap_or_default();
         let coord = Coord::new(&rec, collector, deps.clock.monotonic());
         let inner = Arc::new(Inner {
             size: AtomicU64::new(rec.tip.size),
@@ -267,6 +305,10 @@ impl Engine {
             durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
             coord: Mutex::new(coord),
+            gc_status: Arc::new(Mutex::new(gc_status)),
+            closing: AtomicBool::new(false),
+            gc_wake: (Mutex::new(()), Condvar::new()),
+            gc_requests: AtomicU64::new(0),
             resize_hook: Mutex::new(None),
             report: rec.report,
             cfg,
@@ -354,6 +396,12 @@ impl Engine {
         self.inner.is_failed()
     }
 
+    /// The collector's status, readable after the engine is gone (see
+    /// [`GcStatusHandle`]).
+    pub fn gc_status_handle(&self) -> GcStatusHandle {
+        GcStatusHandle(Arc::clone(&self.inner.gc_status))
+    }
+
     /// The `JournalReserved` bytes the engine believes it holds.
     pub fn journal_charged(&self) -> u64 {
         self.inner.journal_charged.load(Ordering::Acquire)
@@ -375,6 +423,25 @@ impl Engine {
             let _ = h.join();
         }
         self.inner.pool.shutdown();
+    }
+}
+
+/// The daemon's way to the collector (the control socket's `Gc` and
+/// `GcStatus`, the space ladder's compact step); see the `gc` module.
+impl GcControl for Engine {
+    /// Blocks until the pass ends (it waits out the grace) or, for a dry run,
+    /// until the mark is done. Never call it from a queue thread.
+    fn run_pass(&self, dry_run: bool) -> Result<GcPassSummary> {
+        self.inner.run_pass(dry_run)
+    }
+
+    /// Blocks for the urgent pass. Never call it from a queue thread.
+    fn run_urgent(&self, want_bytes: u64) -> Result<u64> {
+        self.inner.run_urgent(want_bytes)
+    }
+
+    fn status(&self) -> GcStatusSnapshot {
+        lock(&self.inner.gc_status).clone()
     }
 }
 
@@ -448,7 +515,17 @@ impl BlockEngine for Engine {
         *lock(&self.inner.resize_hook) = Some(hook);
     }
 
+    /// Also ends GC on this engine for good (see `Inner::closing`): a
+    /// requested pass waiting between its steps wakes and ends `Closed`, and
+    /// no collector call starts after the final commit.
     fn quiesce(&self) -> Result<()> {
+        // Before the coordinator mutex: every GC entry checks the flag under
+        // that mutex, so none starts after the final commit below.
+        self.inner.closing.store(true, Ordering::Release);
+        {
+            let _g = lock(&self.inner.gc_wake.0);
+            self.inner.gc_wake.1.notify_all();
+        }
         let mut co = lock(&self.inner.coord);
         self.inner.commit(&mut co, false, None).map(|_| ())
     }

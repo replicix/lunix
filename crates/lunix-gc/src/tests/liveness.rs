@@ -72,7 +72,12 @@ fn recount(s: &Sim) -> BTreeMap<SegId, u64> {
 
 /// The reference cost-benefit order: score `(1-u)·age/(1+u)` computed
 /// directly, descending, ties by id.
-fn reference(s: &Sim, per: &BTreeMap<SegId, u64>, threshold: f64) -> Vec<SegId> {
+fn reference(
+    s: &Sim,
+    per: &BTreeMap<SegId, u64>,
+    extents: &dyn Fn(SegId) -> u64,
+    threshold: f64,
+) -> Vec<SegId> {
     let hwm = high_water(&s.retained);
     let mut v: Vec<(f64, SegId)> = SegmentStore::list(&s.store)
         .unwrap()
@@ -82,7 +87,11 @@ fn reference(s: &Sim, per: &BTreeMap<SegId, u64>, threshold: f64) -> Vec<SegId> 
             let live = *per.get(&x.seg)?;
             let u = live as f64 / x.size_bytes as f64;
             let age = (hwm - x.seg.raw()) as f64;
-            (u < threshold).then_some(((1.0 - u) * age / (1.0 + u), x.seg))
+            // An output holds the payload plus 128 bytes per extent and
+            // 512 bytes per segment, and must be 1 KiB smaller.
+            let out = live + extents(x.seg) * 128 + 512;
+            (u < threshold && x.size_bytes >= out + 1024)
+                .then_some(((1.0 - u) * age / (1.0 + u), x.seg))
         })
         .collect();
     v.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -135,7 +144,7 @@ fn per_segment_live_bytes_equal_a_model_recount_for_1000_volumes() {
             .collect();
         assert_eq!(
             got,
-            reference(&s, &want, 0.5),
+            reference(&s, &want, &|seg| l.live_in(seg).len() as u64, 0.5),
             "volume {vol}: candidate order"
         );
         with_candidates += u64::from(!got.is_empty());
@@ -143,7 +152,9 @@ fn per_segment_live_bytes_equal_a_model_recount_for_1000_volumes() {
     eprintln!(
         "liveness: {volumes} volumes, {compared} segments compared, {with_candidates} with compaction candidates"
     );
-    assert!(with_candidates > volumes / 10);
+    // GC's retained set reaches one window further down (N24), which keeps
+    // more alive on these short random histories than the engine's window.
+    assert!(with_candidates > volumes / 20);
 }
 
 #[test]

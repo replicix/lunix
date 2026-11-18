@@ -236,7 +236,10 @@ fn after_deleting_index_the_index_comes_back_equal_and_clean() {
         clear_index(&b);
         let r = b.fsck(&b.opts());
         assert!(r.has(code::INDEX_MISSING), "{}", r.render_text());
-        assert_eq!(r.exit_code(), 1);
+        // The first commit's segments are below chain_floor: mount's
+        // catch-up would not restore their entries (M14 re-review R-1).
+        assert!(r.has(code::INDEX_LOST), "{}", r.render_text());
+        assert_eq!(r.exit_code(), 2);
         let fixed = b.fsck(&Options {
             rebuild_index: true,
             ..b.opts()

@@ -97,6 +97,7 @@ impl Collector for Mover {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
     fn urgent(&mut self, _v: &GcView<'_>, _w: u64) -> Result<GcProgress> {
@@ -105,6 +106,7 @@ impl Collector for Mover {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
     fn dry_run(&mut self, _v: &GcView<'_>) -> Result<GcPassSummary> {
@@ -159,6 +161,10 @@ fn a_failed_rehint_is_deferred_to_the_next_cut_not_fatal() {
         !r.engine.is_stopped(),
         "a recoverable re-hint failure is not fatal"
     );
+    // Deferred moves alone cut again only once per commit interval (M12c
+    // merge review M-2), not at the next tick.
+    assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    v.clock.advance(Duration::from_secs(60));
     let out = r.engine.tick().expect("the deferred re-hints apply now");
     assert!(matches!(out, CommitOutcome::Committed { .. }));
     let f = tip_full(&v, &r);

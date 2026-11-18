@@ -36,8 +36,16 @@ pub(crate) struct Facts {
     pub(crate) tip: Option<Tip>,
     /// The verified chain, ascending; may be partial when a link failed.
     pub(crate) retained: Vec<Retained>,
+    /// GC's retained set below `chain_floor` (N24): the FULLs from the lowest
+    /// `chain_floor` a retained FULL records, ascending, authenticated and
+    /// linked down from the floor commit. Roots like the retained ones.
+    pub(crate) gc_extra: Vec<Retained>,
+    /// The lowest `chain_floor` a retained FULL records.
+    pub(crate) gc_floor: CommitSeq,
     /// Whether the chain from the tip down to `chain_floor` verified.
     pub(crate) chain_ok: bool,
+    /// The error codes of the check pass that made these facts (sorted).
+    pub(crate) error_codes: Vec<&'static str>,
     pub(crate) condemned: Option<Condemned>,
     pub(crate) condemned_ids: HashSet<ObjId>,
     pub(crate) leftovers: Vec<Leftover>,
@@ -46,6 +54,8 @@ pub(crate) struct Facts {
     pub(crate) packs: BTreeMap<ObjId, Container>,
     pub(crate) walk: Option<WalkOut>,
     pub(crate) ratios: Option<Ratios>,
+    /// The GC hook's dry run, when it ran.
+    pub(crate) gc_dry_run: Option<lunix_iface::gc::GcPassSummary>,
     pub(crate) stats: Stats,
     /// Segments and packs some retained commit names.
     pub(crate) named_segments: HashSet<ObjId>,

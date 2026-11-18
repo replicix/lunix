@@ -1,0 +1,348 @@
+//! Directed tests the M17.A re-review asked M17.B to add ("Remaining 1"):
+//! two guards that the shipped suite did not fail without.
+//!
+//! * `reconcile` drops the index entries of a flagged segment that is gone
+//!   before it clears the flag (the third site of the B1 fix);
+//! * the delete-time index invariant looks at **every** segment a dead
+//!   segment's stale hints depend on (`deps` is a set), not only the highest.
+
+mod common;
+
+use common::Vol;
+use lunix_format::SegId;
+use lunix_iface::index::ChunkIndex;
+use lunix_iface::store::SegmentStore;
+
+/// A flagged segment that is gone (a crash between the unlink and
+/// `drop_segment`), a lost condemned list, and index entries of the process
+/// that still point into the segment: the next pass must drop those entries
+/// before it clears the flag, or dedup returns a verified hit into a segment
+/// that does not exist (silent loss of the next write of that content).
+#[test]
+fn reconcile_drops_the_entries_of_a_gone_flagged_segment_before_clearing_its_flag() {
+    let mut v = Vol::new(4);
+    v.write(0, 77);
+    v.commit().expect("commit");
+    let gone = v.hint(0).seg;
+    v.write(0, 78);
+    v.commit().expect("commit");
+    v.commit().expect("commit");
+    v.commit().expect("commit");
+    let id = v.id_of(77);
+    assert_eq!(
+        v.index.get(&id).expect("get").map(|c| c.hint.seg),
+        Some(gone),
+        "the index still names the old copy"
+    );
+
+    // The state a crash after the unlink leaves: the flag is set, the file
+    // is gone, the index entries are still there; the list was lost.
+    v.index.mark_condemned(gone).expect("flag");
+    SegmentStore::delete(&v.store, gone).expect("unlink");
+    assert!(!v.segments().contains(&gone));
+    assert!(
+        v.index.get_for_dedup(&id).expect("dedup").is_none(),
+        "a flagged segment is never a dedup target"
+    );
+
+    // A restarted collector: no list in memory, none on disk.
+    v.restart_collector();
+    v.step().expect("a step reconciles the flags with the list");
+
+    assert!(
+        !v.index.condemned().expect("flags").contains(&gone),
+        "the flag of a gone segment is cleared"
+    );
+    let hit = v.index.get_for_dedup(&id).expect("dedup");
+    assert!(
+        hit.is_none(),
+        "dedup must not return a copy in the deleted segment: {hit:?}"
+    );
+    assert!(
+        v.index
+            .get(&id)
+            .expect("get")
+            .is_none_or(|c| c.hint.seg != gone),
+        "no index entry points into the deleted segment"
+    );
+    v.passes(2).expect("later passes");
+}
+
+/// Segment `S` holds chunks 0 and 1 (and three discarded ones). Compaction
+/// moves both to output `T1`; the wiring lags, so `T1` stays unnamed. A
+/// later FULL stores another copy of chunk 1's content in `T2 > T1` and the
+/// index names it, so the live copies `S`'s stale hints resolve to are in
+/// `T1` (unnamed output) and `T2` (named). `S` must not be deleted while `T1`
+/// is unnamed: a crash would sweep `T1` and leave chunk 0 without a copy.
+/// Checking only the highest dependency (`T2`) misses it.
+#[test]
+fn a_dead_segment_waits_for_every_unnamed_output_its_ids_moved_to() {
+    let mut v = Vol::new(8);
+    for ci in 0..5 {
+        v.write(ci, 200 + ci);
+    }
+    v.commit().expect("commit");
+    let s = v.hint(0).seg;
+    assert!((0..5).all(|ci| v.hint(ci).seg == s), "one segment");
+    for ci in 2..5 {
+        v.discard(ci);
+    }
+    // Enough FULLs that the one with all five chunks is no root under any
+    // retention rule (GC keeps every FULL from the lowest chain_floor a
+    // retained FULL records).
+    for _ in 0..3 {
+        v.commit().expect("commit");
+    }
+
+    // Compaction of S (live fraction 0.4) into T1; the moves are held back.
+    v.passes(1).expect("pass");
+    assert!(!v.moved.is_empty(), "S was compacted");
+    let t1: SegId = v.moved[0].new.seg;
+    assert!(v.moved.iter().all(|m| m.old.seg == s && m.new.seg == t1));
+    assert!(v.gc.unnamed_outputs().contains(&t1));
+
+    // A second copy of chunk 1's content in T2, named by a FULL; the index
+    // now names T2 for it and T1 for chunk 0's.
+    v.write(10, 201);
+    v.commit_lagging().expect("commit");
+    let t2 = v.hint(10).seg;
+    assert!(t2 > t1, "T2 {t2:?} is above T1 {t1:?}");
+    assert_eq!(
+        v.index.get(&v.id_of(201)).expect("get").map(|c| c.hint.seg),
+        Some(t2)
+    );
+    assert_eq!(
+        v.index.get(&v.id_of(200)).expect("get").map(|c| c.hint.seg),
+        Some(t1)
+    );
+    // The FULLs that named S leave the retained window; the moves still wait.
+    for _ in 0..3 {
+        v.commit_lagging().expect("commit");
+    }
+    assert_eq!(v.hint(0).seg, s, "the map still hints into S");
+
+    v.passes(4).expect("passes");
+    assert!(
+        v.gc.unnamed_outputs().contains(&t1),
+        "T1 is still an unnamed output"
+    );
+    assert!(
+        v.segments().contains(&s),
+        "S is deleted only once T1 is named (condemned: {:?})",
+        v.gc.condemned()
+    );
+
+    // The wiring catches up: T1 is named, the hints move, S goes.
+    v.commit().expect("commit");
+    assert_eq!(v.hint(0).seg, t1);
+    v.commit().expect("commit");
+    v.commit().expect("commit");
+    v.passes(4).expect("passes");
+    assert!(!v.gc.unnamed_outputs().contains(&t1), "T1 is named");
+    assert!(!v.segments().contains(&s), "S is deleted once T1 is named");
+}
+
+/// M17.B stack review B-1: leaf 0 goes `X -> Y -> X`, so the tip holds an
+/// interior root of the same hash as an older retained root, stored again
+/// with other child locations. The mark must walk the older root's own
+/// stored nodes; with the tip's resident copy standing in, the pack that
+/// holds the older root's leaf is condemned and deleted.
+#[test]
+fn a_reverted_subtree_keeps_the_older_roots_pack() {
+    let mut v = Vol::sized(4, 1024);
+    v.write(0, 1);
+    v.commit().expect("C1");
+    v.write(256, 2);
+    v.commit().expect("C2");
+    v.write(1, 3);
+    v.commit().expect("C3");
+    v.discard(1);
+    v.commit().expect("C4");
+    assert_eq!(v.full(2).map_root.hash, v.full(4).map_root.hash);
+    v.passes(4).expect("passes");
+    let packs = v.packs();
+    // GC's retained set under C4: C2, C3, C4.
+    for seq in 2..=4 {
+        let nodes = v
+            .nodes_from_disk(seq)
+            .unwrap_or_else(|e| panic!("commit {seq}'s map does not walk from disk: {e}"));
+        for n in nodes {
+            assert!(
+                packs.contains(&n.loc.pack),
+                "commit {seq} needs pack {:?}, which GC deleted",
+                n.loc.pack
+            );
+        }
+    }
+}
+
+/// A segment, three of its five chunks discarded and the FULL that held them
+/// aged out: the next pass compacts it. Returns the source segment.
+fn compacted(v: &mut Vol) -> SegId {
+    for ci in 0..5 {
+        v.write(ci, 200 + ci);
+    }
+    v.commit().expect("commit");
+    let s = v.hint(0).seg;
+    for ci in 2..5 {
+        v.discard(ci);
+    }
+    v.commit().expect("commit");
+    for _ in 0..3 {
+        v.commit().expect("commit");
+    }
+    s
+}
+
+/// M17.B stack review S-1 (and re-review S-2, M-1): the source's delete waits
+/// for a FULL below the tip to name the output; the collector asks for that
+/// cut exactly once, the source goes after it, and an idle collector then
+/// runs no pass and writes no evidence.
+#[test]
+fn a_source_waits_for_one_requested_cut_then_goes_and_gc_rests() {
+    use lunix_iface::gc::Collector;
+    let mut v = Vol::new(8);
+    let s = compacted(&mut v);
+    v.passes(1).expect("compaction");
+    assert!(!v.moved.is_empty(), "compacted");
+    v.commit().expect("the cut that names the output");
+    let asked = v.cut_requests;
+    v.passes(4).expect("passes");
+    assert!(
+        v.segments().contains(&s),
+        "the source waits for a FULL below the tip"
+    );
+    assert_eq!(
+        v.cut_requests,
+        asked + 1,
+        "one cut asked for, not one per pass"
+    );
+    v.commit().expect("the requested cut");
+    v.passes(2).expect("passes");
+    assert!(!v.segments().contains(&s), "the source goes after the cut");
+    // At rest: no pass, no evidence, no cut request.
+    let (passes, evidence, asked) = (v.gc.stats().passes, v.evidence(), v.cut_requests);
+    v.passes(10).expect("idle passes");
+    assert_eq!(
+        v.gc.stats().passes,
+        passes,
+        "an idle collector runs no pass"
+    );
+    assert_eq!(v.evidence(), evidence, "and writes no evidence");
+    assert_eq!(v.cut_requests, asked);
+}
+
+/// The local bound of `gc/` (re-review S-2): with a pass that deletes
+/// something after every commit, the newest 1 024 objects stay, numbered on
+/// from the newest.
+#[test]
+fn evidence_keeps_the_newest_1024_objects() {
+    let mut v = Vol::new(1);
+    for i in 0..1040u64 {
+        v.write(0, 1000 + i);
+        v.commit().expect("commit");
+        v.passes(1).expect("pass");
+    }
+    let passes = v.evidence();
+    let last = *passes.last().expect("evidence");
+    assert!(last > 1024, "{last} passes wrote evidence");
+    assert_eq!(passes.len(), 1024, "the newest 1024 stay");
+    assert_eq!(passes, (last - 1023..=last).collect::<Vec<_>>());
+}
+
+/// Re-review S-2 (M-2 of the stack review): a step that seals a compaction
+/// output and then fails (here: the evidence write) keeps its moves for the
+/// engine, which takes them with `Collector::take_moved`.
+#[test]
+fn a_failed_step_hands_its_moves_over() {
+    use lunix_iface::gc::Collector;
+    let mut v = Vol::new(8);
+    compacted(&mut v);
+    v.clock.advance(common::GRACE * 2);
+    v.store
+        .faults()
+        .arm("evidence.put.before", 1, lunix_testkit::Fault::Io);
+    let mut failed = false;
+    for _ in 0..1000 {
+        match v.step() {
+            Ok(p) if p.done => break,
+            Ok(_) => v.clock.advance(common::GRACE),
+            Err(_) => {
+                failed = true;
+                break;
+            }
+        }
+    }
+    assert!(failed, "the evidence write failed");
+    assert!(v.moved.is_empty(), "the failed step returned no moves");
+    let moved = v.gc.take_moved();
+    assert!(
+        !moved.is_empty(),
+        "the moves are handed over after the failure"
+    );
+    assert!(v.gc.unnamed_outputs().contains(&moved[0].new.seg));
+    assert!(v.gc.take_moved().is_empty(), "once");
+    // The abandoned pass is retried one interval later, without a new tip.
+    let (tip, passes) = (v.tip.common.commit_seq, v.gc.stats().passes);
+    v.passes(1).expect("the retried pass");
+    assert_eq!(v.tip.common.commit_seq, tip);
+    assert!(
+        v.gc.stats().passes > passes,
+        "an abandoned pass is retried without a new tip"
+    );
+}
+
+/// The prune is bounded (final review M-3): with a backlog of 1 064 objects,
+/// one pass that writes evidence deletes the 16 oldest, not all 41 beyond the
+/// bound.
+#[test]
+fn the_evidence_prune_takes_at_most_16_per_pass() {
+    use lunix_iface::store::GcStateStore;
+    let mut v = Vol::new(1);
+    for pass in 1..=1064u64 {
+        v.store.put_evidence(pass, b"{}\n").expect("put");
+    }
+    // Passes until one writes an evidence object (a pass that changed
+    // nothing writes none).
+    let mut seed = 7;
+    while v.evidence().last() == Some(&1064) {
+        assert!(seed < 40, "no pass wrote evidence");
+        v.write(0, seed);
+        v.commit().expect("commit");
+        v.passes(1).expect("a pass");
+        seed += 1;
+    }
+    let passes = v.evidence();
+    let last = *passes.last().expect("evidence");
+    assert_eq!(last, 1065, "numbered on from the newest");
+    assert_eq!(passes.len(), 1065 - 16, "16 pruned");
+    assert_eq!(passes.first(), Some(&17), "the oldest first");
+}
+
+/// `worth_compacting` at its edges (re-review S-2).
+#[test]
+fn worth_compacting_at_the_edges() {
+    use lunix_gc::compact::{
+        worth_compacting, MIN_GAIN, OUTPUT_COST_PER_EXTENT, OUTPUT_COST_PER_SEGMENT,
+    };
+    assert!(!worth_compacting(0, 0, 0, 0.5));
+    assert!(!worth_compacting(4096, 0, 0, 0.5), "nothing live");
+    assert!(
+        !worth_compacting(u64::MAX, u64::MAX, u64::MAX, 0.5),
+        "saturates, all live"
+    );
+    assert!(worth_compacting(u64::MAX, 1, 1, 0.5));
+    let (live, ext) = (100u64, 2u64);
+    let out = live + ext * OUTPUT_COST_PER_EXTENT + OUTPUT_COST_PER_SEGMENT;
+    assert!(
+        worth_compacting(out + MIN_GAIN, live, ext, 0.5),
+        "exactly the gain"
+    );
+    assert!(
+        !worth_compacting(out + MIN_GAIN - 1, live, ext, 0.5),
+        "one byte short"
+    );
+    // The fraction still rules: half live is not below 0.5.
+    assert!(!worth_compacting(1 << 20, 1 << 19, 1, 0.5));
+    assert!(worth_compacting(1 << 20, (1 << 19) - 1, 1, 0.5));
+}

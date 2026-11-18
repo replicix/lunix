@@ -363,6 +363,11 @@ pub trait GcStateStore: Send + Sync {
     /// The pass numbers that have an evidence object, ascending (the next pass
     /// is one above the last).
     fn evidence_passes(&self) -> Result<Vec<u64>>;
+
+    /// Deletes `gc/<pass:016x>` durably (unlink, directory sync); `false`
+    /// when there was no such object. The collector prunes the oldest objects
+    /// beyond its local bound (gc.md).
+    fn delete_evidence(&self, pass: u64) -> Result<bool>;
 }
 
 /// What the open-time orphan sweep (N2) keeps.
@@ -412,7 +417,13 @@ pub enum FloorReset {
     /// example a DR steal from a lagging mirror, phase 5).
     OperatorReset,
     /// `fsck --repair --repair-pins`: replaces a rejected `state/pins`.
-    RepairPins,
+    /// `max_keyring_seq` is the sequence of the keyring fsck has just
+    /// unlocked (0 for a plain volume): keyring rollback protection restarts
+    /// at today's value, not at zero (M14 re-review P-4).
+    RepairPins {
+        /// Written as the new file's `max_keyring_seq`.
+        max_keyring_seq: u64,
+    },
 }
 
 impl FloorReset {
@@ -421,7 +432,7 @@ impl FloorReset {
         match self {
             Self::TruncateTip => "truncate_tip",
             Self::OperatorReset => "operator_reset",
-            Self::RepairPins => "repair_pins",
+            Self::RepairPins { .. } => "repair_pins",
         }
     }
 }
@@ -501,9 +512,9 @@ pub trait VolumeDir: Send + Sync {
     /// record a floor that makes the volume unmountable. For
     /// [`FloorReset::TruncateTip`] the new height must also be **below** the
     /// recorded one. For [`FloorReset::RepairPins`] `state/pins` must really be
-    /// rejected; it is then replaced by a fresh file (zero `max_keyring_seq`
-    /// and `max_epoch`, no pin, the new floor), and those three values are
-    /// given up.
+    /// rejected; it is then replaced by a fresh file (`max_keyring_seq` as
+    /// the reason carries it, zero `max_epoch`, no pin, the new floor), and
+    /// the recorded `max_epoch` and pin are given up.
     ///
     /// Every reset appends one line (time, reason, old and new floor) to
     /// `state/floor-resets.log` and makes it durable **before** `state/pins`

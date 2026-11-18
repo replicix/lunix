@@ -26,6 +26,8 @@ pub(crate) struct Ext {
     pub(crate) ulen: u32,
     pub(crate) codec: Codec,
     pub(crate) id: ChunkId,
+    /// A retained root resolved an entry to this extent (set by `resolve`).
+    pub(crate) live: bool,
 }
 
 /// A sealed container as fsck found it.
@@ -234,6 +236,7 @@ fn verify(
             ulen: e.ulen,
             codec: e.codec,
             id: e.chunk_id,
+            live: false,
         })
         .collect();
     c.exts.sort_unstable_by_key(|e| e.off);

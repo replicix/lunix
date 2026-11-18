@@ -13,5 +13,6 @@ Options:
       --passphrase-fd <FD>         Read the passphrase from this file descriptor (implies --passphrase). The descriptor must be a file or a pipe; one trailing newline is removed
       --key-file <FILE>            The new slot's key file (a key-file slot instead of a passphrase slot)
       --unlock-key-file <FILE>     An existing key file that unlocks the volume
+      --unlock-passphrase          Ask on the terminal for the existing passphrase that unlocks the volume (no echo)
       --unlock-passphrase-fd <FD>  Read the existing passphrase that unlocks the volume from this descriptor
   -h, --help                       Print help

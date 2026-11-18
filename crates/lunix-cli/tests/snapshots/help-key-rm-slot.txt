@@ -11,5 +11,6 @@ Options:
       --dir <DIR>                  The directory the volume was created in
       --timeout <T>                How long to wait for the daemon's reply (500ms, 60s, 5m, 1h); attach and gc can be slow, so the default is generous [default: 10m]
       --unlock-key-file <FILE>     An existing key file that unlocks the volume
+      --unlock-passphrase          Ask on the terminal for the existing passphrase that unlocks the volume (no echo)
       --unlock-passphrase-fd <FD>  Read the existing passphrase that unlocks the volume from this descriptor
   -h, --help                       Print help

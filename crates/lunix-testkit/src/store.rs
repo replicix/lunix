@@ -1094,6 +1094,11 @@ impl GcStateStore for MemStore {
     fn evidence_passes(&self) -> Result<Vec<u64>> {
         Ok(self.st()?.d.evidence.keys().copied().collect())
     }
+
+    fn delete_evidence(&self, pass: u64) -> Result<bool> {
+        let mut st = lock(&self.0.state);
+        Ok(st.d.evidence.remove(&pass).is_some())
+    }
 }
 
 // ----------------------------------------------------------- volume dir
@@ -1196,7 +1201,7 @@ impl VolumeDir for MemStore {
                 why: "the commit at the new floor's height does not hash to the floor's tip_hash",
             });
         }
-        if why == FloorReset::RepairPins {
+        if matches!(why, FloorReset::RepairPins { .. }) {
             // The memory store never has a rejected pins file.
             return Err(Error::Refused {
                 why: "state/pins is not rejected; nothing to repair",

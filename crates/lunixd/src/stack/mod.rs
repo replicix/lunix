@@ -19,13 +19,17 @@
 //!    opener and the M9 destage adapter, then `Engine::open`, which verifies
 //!    the chain, applies R4, sweeps orphans, catches the index up, recovers
 //!    the journal and raises the floor.
-//! 5. Only then record the trust-on-first-use pin and the keyring sequence in
+//! 5. Register GC's urgent pass as the space ladder's compact step
+//!    ([`CompactStep`]).
+//! 6. Only then record the trust-on-first-use pin and the keyring sequence in
 //!    `state/pins` (R4 precedes every write).
 
 mod destage;
 mod floor;
+mod ladder;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use lunix_crypto::keyring::{self, Argon2Cost, KeyFile, NewSlot, Unlock};
@@ -46,6 +50,7 @@ use lunix_format::{CommitSeq, CryptoMode, DekGen, FamilyId, IdLen, Profile, Volu
 use lunix_iface::clock::{Clock, SystemClock};
 use lunix_iface::crypto::{CommitCodec, ExtentCodec, MetaCodec};
 use lunix_iface::map::{BlockMap, NodeSource};
+use lunix_iface::space::{Ladder, LadderStepKind};
 use lunix_iface::store::{CommitStore, PackRead, VolumeDir};
 use lunix_iface::Error;
 use lunix_index::LsmIndex;
@@ -57,6 +62,7 @@ use lunix_store::{read_volume_file, FsOps, LocalVolume, StoreOptions};
 
 pub use destage::{map_error, map_outcome, retry_of, PipelineDestager, PressureThresholds};
 pub use floor::DirFloor;
+pub use ladder::{Borrow, Borrows, CompactStep};
 
 use crate::fsio;
 
@@ -483,6 +489,10 @@ pub struct OpenParams {
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
     pub journal_tweak: Option<JournalTweak>,
+    /// The collector's own settings (`None`: [`lunix_gc::GcConfig`]'s
+    /// defaults). The GC settings of `volume.json` reach it through the
+    /// engine's `gc_params`; tests shorten the pass interval here.
+    pub gc: Option<lunix_gc::GcConfig>,
 }
 
 impl OpenParams {
@@ -500,6 +510,7 @@ impl OpenParams {
             lock_memory: false,
             store_fs: None,
             journal_tweak: None,
+            gc: None,
         }
     }
 }
@@ -529,6 +540,13 @@ pub struct VolumeStack {
     /// The rollback floor found before the engine opened (`None`: first
     /// attach on this host, which cannot detect an earlier rollback).
     pub floor_before: Option<RollbackFloor>,
+    /// Runs of the space ladder's compact step that ended without an error
+    /// (with or without bytes freed), for tests and diagnostics; a failed
+    /// run is in `LunixSpace::step_errors`.
+    pub compact_runs: Arc<AtomicU64>,
+    /// Calls that use the engine besides its owner (a `Gc` call, the compact
+    /// step); a detach closes it and waits for them.
+    pub borrows: Arc<Borrows>,
 }
 
 impl std::fmt::Debug for VolumeStack {
@@ -766,6 +784,26 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.map_fanout = u32::from(desc.map_fanout);
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
+    // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
+    // idle ticks, with the settings of volume.json.
+    let budget = std::time::Duration::from_millis(json.gc_step_budget_ms);
+    cfg.gc_budget = Some(lunix_iface::gc::GcBudget {
+        max_duration: budget,
+        max_bytes: json
+            .gc_rate
+            .saturating_mul(json.gc_step_budget_ms)
+            .div_ceil(1000)
+            .max(1 << 20),
+    });
+    cfg.gc_params = Some(lunix_iface::gc::GcParams {
+        retain_last: json.retain_last,
+        grace: std::time::Duration::from_millis(json.gc_grace_ms),
+        read_timeout: std::time::Duration::from_millis(json.read_timeout_ms),
+        rate_bytes_per_s: json.gc_rate,
+        live_threshold: json.gc_live_threshold,
+        chunk_size: cs,
+        id_len: desc.id_len,
+    });
     if let Some(b) = p.max_io_buf_bytes {
         cfg.max_io_buf_bytes = b;
     }
@@ -795,10 +833,28 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
             cfg: map_cfg,
         }),
         destager: Arc::new(destager),
-        collector: None,
+        // Built once and kept as long as the engine: unnamed compaction
+        // outputs and undelivered moves are memory only (gc.md "What the
+        // wiring must do"). The rollback floor comes from the volume
+        // directory.
+        collector: Some(Box::new(lunix_gc::Gc::new(
+            Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
+            p.gc.unwrap_or_default(),
+        ))),
         hooks: Arc::new(NoHooks),
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);
+    // The ladder's compact step is GC's urgent pass (plan M12 step 12).
+    let compact_runs = Arc::new(AtomicU64::new(0));
+    let borrows = Arc::new(Borrows::default());
+    space.register(
+        LadderStepKind::Compact,
+        Box::new(CompactStep {
+            engine: Arc::downgrade(&engine),
+            runs: Arc::clone(&compact_runs),
+            borrows: Arc::clone(&borrows),
+        }),
+    );
     record_pins(&store, &desc, ok.record_pin, ok.keyring_seq)?;
     Ok(VolumeStack {
         engine,
@@ -811,5 +867,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         json,
         voldir,
         floor_before,
+        compact_runs,
+        borrows,
     })
 }

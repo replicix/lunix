@@ -16,7 +16,7 @@ use lunix_iface::crypto::{CommitCodec, ExtentCodec};
 use lunix_iface::gc::{Collector, GcState};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::map::ChunkNo;
-use lunix_iface::store::{CommitStore, SegmentStore, VolumeDir};
+use lunix_iface::store::{CommitStore, GcStateStore, SegmentStore, VolumeDir};
 use lunix_iface::{Error, Result};
 
 use super::sim::{data_of, high_water, Sim, SimCfg, GRACE};
@@ -136,6 +136,60 @@ fn truncate_tip_finds_the_predecessors_chain_floor_commit() {
             &[0x11; 32],
         )
         .unwrap();
+}
+
+/// N12 (b): GC keeps every FULL from the lowest `chain_floor` a retained
+/// FULL records as a root. After `--truncate-tip` the predecessor mounts
+/// (its chain verifies down to its own `chain_floor`) and every block of
+/// every root of its retained window reads back the model's content, also
+/// the older root whose data the dropped tip had overwritten.
+#[test]
+fn truncate_tip_then_mount_reads_every_root_of_the_predecessors_window() {
+    let mut s = sim();
+    for i in 0..12u64 {
+        s.write(i % 4, 100 + i);
+        s.write(4 + i % 3, 200 + i);
+        s.commit().unwrap();
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    // Passes without commits: everything dead is condemned and deleted.
+    for _ in 0..4 {
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    s.check_roots().unwrap();
+    let tip = s.tip.common.commit_seq;
+    let pred = match &s.retained[s.retained.len() - 2] {
+        lunix_format::commit::Commit::Full(f) => f.clone(),
+        _ => unreachable!(),
+    };
+    let older = pred.chain_floor;
+    assert_eq!(older.0, tip.0 - 2);
+    assert_ne!(
+        s.model[&older.0], s.model[&tip.0],
+        "the dropped tip overwrote data of the older root"
+    );
+    // The truncation as fsck does it, then a mount (crash image, sweep,
+    // catch-up): the predecessor is the tip.
+    s.store.set_aside(tip).unwrap();
+    s.raise_floor = false;
+    s.crash_reopen(7).unwrap();
+    assert_eq!(s.tip.common.commit_seq, pred.common.commit_seq);
+    s.commit_codec
+        .verify_chain(&s.store, pred.common.commit_seq, older, &[0x11; 32])
+        .unwrap();
+    let roots: Vec<u64> = s.roots().iter().map(|(q, _)| *q).collect();
+    assert!(roots.contains(&older.0), "roots {roots:?}");
+    s.check_roots_with(&*s.index).unwrap();
+    // GC runs at once on the truncated volume and keeps it whole.
+    for i in 0..4u64 {
+        s.write(i, 900 + i);
+        s.commit().unwrap();
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+        s.check_roots().unwrap();
+    }
 }
 
 /// M5: a crash between the list write and the index flags; after the reopen
@@ -371,6 +425,74 @@ fn a_floor_that_fails_after_the_recheck_still_keeps_the_commits() {
     let _ = CommitSeq(0);
 }
 
+/// Final review M-1: commits condemned while the floor is unreadable are
+/// deferred at every pass; those passes are repeated (the floor may come
+/// back) but write no evidence object, so the local bound keeps the objects
+/// that recorded real changes.
+#[test]
+fn passes_deferred_for_an_unreadable_floor_repeat_without_evidence() {
+    let mut s = sim();
+    let flaky = Arc::new(Flaky {
+        fail: AtomicBool::new(false),
+        store: s.store.clone(),
+    });
+    s.gc = Gc::new(flaky.clone(), s.cfg.gc);
+    for i in 0..8 {
+        s.write(i, i);
+        s.commit().unwrap();
+    }
+    s.clock.advance(Duration::from_secs(5));
+    // Until a commit is condemned.
+    for _ in 0..100_000 {
+        if s.gc
+            .condemned()
+            .iter()
+            .any(|o| matches!(o, ObjectRef::Commit(_)))
+        {
+            break;
+        }
+        s.unit().unwrap();
+        s.clock.advance(Duration::from_secs(1));
+    }
+    let condemned: Vec<ObjectRef> =
+        s.gc.condemned()
+            .into_iter()
+            .filter(|o| matches!(o, ObjectRef::Commit(_)))
+            .collect();
+    assert!(!condemned.is_empty(), "a commit is condemned");
+    flaky.fail.store(true, Ordering::SeqCst);
+    // The pass in progress ends; after it, only deferrals for the floor.
+    s.pass().unwrap();
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    let evidence = s.store.evidence_passes().unwrap().len();
+    let passes = s.gc.stats().passes;
+    for _ in 0..10 {
+        s.clock.advance(Duration::from_secs(2));
+        s.pass().unwrap();
+    }
+    assert!(
+        s.gc.stats().passes >= passes + 10,
+        "a floor deferral is retried at every interval ({} -> {})",
+        passes,
+        s.gc.stats().passes
+    );
+    assert_eq!(
+        s.store.evidence_passes().unwrap().len(),
+        evidence,
+        "no evidence object for passes that only deferred for the floor"
+    );
+    for o in &condemned {
+        if let ObjectRef::Commit(c) = o {
+            assert!(s.commit_exists(c.0), "commit {} kept", c.0);
+        }
+    }
+    // The floor back: the next pass deletes them and writes its evidence.
+    flaky.fail.store(false, Ordering::SeqCst);
+    s.quiesce().unwrap();
+    assert!(s.store.evidence_passes().unwrap().len() > evidence);
+}
+
 /// M4: an extent that does not open is skipped and reported; the pass, and
 /// every later one, still finishes and deletes what it can.
 #[test]
@@ -507,4 +629,89 @@ fn a_fault_at_every_point_is_survived() {
             check_quiescent(&mut s).unwrap_or_else(|e| panic!("{}: {e:?}", FAULT_POINTS[pi]));
         }
     }
+}
+
+/// B-1 of the M17.B review: a compaction source must outlive the FULL that
+/// first names its output. Only the tip names the output; `--truncate-tip`
+/// drops the tip and the mount sweep deletes the output (above the new
+/// chain's mark), so the source is the only copy the older roots have.
+#[test]
+fn a_compaction_source_outlives_the_tip_that_alone_names_its_output() {
+    let mut s = sim();
+    for ci in 0..4 {
+        s.write(ci, 300 + ci);
+    }
+    s.commit().unwrap();
+    let src = s
+        .map
+        .get(ChunkNo(0))
+        .unwrap()
+        .map(|e| lunix_iface::map::entry_hint(&e).seg)
+        .unwrap();
+    for ci in 1..4 {
+        s.write(ci, 400 + ci);
+    }
+    s.commit().unwrap();
+    // Age the FULL that holds all four chunks out of GC's retained set.
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    assert!(!s.moved.is_empty(), "the source was compacted");
+    assert!(s.moved.iter().all(|m| m.old.seg == src));
+    let out = s.moved[0].new.seg;
+    // The tip names the output and re-hints the map; no later commit.
+    s.commit().unwrap();
+    for _ in 0..4 {
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    assert!(
+        segs(&s).contains(&src),
+        "the source stays while only the tip names {out:?}"
+    );
+    // `--truncate-tip`, then the mount.
+    let tip = s.tip.common.commit_seq;
+    s.store.set_aside(tip).unwrap();
+    s.raise_floor = false;
+    s.crash_reopen(11).unwrap();
+    assert!(
+        !segs(&s).contains(&out),
+        "the sweep deleted the unnamed output"
+    );
+    s.check_roots_with(&*s.index).unwrap();
+    // One more FULL names the output below the tip: the source goes.
+    let mut s2 = sim();
+    for ci in 0..4 {
+        s2.write(ci, 300 + ci);
+    }
+    s2.commit().unwrap();
+    let src2 = s2
+        .map
+        .get(ChunkNo(0))
+        .unwrap()
+        .map(|e| lunix_iface::map::entry_hint(&e).seg)
+        .unwrap();
+    for ci in 1..4 {
+        s2.write(ci, 400 + ci);
+    }
+    s2.commit().unwrap();
+    for _ in 0..4 {
+        s2.commit().unwrap();
+    }
+    s2.clock.advance(GRACE * 2);
+    s2.pass().unwrap();
+    assert!(!s2.moved.is_empty());
+    for _ in 0..5 {
+        s2.commit().unwrap();
+        s2.clock.advance(GRACE * 2);
+        s2.pass().unwrap();
+    }
+    s2.quiesce().unwrap();
+    assert!(
+        !segs(&s2).contains(&src2),
+        "the source goes once a FULL below the tip names the output"
+    );
+    s2.check_roots().unwrap();
 }

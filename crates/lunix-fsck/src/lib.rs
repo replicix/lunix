@@ -19,7 +19,8 @@
 //!    a tip below the rollback floor is `rollback`, another commit at the
 //!    floor's height is `fork`, and a walk back to the floor that cannot be
 //!    completed is `fork_unverifiable` (ADR-31).
-//! 3. **Map walk** from every retained root (R2): every node is opened with
+//! 3. **Map walk** from every retained root and from the FULLs below
+//!    `chain_floor` that GC's retained set keeps (N24) (R2): every node is opened with
 //!    `kind = node`, must be codec 0, must carry the id its parent names and
 //!    must hash to it. Every entry must resolve to an existing extent through
 //!    its hint or, for a stale hint, through the index confirmed against the
@@ -46,16 +47,29 @@
 //!
 //! # Memory
 //!
-//! The walk streams the nodes, but the checks keep per-chunk state: the tip
-//! root's entries (64 bytes per **mapped** chunk), the footers of every
-//! container (about 48 bytes per extent), and sets of distinct chunk ids
-//! (resolution, index comparison). Measured on a volume with 320 000
-//! distinct and 400 000 mapped chunks: peak RSS 100 MiB, about **330 bytes per
-//! distinct chunk**. A full 1 TiB volume of 64 KiB chunks (16 M chunks) needs
-//! about 5 GiB, one of 16 KiB chunks about 20 GiB, plus the scratch copy of
-//! the index on disk and one container's extent region (16 MiB) in memory.
-//! A streaming rework (resolve per segment and drop, sorted vectors for the
-//! id sets) is a listed follow-up.
+//! The walk streams the nodes, but the checks keep per-chunk state: the
+//! retained roots' entries (64 bytes per **mapped** chunk, freed once they are
+//! resolved), the footers of every container (about 48 bytes per extent), and
+//! sorted vectors for the id sets: one record of 40 bytes per resolved extent
+//! for the distinct-chunk count (sorted and deduplicated, freed at once), and
+//! 32 bytes plus a bit per id of the segments in use for the index
+//! comparison (instead of hash sets). Measured on a volume with 320 000
+//! distinct and 400 000 mapped chunks: peak RSS 81 MiB, about **270 bytes per
+//! distinct chunk** (330 before the sorted vectors). A full 1 TiB volume of
+//! 64 KiB chunks (16 M chunks) needs about 4.5 GiB, one of 16 KiB chunks
+//! about 18 GiB, plus the scratch copy of the index on disk and one
+//! container's extent region (16 MiB) in memory. The entries of the tip
+//! (64 bytes per mapped chunk) are the largest remaining term.
+//!
+//! The GC hook (`gc.rs`, M17.B) adds, one after the other: `lunix-gc`'s mark
+//! (24 bytes per reference until a segment is finished, then per live
+//! extent), fsck's liveness recount (8 bytes per reference of one root, then
+//! per live extent) and the dry run's mark, plus a 32 MiB map cache and a
+//! second scratch copy of the index. Measured with it on the merged tree
+//! (`p1/m17b-r2`): 320 000 distinct and 400 000 mapped chunks, peak RSS
+//! 82 MiB, **269 bytes per distinct chunk** (unchanged); 1 048 576 mapped
+//! chunks of 64 distinct extents, peak RSS 112 MiB (84 MiB without the hook),
+//! about 30 bytes more per mapped chunk.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -189,13 +203,26 @@ fn run_checks(s: &session::Session, opts: &Options, sink: &mut Sink) -> Facts {
         facts: &facts,
         repair: false,
     };
-    for f in gc::check_gc(&ctx) {
+    let gc_check = gc::check_gc(&ctx);
+    for f in gc_check.findings {
         sink.push(f);
     }
+    facts.gc_dry_run = gc_check.dry_run;
     let bytes = resolve::category_bytes(s, &facts);
     if let Some(r) = &mut facts.ratios {
         r.bytes = bytes;
     }
+    // What a destructive repair must not run past (`--repair --gc`): every
+    // error code of this pass, the GC hook's own included.
+    let mut errors: Vec<&'static str> = sink
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .map(|f| f.code)
+        .collect();
+    errors.sort_unstable();
+    errors.dedup();
+    facts.error_codes = errors;
     facts
 }
 
@@ -266,6 +293,7 @@ pub fn check(dir: &Path, opts: &Options) -> Report {
         findings,
         counts,
         ratios: facts.ratios,
+        gc_dry_run: facts.gc_dry_run,
         stats: facts.stats,
         repairs,
         uncovered: {
