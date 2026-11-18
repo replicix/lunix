@@ -175,6 +175,10 @@ pub struct CreateArgs {
     /// Length of the chunk-id prefix kept in the block map: 16 or 32.
     #[arg(long, value_name = "BYTES", value_parser = parse_id_len, default_value = "16")]
     pub id_len: u8,
+
+    /// Cap the volume's local store at this percentage of its size (space.cache_max_percent; the cap follows a grow), 100 to 10000, or 0 for no cap. Default: the daemon's store_max_percent (200). `lunix space --cache-max` replaces it with an absolute cap
+    #[arg(long, value_name = "PERCENT")]
+    pub store_max_percent: Option<u32>,
 }
 
 /// `lunix volume list`

@@ -77,12 +77,19 @@ fn actions(s: &mut Sim, z: &mut u64, n: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn sweep(chunk_size: u32, id_len: IdLen, workloads: u64) -> BTreeMap<&'static str, u64> {
+fn sweep(
+    chunk_size: u32,
+    id_len: IdLen,
+    workloads: u64,
+    pipeline: bool,
+) -> BTreeMap<&'static str, u64> {
     let mut hits: BTreeMap<&'static str, u64> = BTreeMap::new();
     for (pi, &point) in CRASH_POINTS.iter().enumerate() {
         for w in 0..workloads {
             let mut z = (pi as u64) << 32 | w;
-            let mut s = Sim::new(SimCfg::new(chunk_size, id_len));
+            let mut cfg = SimCfg::new(chunk_size, id_len);
+            cfg.gc.pipeline = pipeline;
+            let mut s = Sim::new(cfg);
             s.hooks.arm(point, 1 + w % 3);
             let mut crashed = None;
             for _ in 0..40 {
@@ -92,6 +99,14 @@ fn sweep(chunk_size: u32, id_len: IdLen, workloads: u64) -> BTreeMap<&'static st
                 }
             }
             let Some(p) = crashed else {
+                // Not crashed (the point was not reached often enough): the
+                // longest history of the sweep, checked too (review m-12).
+                s.check_roots()
+                    .unwrap_or_else(|e| panic!("uncrashed workload {w} armed at {point}: {e}"));
+                s.hooks.arm("none", 1);
+                check_quiescent(&mut s).unwrap_or_else(|e| {
+                    panic!("convergence of the uncrashed workload {w} armed at {point}: {e}")
+                });
                 continue;
             };
             assert_eq!(p, point);
@@ -116,12 +131,18 @@ fn sweep(chunk_size: u32, id_len: IdLen, workloads: u64) -> BTreeMap<&'static st
 }
 
 fn check(chunk_size: u32, id_len: IdLen) {
+    check_with(chunk_size, id_len, false);
+}
+
+fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool) {
     let workloads = std::env::var("LUNIX_GC_CRASH_WORKLOADS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let hits = sweep(chunk_size, id_len, workloads);
-    eprintln!("gc crash sweep: chunk {chunk_size}, id_len {id_len:?}: {hits:?}");
+    let hits = sweep(chunk_size, id_len, workloads, pipeline);
+    eprintln!(
+        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}: {hits:?}"
+    );
     for p in CRASH_POINTS {
         let needed = if id_len == IdLen::Zero && p.starts_with("gc.compact.") {
             // Lean volumes never compact.
@@ -150,4 +171,21 @@ fn every_crash_point_64k() {
 #[test]
 fn every_crash_point_lean() {
     check(16 << 10, IdLen::Zero);
+}
+
+/// The daemon's pipelined schedule (milestone gcrate): the scheduled passes
+/// delete with their condemn mark as the recheck.
+#[test]
+fn every_crash_point_pipelined_16k() {
+    check_with(16 << 10, IdLen::Sixteen, true);
+}
+
+#[test]
+fn every_crash_point_pipelined_64k() {
+    check_with(64 << 10, IdLen::ThirtyTwo, true);
+}
+
+#[test]
+fn every_crash_point_pipelined_lean() {
+    check_with(16 << 10, IdLen::Zero, true);
 }

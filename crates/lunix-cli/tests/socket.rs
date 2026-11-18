@@ -39,6 +39,7 @@ fn base_create() -> VolumeCreate {
         map_fanout: None,
         key_file: None,
         passphrase: None,
+        store_max_percent: None,
     }
 }
 
@@ -237,6 +238,7 @@ fn create_options_and_passphrase_from_stdin() {
             map_fanout: None,
             key_file: None,
             passphrase: Some(Secret::from_text("correct horse")),
+            store_max_percent: None,
         })]
     );
     assert!(!o.stdout.contains("correct horse") && !o.stderr.contains("correct horse"));
@@ -544,6 +546,7 @@ fn space_body() -> SpaceBody {
             on_full: OnFull::Error,
             full_timeout_ms: Some(60_000),
             cache_max: Some(100 << 30),
+            cache_max_percent: None,
             headroom: 256 << 20,
         },
         figures: SpaceFigures::default(),

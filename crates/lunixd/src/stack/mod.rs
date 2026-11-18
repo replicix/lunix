@@ -43,14 +43,17 @@ use lunix_engine::{
 };
 use lunix_format::commit::{Commit, Full, MapRoot};
 use lunix_format::keyring::RootKind;
-use lunix_format::local::{LocalPins, LocalPinsFile, Pin, RollbackFloor, VolumeJson};
+use lunix_format::local::{
+    LocalPins, LocalPinsFile, Pin, RollbackFloor, SpaceSettings, VolumeJson,
+};
 use lunix_format::paths::local as lpath;
 use lunix_format::volume::{CodecPolicy, VolumeDescriptor, BLOCK_SIZE};
 use lunix_format::{CommitSeq, CryptoMode, DekGen, FamilyId, IdLen, Profile, VolumeUuid};
+use lunix_iface::block::BlockEngine;
 use lunix_iface::clock::{Clock, SystemClock};
 use lunix_iface::crypto::{CommitCodec, ExtentCodec, MetaCodec};
 use lunix_iface::map::{BlockMap, NodeSource};
-use lunix_iface::space::{Ladder, LadderStepKind};
+use lunix_iface::space::{Ladder, LadderStepKind, SpaceGate};
 use lunix_iface::store::{CommitStore, PackRead, VolumeDir};
 use lunix_iface::Error;
 use lunix_index::LsmIndex;
@@ -489,10 +492,13 @@ pub struct OpenParams {
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
     pub journal_tweak: Option<JournalTweak>,
-    /// The collector's own settings (`None`: [`lunix_gc::GcConfig`]'s
-    /// defaults). The GC settings of `volume.json` reach it through the
+    /// The collector's own settings (`None`: the daemon's,
+    /// [`lunix_gc::GcConfig::daemon`]). The GC settings of `volume.json` reach it through the
     /// engine's `gc_params`; tests shorten the pass interval here.
     pub gc: Option<lunix_gc::GcConfig>,
+    /// The wait at the limit when `space.full_timeout_ms` is null (the
+    /// daemon's `full_timeout_ms`, ADR-32).
+    pub full_timeout: std::time::Duration,
 }
 
 impl OpenParams {
@@ -511,6 +517,7 @@ impl OpenParams {
             store_fs: None,
             journal_tweak: None,
             gc: None,
+            full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
         }
     }
 }
@@ -711,6 +718,27 @@ fn record_pins(
     Ok(())
 }
 
+/// The cap a percentage `percent` of a volume of `size` bytes gives (ADR-32
+/// M2, FREEZE F2): `percent` of the size, never below the size plus twice
+/// `dirty_bytes` (until a cut the journal holds up to `commit.dirty_bytes`,
+/// counted twice during the cut, so a small volume's first fill must not
+/// reach the cap).
+pub(crate) fn cache_cap(size: u64, percent: u32, dirty_bytes: u64) -> u64 {
+    let cap = u64::try_from(u128::from(size) * u128::from(percent) / 100).unwrap_or(u64::MAX);
+    cap.max(size.saturating_add(dirty_bytes.saturating_mul(2)))
+}
+
+/// The space settings the gate gets for a volume of `size` bytes: a
+/// percentage cap (`space.cache_max_percent`) resolved to `cache_max` bytes
+/// (FREEZE F2). The gate knows no size and refuses an unresolved one.
+pub fn effective_space(json: &VolumeJson, size: u64) -> SpaceSettings {
+    let mut s = json.space.clone();
+    if let Some(p) = s.cache_max_percent.take() {
+        s.cache_max = Some(cache_cap(size, p, json.commit.dirty_bytes));
+    }
+    s
+}
+
 /// Opens a volume: the attach check, the store, every component, the
 /// engine (recovery), then the pins. See the module docs for the order.
 ///
@@ -763,8 +791,17 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         tracing::warn!(volume = %uuid, fell_back = report.fell_back, discarded = report.discarded_runs.len(), "index manifest fell back; catch-up rebuilds it");
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    // A percentage cap needs the volume size, which the engine knows only
+    // once it opened: no cap until then, the resolved one right after. Safe
+    // because nothing can reserve in between: recovery only charges, and no
+    // queue handler exists before `open_volume` returns (a change that
+    // attached queues earlier would have to resolve the cap first).
+    let mut early = json.space.clone();
+    early.cache_max_percent = None;
+    let mut space_cfg = SpaceConfig::new(early);
+    space_cfg.full_timeout = p.full_timeout;
     let space = LunixSpace::new(
-        SpaceConfig::new(json.space.clone()),
+        space_cfg,
         Arc::new(StatvfsProbe::new(&voldir)),
         Arc::clone(&clock),
     )?;
@@ -784,16 +821,18 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.map_fanout = u32::from(desc.map_fanout);
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
+    cfg.full_timeout = space.full_timeout();
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
-    // idle ticks, with the settings of volume.json.
+    // idle ticks, with the settings of volume.json. A step may compact up to
+    // one second of `gc_rate`: its time budget bounds it, and the collector's
+    // own rate cap keeps the mean at `gc_rate`. A cap of one budget's worth
+    // (`gc_rate` x 50 ms) held compaction to a few MiB per step, far below
+    // `gc_rate` while the cuts leave the coordinator few steps per second
+    // (milestone gcrate, the M15 root cell).
     let budget = std::time::Duration::from_millis(json.gc_step_budget_ms);
     cfg.gc_budget = Some(lunix_iface::gc::GcBudget {
         max_duration: budget,
-        max_bytes: json
-            .gc_rate
-            .saturating_mul(json.gc_step_budget_ms)
-            .div_ceil(1000)
-            .max(1 << 20),
+        max_bytes: json.gc_rate.max(1 << 20),
     });
     cfg.gc_params = Some(lunix_iface::gc::GcParams {
         retain_last: json.retain_last,
@@ -839,11 +878,14 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         // directory.
         collector: Some(Box::new(lunix_gc::Gc::new(
             Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
-            p.gc.unwrap_or_default(),
+            p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon),
         ))),
         hooks: Arc::new(NoHooks),
     };
     let engine = Arc::new(Engine::open(cfg, deps)?);
+    if json.space.cache_max_percent.is_some() {
+        space.reconfigure(&effective_space(&json, engine.size_bytes()))?;
+    }
     // The ladder's compact step is GC's urgent pass (plan M12 step 12).
     let compact_runs = Arc::new(AtomicU64::new(0));
     let borrows = Arc::new(Borrows::default());

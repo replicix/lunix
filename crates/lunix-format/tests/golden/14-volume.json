@@ -7,6 +7,7 @@
     "on_full": "wait",
     "full_timeout_ms": null,
     "cache_max": null,
+    "cache_max_percent": null,
     "headroom": 268435456
   },
   "commit": {

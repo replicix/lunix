@@ -312,11 +312,19 @@ fn gc_tune(c: &mut EngineConfig) {
     }
 }
 
-/// A pass every second.
+/// A pass every second, on the daemon's pipelined schedule
+/// (`GcConfig::daemon`, gcrate review M-2); `LUNIX_GC_PIPELINE=0` runs the
+/// whole sequence for every pass instead.
 fn fast_gc(o: &mut lunixd::stack::OpenParams) {
+    let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
+        GcConfig::default()
+    } else {
+        GcConfig::daemon()
+    };
     o.gc = Some(GcConfig {
         pass_interval: Duration::from_secs(1),
-        ..GcConfig::default()
+        busy_interval: Duration::from_secs(1),
+        ..base
     });
 }
 
@@ -449,7 +457,10 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
 /// error`), which starts the space ladder on the gate's thread, and waits for
 /// its compact step (the urgent pass) to end. Restores the settings.
 fn run_ladder(stack: &lunixd::stack::VolumeStack) {
-    let saved = stack.json.space.clone();
+    let saved = lunixd::stack::effective_space(
+        &stack.json,
+        lunix_iface::block::BlockEngine::size_bytes(&*stack.engine),
+    );
     let mut tight = saved.clone();
     tight.on_full = OnFull::Error;
     tight.cache_max = Some(stack.space.snapshot().used().max(1));

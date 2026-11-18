@@ -580,8 +580,13 @@ pub struct SpaceSettings {
     pub on_full: OnFull,
     /// Wait timeout (at least 1) or none.
     pub full_timeout_ms: Option<u64>,
-    /// Cache cap in bytes, or none.
+    /// Cache cap in bytes (an absolute cap), or none. At most one of
+    /// `cache_max` and `cache_max_percent` is set.
     pub cache_max: Option<u64>,
+    /// Cache cap in percent of the volume size (100 ..= 10 000), recomputed
+    /// from the size at open and on every grow (FREEZE F2, ADR-32 N2), or
+    /// none. The key is required in the file (null for none).
+    pub cache_max_percent: Option<u32>,
     /// Headroom in bytes.
     pub headroom: u64,
 }
@@ -593,6 +598,7 @@ impl Default for SpaceSettings {
             on_full: OnFull::Wait,
             full_timeout_ms: None,
             cache_max: None,
+            cache_max_percent: None,
             headroom: 268_435_456,
         }
     }
@@ -728,6 +734,11 @@ impl VolumeJson {
         if self.space.full_timeout_ms == Some(0) {
             return Err(bad("space.full_timeout_ms"));
         }
+        if let Some(p) = self.space.cache_max_percent {
+            if !(100..=10_000).contains(&p) || self.space.cache_max.is_some() {
+                return Err(bad("space.cache_max_percent"));
+            }
+        }
         if self.commit.interval_ms < 1000 {
             return Err(bad("commit.interval_ms"));
         }
@@ -775,6 +786,17 @@ impl VolumeJson {
         let raw: serde_json::Value = serde_json::from_str(s).map_err(json_err)?;
         if raw.get("version").is_none() {
             return Err(FormatError::invalid(VJ, "missing version"));
+        }
+        // How the cap was set is required too (FREEZE F2): no default, no
+        // reading of a file written before the key existed.
+        let has_cap_keys = raw
+            .get("space")
+            .is_some_and(|s| s.get("cache_max").is_some() && s.get("cache_max_percent").is_some());
+        if !has_cap_keys {
+            return Err(FormatError::invalid(
+                VJ,
+                "missing space.cache_max or space.cache_max_percent (both keys are required; null for none)",
+            ));
         }
         let v: Self = serde_json::from_value(raw).map_err(json_err)?;
         v.validate()?;

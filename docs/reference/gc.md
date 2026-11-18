@@ -17,9 +17,17 @@ condemned objects hold): one rule, the step runs whenever the map is the
 tip's. Moves of a call that failed, and a cut the collector asks for
 (`GcProgress::cut_wanted`), reach the next cut whichever path called it.
 A step does small units of work until its budget (`gc_step_budget_ms`, default
-50 ms) is spent, so a background step never holds up a cut for longer than one
-unit past the budget. The urgent pass and a dry run are one call each and hold
-the coordinator for a whole mark (and the urgent pass's compaction).
+50 ms) is spent, so a step never runs for longer than one unit past the
+budget. While the pass in progress has work a step can do now (it is not idle,
+not waiting out its grace, and not compaction at its rate cap) the background
+thread ticks every 10 ms instead of every 100 ms, and after each cut the
+collector steps on for up to a third of that cut's time, at most 1 s
+(`gc_share`): under writes that keep the coordinator cutting it gets about a
+quarter of it, and the next cut waits that long. Under writes, pending
+compaction moves cut at most once a second while a pass is busy (on an idle
+volume at once). The urgent pass
+and a dry run are one call each and hold the coordinator for a whole mark
+(and the urgent pass's compaction).
 
 A pass runs when the
 previous one ended at least 30 s ago and something may have changed: a new
@@ -29,6 +37,33 @@ for a FULL) is not repeated until the tip or the pins change; the pins are
 then looked at once per interval, not at every tick. A pass abandoned on an
 error, or one that deferred for the store or the rollback floor, is retried
 one interval later (a deferral for the store or the floor writes no evidence).
+
+**The daemon's schedule is pipelined** (`GcConfig::daemon`, milestone gcrate; the
+order inside a pass is mark, condemn, delete, compact).
+A scheduled pass does not wait out the grace in the middle of the pass: its
+one mark is the recheck of every listed object whose grace ended before the
+mark began (the urgent pass's rule, with the full grace): after condemning
+what is newly dead it deletes those, then compacts. Objects whose grace still runs
+are left alone without an evidence line. A pass that changed something is
+followed by the next after 5 s (`busy_interval`) instead of 30 s, and a grace
+that ends starts a pass without waiting for a new tip or the 30 s. "Changed
+something" means reclaim work: a segment condemned, deleted or compacted, or
+64 MiB freed; the commit objects and map packs every cut leaves dead do not
+count, so a lightly written volume keeps the 30 s pace. Whatever the pace, a
+pass follows the last one at the earliest after three times that pass's mark
+time, so marking a large map takes at most about a quarter of the coordinator
+(deletes and compaction are not capped: they are the reclaim). After an abandoned pass the next waits 30 s.
+`condemned_pending` in `lunix gc --status` is normally non-zero under this
+schedule: it holds about one grace's worth of dead objects waiting for it,
+which is not a backlog (a backlog shows as a store that keeps growing, or as
+`condemned_pending` growing from pass to pass). A dead
+object therefore waits one grace plus at most two pass periods; in the M17
+sequence (every pass waits out its grace, then 30 s) it waits up to two graces
+plus 30 s plus two passes, and under sustained overwrite the store holds that
+many seconds of writes. A pass asked for (`lunix gc NAME`, `request_pass`)
+still runs the whole sequence: condemn, grace, recheck, delete. The
+collector's default (`GcConfig::default`, which the tests and the offline
+`fsck --repair --gc` use) is the whole sequence for every pass.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -64,7 +99,16 @@ calling thread runs the collector under the coordinator mutex):
   published after its last call, without waiting for the coordinator or the
   engine. A volume that is not attached is idle, with empty counters.
 - **The space ladder's compact step** is the urgent pass (below): the gate
-  runs it on its own thread when a reservation does not fit. A commit that
+  runs it on its ladder thread when a reservation does not fit, and asks
+  again each second while requests wait for space (ADR-32). That path has a
+  back-off of its own: not sooner than 2 s after the end of the last urgent
+  pass (either kind), doubling up to 60 s while ladder passes free nothing,
+  at most the floor grace after one that condemned something, back to 2 s
+  after one that freed bytes or when a write is admitted again; a successful
+  commit does not reset it. Within the pause the step frees nothing and
+  returns at once, and the ladder thread then waits 100 ms before its next
+  run. The gate's deadlines never wait for it: they run on its timer thread,
+  which also asks the ladder each second while the volume is latched full. A commit that
   fails for space at any step (a destage `NoSpace` from a full host file
   system, an index run that cannot be written) runs it too, from the
   coordinator, at least 2 s after the end of the last urgent pass (either
@@ -228,7 +272,8 @@ pass, and is left alone. Candidates are also at or below the high-water mark,
 not condemned, not an unnamed output, and not introduced by the tip FULL
 (younger than one commit interval). With `u = live / file size` they are
 ranked by LFS cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
-mark minus the segment id, best first; up to 1 GiB of live bytes per pass.
+mark minus the segment id, best first; up to 1 GiB of live bytes per pass
+(256 MiB under the daemon's schedule).
 
 Live extents are copied in chunk-number order (LBA locality). Each is read,
 opened with its full chunk id and re-sealed through the extent codec, which
@@ -241,8 +286,10 @@ idle volume. These cuts, and the one the collector asks for before a source
 can go, are ordinary FULLs: on an idle volume they consume the retained
 window, so the retained FULLs may soon all be GC cuts of the same data (M17.B
 stack review M-5). Compaction reads at most `gc_rate` bytes per second
-(default 64 MiB/s) plus one step's worth, and at most the step budget's bytes
-per step; a `gc_rate` of 0 compacts nothing.
+(default 64 MiB/s) plus one step's allowance, and at most that allowance per
+step: the daemon allows one second of `gc_rate` per step (so a pass may read up
+to 64 MiB ahead of the rate), and the step's time budget bounds it; a `gc_rate`
+of 0 compacts nothing.
 
 The source segments become dead once the index's current copies are in the
 output; the next pass condemns them.
@@ -267,8 +314,9 @@ scratch is bounded.
 | `gc_live_threshold` | 0.5 | compact segments whose live fraction is below this |
 | `gc_step_budget_ms` | 50 | time one step may spend |
 
-Not in `volume.json` (`GcConfig` in the code): 30 s between passes, 1 GiB of
-live bytes compacted per pass, a root walked in at most 64 leaf batches of at
+Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
+daemon's), 30 s between passes and 5 s after a pass that did reclaim work, 1 GiB of
+live bytes compacted per pass (256 MiB for the daemon), a root walked in at most 64 leaf batches of at
 least 16 leaves, 32 decoded footers cached.
 
 ## `state/gc/condemned`, body version 1
@@ -300,7 +348,11 @@ nothing, or only deferred for a FULL, the store or the rollback floor, writes
 none, and its number is used by the
 next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
 new one deletes the oldest beyond that, at most 16 per pass
-(`GcStateStore::delete_evidence`).
+(`GcStateStore::delete_evidence`). Under the daemon's pipelined schedule a
+busy volume writes one object every few seconds, so the newest 1 024 cover
+about one to two hours of a sustained overwrite (a day or more when the
+volume is quiet), and an object's `condemn` lines and the `delete` lines of
+the same objects are in different evidence objects (a grace apart).
 Evidence objects are not in the ledger; the bound keeps them under 1 024 x
 48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and

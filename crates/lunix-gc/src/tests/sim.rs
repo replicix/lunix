@@ -1150,6 +1150,12 @@ impl Sim {
             }
             self.clock.advance(GRACE * 2);
             self.pass()?;
+            if self.cfg.gc.pipeline {
+                // A pipelined pass deletes what the one before condemned:
+                // one more without a commit empties the list.
+                self.clock.advance(GRACE * 2);
+                self.pass()?;
+            }
             if round > 0 && self.moved.is_empty() && self.gc.condemned().is_empty() {
                 return Ok(());
             }

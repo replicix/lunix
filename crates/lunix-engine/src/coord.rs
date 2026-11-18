@@ -35,7 +35,7 @@ use std::time::Duration;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
-use lunix_iface::gc::{Collector, GcProgress, Moved};
+use lunix_iface::gc::{Collector, GcProgress, GcState, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
@@ -46,6 +46,22 @@ use crate::destage::{DestageCtx, Retry};
 use crate::engine::{CommitOutcome, Inner};
 use crate::recover::Recovered;
 use crate::stats::add;
+
+/// The shortest time between two cuts made for pending compaction moves
+/// alone (`wanted`).
+const MOVES_CUT_GAP: Duration = Duration::from_secs(1);
+
+/// After a cut, a busy collector steps for up to the cut's time divided by
+/// this (`gc_share`): a quarter of the coordinator.
+const GC_SHARE_DIVISOR: u32 = 3;
+
+/// The longest share after one cut (`gc_share`): a long cut does not hold the
+/// coordinator (the ladder, `grow`, the window turn, ring-parked writes) for
+/// a third of its time.
+const GC_SHARE_MAX: Duration = Duration::from_secs(1);
+
+/// Steps in a row without the clock moving that end a share (`gc_share`).
+const GC_SHARE_STALLS: u32 = 8;
 
 /// The coordinator's state, under the engine's coordinator mutex.
 pub(crate) struct Coord {
@@ -233,6 +249,7 @@ impl Inner {
                     "destage cannot complete this cut: no more commits in this process; writes fail, reads continue"
                 );
                 self.failed.store(true, Ordering::Release);
+                self.signal_queues();
                 CutFail::Other(f.error)
             }
         }
@@ -243,14 +260,20 @@ impl Inner {
             tracing::error!(step, error = %e, "commit failed after the map changed: no more commits in this process");
         }
         self.failed.store(true, Ordering::Release);
+        self.signal_queues();
     }
 
     /// The trigger check (plan M11 step 5): `T`, `B`, journal fill, a full
     /// ring, pending `moved` records. An idle volume cuts nothing.
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
         let mut co = crate::engine::lock(&self.coord);
-        if self.wanted(&mut co) {
-            let res = self.commit(&mut co, false, None);
+        let wanted = self.wanted(&mut co);
+        // ADR-32 T2: a full volume cuts its discards and turns the window.
+        let space_cut = self.space_cut(&co);
+        if wanted || space_cut.is_some() {
+            let cut_started = self.clock.monotonic();
+            let res = self.commit(&mut co, space_cut == Some(true), None);
+            self.after_space_cut(&co, space_cut, &res);
             // A commit that failed before it changed the map (no space for
             // the cut above all, an index run still unpersisted, writes in
             // flight) still lets the collector work: a volume that cannot
@@ -267,6 +290,8 @@ impl Inner {
             let committed = matches!(res, Ok(CommitOutcome::Committed { .. }));
             if !committed && !self.is_failed() {
                 self.gc_step(&mut co);
+            } else if committed {
+                self.gc_share(&mut co, cut_started);
             }
             res
         } else {
@@ -302,9 +327,20 @@ impl Inner {
             return true;
         }
         let now = self.clock.monotonic();
+        // Under writes (new writes since the tip) while a pass is still
+        // compacting (`gc_busy`), pending moves cut at most once per
+        // `MOVES_CUT_GAP`: with outputs sealed back to back a cut per tick
+        // would leave the coordinator to the cuts, and each FULL leaves a
+        // commit object and packs to collect (milestone gcrate). Otherwise,
+        // an idle volume above all, they cut at once, as before.
+        let since = now.saturating_sub(co.last_commit_at);
+        let writing = self.journal.last_issued() > co.tip.cut_seq;
+        let paced = !writing
+            || !self.gc_busy.load(Ordering::Acquire)
+            || since >= MOVES_CUT_GAP.min(self.cfg.commit_interval);
         if !co.moved.is_empty()
-            && (!co.moves_deferred
-                || now.saturating_sub(co.last_commit_at) >= self.cfg.commit_interval)
+            && paced
+            && (!co.moves_deferred || since >= self.cfg.commit_interval)
         {
             return true;
         }
@@ -332,6 +368,7 @@ impl Inner {
         new_size: Option<u64>,
     ) -> Result<CommitOutcome> {
         let res = self.commit_once(co, force, new_size);
+        self.full.note_commit(&res, self.clock.monotonic());
         match &res {
             Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
             Err(_) => {}
@@ -613,6 +650,7 @@ impl Inner {
         );
         co.tip = full;
         co.tip_hash = sealed.hash;
+        self.full.note_cut(prev, c, commit_seq.0);
         co.retained.push(commit);
         co.retained.retain(|r| r.common().commit_seq >= chain_floor);
         co.last_commit_at = self.clock.monotonic();
@@ -688,20 +726,21 @@ impl Inner {
         self.true_up_index(Some(&mut acct));
         point!(self.points, "engine.c8.index");
         // C9: reclaim the journal below the cut, release the overlay.
+        // The ring files are the journal's to recycle; the charge of every
+        // record at or below the cut goes now, whichever files were reused
+        // (ADR-32 review M4): the ledger then equals what a restart charges.
         match &tail {
-            Ok(t) => match self.journal.reclaim(t) {
-                Ok(rep) => {
-                    let held = self.journal_charged.load(Ordering::Acquire);
-                    let give = rep.bytes.min(held);
-                    self.journal_charged.fetch_sub(give, Ordering::AcqRel);
-                    self.space.release(SpaceKind::JournalReserved, give);
+            Ok(t) => {
+                if let Err(e) = self.journal.reclaim(t) {
+                    tracing::warn!(error = %e, "journal reclaim failed; retried at the next cut");
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "journal reclaim failed; retried at the next cut")
-                }
-            },
+            }
             Err(e) => tracing::warn!(error = %e, "journal tail unknown; nothing reclaimed"),
         }
+        let held = self.journal_charged.load(Ordering::Acquire);
+        let give = self.jcharges.take_upto(c).min(held);
+        self.journal_charged.fetch_sub(give, Ordering::AcqRel);
+        self.space.release(SpaceKind::JournalReserved, give);
         self.overlay.release(&cut);
         self.abandon(acct);
         self.journal_full.store(false, Ordering::Release);
@@ -861,6 +900,33 @@ impl Inner {
         txn.commit().map(|_| ())
     }
 
+    /// After a cut, while a pass has work it can do now (`gc_busy`): more
+    /// steps, for up to a third of the time the cut took and at most
+    /// [`GC_SHARE_MAX`], so the collector gets about a quarter of the
+    /// coordinator under writes that keep it cutting back to back (one step
+    /// per cut gave it a few percent, and a 4 GiB working set outran
+    /// compaction; milestone gcrate). The next cut waits that long; each step
+    /// still ends one unit past its budget, and a clock that does not move
+    /// over [`GC_SHARE_STALLS`] steps (a manual one) ends the share.
+    fn gc_share(&self, co: &mut Coord, cut_started: Duration) {
+        let now = self.clock.monotonic();
+        let share = (now.saturating_sub(cut_started) / GC_SHARE_DIVISOR).min(GC_SHARE_MAX);
+        let until = now.saturating_add(share);
+        let mut last = now;
+        let mut stalled = 0u32;
+        while stalled < GC_SHARE_STALLS
+            && self.gc_busy.load(Ordering::Acquire)
+            && !self.is_failed()
+            && !self.closing.load(Ordering::Acquire)
+            && last < until
+        {
+            self.gc_step(co);
+            let t = self.clock.monotonic();
+            stalled = if t == last { stalled + 1 } else { 0 };
+            last = t;
+        }
+    }
+
     fn gc_step(&self, co: &mut Coord) {
         let Some(budget) = self.cfg.gc_budget else {
             return;
@@ -868,20 +934,37 @@ impl Inner {
         // No collector call starts once a quiesce began (the engine is
         // about to be dropped; moves made now would be lost with it).
         if self.closing.load(Ordering::Acquire) {
+            self.gc_busy.store(false, Ordering::Release);
             return;
         }
+        let read_before = co.collector.as_ref().map(|c| c.stats().compaction_read);
         match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => {
+                // Work left that a step can do now: the background thread
+                // ticks again soon (`GC_BUSY_PERIOD`). Not while the pass
+                // waits out a grace, nor while compaction sits at its rate
+                // cap (it read nothing, moved nothing, freed nothing): the
+                // same rule as `run_pass`'s pause.
+                let read_now = co.collector.as_ref().map(|c| c.stats().compaction_read);
+                let capped = p.state == GcState::Compacting
+                    && read_now == read_before
+                    && p.moved.is_empty()
+                    && p.freed == 0;
+                let busy = !p.done && !capped && !matches!(p.state, GcState::Idle | GcState::Grace);
+                self.gc_busy.store(busy, Ordering::Release);
                 co.absorb(p);
                 co.gc_error = None;
             }
             // No collector, or the map ahead of the tip (the hook's
             // precondition, M17): nothing to step now.
-            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {}
+            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {
+                self.gc_busy.store(false, Ordering::Release);
+            }
             // Moves sealed before the failure were taken by `with_collector`
             // (M17.B stack review M-2). Once per distinct error, not at every
             // tick (M-3).
             Err(e) => {
+                self.gc_busy.store(false, Ordering::Release);
                 let msg = e.to_string();
                 if co.gc_error.as_deref() != Some(msg.as_str()) {
                     tracing::warn!(error = %msg, "gc step failed; the pass resumes later");

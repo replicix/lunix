@@ -310,7 +310,9 @@ fn journal_damage_is_reported_and_wiped_and_refuse_keeps_it() {
     let Some(t) = scratch("jd") else { return };
     let mode = CryptoMode::Integrity;
     let v = create(t.path(), mode, 64 << 10);
-    let s = open(&v, mode);
+    // No journal marks: a mark written while the host is slow between a
+    // flush and the next write takes a number and shifts the ones asserted.
+    let s = open_unmarked(&v, mode);
     let mut d = Driver::new(&s.engine, 2, 1 << 20);
     let marks: Vec<Vec<u8>> = (0..3).map(|i| pattern(1000 + i, 4096)).collect();
     for (i, m) in marks.iter().enumerate() {

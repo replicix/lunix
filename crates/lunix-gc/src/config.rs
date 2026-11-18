@@ -57,7 +57,8 @@ pub struct GcConfig {
     /// (default 30 s). A pass also needs a reason to run: a new tip, a
     /// non-empty condemned list or changed pins.
     pub pass_interval: Duration,
-    /// Live bytes compaction may rewrite in one pass (default 1 GiB).
+    /// Live bytes compaction may rewrite in one pass (default 1 GiB; 256 MiB
+    /// in [`GcConfig::daemon`]).
     pub compact_per_pass: u64,
     /// New leaves one mark unit walks and resolves (default 32: 16 384
     /// entries at fanout 512).
@@ -67,6 +68,26 @@ pub struct GcConfig {
 
     /// Decoded segment footers kept by the mark (default 32).
     pub footer_cache: usize,
+
+    /// Overlap the grace with the next passes (default off; the daemon turns
+    /// it on, [`GcConfig::daemon`]). Off, a pass marks, condemns, waits out
+    /// the grace, marks again for the recheck and deletes: whatever dies
+    /// during that wait is condemned only by the next pass and waits a whole
+    /// grace again, so under sustained overwrite the store holds about two
+    /// graces plus a pass interval of writes. On, a scheduled pass does not
+    /// wait: it condemns what its one mark finds newly dead, and that mark is
+    /// the recheck of every object listed before it whose grace ended before
+    /// the mark began (as in the urgent pass): those are deleted; then it
+    /// compacts. An object waits one grace plus at
+    /// most two pass periods. A pass on request (`request_pass`) always runs
+    /// the whole sequence.
+    pub pipeline: bool,
+    /// With `pipeline`: the time between a pass that did reclaim work (a
+    /// segment condemned, deleted or compacted, or 64 MiB freed) and the next
+    /// one, at least three times its mark time, instead of
+    /// `pass_interval` (default 5 s), so passes follow each other while
+    /// garbage keeps coming.
+    pub busy_interval: Duration,
 }
 
 impl Default for GcConfig {
@@ -77,6 +98,23 @@ impl Default for GcConfig {
             leaves_per_unit: 32,
             finish_per_unit: 1 << 18,
             footer_cache: 32,
+            pipeline: false,
+            busy_interval: Duration::from_secs(5),
+        }
+    }
+}
+
+impl GcConfig {
+    /// The daemon's settings: the defaults with `pipeline` on, and 256 MiB
+    /// compacted per pass. A pipelined pass deletes at its start what earlier
+    /// passes made dead, so a long compaction phase delays those deletes: a
+    /// smaller share per pass keeps the passes (and the deletes) coming while
+    /// compaction is the work (milestone gcrate, the M15 root cell).
+    pub fn daemon() -> Self {
+        Self {
+            pipeline: true,
+            compact_per_pass: 256 << 20,
+            ..Self::default()
         }
     }
 }
