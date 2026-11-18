@@ -35,6 +35,10 @@ carry a second block for the maintainer's tamper-resistance decisions (keyed
 chunk ids in `integrity` mode, OS randomness, rules R1-R4, the hostile
 keyring cost policy), and ADR-31 records the rollback anchor.
 
+**Proposed 2026-11-18:** [ADR-32](#adr-32-write-back-pressure-a-paced-admission-band-below-the-limit-and-a-bounded-full-volume)
+(write back-pressure and the full volume) is **proposed, not accepted**. It
+amends ADR-14's ladder if accepted.
+
 **Terminology.** Two sequence numbers exist. `write_seq` numbers writes
 and cuts (the `seq` of ADR-3, 4, 10, 26, 27 and 28, and `cut_seq`).
 `commit_seq` is a commit's position in the chain (the `seq` of
@@ -2349,3 +2353,185 @@ is not an anchor.
   the floor, also for a detached volume.
 - The rollback floor and `chain_floor` (retention) are unrelated: GC
   deleting old commits never lowers the rollback floor.
+
+## ADR-32: Write back-pressure: a paced admission band below the limit, and a bounded full volume
+
+**Status: proposed (2026-11-18), for the maintainer's decision.** Nothing in
+it is implemented. If accepted it amends ADR-14 (the ladder's order and
+`on_full`) and DESIGN §2, §4.3, §19 and §20. The evidence, the analysis, the
+prior art, the alternatives in full, the test list and the implementation
+sketch are in
+[research/2026-11-18-write-backpressure.md](research/2026-11-18-write-backpressure.md)
+(cited below as "the note").
+
+**Context:**
+- The space gate has one threshold, the limit `min(cache_max, fs_ceiling -
+  reserve)`, and with no `cache_max` the limit is the host file system. Below
+  it nothing slows a writer. Runs of 2026-11-18: on `main` a 4 GiB working
+  set took 107 GiB of store within minutes and the urgent pass never ran; on
+  `p1/gcrate` the same shape held about 49 GiB after 10 min, with compaction
+  (about 12 of 64 MiB/s) the bottleneck.
+- At the limit a write parks, and the defaults (`on_full = wait`, no
+  `full_timeout`) give it no deadline. On a store that reached its limit with
+  no collector, one write parked for more than 25 min with 128 requests in
+  flight and hung-task reports; a restart with `on_full = error` did not
+  release it; only killing the daemon and force-deleting the device did.
+- The code has six paths by which a request stays parked without bound (the
+  note, §2): no default deadline; a policy change that does not re-judge
+  parked requests; a quiesce that cannot drain them; discards that queue
+  behind them; deadlines that share a thread with the urgent GC pass; and
+  writes parked for a full journal ring, which have no deadline at all.
+- With a grace, garbage is proportional to the write rate: the store holds
+  about `R × τ` of it, `τ` about 95 s with the defaults on `p1/gcrate`. A cap
+  `L` therefore fixes the sustained write rate at `(L - live store) / τ`,
+  whatever the mechanism (the note, §3).
+
+**Decision (proposed):**
+- **Signal: the headroom** `H = limit - used`, read from the ledger. No rate
+  estimate and no GC statistic is a control input in phase 1.
+- **Three marks, relative to the limit:**
+  - soft: 15 % of the limit, clamped to 1 GiB ..= 64 GiB and to half the
+    limit. Above it writes are untouched, at the cost of one comparison
+    under a lock the write already takes;
+  - hard: the reservation does not fit, as today;
+  - resume: the larger of 4 segments and 1 % of the limit.
+- **Every volume gets a limit of its own.** `lunix volume create` writes
+  `cache_max = store_max_percent × size` (default 200 %) with the existing
+  key.
+- **Mechanism: pace the admission of a write's journal reservation**, the
+  one place a guest write already waits, before it holds a `write_seq`, a
+  lock or a charge.
+  - Between the soft and the hard mark a token bucket admits bytes at
+    `max(r_min, r_mid × x / (1 - x))` with `x = H / soft`, `r_mid =
+    max(gc_rate, 16 MiB/s)` and `r_min` = 4 MiB/s: unbounded at the soft
+    mark, `gc_rate` in the middle of the band, the minimum near the limit
+    (the OpenZFS delay curve in rate form).
+  - One request is never delayed longer than `throttle_max_delay_ms`
+    (10 s); past that it is admitted if it fits and the bucket carries the
+    debt.
+  - Never paced: reads; FLUSH (it reserves nothing and never waits for an
+    unadmitted write); FUA writes of at most 256 KiB (admitted at once,
+    charged to the bucket: the write an fsync waits on); discards and
+    write-zeroes (admitted from the reserved region, even on a full volume,
+    and not queued behind parked writes); the commit path and GC (they never
+    enter the gate).
+  - Grants and deadlines run on a timer thread that takes only the gate's
+    lock. The ladder keeps its own thread.
+- **The full volume:**
+  - `on_full = wait` (default): a write that does not fit waits for space,
+    FIFO, at most `full_timeout` from its arrival (default **60 s**, the
+    dm-thin default; under the kernel's 120 s hung-task threshold). Then it
+    fails with `ENOSPC` and the volume **latches full**: the other requests
+    waiting for space fail with it and writes fail at once until the headroom
+    passes the resume mark. Reads, FLUSH and discards go on; GC goes on.
+  - `on_full = error`: fails at once at the limit, as today.
+  - There is no `readonly` value: the latch gives the file system the same
+    view and opens by itself.
+  - The error is `ENOSPC` (`BLK_STS_NOSPC`). `EIO` remains the answer of a
+    failed or read-only engine.
+  - **Every wait has a deadline**, the journal-ring wait included (`ENOSPC`
+    if the last commit failed for space, else `EIO`; at once when the engine
+    has stopped).
+  - **A policy change re-judges every parked request**: `on_full = error`
+    fails them now, a new `full_timeout` counts from each arrival, a larger
+    `cache_max` grants and opens the latch.
+  - **Restart:** nothing about a parked request is persisted. After a crash
+    the reissued requests are admitted from scratch under the policy read at
+    open. A quiesce admits every paced request that fits and fails the
+    requests waiting for space with `ENOSPC`, so the drain finishes.
+  - **Discard frees space:** in the stop and full states the coordinator
+    cuts as soon as hole records are journaled and follows with as many
+    FULLs as GC's retained set holds (three with `retain_last` = 2), so the
+    old extents leave every root; the urgent pass then deletes them after
+    the floor grace. About 45 s from discard to space with the defaults.
+- **GC's duty.** The engine reads the gate's state at each tick. Outside
+  `open` the collector gets four times the step budget, `gc_rate ×
+  gc_pressure_rate_factor` (4; uncapped at the limit) and the floor grace
+  (10 s + 2 × `read_timeout`) instead of `gc_grace_ms`: the urgent pass's
+  concession, per step. `GcBudget` and `GcParams` are per step already, so
+  the `Collector` trait does not change. The ladder's urgent pass gets the
+  back-off that commits failing for space already have (2 s, doubling to
+  60 s while it frees nothing).
+- **Observability:** a `throttle` object in the status (state, rate,
+  headroom and marks, waiters, delayed writes and time, longest wait,
+  `ENOSPC` count, time throttled, GC pressure, ingest and reclaim rates) and
+  one log line per state change, plus a 30 s line while throttled (the note,
+  §7). The counters live in the gate; the checkpoint is untouched.
+- **Configuration:** `volume.json` keeps its keys and its bytes
+  (`space.cache_max`, `on_full`, `full_timeout_ms`, `gc_rate` carry the
+  per-volume policy). The new keys are daemon-wide, in `lunixd.toml`:
+  `throttle`, `throttle_soft_percent`, `throttle_soft_min_bytes`,
+  `throttle_soft_max_bytes`, `throttle_min_rate`, `throttle_max_delay_ms`,
+  `full_timeout_ms`, `gc_pressure_rate_factor`, `store_max_percent` (the
+  note, §8, with defaults and validation).
+- **ADR-14's ladder becomes:** pace (continuously, below the limit); at the
+  limit evict clean, compact (the urgent pass), then `on_full` with a
+  bounded wait and the latch. The "throttle destage" rung stays unused.
+
+**Rejected** (the note, §6, has the trade-offs):
+- *Only fixing the hard stop.* Necessary and the first step of this
+  decision, but alone it is the SSD write cliff: full speed, then stalls and
+  `ENOSPC` on a volume that is merely slow to collect.
+- *A token bucket at the measured reclaim rate.* GC reclaims what was
+  written `τ` earlier, so the loop feeds on itself with a dead time of a
+  minute and winds down. At the hard mark the gate already is this.
+- *RocksDB-style backlog triggers with an adaptive rate.* Needs a garbage
+  estimate that the mark cannot give fresh (a fast first fill would be
+  throttled as garbage), and absolute byte triggers do not scale across
+  volume sizes. Its adaptive step is kept as a later refinement.
+- *Throttling destage or the cut.* It delays the step that frees journal
+  bytes and turns the retained window, and the journal ring then parks
+  writes with no pacing at all.
+- *Shrinking the queue depth.* Fixed at `ADD_DEV`; `nr_requests` counts
+  requests, not bytes. A possible complement later.
+- *Foreground GC in the writer's context.* Queue threads never block, and it
+  is the known source of stalls in F2FS and SSD firmware.
+- *`on_full = readonly`.* Not reversible on a live ublk device.
+
+**Consequences:**
+- **`store <= cache_max` + the reserved region + one cut in flight holds by
+  admission**, at any write rate. This is the bound the `p1/gcrate` report
+  could not give, and the M15 cells can gate on it.
+- **The DESIGN §20 write targets are burst targets** unless the volume has
+  `R × τ` of garbage room: 300 K 4 KiB IOPS sustained needs about 110 GiB at
+  the default grace, about 76 GiB at the floor grace. M16 cells are valid
+  only when they were not throttled, and one sustained cell is added.
+- **A latency bound replaces an unbounded park:** 10 s of pacing, 60 s at
+  the limit, then an error. A full volume under a mounted file system is as
+  unpleasant as a full thin pool; it is now prompt, visible and reversible.
+- With many large requests in flight the delay cap lets the band be
+  overrun; the hard mark, where a byte is admitted when a byte is freed,
+  then does the pacing.
+- **Format freeze:** no byte of any frozen format changes. One frozen
+  *meaning* does (flag F1): a null `space.full_timeout_ms` stops meaning
+  "wait for ever" and means "the daemon's `full_timeout_ms`"; the row of
+  on-disk-formats.md §21 changes its text, the golden does not. Per-volume
+  throttle keys (F2) are deferred because they would change `volume.json`.
+- **Interface changes** in `lunix-iface` (not on disk, the lead's sign-off):
+  the reservation's class, the snapshot's throttle fields, the status
+  message.
+- **Phases:** the bounded stop and the discard path (the note's T1 and T2)
+  do not depend on `p1/gcrate` and fix a defect that needs a forced device
+  deletion today; the band, GC pressure and the status follow `p1/gcrate`'s
+  merge. Later: a garbage estimate as a second signal, per-volume keys,
+  metadata bypass, a daemon-wide GC budget, and in phase 2 the unsynced
+  bytes and the cache tier as further pressure sources of the same gate.
+
+**For the maintainer to decide** (the recommendation first):
+
+| # | question | recommendation | alternative |
+|---|---|---|---|
+| M1 | The mechanism | the band with a fixed curve, on top of the bounded stop | the bounded stop only, the band later |
+| M2 | A default cap for new volumes | `cache_max` = 200 % of the size, written at creation | none: the host file system's floor stays the only limit |
+| M3 | A null `full_timeout_ms` (flag F1) | it means the daemon default, 60 s; "for ever" no longer exists | a required number in `volume.json` (a byte change of a frozen file) |
+| M4 | The defaults | soft 15 %, minimum rate 4 MiB/s, delay cap 10 s, `full_timeout` 60 s | other values; the sustained M16 cell is the measurement to tune them by |
+| M5 | A quiesce while writes wait for space | fail them with `ENOSPC` and finish the drain | abort the process and let `REISSUE` park them again in the successor |
+| M6 | The window turn after a discard on a full volume | yes, only in the stop and full states | no: a discard then frees space only as later commits happen |
+| M7 | DESIGN §20 and the gates | say "burst" in §20; M16 cells declare their garbage room and are void if throttled; M15 cells set `cache_max` and gate on the store size; one full-volume cell is added | leave §20 as it is and report throttled cells as shortfalls |
+| M8 | GC under pressure | floor grace, 4 × budget and rate while writes are slowed | budget and rate only, the configured grace kept |
+| M9 | Order of work | T1 and T2 now, on `main`; the rest after `p1/gcrate` | everything after `p1/gcrate` |
+
+*Gate:* the note's §9: the gate's property test (no waiter pending longer
+than `full_timeout`), the deterministic engine test, the slow-GC and
+replayed-E1 stack tests, the M15 cells under a cap with the full-volume cell,
+and the M16 validity rule with the sustained cell.
