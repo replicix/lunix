@@ -97,7 +97,10 @@ do_sync() {
     "$root/" "$LUNIX_HOST:$src/"
   # The host copy has no .git: hand check-ownership the changed paths.
   if [ -d "$root/.git" ] || [ -f "$root/.git" ]; then
-    mb="$(git -C "$root" merge-base HEAD main 2>/dev/null || true)"
+    # Against origin/main (as check-ownership.sh): a stale local main would
+    # count the paths merged from the remote as this branch's.
+    mb="$(git -C "$root" merge-base HEAD origin/main 2>/dev/null \
+      || git -C "$root" merge-base HEAD main 2>/dev/null || true)"
     if [ -n "$mb" ]; then
       { git -C "$root" diff --name-only "$mb"; git -C "$root" ls-files --others --exclude-standard; } \
         | sort -u | ssh_ "cat > $(printf '%q' "$src")/.lunix-changed-files"

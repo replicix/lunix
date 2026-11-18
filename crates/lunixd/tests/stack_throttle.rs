@@ -213,6 +213,16 @@ fn fast_gc(o: &mut OpenParams) {
     });
 }
 
+/// The daemon's pipelined schedule (`GcConfig::daemon`), a pass at most
+/// every second (milestone gcrate, re-review M-1).
+fn daemon_gc(o: &mut OpenParams) {
+    o.gc = Some(GcConfig {
+        pass_interval: Duration::from_secs(1),
+        busy_interval: Duration::from_secs(1),
+        ..GcConfig::daemon()
+    });
+}
+
 /// A 128 MiB volume capped at 64 MiB of store, commits every second,
 /// `on_full = wait` with `full_timeout_ms` as given (null: the daemon
 /// default).
@@ -418,9 +428,21 @@ fn e1_a_kill_and_a_restart_with_on_full_error_fail_the_reissued_writes_at_once()
 
 #[test]
 fn a_discard_on_a_full_volume_brings_the_space_back_and_writes_succeed() {
-    let t = Scratch::new("bstop-discard");
+    discard_on_a_full_volume("bstop-discard", fast_gc);
+}
+
+/// The same on the daemon's pipelined schedule: the ladder's urgent passes
+/// interrupt pipelined passes, the window turn's FULLs move the tip under
+/// them.
+#[test]
+fn a_discard_on_a_full_volume_brings_the_space_back_on_the_daemon_schedule() {
+    discard_on_a_full_volume("gcrate-discard", daemon_gc);
+}
+
+fn discard_on_a_full_volume(tag: &str, gc: fn(&mut OpenParams)) {
+    let t = Scratch::new(tag);
     let vol = volume(&t, Some(FULL_TIMEOUT_MS));
-    let stack = vol.open_with(fast_gc).expect("open");
+    let stack = vol.open_with(gc).expect("open");
     let mut q = Queue::new(&stack);
     let written = fill_and_park(&mut q, &stack, 3);
     all_enospc(&q.wait_all(FULL_TIMEOUT + SLACK));

@@ -40,6 +40,12 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// The background thread's period while a GC pass has work it can do now
+/// (`Inner::gc_busy`): each tick runs one budgeted step, so the collector
+/// gets most of the coordinator's time while the cuts still come between
+/// its steps.
+pub(crate) const GC_BUSY_PERIOD: Duration = Duration::from_millis(10);
+
 /// The error of every call after a failure stopped the commits.
 pub(crate) fn stopped() -> Error {
     Error::Io(std::io::Error::other(
@@ -135,6 +141,10 @@ pub(crate) struct Inner {
     pub(crate) gc_wake: (Mutex<()>, Condvar),
     /// Requested passes being waited for (`GcStatusSnapshot::requests`).
     pub(crate) gc_requests: AtomicU64,
+    /// The collector's last step left its pass with work it can do now
+    /// (not idle, not in its grace): the background thread ticks again after
+    /// [`GC_BUSY_PERIOD`] instead of its period.
+    pub(crate) gc_busy: AtomicBool,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
     /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
@@ -318,6 +328,7 @@ impl Engine {
             closing: AtomicBool::new(false),
             gc_wake: (Mutex::new(()), Condvar::new()),
             gc_requests: AtomicU64::new(0),
+            gc_busy: AtomicBool::new(false),
             resize_hook: Mutex::new(None),
             report: rec.report,
             full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
@@ -342,11 +353,19 @@ impl Engine {
         let handle = std::thread::Builder::new()
             .name("lunix-coord".into())
             .spawn(move || loop {
+                // A pass with work left steps again soon: at one 50 ms step
+                // per period the collector would get a third of its budget
+                // and fall behind a sustained overwrite (milestone gcrate).
+                let wait = weak.upgrade().map_or(period, |inner| {
+                    if inner.gc_busy.load(Ordering::Acquire) {
+                        period.min(GC_BUSY_PERIOD)
+                    } else {
+                        period
+                    }
+                });
                 {
                     let g = lock(&s.0);
-                    let (g, _) =
-                        s.1.wait_timeout(g, period)
-                            .unwrap_or_else(|p| p.into_inner());
+                    let (g, _) = s.1.wait_timeout(g, wait).unwrap_or_else(|p| p.into_inner());
                     if *g {
                         return;
                     }
@@ -359,6 +378,8 @@ impl Engine {
                 // that hold one are woken.
                 inner.signal_ring_parked();
                 if inner.is_failed() {
+                    // No more steps: back to the plain period.
+                    inner.gc_busy.store(false, Ordering::Release);
                     continue;
                 }
                 inner.background_tick();

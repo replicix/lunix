@@ -312,11 +312,19 @@ fn gc_tune(c: &mut EngineConfig) {
     }
 }
 
-/// A pass every second.
+/// A pass every second, on the daemon's pipelined schedule
+/// (`GcConfig::daemon`, gcrate review M-2); `LUNIX_GC_PIPELINE=0` runs the
+/// whole sequence for every pass instead.
 fn fast_gc(o: &mut lunixd::stack::OpenParams) {
+    let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
+        GcConfig::default()
+    } else {
+        GcConfig::daemon()
+    };
     o.gc = Some(GcConfig {
         pass_interval: Duration::from_secs(1),
-        ..GcConfig::default()
+        busy_interval: Duration::from_secs(1),
+        ..base
     });
 }
 

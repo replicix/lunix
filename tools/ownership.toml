@@ -225,6 +225,33 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# gcrate: GC reclaim rate under sustained overwrite (the pipelined schedule,
+# the busy tick, the pass profile line, the amplification test).
+[gcrate]
+paths = [
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/crash.rs",
+  "crates/lunix-gc/src/tests/pipeline.rs",
+  "crates/lunix-gc/src/tests/sim.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/tests/gc_pacing.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_gc.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_gc_ladder.rs",
+  "crates/lunixd/tests/stack_gc_rate.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/reference/gc.md",
+  "tools/ci.sh",
+  "tools/remote.sh",
+  "tools/check-ownership.sh",
+  "tools/tests/run.sh",
+  "tools/ownership.toml",
+]
+
 # bstop: ADR-32 T1, T2 and T6 (the bounded stop, the discard path, a default
 # cache_max at volume creation).
 [bstop]

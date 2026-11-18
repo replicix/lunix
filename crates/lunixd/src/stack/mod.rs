@@ -492,8 +492,8 @@ pub struct OpenParams {
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
     pub journal_tweak: Option<JournalTweak>,
-    /// The collector's own settings (`None`: [`lunix_gc::GcConfig`]'s
-    /// defaults). The GC settings of `volume.json` reach it through the
+    /// The collector's own settings (`None`: the daemon's,
+    /// [`lunix_gc::GcConfig::daemon`]). The GC settings of `volume.json` reach it through the
     /// engine's `gc_params`; tests shorten the pass interval here.
     pub gc: Option<lunix_gc::GcConfig>,
     /// The wait at the limit when `space.full_timeout_ms` is null (the
@@ -823,15 +823,16 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     cfg.full_timeout = space.full_timeout();
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
-    // idle ticks, with the settings of volume.json.
+    // idle ticks, with the settings of volume.json. A step may compact up to
+    // one second of `gc_rate`: its time budget bounds it, and the collector's
+    // own rate cap keeps the mean at `gc_rate`. A cap of one budget's worth
+    // (`gc_rate` x 50 ms) held compaction to a few MiB per step, far below
+    // `gc_rate` while the cuts leave the coordinator few steps per second
+    // (milestone gcrate, the M15 root cell).
     let budget = std::time::Duration::from_millis(json.gc_step_budget_ms);
     cfg.gc_budget = Some(lunix_iface::gc::GcBudget {
         max_duration: budget,
-        max_bytes: json
-            .gc_rate
-            .saturating_mul(json.gc_step_budget_ms)
-            .div_ceil(1000)
-            .max(1 << 20),
+        max_bytes: json.gc_rate.max(1 << 20),
     });
     cfg.gc_params = Some(lunix_iface::gc::GcParams {
         retain_last: json.retain_last,
@@ -877,7 +878,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         // directory.
         collector: Some(Box::new(lunix_gc::Gc::new(
             Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
-            p.gc.unwrap_or_default(),
+            p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon),
         ))),
         hooks: Arc::new(NoHooks),
     };
