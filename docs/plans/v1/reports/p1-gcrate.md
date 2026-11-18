@@ -61,117 +61,209 @@ the floor any schedule has while the grace is 60 s: at 38 MiB/s, 2.2 GiB.
 ## The fix
 
 1. **Pipelined passes** (`GcConfig::pipeline`, `crates/lunix-gc/src/{config,collector}.rs`). A
-   scheduled pass no longer waits out the grace. Its one mark is the recheck of every listed object
-   whose grace ended before the mark began (exactly the urgent pass's rule, with the full grace: the
-   recheck mark's roots are pinned after the flag and the grace), so it deletes those, then condemns
-   what is newly dead, then compacts from the same mark. Objects whose grace still runs are left alone
-   without an evidence line. A pass that changed something is followed after `busy_interval` (5 s)
-   instead of `pass_interval` (30 s), and a grace that ends starts a pass (after `busy_interval`) even
-   without a new tip. A dead object now waits `G + 2 P` plus the retained window, instead of up to
-   `2 G + pass_interval + 2 P`. A **requested** pass (`lunix gc NAME`, `request_pass`) still runs the
-   whole sequence (condemn, grace, recheck, delete), so `GcControl::run_pass` and its tests keep their
+   scheduled pass no longer waits out the grace. Order: mark, condemn what is newly dead, delete the
+   objects listed before this pass whose grace ended before the mark began (the urgent pass's rule, with
+   the full grace: `grace start + G <= mark start`, both on the monotonic clock, the mark's start read in
+   the unit that pins its roots), compact from the same mark. Objects whose grace still runs are skipped
+   without an evidence line, and the condemned list is rewritten only when an entry went. A **requested**
+   pass (`lunix gc NAME`, `request_pass`) still runs the whole sequence, so `GcControl::run_pass` keeps its
    meaning. `GcConfig::default()` keeps the whole sequence for every pass (the collector's tests, the
-   offline `fsck --repair --gc`); the daemon uses `GcConfig::daemon()` (`pipeline` on) when no config
-   is given (`crates/lunixd/src/stack/mod.rs`).
-2. **Busy ticking** (`crates/lunix-engine/src/{engine,coord}.rs`). After a step that leaves its pass
-   with work it can do now (not idle, not in the whole sequence's grace), the background thread ticks
-   again after 10 ms instead of 100 ms. The collector then gets about 80 % of the coordinator; each step
-   is still bounded by `gc_step_budget_ms` and the cuts still come between steps. Pass wall time on the
-   repro went from about 10 s to about 3 s.
-3. **A pass profile line** (`gc pass done`, INFO, once per pass): wall time, steps, and per phase the
-   active time, units and when the pass entered it. This is what located the bottleneck; it stays for
-   field diagnosis.
+   offline `fsck --repair --gc`); the daemon uses `GcConfig::daemon()`.
+2. **Pacing** (review M-4, m-2, m-7). A pass is "busy" only when it did reclaim work worth hurrying for:
+   a segment condemned, deleted or compacted, or 64 MiB freed (the commit objects and packs every cut
+   leaves dead no longer count). After a busy pass the next is due after `busy_interval` (5 s), else
+   after `pass_interval` (30 s); a grace that ends starts a pass without a new tip. Whatever the pace, a
+   pass follows the last one at the earliest after 3 x that pass's own work (time inside its units), so
+   marking takes at most about a quarter of the coordinator however large the map. An abandoned pass is
+   retried after `pass_interval`; an idle check clears "busy".
+3. **Busy ticking** (`crates/lunix-engine/src/{engine,coord}.rs`). While the pass in progress has work a
+   step can do now, the background thread ticks every 10 ms instead of 100 ms. Not while a whole
+   sequence waits out its grace, nor while compaction sits at its rate cap (no bytes read, nothing moved
+   or freed), nor once the engine failed or closes (m-1, m-4).
+4. **A coordinator share for GC after cuts** (`gc_share`, coord.rs; found by the root check). Under a
+   sustained overwrite the coordinator cuts back to back, and GC got one 50 ms step per cut (a few
+   percent of the coordinator). After a cut, while the pass is busy, GC now steps for up to a third of
+   that cut's time: about a quarter of the coordinator. The next cut waits that long; each step is still
+   bounded by `gc_step_budget_ms`. With a manual clock this adds nothing (the tests are unchanged).
+5. **Compaction throughput** (root check). The daemon's per-step byte allowance was `gc_rate x 50 ms`
+   (3.2 MiB): with few steps per second compaction ran at about 12 MiB/s. It is now one second of
+   `gc_rate`: the step's time budget bounds a step and the collector's own rate cap keeps the mean at
+   `gc_rate` (`crates/lunixd/src/stack/mod.rs`). Pending moves cut at most once a second while a pass is
+   busy (a cut per tick left the coordinator to the cuts; review m-5); otherwise they cut at once as
+   before. The daemon compacts 256 MiB per pass instead of 1 GiB, so a pass's compaction phase does not
+   hold back the deletes the next pass makes.
+6. **A pass profile line** (`gc pass done`; INFO for a pass that wrote evidence, DEBUG otherwise): wall
+   time, steps (now counted correctly), per phase the active time, units and when the pass entered it.
 
 No format, interface or `volume.json` change. `GcConfig` (not an interface type) gained `pipeline` and
 `busy_interval`.
 
-## Reproduction and numbers
+## Reproduction without root (256 MiB working set)
 
-`crates/lunixd/tests/stack_gc_rate.rs` on the stack, no root: a 256 MiB working set, 64 KiB chunks,
-integrity, incompressible random 64 KiB overwrites at QD 1 (36 to 44 MiB/s on the test host), the
-daemon's engine (background coordinator, `volume.json` commit triggers), the store (segments, map
-packs, index runs, commits) sampled every 2 s.
+`crates/lunixd/tests/stack_gc_rate.rs` on the stack: a 256 MiB working set, 64 KiB chunks, integrity,
+incompressible random 64 KiB overwrites at QD 1 (36 to 44 MiB/s), the daemon's engine, the store
+(segments, map packs, index runs, commits) sampled every 2 s. Numbers from the first round (5773f3a):
 
-Daemon defaults (`G` 60 s), 300 s, `sustained_overwrite_daemon_defaults`:
+| build, daemon defaults (`G` 60 s), 300 s | store over the run | peak | passes |
+|---|---|---|---|
+| `main` `6d16fbf` | sawtooth 4.4 to 7.0 GiB | 7 009 MiB (27.4 x W) | 3 |
+| 5773f3a, `pipeline` off | sawtooth 4.2 to 7.4 GiB | 7 407 MiB (28.9 x W) | 4 |
+| 5773f3a, `pipeline` on | steady 3.9 to 4.2 GiB from 110 s on | 4 249 MiB (16.6 x W) | 34 |
 
-| build | store over the run | peak | passes | pass wall |
-|---|---|---|---|---|
-| `main` `6d16fbf` | sawtooth 4.4 to 7.0 GiB, still rising each cycle | 7 009 MiB (27.4 x W) | 3 | 65 to 83 s (grace 60 s, about 5 s active) |
-| this branch, `pipeline` off (M17 sequence, busy ticking on) | sawtooth 4.2 to 7.4 GiB | 7 407 MiB (28.9 x W) | 4 | 63 to 72 s |
-| this branch (daemon: `pipeline` on) | steady 3.9 to 4.2 GiB from 110 s on | 4 249 MiB (16.6 x W, the warm-up crest at 100 s) | 34 | about 3 s |
+With whole 64 KiB overwrites of a small working set, segments die whole and GC is grace-bound: the
+steady state is about `W + R x 95 s`, of which `R G` is 60 s.
 
-The steady state with the defaults is about `W + R x 95 s`; `R G` alone is 60 s of it. For the M15
-shape (`W` 4 GiB) the store should settle near `2 W + R x 95 s`: about 22 GiB at 150 MiB/s, and the
-80 GiB cap is reached only above about 750 MiB/s of sustained writes. That is an estimate from this
-model, not a measurement: the root rerun is not done (see Open).
+## Root check: M15 `fio-verify`, profile 1 (QD 32, 4 KiB to 1 MiB random writes, 4 GiB per job)
 
-CI test `sustained_overwrite_stays_bounded` (`G` 10 s, the collector's minimum with `read_timeout`
-0; 140 s; samples after a warm-up of `pass_interval + 2 G + 3 P` checked against the bound with `P` =
-5 s + 4 s of work and the run's own `R` and `C`):
+`tests/exit/fio-verify.sh` of `p1/m15` with this branch's release binaries, `PROFILES="32:1"`, a fresh
+32 GiB volume per cell, daemon on CPUs 0-3 and fio on 4-7, `tools/remote.sh root`, the 80 GiB cap on,
+one root run at a time. A sampler next to the harness recorded the device's written bytes, the store
+(`segments`, `map`, `index`, `state/commits`) and `lunix gc --status --json` every 10 s. `R` below is the
+store's intake (store plus freed, per second), which is above the device rate: a 4 KiB write rewrites
+its whole chunk. The model's bound is `2 W + R (G + 3P + 2C) + 0.5 GiB` with `W` 4.25 GiB (the 4 GiB
+region plus the trim region), `G` 60 s, `P` 9 s, `C` 5 s. Every cell passed: fio verify, trimcheck,
+guest fsck, `lunix fsck --deep` before and after the detach and reattach, `verify_only`. No cell reached
+the cap.
 
-| build | steady store | bound |
-|---|---|---|
-| pipeline, no busy ticking | 1.75 to 2.2 GiB (passes 10 s apart, 15 s period) | (would fail) |
-| pipeline and busy ticking | 1.42 to 1.83 GiB (5.6 to 7.1 x W) | about 2.0 GiB (7.8 x W) |
+| binaries | cell | device rate | `R` | store at 600 s | model bound | freed |
+|---|---|---|---|---|---|---|
+| `main` (M15's log, p1 after p0) | raw / ext4 / xfs 64K integrity | | | +53 / +40 / +51 GiB in p1 (81 / 86 / 107 GiB) | | |
+| 5773f3a | raw 64K integrity | 62 MiB/s | 97 MiB/s | 49 GiB, still rising | 18 GiB | 8 GiB |
+| 5773f3a | ext4 / xfs 64K integrity | | 74 / 75 MiB/s | 56 / 57 GiB | 16 GiB | |
+| + share and per-step bytes | raw / ext4 / xfs 64K integrity | 42 MiB/s (raw) | 78 / 58 / 52 MiB/s | 36 / 41 / 37 GiB | 14 to 16 GiB | 9.4 GiB (raw) |
+| + 256 MiB per pass (final) | raw 64K integrity | 50 MiB/s | 88 MiB/s | 32 GiB (18 to 28 GiB in the middle, still drifting up) | 17 GiB | 19 GiB |
+| final | raw / ext4 / xfs 64K encrypted | 50 MiB/s (raw) | 91 MiB/s (raw) | 28 / 29 / 26 GiB; raw flat at 24 GiB over its last 4 min | 18 GiB | 25 GiB (raw) |
+| final | raw / ext4 / xfs 16K integrity | 31 MiB/s (raw) | 40 MiB/s (raw) | 11 / 13 / 12 GiB; raw 10 to 14 GiB over its last 6 min | 13 GiB | 12 GiB (raw) |
 
-The time constant `k` asked for in the brief is not a constant multiple of `W`: the garbage term
-scales with `R`, so the test states `k = 2 + R (G + 3P + 2C) / W` and checks it with the measured `R`
-and `C`.
+(The sampler's written and freed counters are valid for the raw cells only: the device counter restarts
+with each device and the file-system cells' status calls returned nothing usable.)
+
+What this shows:
+
+- **A second bottleneck, which the 256 MiB repro did not have: compaction.** With a 4 GiB working set and
+  4 KiB to 1 MiB writes, a 16 MiB segment dies whole only after about six to eight working sets more have
+  been written, so reclaim runs through compaction. On 5773f3a compaction ran at about 12 MiB/s: the
+  per-step byte cap (3.2 MiB) and about three GC steps a second between back-to-back cuts. Passes 9 and
+  10 of the raw cell took 111 and 174 s, 97 % of it waiting for steps.
+- With the final binaries GC gets about 12 % of the run on average (16 % to 25 % in the long passes; the
+  raw 64K integrity cell: 66 s of unit time in 535 s), the mark of this 4 GiB working set on a 32 GiB
+  volume costs 0.2 to 0.65 s, and passes take 5 to 80 s. Foreground write throughput dropped (raw 64K
+  integrity: 62 to 42 to 50 MiB/s across the three builds): that is the share GC now takes from the cuts.
+- The store under the M15 profile is about half of `main`'s: 32 GiB against 81 GiB (raw), with the
+  80 GiB cap far away. **It is not inside the model's bound.** 64K encrypted and 16K integrity plateau
+  near 1.4 x and 1.1 x the bound; 64K integrity is still drifting up at 600 s, at about 1.6 to 1.9 x.
+  The remaining gap is compaction throughput against the write rate under a fixed GC share: a policy
+  choice (see Open 2).
+
+## Large-map cost (review M-4)
+
+Measured on the root cells (a 4 GiB working set on a 32 GiB volume, about 65 000 live chunks per root):
+the mark costs 0.2 to 0.65 s of unit time, a pass's work 0.2 to 16 s, and the duty cap keeps the gap
+after a pass at 3 x its work or more. A volume with a map ten times larger marks in seconds and is
+paced down to one pass per 4 x mark time at worst; that is bounded, not measured here.
 
 ## Tests
 
-- `crates/lunix-gc/src/tests/pipeline.rs` (3): a scheduled pass condemns without waiting and a later one
-  deletes after the grace, nothing listed goes early; a pass starts when a grace ends without a new tip
-  and passes that only find graces running write no evidence; a requested pass still waits out its
-  grace and deletes in the same pass.
-- `crates/lunix-gc/src/tests/crash.rs`: `every_crash_point_pipelined_16k`, the crash sweep with the
-  pipelined schedule: every GC crash point hit by 10 of 10 workloads, roots read back, ledger exact,
-  convergence. `Sim::quiesce` runs one more pass without a commit under `pipeline`.
-- `crates/lunixd/tests/stack_gc_rate.rs`: the bound above (CI), and the by-hand comparison with the
-  daemon defaults (`LUNIX_GC_RATE_PIPELINE=0` for the M17 sequence).
-- `tools/ci.sh` runs `stack_gc_rate` with the other stack GC tests.
+- `crates/lunix-gc/src/tests/pipeline.rs` (8): the schedule (a scheduled pass condemns without waiting
+  and a later one deletes after the grace; a pass starts when a grace ends without a new tip, and passes
+  that only find graces running write no evidence; a requested pass still runs the whole sequence) and
+  the delete boundary (review M-1): a grace that ends during the deleting pass's mark keeps the objects
+  for the next mark (**this test fails when `<= l.started` in `recheck_verdict` is replaced by the
+  current time**; checked by hand); a dedup hit between the mark and the flag in the pipelined order is
+  un-condemned by the pass after the grace (the hit is asserted on the listed segment); an urgent pass
+  during a pipelined pass's condemn and delete units; a request during a pipelined pass makes the next
+  pass whole; a pin on a condemned commit between condemn and delete keeps the commit and everything its
+  root reaches.
+- `crates/lunix-gc/src/tests/crash.rs`: the pipelined crash sweep at 16 KiB / 16-byte ids, 64 KiB /
+  32-byte ids and lean ids (every crash point hit by 10 of 10 workloads); every sweep now also checks the
+  roots of the workloads that did not crash and drives them to quiescence (m-12).
+- `crates/lunixd/tests/stack_gc.rs`: the churn oracle on the daemon's pipelined schedule
+  (`churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`): reads against the flat oracle during
+  GC, reopen, `lunix-fsck --deep`, the at-rest store bound, no GC work left (M-2).
+- `crates/lunixd/tests/stack_gc_kill.rs`: the kill loop runs the pipelined schedule by default
+  (`LUNIX_GC_PIPELINE=0` for the whole sequence). The kill loops stay out of CI, as before; the plain
+  16 KiB loop was run by hand (21 of 21, see Gate).
+- `crates/lunixd/tests/stack_gc_rate.rs`, `sustained_overwrite_stays_bounded` (M-3): 150 s; `P` is the
+  run's mean pass period and `R` the rate over `G + 3P` before each sample; it asserts that the store
+  does not keep growing (the last third's peak is at most the middle third's plus `R x P`), a 1.5 x
+  backstop over the bound, every chunk reads back its last write, and `lunix-fsck` is clean.
+- `tools/tests/run.sh`: `remote.sh` ids (`gcrate`, `m12c`, `m18a` accepted; `cargo`, a slash, a dot
+  refused) and the `p1/gcrate` branch guess.
 
 ## Gate
 
-`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`) at the committed tree: **all green**.
-1 819 tests passed, 0 failed, 28 ignored (summed over every `test result` line; `main` `6d16fbf`
-reported 1 814). New: 3 pipeline unit tests, the pipelined crash sweep, and
-`sustained_overwrite_stays_bounded` (passed, about 140 s). fmt, clippy `-D warnings` (workspace and
-`lunixd` with `testsupport,crashpoints`), the feature edges, the release stack tests with `lunix-fsck`,
-and `check-ownership: gcrate ok (15 changed paths)`. No root run (see Open).
+`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`), on a quiet host after the root runs: **all
+green**. 1 828 tests passed, 0 failed, 28 ignored (summed over every `test result` line; 1 819 at
+5773f3a). Among them the 5 new directed pipeline tests, the pipelined crash sweeps at 16 KiB, 64 KiB and
+lean ids, `churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`, `sustained_overwrite_stays_bounded`
+and the `tools/tests` cases. fmt, clippy `-D warnings` (workspace and `lunixd` with
+`testsupport,crashpoints`), the feature edges, the release stack tests with `lunix-fsck`, and
+`check-ownership: gcrate ok (18 changed paths)`.
 
-Remote disk: about 20 GiB under the milestone directory, all of it `target/` (debug and release
-builds, as for the other milestones); the scratch volumes of the tests are removed by the tests.
+By hand: `gc_kill_loop_plain_16k` on the pipelined schedule: 21 points, 21 reached, 21 kills, all
+verified (1 061 s). Root: seven `fio-verify` cells (above), all passing, host left clean (no ublk device,
+mount or daemon of this milestone; `ublk-leftovers: clean` after every run).
+
+Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches removed, the release build kept); scratch 3 MiB (logs).
+
+## Review response (`01-p1-gcrate-review.md`)
+
+| finding | response |
+|---|---|
+| M-1 delete boundary untested | Five directed tests in `pipeline.rs` (above); the mid-mark grace test fails with the boundary moved to the current time. |
+| M-2 no data-verifying test on the daemon schedule | Two pipelined churn-oracle tests in `stack_gc` (CI); the `stack_gc_kill` loop on the pipelined schedule by default (plain 16 KiB run by hand: 21 of 21); read-back and `fsck` in `stack_gc_rate`; pipelined crash sweeps at 64 KiB and lean ids. `stack_kill` and `stack_gc_ladder` keep their own `GcConfig` (they test the engine's kill recovery and the ladder, whose urgent pass is the same in both schedules). |
+| M-3 flaky bound | `P` and `R` from the run, a no-growth assertion, a 1.5 x backstop. |
+| M-4 continuous marking, cost not bounded | "Busy" means reclaim work (segments, or 64 MiB freed); a duty cap of 3 x the last pass's work; measured on the root cells (above). |
+| m-1 `gc_busy` left set | Cleared on the failed and closing paths. |
+| m-2 failing pass retried every 5 s | `abort_pass` clears busy; the grace trigger waits `pass_interval` after an abort. |
+| m-3 todo condemned late | Pipelined order is now mark, condemn, delete, compact. |
+| m-4 busy ticking at the rate cap | Not busy when a compaction step read, moved and freed nothing. |
+| m-5 cuts during compaction | Move cuts at most once a second while a pass is busy. Commits per second, raw 64K integrity cells: not separated from the dirty-data cuts in the logs; the 256 MiB repro made 0.35 commits/s on `main` and 0.87/s on 5773f3a. |
+| m-6 list rewrite every pipelined delete phase | Stored only when an entry went. |
+| m-7 idle polling at 5 s | The idle check clears busy. |
+| m-8 evidence history | gc.md says how long 1 024 objects last now and that condemn and delete lines are in different objects. |
+| m-9 profile line | `steps` counted per step before the line; DEBUG for passes without evidence; `phases` stays one string. |
+| m-10 module doc | The collector's header gives both orders and the boundary rule. |
+| m-11 `condemned_pending` normally non-zero | Noted in gc.md. |
+| m-12 uncrashed workloads unchecked | Checked and driven to quiescence. |
+| m-13 typo guard | `remote.sh` requires an `[id]` entry in `tools/ownership.toml` (`m18a` excepted) and has a `check-id` subcommand for `tools/tests`. |
 
 ## Deviations and choices
 
-- `tools/remote.sh` accepted only milestone ids `m<digits>...`; `gcrate` failed it. The check is now
-  `^[a-z][a-z0-9]*$` (the ownership table's own id syntax).
-- `GcConfig::default()` keeps the whole sequence rather than the daemon's schedule: two of its three
-  users (the collector's test harnesses and `fsck --repair --gc`, which runs offline passes until one
-  frees nothing) rely on a pass deleting what it condemned. The stack tests that pass their own
-  `GcConfig` (`pass_interval` 1 s) also keep the whole sequence; the stack runs without one (the
-  daemon, `control_gc`, the reopens in the ladder tests) get the pipelined schedule.
-- rust-skills: no conflict with the project's conventions in this change.
+- `tools/remote.sh`: ids `^[a-z][a-z0-9]*$` with an ownership entry (above).
+- `GcConfig::default()` keeps the whole sequence (the collector's harnesses and `fsck --repair --gc`
+  rely on a pass deleting what it condemned).
+- The root check's sampler and the copy of M15's harness lived in the worktree untracked for the runs
+  and are not committed (the harness is `p1/m15`'s). The harness ignores a TERM after its teardown:
+  `teardown` clears the traps and returns, and the script goes on to the next cell (seen when a run was
+  stopped early). That is for M15 to look at.
+- `crates/lunixd/tests/wiring.rs` `journal_damage_is_reported_and_wiped_and_refuse_keeps_it` failed once
+  (a damaged range's `next_seq` 4 instead of 3) in a CI run started at low priority next to a root run;
+  it passed three of three alone. Not changed here.
+- rust-skills: one local `macro_rules!` picks the log level of the pass line (tracing needs a constant
+  level); no conflict with the project's conventions.
 
 ## Ownership
 
-`[gcrate]` in `tools/ownership.toml`: `lunix-gc` `collector.rs`, `config.rs`, `tests/{mod,crash,
-pipeline,sim}.rs`; `lunix-engine` `coord.rs`, `engine.rs`; `lunixd` `src/stack/mod.rs`,
-`tests/stack_gc_rate.rs`; `docs/reference/gc.md`; `tools/{ci.sh,remote.sh,ownership.toml}`.
+`[gcrate]` in `tools/ownership.toml` (confirmed by the lead, with these additions from the review fixes:
+`crates/lunixd/tests/stack_gc.rs`, `stack_gc_kill.rs`, `tools/tests/run.sh`): `lunix-gc` `collector.rs`,
+`config.rs`, `tests/{mod,crash,pipeline,sim}.rs`; `lunix-engine` `coord.rs`, `engine.rs`; `lunixd`
+`src/stack/mod.rs`, `tests/{stack_gc,stack_gc_kill,stack_gc_rate}.rs`; `docs/reference/gc.md`;
+`tools/{ci.sh,remote.sh,ownership.toml,tests/run.sh}`.
 
-## Open
+## Open (for the maintainer; not implemented)
 
-1. **The grace is now the floor.** With `gc_grace_ms` 60 s, `R G` is the larger part of the garbage
-   (2.2 GiB at 38 MiB/s, 9 GiB at 150 MiB/s). Lowering the default toward its floor (30 s) halves it; it
-   is a policy choice (the grace covers in-flight cuts, destage and reads) for the maintainer.
-2. **No back-pressure on garbage.** Nothing slows writes when garbage outruns GC; the space ladder acts
-   only at `NoSpace` (host free-space floor or `cache_max`). A rate above `(cap - 2 W) / (G + 3 P + 2 C)`
-   still fills any cap. The pre-GC 245 GB parking is that same missing back-pressure, not this root
-   cause.
-3. **Per-object index manifest swaps.** Each condemn and delete rewrites and syncs the index manifest
-   (a condemn 5.5 ms, a delete 13 ms here). Batched flags would need a `ChunkIndex` batch call (frozen
-   interface); not needed at these rates now that the pass runs at about 80 % duty.
-4. **The M15 root rerun** with this branch (profile 1 on raw, ext4, xfs) has not been run: root runs
-   need the lead's go-ahead (proposed: the same `fio-verify.sh` invocation with this branch's binaries,
-   one cell at a time on CPUs 0-7, `gc --status` sampled every 10 s).
+1. **The grace is the floor of the grace-bound case.** `R G` is most of the garbage when segments die
+   whole (the 256 MiB repro). A lower default toward the 30 s floor halves it.
+2. **GC's share against the writes, in the compaction-bound case.** The M15 profile with a 4 GiB working
+   set needs compaction, and compaction runs on the coordinator between cuts. With the share of about a
+   quarter (`gc_share`) the store settles for 64K encrypted and 16K integrity and still drifts for 64K
+   integrity, at 1.1 to 1.9 x the model's bound. A larger share, a higher `gc_rate`, or compaction off the
+   coordinator (an interface change: the collector runs under the coordinator mutex) are the levers;
+   each costs foreground throughput or a design change.
+3. **No back-pressure on garbage.** Writes are not slowed when garbage outruns GC; the ladder acts only
+   at `NoSpace`. The pre-GC 245 GB parking is the same gap.
+4. **Per-object index manifest swaps** (condemn 5.5 ms, delete 13 ms): a batch call would need a frozen
+   `ChunkIndex` change.
+5. **The other `stack_gc_kill` cells** (plain 64 KiB, integrity 16 KiB) on the pipelined schedule were
+   not run.

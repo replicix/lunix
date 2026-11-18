@@ -238,10 +238,13 @@ paths = [
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_gc.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
   "crates/lunixd/tests/stack_gc_rate.rs",
   "docs/reference/gc.md",
   "tools/ci.sh",
   "tools/remote.sh",
+  "tools/tests/run.sh",
   "tools/ownership.toml",
 ]
 

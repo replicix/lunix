@@ -363,6 +363,8 @@ impl Engine {
                     return;
                 };
                 if inner.is_failed() {
+                    // No more steps: back to the plain period.
+                    inner.gc_busy.store(false, Ordering::Release);
                     continue;
                 }
                 inner.background_tick();

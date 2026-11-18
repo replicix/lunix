@@ -34,14 +34,25 @@ then looked at once per interval, not at every tick. A pass abandoned on an
 error, or one that deferred for the store or the rollback floor, is retried
 one interval later (a deferral for the store or the floor writes no evidence).
 
-**The daemon's schedule is pipelined** (`GcConfig::daemon`, milestone gcrate).
+**The daemon's schedule is pipelined** (`GcConfig::daemon`, milestone gcrate; the
+order inside a pass is mark, condemn, delete, compact).
 A scheduled pass does not wait out the grace in the middle of the pass: its
 one mark is the recheck of every listed object whose grace ended before the
 mark began (the urgent pass's rule, with the full grace), it deletes those,
 then condemns what is newly dead and compacts. Objects whose grace still runs
 are left alone without an evidence line. A pass that changed something is
 followed by the next after 5 s (`busy_interval`) instead of 30 s, and a grace
-that ends starts a pass without waiting for a new tip or the 30 s. A dead
+that ends starts a pass without waiting for a new tip or the 30 s. "Changed
+something" means reclaim work: a segment condemned, deleted or compacted, or
+64 MiB freed; the commit objects and map packs every cut leaves dead do not
+count, so a lightly written volume keeps the 30 s pace. Whatever the pace, a
+pass follows the last one at the earliest after three times that pass's own
+work (time inside its units), so marking a large map takes at most about a
+quarter of the coordinator. After an abandoned pass the next waits 30 s.
+`condemned_pending` in `lunix gc --status` is normally non-zero under this
+schedule: it holds about one grace's worth of dead objects waiting for it,
+which is not a backlog (a backlog shows as a store that keeps growing, or as
+`condemned_pending` growing from pass to pass). A dead
 object therefore waits one grace plus at most two pass periods; in the M17
 sequence (every pass waits out its grace, then 30 s) it waits up to two graces
 plus 30 s plus two passes, and under sustained overwrite the store holds that
@@ -321,7 +332,11 @@ nothing, or only deferred for a FULL, the store or the rollback floor, writes
 none, and its number is used by the
 next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
 new one deletes the oldest beyond that, at most 16 per pass
-(`GcStateStore::delete_evidence`).
+(`GcStateStore::delete_evidence`). Under the daemon's pipelined schedule a
+busy volume writes one object every few seconds, so the newest 1 024 cover
+about one to two hours of a sustained overwrite (a day or more when the
+volume is quiet), and an object's `condemn` lines and the `delete` lines of
+the same objects are in different evidence objects (a grace apart).
 Evidence objects are not in the ledger; the bound keeps them under 1 024 x
 48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and

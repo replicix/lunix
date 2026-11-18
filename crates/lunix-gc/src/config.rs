@@ -102,10 +102,15 @@ impl Default for GcConfig {
 }
 
 impl GcConfig {
-    /// The daemon's settings: the defaults with `pipeline` on.
+    /// The daemon's settings: the defaults with `pipeline` on, and 256 MiB
+    /// compacted per pass. A pipelined pass deletes at its start what earlier
+    /// passes made dead, so a long compaction phase delays those deletes: a
+    /// smaller share per pass keeps the passes (and the deletes) coming while
+    /// compaction is the work (milestone gcrate, the M15 root cell).
     pub fn daemon() -> Self {
         Self {
             pipeline: true,
+            compact_per_pass: 256 << 20,
             ..Self::default()
         }
     }

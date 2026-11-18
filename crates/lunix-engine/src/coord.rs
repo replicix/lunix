@@ -43,6 +43,14 @@ use lunix_iface::space::SpaceKind;
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
+
+/// The shortest time between two cuts made for pending compaction moves
+/// alone (`wanted`).
+const MOVES_CUT_GAP: Duration = Duration::from_secs(1);
+
+/// After a cut, a busy collector steps for up to the cut's time divided by
+/// this (`gc_share`): a quarter of the coordinator.
+const GC_SHARE_DIVISOR: u32 = 3;
 use crate::engine::{CommitOutcome, Inner};
 use crate::recover::Recovered;
 use crate::stats::add;
@@ -250,6 +258,7 @@ impl Inner {
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
         let mut co = crate::engine::lock(&self.coord);
         if self.wanted(&mut co) {
+            let cut_started = self.clock.monotonic();
             let res = self.commit(&mut co, false, None);
             // A commit that failed before it changed the map (no space for
             // the cut above all, an index run still unpersisted, writes in
@@ -267,6 +276,8 @@ impl Inner {
             let committed = matches!(res, Ok(CommitOutcome::Committed { .. }));
             if !committed && !self.is_failed() {
                 self.gc_step(&mut co);
+            } else if committed {
+                self.gc_share(&mut co, cut_started);
             }
             res
         } else {
@@ -302,9 +313,17 @@ impl Inner {
             return true;
         }
         let now = self.clock.monotonic();
+        // While a pass is still compacting (`gc_busy`), pending moves cut at
+        // most once per `MOVES_CUT_GAP`: with outputs sealed back to back a
+        // cut per tick would leave the coordinator to the cuts, and each FULL
+        // leaves a commit object and packs to collect (milestone gcrate).
+        // Otherwise they cut at once, as before.
+        let since = now.saturating_sub(co.last_commit_at);
+        let paced = !self.gc_busy.load(Ordering::Acquire)
+            || since >= MOVES_CUT_GAP.min(self.cfg.commit_interval);
         if !co.moved.is_empty()
-            && (!co.moves_deferred
-                || now.saturating_sub(co.last_commit_at) >= self.cfg.commit_interval)
+            && paced
+            && (!co.moves_deferred || since >= self.cfg.commit_interval)
         {
             return true;
         }
@@ -861,6 +880,24 @@ impl Inner {
         txn.commit().map(|_| ())
     }
 
+    /// After a cut, while a pass has work it can do now (`gc_busy`): more
+    /// steps, for up to a third of the time the cut took, so the collector
+    /// gets about a quarter of the coordinator under writes that keep it
+    /// cutting back to back (one step per cut gave it a few percent, and a
+    /// 4 GiB working set outran compaction; milestone gcrate). The next cut
+    /// waits that long; each step still ends one unit past its budget.
+    fn gc_share(&self, co: &mut Coord, cut_started: Duration) {
+        let now = self.clock.monotonic();
+        let until = now.saturating_add(now.saturating_sub(cut_started) / GC_SHARE_DIVISOR);
+        while self.gc_busy.load(Ordering::Acquire)
+            && !self.is_failed()
+            && !self.closing.load(Ordering::Acquire)
+            && self.clock.monotonic() < until
+        {
+            self.gc_step(co);
+        }
+    }
+
     fn gc_step(&self, co: &mut Coord) {
         let Some(budget) = self.cfg.gc_budget else {
             return;
@@ -868,13 +905,23 @@ impl Inner {
         // No collector call starts once a quiesce began (the engine is
         // about to be dropped; moves made now would be lost with it).
         if self.closing.load(Ordering::Acquire) {
+            self.gc_busy.store(false, Ordering::Release);
             return;
         }
+        let read_before = co.collector.as_ref().map(|c| c.stats().compaction_read);
         match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => {
                 // Work left that a step can do now: the background thread
-                // ticks again soon (`GC_BUSY_PERIOD`).
-                let busy = !p.done && !matches!(p.state, GcState::Idle | GcState::Grace);
+                // ticks again soon (`GC_BUSY_PERIOD`). Not while the pass
+                // waits out a grace, nor while compaction sits at its rate
+                // cap (it read nothing, moved nothing, freed nothing): the
+                // same rule as `run_pass`'s pause.
+                let read_now = co.collector.as_ref().map(|c| c.stats().compaction_read);
+                let capped = p.state == GcState::Compacting
+                    && read_now == read_before
+                    && p.moved.is_empty()
+                    && p.freed == 0;
+                let busy = !p.done && !capped && !matches!(p.state, GcState::Idle | GcState::Grace);
                 self.gc_busy.store(busy, Ordering::Release);
                 co.absorb(p);
                 co.gc_error = None;

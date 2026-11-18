@@ -13,6 +13,7 @@
 #                         check before and after (root milestones only)
 #   leftovers             run spikes/common/ublk-leftovers.sh on the host
 #   df                    show free space of the host's file system
+#   check-id              validate the milestone id only (no host needed)
 #   df-guard <path> <GiB> (absolute path) exit non-zero unless the file system holding <path>
 #                         keeps at least $LUNIX_MIN_FREE_GIB (default 120) GiB
 #                         free after <GiB> more are used
@@ -43,12 +44,20 @@ if [ "${1:-}" = "-m" ]; then m="$2"; shift 2; fi
 
 die() { echo "remote.sh: $*" >&2; exit 2; }
 
-[ -n "${LUNIX_HOST:-}" ] || die "LUNIX_HOST is not set"
-[ -n "${LUNIX_HOST_BASE:-}" ] || die "LUNIX_HOST_BASE is not set"
 [ -n "$m" ] || die "milestone not given (-m or LUNIX_M)"
+# The id names directories on the host: a plain word, and one the ownership
+# table knows (a typo such as `-m cargo` must not sync into a new tree).
+# `m18a` has no entry (its repository is replicix-core).
 [[ "$m" =~ ^[a-z][a-z0-9]*$ ]] || die "bad milestone id '$m'"
+if [ "$m" != m18a ] && ! grep -qxF "[$m]" "$root/tools/ownership.toml"; then
+  die "milestone '$m' has no [$m] entry in tools/ownership.toml"
+fi
 [ $# -ge 1 ] || die "missing subcommand"
 sub="$1"; shift
+# check-id: the checks above only (tools/tests).
+[ "$sub" = check-id ] && exit 0
+[ -n "${LUNIX_HOST:-}" ] || die "LUNIX_HOST is not set"
+[ -n "${LUNIX_HOST_BASE:-}" ] || die "LUNIX_HOST_BASE is not set"
 
 base="${LUNIX_HOST_BASE%/}"
 src="${LUNIX_HOST_SRC:-$base/$m/src}"

@@ -99,6 +99,14 @@ fn sweep(
                 }
             }
             let Some(p) = crashed else {
+                // Not crashed (the point was not reached often enough): the
+                // longest history of the sweep, checked too (review m-12).
+                s.check_roots()
+                    .unwrap_or_else(|e| panic!("uncrashed workload {w} armed at {point}: {e}"));
+                s.hooks.arm("none", 1);
+                check_quiescent(&mut s).unwrap_or_else(|e| {
+                    panic!("convergence of the uncrashed workload {w} armed at {point}: {e}")
+                });
                 continue;
             };
             assert_eq!(p, point);
@@ -170,4 +178,14 @@ fn every_crash_point_lean() {
 #[test]
 fn every_crash_point_pipelined_16k() {
     check_with(16 << 10, IdLen::Sixteen, true);
+}
+
+#[test]
+fn every_crash_point_pipelined_64k() {
+    check_with(64 << 10, IdLen::ThirtyTwo, true);
+}
+
+#[test]
+fn every_crash_point_pipelined_lean() {
+    check_with(16 << 10, IdLen::Zero, true);
 }

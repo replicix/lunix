@@ -785,15 +785,16 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.on_journal_damage = p.on_journal_damage;
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
-    // idle ticks, with the settings of volume.json.
+    // idle ticks, with the settings of volume.json. A step may compact up to
+    // one second of `gc_rate`: its time budget bounds it, and the collector's
+    // own rate cap keeps the mean at `gc_rate`. A cap of one budget's worth
+    // (`gc_rate` x 50 ms) held compaction to a few MiB per step, far below
+    // `gc_rate` while the cuts leave the coordinator few steps per second
+    // (milestone gcrate, the M15 root cell).
     let budget = std::time::Duration::from_millis(json.gc_step_budget_ms);
     cfg.gc_budget = Some(lunix_iface::gc::GcBudget {
         max_duration: budget,
-        max_bytes: json
-            .gc_rate
-            .saturating_mul(json.gc_step_budget_ms)
-            .div_ceil(1000)
-            .max(1 << 20),
+        max_bytes: json.gc_rate.max(1 << 20),
     });
     cfg.gc_params = Some(lunix_iface::gc::GcParams {
         retain_last: json.retain_last,

@@ -1,11 +1,18 @@
 //! The collector: the pass state machine behind [`Collector`].
 //!
-//! A pass is `Marking → Condemning → Grace → Rechecking → Deleting →
-//! Compacting`, each phase made of small units; [`Collector::step`] runs units
-//! until its budget is spent, so a pass never stalls a cut for longer than a
-//! unit past the budget. Grace, recheck and delete are skipped when nothing is
-//! condemned; compaction is skipped on a lean volume and when nothing
-//! qualifies.
+//! A pass is made of small units; [`Collector::step`] runs units until its
+//! budget is spent, so a pass never stalls a cut for longer than a unit past
+//! the budget. Two orders:
+//!
+//! * **The whole sequence** (a requested pass, or `GcConfig::pipeline` off):
+//!   `Marking → Condemning → Grace → Rechecking → Deleting → Compacting`.
+//!   Grace, recheck and delete are skipped when nothing is condemned.
+//! * **Pipelined** (a scheduled pass with `pipeline`, the daemon's):
+//!   `Marking → Condemning → Deleting → Compacting`. The one mark condemns
+//!   the newly dead and is the recheck of the objects listed before it whose
+//!   grace ended before it began; the others stay listed for a later pass.
+//!
+//! Compaction is skipped on a lean volume and when nothing qualifies.
 //!
 //! # Safety argument (plan M17 rules 5, 6, 7 and 12)
 //!
@@ -17,9 +24,19 @@
 //!   `get_for_dedup` never returns it; at every pass start (and load) each
 //!   segment on the list is re-flagged and, if the flag was missing, its
 //!   grace restarts.
-//! * The recheck is a new mark whose root set is pinned after every
-//!   condemned object was flagged and its grace elapsed; an object it finds
-//!   referenced (or named, or above the mark) is un-condemned.
+//! * The recheck is a mark whose root set is pinned after the object was
+//!   flagged and its grace elapsed: `grace start + grace <= mark start`, both
+//!   on the view's monotonic clock, with the mark's start read in the unit
+//!   that pins its roots (`recheck_verdict`; never the time of the delete
+//!   unit). In the whole sequence it is a new mark after the grace; in a
+//!   pipelined pass it is the pass's own mark, which began after the grace of
+//!   every object it may delete; the urgent pass uses its own mark the same
+//!   way with the floor grace. Nothing gains a reference to a flagged segment
+//!   (dedup skips flagged segments and runs only inside a cut, and a step
+//!   runs only with the map at the tip), so what such a mark finds dead stays
+//!   dead; an object it finds referenced (or named, or above the mark) is
+//!   un-condemned. A dedup hit between a mark and the flag is in the tip when
+//!   the recheck mark pins its roots.
 //! * A segment that stale hints point into is deleted only while the live
 //!   copy of every id they resolve to is in a segment a durable FULL named
 //!   (at or below the highest id the FULLs read since start name, and not an
@@ -116,9 +133,8 @@ enum Phase {
         todo: Vec<(ObjectRef, u64)>,
         listed: bool,
         next: usize,
-        /// Wait out the grace in this pass (the whole sequence); else go on
-        /// to compaction (a pipelined pass).
-        wait: bool,
+        /// What follows the condemn.
+        then: AfterCondemn,
     },
     Grace {
         until: Duration,
@@ -126,12 +142,26 @@ enum Phase {
     Rechecking(Box<Mark>),
     Deleting {
         queue: VecDeque<ObjectRef>,
-        /// A pipelined pass: objects whose grace has not ended are skipped
-        /// without a line, and `todo` is condemned afterwards.
-        then: Option<Vec<(ObjectRef, u64)>>,
+        /// A pipelined pass: an object whose grace has not ended is skipped
+        /// without a line.
+        pipelined: bool,
+        /// The list's length when the deletes began: the list is stored at
+        /// the end only when an entry went (a pipelined pass).
+        start_len: usize,
     },
     Compacting(Option<Box<Compactor>>),
     Finishing,
+}
+
+/// What follows the condemn units of a pass.
+#[derive(Debug)]
+enum AfterCondemn {
+    /// The whole sequence: wait out the grace, then the recheck mark.
+    Grace,
+    /// A pipelined pass: the objects listed before this pass condemned
+    /// anything, judged against this pass's mark (those whose grace ended
+    /// before it began go), then compaction.
+    Delete(VecDeque<ObjectRef>),
 }
 
 impl Phase {
@@ -171,6 +201,8 @@ struct PassProfile {
     entered: [Option<Duration>; PHASES],
     /// `step` calls that ran a unit of this pass.
     steps: u64,
+    /// The current `step` call is counted in `steps`.
+    step_counted: bool,
 }
 
 /// Phases a pass profile tracks.
@@ -182,6 +214,11 @@ const PHASE_NAMES: [&str; PHASES] = [
 ];
 
 impl PassProfile {
+    /// Time inside units, all phases.
+    fn active_total(&self) -> Duration {
+        self.active.iter().sum()
+    }
+
     fn ms(d: Duration) -> u64 {
         u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
     }
@@ -311,6 +348,23 @@ const NOT_DURABLE_YET: &str = "live copies of its ids are not durable yet";
 /// not named by the tip, so the engine is not asked for a cut (it would cut
 /// an empty FULL at every pass; M17.B stack re-review M-1).
 const NOT_DURABLE_NO_CUT: &str = "live copies of its ids are not durable yet; a cut does not help";
+/// A pipelined pass is followed at the earliest after this many times its
+/// own work (time inside units): see [`Gc::min_gap`].
+const DUTY_FACTOR: u32 = 3;
+
+/// Bytes freed by a pass that make it busy without a segment (commit objects
+/// and map packs alone do not hurry the next pass).
+const BUSY_FREED: u64 = 64 << 20;
+
+/// A pass did reclaim work worth hurrying for: it condemned, deleted or
+/// compacted a segment, or freed at least [`BUSY_FREED`]. Each cut leaves a
+/// commit object and map packs dead, so any evidence line would make every
+/// written volume busy for ever (gcrate review M-4).
+fn reclaim_busy(p: &GcPassSummary) -> bool {
+    p.segments_condemned + p.segments_deleted + p.segments_compacted > 0
+        || p.bytes_freed >= BUSY_FREED
+}
+
 /// Evidence objects pruned per pass at most (one unlink and directory sync
 /// each, under the coordinator's mutex).
 const EVIDENCE_PRUNE_PER_PASS: usize = 16;
@@ -523,9 +577,13 @@ pub struct Gc {
     /// The current pass runs the whole sequence (a request, or `pipeline`
     /// off).
     whole: bool,
-    /// The last pass changed something: with `pipeline`, the next is due
-    /// after `busy_interval`.
+    /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
+    /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
+    /// Time inside units of the last finished pass (the duty-cycle cap).
+    last_active: Duration,
+    /// The last pass was abandoned: the grace trigger waits `pass_interval`.
+    last_aborted: bool,
     /// When the last mark of a scheduled pass began: a listed object whose
     /// grace ends after it waits for the next mark.
     last_mark_start: Option<Duration>,
@@ -585,6 +643,8 @@ impl Gc {
             prof: PassProfile::default(),
             whole: true,
             last_pass_busy: false,
+            last_active: Duration::ZERO,
+            last_aborted: false,
             last_mark_start: None,
         }
     }
@@ -848,18 +908,24 @@ impl Gc {
         }
         let now = view.clock.monotonic();
         let waited = |d: Duration| self.last_end.is_none_or(|end| now >= end.saturating_add(d));
-        let busy = self.cfg.busy_interval.min(self.cfg.pass_interval);
+        let gap = self.min_gap();
         // Pipelined: a grace that ended since the last mark began makes its
         // object deletable by the next mark; it does not wait for
-        // `pass_interval`.
-        if self.cfg.pipeline && waited(busy) && self.grace_ended_since_mark(view.params.grace, now)
+        // `pass_interval` (after an abandoned pass it does).
+        if self.cfg.pipeline
+            && waited(if self.last_aborted {
+                self.cfg.pass_interval.max(gap)
+            } else {
+                gap
+            })
+            && self.grace_ended_since_mark(view.params.grace, now)
         {
             return Ok(true);
         }
         let interval = if self.cfg.pipeline && self.last_pass_busy {
-            busy
+            gap
         } else {
-            self.cfg.pass_interval
+            self.cfg.pass_interval.max(gap)
         };
         if !waited(interval) {
             return Ok(false);
@@ -875,9 +941,21 @@ impl Gc {
             return Ok(true);
         }
         // Nothing changed: look again (the pins too) one interval from now,
-        // not at every idle tick.
+        // not at every idle tick; the volume is idle now.
         self.last_end = Some(now);
+        self.last_pass_busy = false;
         Ok(false)
+    }
+
+    /// The shortest time between two pipelined passes: `busy_interval`, and
+    /// at least [`DUTY_FACTOR`] times the last pass's own work, so that
+    /// passes take at most about a quarter of the coordinator however large
+    /// the map is.
+    fn min_gap(&self) -> Duration {
+        self.cfg
+            .busy_interval
+            .min(self.cfg.pass_interval)
+            .max(self.last_active.saturating_mul(DUTY_FACTOR))
     }
 
     /// Writes the pass's evidence object when it has lines; returns its
@@ -927,6 +1005,9 @@ impl Gc {
         // runs even if nothing else changed (re-review M-2).
         self.last_pass_changed = true;
         self.last_tip = None;
+        // Retried one interval later, not at the busy pace (review m-2).
+        self.last_pass_busy = false;
+        self.last_aborted = true;
     }
 
     fn note_heap(&mut self) {
@@ -937,9 +1018,7 @@ impl Gc {
         h += match &self.phase {
             Phase::Marking(m) | Phase::Rechecking(m) => m.heap_bytes(),
             Phase::Condemning { todo, .. } => todo.capacity() * 24,
-            Phase::Deleting { queue, then } => {
-                queue.capacity() * 16 + then.as_ref().map_or(0, |t| t.capacity() * 24)
-            }
+            Phase::Deleting { queue, .. } => queue.capacity() * 16,
             Phase::Compacting(Some(c)) => c.heap_bytes(),
             _ => 0,
         };
@@ -1007,10 +1086,15 @@ impl Gc {
             self.prof.active[i] += t.elapsed();
             self.prof.units[i] += 1;
         }
+        if (before.is_some() || self.phase.index().is_some()) && !self.prof.step_counted {
+            self.prof.steps += 1;
+            self.prof.step_counted = true;
+        }
         if let (Some(j), Some(st)) = (self.phase.index(), self.prof.started) {
             self.prof.entered[j].get_or_insert_with(|| st.elapsed());
         }
         if matches!(res, Ok(Flow::PassDone)) {
+            self.last_active = self.prof.active_total();
             self.log_pass("step");
         }
         res
@@ -1022,7 +1106,11 @@ impl Gc {
             return;
         };
         let wall = self.prof.started.map_or(Duration::ZERO, |s| s.elapsed());
-        tracing::info!(
+        // INFO for a pass that wrote evidence; on a busy volume passes that
+        // changed nothing come every few seconds.
+        macro_rules! pass_line {
+            ($level:ident) => {
+                tracing::$level!(
             how,
             pass = p.pass,
             wall_ms = PassProfile::ms(wall),
@@ -1038,7 +1126,14 @@ impl Gc {
             bytes_moved = p.bytes_moved,
             pending = self.list.entries.len(),
             "gc pass done"
-        );
+                )
+            };
+        }
+        if p.pass != 0 {
+            pass_line!(info);
+        } else {
+            pass_line!(debug);
+        }
     }
 
     fn unit_inner(
@@ -1091,28 +1186,26 @@ impl Gc {
                                 todo,
                                 listed: false,
                                 next: 0,
-                                wait: true,
+                                then: AfterCondemn::Grace,
                             }
                         }
                     } else {
-                        // Pipelined: this mark is the recheck of the listed
-                        // objects whose grace ended before it began, then
-                        // the newly dead are condemned.
+                        // Pipelined: the newly dead are condemned first (the
+                        // flags follow the mark as closely as they can), then
+                        // this mark is the recheck of the objects listed
+                        // before it whose grace ended before it began.
                         self.last_mark_start = Some(started);
-                        if !self.list.entries.is_empty() {
-                            Phase::Deleting {
-                                queue: self.list.entries.keys().copied().collect(),
-                                then: Some(todo),
-                            }
-                        } else if !todo.is_empty() {
+                        let queue: VecDeque<ObjectRef> =
+                            self.list.entries.keys().copied().collect();
+                        if !todo.is_empty() {
                             Phase::Condemning {
                                 todo,
                                 listed: false,
                                 next: 0,
-                                wait: false,
+                                then: AfterCondemn::Delete(queue),
                             }
                         } else {
-                            Phase::Compacting(None)
+                            self.deleting_or_compacting(queue)
                         }
                     };
                 } else {
@@ -1124,7 +1217,7 @@ impl Gc {
                 todo,
                 listed,
                 next,
-                wait,
+                then,
             } => {
                 if !listed {
                     self.list_condemned(view, &todo)?;
@@ -1132,7 +1225,7 @@ impl Gc {
                         todo,
                         listed: true,
                         next: 0,
-                        wait,
+                        then,
                     };
                 } else if let Some(&(obj, _)) = todo.get(next) {
                     if let ObjectRef::Segment(s) = obj {
@@ -1142,21 +1235,22 @@ impl Gc {
                         todo,
                         listed: true,
                         next: next + 1,
-                        wait,
+                        then,
                     };
                 } else {
                     let until = self.start_graces(view, &todo);
-                    self.phase = if wait {
-                        // The condemn mark is not needed again: the recheck
-                        // makes its own.
-                        if let Some(ctx) = &mut self.ctx {
-                            ctx.liveness = None;
+                    self.phase = match then {
+                        AfterCondemn::Grace => {
+                            // The condemn mark is not needed again: the
+                            // recheck makes its own.
+                            if let Some(ctx) = &mut self.ctx {
+                                ctx.liveness = None;
+                            }
+                            Phase::Grace { until }
                         }
-                        Phase::Grace { until }
-                    } else {
-                        // Pipelined: the graces run into the next passes;
-                        // compaction works from this pass's mark.
-                        Phase::Compacting(None)
+                        // Pipelined: the new graces run into the next
+                        // passes; the deletes and compaction use this mark.
+                        AfterCondemn::Delete(queue) => self.deleting_or_compacting(queue),
                     };
                 }
                 Flow::Continue
@@ -1179,37 +1273,44 @@ impl Gc {
                         ctx.liveness = Some(l);
                     }
                     let queue = self.list.entries.keys().copied().collect();
-                    self.phase = Phase::Deleting { queue, then: None };
+                    self.phase = Phase::Deleting {
+                        start_len: self.list.entries.len(),
+                        queue,
+                        pipelined: false,
+                    };
                 } else {
                     self.phase = Phase::Rechecking(m);
                 }
                 Flow::Continue
             }
-            Phase::Deleting { mut queue, then } => {
+            Phase::Deleting {
+                mut queue,
+                pipelined,
+                start_len,
+            } => {
                 match queue.pop_front() {
                     Some(obj) => {
                         let v = self.recheck_verdict(view, obj, view.params.grace)?;
                         // Pipelined: a grace still running is no news; a
                         // later pass decides (`due` starts it when the grace
                         // ends).
-                        let skip =
-                            then.is_some() && matches!(v, Verdict::Defer(_, Deferral::Grace));
+                        let skip = pipelined && matches!(v, Verdict::Defer(_, Deferral::Grace));
                         if !skip {
                             *freed += self.apply_verdict(view, obj, v)?;
                         }
-                        self.phase = Phase::Deleting { queue, then };
+                        self.phase = Phase::Deleting {
+                            queue,
+                            pipelined,
+                            start_len,
+                        };
                     }
                     None => {
-                        self.store_list(view)?;
-                        self.phase = match then {
-                            Some(todo) if !todo.is_empty() => Phase::Condemning {
-                                todo,
-                                listed: false,
-                                next: 0,
-                                wait: false,
-                            },
-                            _ => Phase::Compacting(None),
-                        };
+                        // Deletes only remove entries: an unchanged length
+                        // is an unchanged list (un-condemns stored theirs).
+                        if !pipelined || self.list.entries.len() != start_len {
+                            self.store_list(view)?;
+                        }
+                        self.phase = Phase::Compacting(None);
                     }
                 }
                 Flow::Continue
@@ -1222,6 +1323,20 @@ impl Gc {
         };
         self.note_heap();
         Ok(flow)
+    }
+
+    /// A pipelined pass's deletes over `queue`, or compaction when it is
+    /// empty.
+    fn deleting_or_compacting(&self, queue: VecDeque<ObjectRef>) -> Phase {
+        if queue.is_empty() {
+            Phase::Compacting(None)
+        } else {
+            Phase::Deleting {
+                queue,
+                pipelined: true,
+                start_len: self.list.entries.len(),
+            }
+        }
     }
 
     fn after_mark(&mut self, l: &Liveness) {
@@ -1619,7 +1734,8 @@ impl Gc {
         }
         ctx.summary.pass = pass;
         self.last_pass_changed = ctx.evidence.wants_retry();
-        self.last_pass_busy = !ctx.evidence.only_defers();
+        self.last_pass_busy = reclaim_busy(&ctx.summary);
+        self.last_aborted = false;
         self.stats.passes += 1;
         self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);
@@ -1644,22 +1760,17 @@ impl Gc {
         let mut step_bytes = 0u64;
         self.load(view)?;
         self.observe_named(view)?;
-        let units_before: u64 = self.prof.units.iter().sum();
-        let res = loop {
-            match self.unit(view, budget, freed, &mut step_bytes) {
-                Ok(Flow::Continue) => {}
-                Ok(Flow::Yield) => break Ok(false),
-                Ok(Flow::PassDone) => break Ok(true),
-                Err(e) => break Err(e),
+        self.prof.step_counted = false;
+        loop {
+            match self.unit(view, budget, freed, &mut step_bytes)? {
+                Flow::Continue => {}
+                Flow::Yield => return Ok(false),
+                Flow::PassDone => return Ok(true),
             }
             if view.clock.monotonic() >= deadline {
-                break Ok(false);
+                return Ok(false);
             }
-        };
-        if self.prof.units.iter().sum::<u64>() != units_before {
-            self.prof.steps += 1;
         }
-        res
     }
 
     // ------------------------------------------------------------ urgent
@@ -1762,6 +1873,8 @@ impl Gc {
             }
         }
         self.finish_pass(view)?;
+        // One call: its own work is its wall time.
+        self.last_active = self.prof.started.map_or(Duration::ZERO, |t| t.elapsed());
         self.log_pass("urgent");
         Ok(())
     }

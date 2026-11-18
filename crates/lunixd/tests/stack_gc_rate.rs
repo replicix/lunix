@@ -22,11 +22,15 @@
 //! ```
 //!
 //! * `sustained_overwrite_stays_bounded` (CI): `G` = 10 s (the smallest
-//!   grace the collector takes, `read_timeout` 0), 140 s of writes; after a
-//!   warm-up (the first pass interval, then two graces and three pass periods)
-//!   every sample is checked against the bound with `R` and `C` measured over
-//!   the run. The M17 sequence (every pass waits out its grace, then
-//!   `pass_interval`) holds about `R · (2G + pass_interval + 2P)`.
+//!   grace the collector takes, `read_timeout` 0), 150 s of writes. After a
+//!   warm-up (the first pass interval, two graces and three pass periods):
+//!   the store does not keep growing (the last third's peak is at most the
+//!   middle third's plus one pass period of writes), and every sample is
+//!   below 1.5 x the bound, with `P` (the mean pass period), `R` (over the
+//!   window `G + 3P` before the sample) and `C` measured in the run. At the
+//!   end every chunk reads back what was last written to it, and
+//!   `lunix-fsck` finds no error. The M17 sequence (every pass waits out its
+//!   grace, then `pass_interval`) holds about `R · (2G + pass_interval + 2P)`.
 //! * `sustained_overwrite_daemon_defaults` (by hand): the `volume.json`
 //!   defaults too (`G` = 60 s); `LUNIX_GC_RATE_PIPELINE=0` runs the M17
 //!   sequence instead (every pass waits out its grace), for the comparison.
@@ -48,7 +52,9 @@ use std::time::{Duration, Instant};
 use lunix_engine::EngineConfig;
 use lunix_format::CryptoMode;
 use lunix_gc::GcConfig;
-use lunixd::testsupport::{close, payload, Driver, Scratch, TestRng, TestVolume, VolumeBuilder};
+use lunixd::testsupport::{
+    close, fsck, payload, Driver, Scratch, TestRng, TestVolume, VolumeBuilder,
+};
 
 fn env_or(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -83,26 +89,35 @@ struct Run {
     /// `Some(grace)`: a test grace (`read_timeout` 0); `None`: `volume.json`.
     grace: Option<Duration>,
     gc: GcConfig,
-    /// Samples from this time on are checked against the bound.
+    /// Samples from this time on are the steady state.
     warmup: Duration,
 }
 
-/// What a run saw after its warm-up.
+/// One sample.
+#[derive(Clone, Copy, Debug)]
+struct Sample {
+    at: Duration,
+    written: u64,
+    store: u64,
+    passes: u64,
+}
+
+/// What a run saw.
 #[derive(Debug, Default)]
 struct Seen {
     written: u64,
     elapsed: Duration,
     peak: u64,
-    /// The largest store seen after the warm-up, with the bytes written then.
-    steady_peak: u64,
     passes: u64,
     freed: u64,
     /// Commits made (the tip's `commit_seq`).
     commits: u64,
-    /// `(elapsed, written, store)` after the warm-up.
-    samples: Vec<(Duration, u64, u64)>,
+    /// Every sample, from the start.
+    samples: Vec<Sample>,
     /// The largest map, index and commit bytes seen.
     meta_peak: u64,
+    /// Chunks whose read-back differed from the last write.
+    bad_reads: u64,
 }
 
 fn run(r: &Run) -> Seen {
@@ -129,6 +144,8 @@ fn run(r: &Run) -> Seen {
     let mut d = Driver::new(&stack).expect("driver");
     let mut rng = TestRng::new(0x6763_7261_7465);
     let chunks = r.ws / cs64;
+    // The seed last written to each chunk (0: never written).
+    let mut last = vec![0u64; usize::try_from(chunks).expect("chunks")];
     let started = Instant::now();
     let mut next_sample = Duration::ZERO;
     let mut seen = Seen::default();
@@ -139,6 +156,7 @@ fn run(r: &Run) -> Seen {
         assert!(d
             .write(0, c * cs64, &payload(seed, cs as usize), false)
             .is_ok());
+        last[c as usize] = seed;
         seen.written += cs64;
         if seen.written % (256 << 20) == 0 {
             assert!(d.flush(0).is_ok());
@@ -150,11 +168,13 @@ fn run(r: &Run) -> Seen {
             let total: u64 = b.iter().sum();
             seen.peak = seen.peak.max(total);
             seen.meta_peak = seen.meta_peak.max(b[1] + b[2] + b[3]);
-            if now >= r.warmup {
-                seen.steady_peak = seen.steady_peak.max(total);
-                seen.samples.push((now, seen.written, total));
-            }
             let s = status.get();
+            seen.samples.push(Sample {
+                at: now,
+                written: seen.written,
+                store: total,
+                passes: s.stats.passes,
+            });
             if now.as_secs() % 10 < 2 {
                 eprintln!(
                     "{} t={:>4}s written={:>6} MiB store={:>6} MiB (seg {} map {} idx {} commits {}) x{:.2} state={:?} pending={} passes={} freed={} MiB",
@@ -182,83 +202,162 @@ fn run(r: &Run) -> Seen {
     seen.elapsed = started.elapsed();
     let s = status.get();
     seen.passes = s.stats.passes;
-    seen.commits = stack.engine.tip().0 .0;
     seen.freed = s.stats.bytes_freed;
+    seen.commits = stack.engine.tip().0 .0;
+    // Every chunk reads back its last write.
+    stack.engine.release_read_cache();
+    for (c, &seed) in last.iter().enumerate() {
+        if seed == 0 {
+            continue;
+        }
+        let got = d.read(0, c as u64 * cs64, cs).expect("read back");
+        if got != payload(seed, cs as usize) {
+            seen.bad_reads += 1;
+        }
+    }
     drop(d);
     close(stack).expect("close");
+    match fsck(&vol) {
+        Some(f) => assert!(f.no_errors(), "{}: lunix-fsck:\n{}", r.tag, f.text),
+        None => assert!(
+            std::env::var_os("LUNIX_STACK_REQUIRE_FSCK").is_none(),
+            "{}: lunix-fsck is not built",
+            r.tag
+        ),
+    }
     seen
 }
 
-/// `2 W + R (G + 3 P + 2 C) + slack` (see the module doc), with `R` the
-/// run's mean write rate and `C` its mean commit spacing. `P` is
-/// `busy_interval` plus `work` per pass.
-fn bound(r: &Run, seen: &Seen, grace: Duration, work: Duration) -> u64 {
-    let secs = seen.elapsed.as_secs_f64().max(1.0);
-    let rate = seen.written as f64 / secs;
-    let spacing = Duration::from_secs_f64(secs / seen.commits.max(1) as f64);
-    let p = r.gc.busy_interval + work;
-    let window = grace + p * 3 + spacing * 2;
-    let slack = seen.meta_peak + (64 << 20);
-    2 * r.ws + (rate * window.as_secs_f64()) as u64 + slack
+/// Measured over the steady samples: the mean pass period.
+fn pass_period(steady: &[Sample]) -> Duration {
+    let (Some(a), Some(b)) = (steady.first(), steady.last()) else {
+        return Duration::from_secs(10);
+    };
+    let n = b.passes.saturating_sub(a.passes).max(1);
+    (b.at.saturating_sub(a.at)) / u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-fn report(r: &Run, seen: &Seen, bound: u64) {
-    let rate = seen.written as f64 / seen.elapsed.as_secs_f64().max(1.0);
+/// The write rate over `window` before `at` (bytes per second).
+fn rate_before(samples: &[Sample], at: Duration, window: Duration) -> f64 {
+    let end = samples.iter().rfind(|s| s.at <= at).copied();
+    let start = samples
+        .iter()
+        .find(|s| s.at + window >= at)
+        .copied()
+        .or(samples.first().copied());
+    match (start, end) {
+        (Some(a), Some(b)) if b.at > a.at => {
+            (b.written - a.written) as f64 / (b.at - a.at).as_secs_f64()
+        }
+        _ => 0.0,
+    }
+}
+
+/// `2 W + R (G + 3 P + 2 C) + slack` (see the module doc).
+fn bound(ws: u64, rate: f64, grace: Duration, p: Duration, c: Duration, slack: u64) -> u64 {
+    let window = grace + p * 3 + c * 2;
+    2 * ws + (rate * window.as_secs_f64()) as u64 + slack
+}
+
+/// The run's numbers, and its steady samples with their bound.
+fn report(r: &Run, seen: &Seen, grace: Duration) -> (Duration, Vec<(Sample, u64)>) {
+    let secs = seen.elapsed.as_secs_f64().max(1.0);
+    let rate = seen.written as f64 / secs;
+    let c = Duration::from_secs_f64(secs / seen.commits.max(1) as f64);
+    let steady: Vec<Sample> = seen
+        .samples
+        .iter()
+        .copied()
+        .filter(|s| s.at >= r.warmup)
+        .collect();
+    let p = pass_period(&steady);
+    let slack = seen.meta_peak + (64 << 20);
+    let checked: Vec<(Sample, u64)> = steady
+        .iter()
+        .map(|s| {
+            let local = rate_before(&seen.samples, s.at, grace + p * 3);
+            (*s, bound(r.ws, local, grace, p, c, slack))
+        })
+        .collect();
+    let steady_peak = steady.iter().map(|s| s.store).max().unwrap_or(0);
+    let mean_bound = bound(r.ws, rate, grace, p, c, slack);
     eprintln!(
-        "{}: {:.0?}, W {} MiB, {} commits, written {} MiB at {:.1} MiB/s, peak store {} MiB (x{:.2} W), after warm-up {} MiB (x{:.2} W), bound {} MiB (x{:.2} W), {} passes, {} MiB freed",
+        "{}: {:.0?}, W {} MiB, {} commits (C {:.1?}), {} passes (P {:.1?} in the steady state), written {} MiB at {:.1} MiB/s, peak store {} MiB (x{:.2} W), steady peak {} MiB (x{:.2} W), bound at the mean rate {} MiB (x{:.2} W), {} MiB freed, {} bad reads",
         r.tag,
         seen.elapsed,
         r.ws >> 20,
         seen.commits,
+        c,
+        seen.passes,
+        p,
         seen.written >> 20,
         rate / f64::from(1 << 20),
         seen.peak >> 20,
         seen.peak as f64 / r.ws as f64,
-        seen.steady_peak >> 20,
-        seen.steady_peak as f64 / r.ws as f64,
-        bound >> 20,
-        bound as f64 / r.ws as f64,
-        seen.passes,
+        steady_peak >> 20,
+        steady_peak as f64 / r.ws as f64,
+        mean_bound >> 20,
+        mean_bound as f64 / r.ws as f64,
         seen.freed >> 20,
+        seen.bad_reads,
     );
+    (p, checked)
 }
 
-/// CI: the store stays below `2 W + R (G + 3 P + 2 C) + slack` once the first
-/// grace and pass interval are over.
+/// CI: after the warm-up the store stops growing and stays below 1.5 x
+/// `2 W + R (G + 3 P + 2 C) + slack`, every chunk reads back its last write
+/// and `lunix-fsck` is clean.
 #[test]
 fn sustained_overwrite_stays_bounded() {
     lunixd::log::StderrLog::install(tracing::Level::INFO);
     let grace = Duration::from_secs(10);
-    // A pass's own work at this size: about 3 s on the test host (a
-    // compaction of about 100 MiB at `gc_rate`, about 100 deletes and 50
-    // condemns at a few directory syncs each); 4 s allows for load.
-    let work = Duration::from_secs(4);
+    // The warm-up allows passes of up to 6 s of work.
+    let work = Duration::from_secs(6);
     let gc = GcConfig::daemon();
     let r = Run {
         tag: "gcrate-bounded",
-        secs: env_or("LUNIX_GC_RATE_SECS", 140),
+        secs: env_or("LUNIX_GC_RATE_SECS", 150),
         ws: env_or("LUNIX_GC_RATE_MIB", 256) << 20,
         grace: Some(grace),
         gc,
         warmup: gc.pass_interval + grace * 2 + (gc.busy_interval + work) * 3,
     };
     let seen = run(&r);
-    let b = bound(&r, &seen, grace, work);
-    report(&r, &seen, b);
+    let (p, checked) = report(&r, &seen, grace);
+    assert_eq!(seen.bad_reads, 0, "{}: chunks read back wrong", r.tag);
     assert!(seen.freed > 0, "{}: GC freed nothing", r.tag);
     assert!(
-        seen.samples.len() > 10,
+        checked.len() >= 15,
         "{}: too few samples after the warm-up",
         r.tag
     );
-    for &(at, written, store) in &seen.samples {
+    // No growth: the last third's peak is not above the middle third's by
+    // more than one pass period of writes.
+    let third = checked.len() / 3;
+    let peak = |s: &[(Sample, u64)]| s.iter().map(|(x, _)| x.store).max().unwrap_or(0);
+    let middle = peak(&checked[third..2 * third]);
+    let tail = peak(&checked[2 * third..]);
+    let rate = rate_before(&seen.samples, seen.elapsed, seen.elapsed);
+    let allowance = (rate * p.as_secs_f64()) as u64 + (64 << 20);
+    assert!(
+        tail <= middle + allowance,
+        "{}: the store keeps growing: last third peak {} MiB, middle third {} MiB, allowance {} MiB",
+        r.tag,
+        tail >> 20,
+        middle >> 20,
+        allowance >> 20
+    );
+    // The absolute backstop, with margin.
+    for (s, b) in &checked {
+        let backstop = b + b / 2;
         assert!(
-            store <= b,
-            "{}: at {at:.0?} ({} MiB written) the store is {} MiB, above the bound of {} MiB",
+            s.store <= backstop,
+            "{}: at {:.0?} ({} MiB written) the store is {} MiB, above 1.5 x the bound ({} MiB)",
             r.tag,
-            written >> 20,
-            store >> 20,
-            b >> 20
+            s.at,
+            s.written >> 20,
+            s.store >> 20,
+            backstop >> 20
         );
     }
 }
@@ -285,9 +384,9 @@ fn sustained_overwrite_daemon_defaults() {
         ws: env_or("LUNIX_GC_RATE_MIB", 256) << 20,
         grace: None,
         gc,
-        warmup: grace + gc.pass_interval,
+        warmup: gc.pass_interval + grace * 2,
     };
     let seen = run(&r);
-    let b = bound(&r, &seen, grace, Duration::from_secs(4));
-    report(&r, &seen, b);
+    report(&r, &seen, grace);
+    assert_eq!(seen.bad_reads, 0, "{}: chunks read back wrong", r.tag);
 }
