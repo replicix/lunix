@@ -175,3 +175,139 @@ fn a_reverted_subtree_keeps_the_older_roots_pack() {
         }
     }
 }
+
+/// A segment, three of its five chunks discarded and the FULL that held them
+/// aged out: the next pass compacts it. Returns the source segment.
+fn compacted(v: &mut Vol) -> SegId {
+    for ci in 0..5 {
+        v.write(ci, 200 + ci);
+    }
+    v.commit().expect("commit");
+    let s = v.hint(0).seg;
+    for ci in 2..5 {
+        v.discard(ci);
+    }
+    v.commit().expect("commit");
+    for _ in 0..3 {
+        v.commit().expect("commit");
+    }
+    s
+}
+
+/// M17.B stack review S-1 (and re-review S-2, M-1): the source's delete waits
+/// for a FULL below the tip to name the output; the collector asks for that
+/// cut exactly once, the source goes after it, and an idle collector then
+/// runs no pass and writes no evidence.
+#[test]
+fn a_source_waits_for_one_requested_cut_then_goes_and_gc_rests() {
+    use lunix_iface::gc::Collector;
+    let mut v = Vol::new(8);
+    let s = compacted(&mut v);
+    v.passes(1).expect("compaction");
+    assert!(!v.moved.is_empty(), "compacted");
+    v.commit().expect("the cut that names the output");
+    let asked = v.cut_requests;
+    v.passes(4).expect("passes");
+    assert!(
+        v.segments().contains(&s),
+        "the source waits for a FULL below the tip"
+    );
+    assert_eq!(
+        v.cut_requests,
+        asked + 1,
+        "one cut asked for, not one per pass"
+    );
+    v.commit().expect("the requested cut");
+    v.passes(2).expect("passes");
+    assert!(!v.segments().contains(&s), "the source goes after the cut");
+    // At rest: no pass, no evidence, no cut request.
+    let (passes, evidence, asked) = (v.gc.stats().passes, v.evidence(), v.cut_requests);
+    v.passes(10).expect("idle passes");
+    assert_eq!(
+        v.gc.stats().passes,
+        passes,
+        "an idle collector runs no pass"
+    );
+    assert_eq!(v.evidence(), evidence, "and writes no evidence");
+    assert_eq!(v.cut_requests, asked);
+}
+
+/// The local bound of `gc/` (re-review S-2): with a pass that deletes
+/// something after every commit, the newest 1 024 objects stay, numbered on
+/// from the newest.
+#[test]
+fn evidence_keeps_the_newest_1024_objects() {
+    let mut v = Vol::new(1);
+    for i in 0..1040u64 {
+        v.write(0, 1000 + i);
+        v.commit().expect("commit");
+        v.passes(1).expect("pass");
+    }
+    let passes = v.evidence();
+    let last = *passes.last().expect("evidence");
+    assert!(last > 1024, "{last} passes wrote evidence");
+    assert_eq!(passes.len(), 1024, "the newest 1024 stay");
+    assert_eq!(passes, (last - 1023..=last).collect::<Vec<_>>());
+}
+
+/// Re-review S-2 (M-2 of the stack review): a step that seals a compaction
+/// output and then fails (here: the evidence write) keeps its moves for the
+/// engine, which takes them with `Collector::take_moved`.
+#[test]
+fn a_failed_step_hands_its_moves_over() {
+    use lunix_iface::gc::Collector;
+    let mut v = Vol::new(8);
+    compacted(&mut v);
+    v.clock.advance(common::GRACE * 2);
+    v.store
+        .faults()
+        .arm("evidence.put.before", 1, lunix_testkit::Fault::Io);
+    let mut failed = false;
+    for _ in 0..1000 {
+        match v.step() {
+            Ok(p) if p.done => break,
+            Ok(_) => v.clock.advance(common::GRACE),
+            Err(_) => {
+                failed = true;
+                break;
+            }
+        }
+    }
+    assert!(failed, "the evidence write failed");
+    assert!(v.moved.is_empty(), "the failed step returned no moves");
+    let moved = v.gc.take_moved();
+    assert!(
+        !moved.is_empty(),
+        "the moves are handed over after the failure"
+    );
+    assert!(v.gc.unnamed_outputs().contains(&moved[0].new.seg));
+    assert!(v.gc.take_moved().is_empty(), "once");
+}
+
+/// `worth_compacting` at its edges (re-review S-2).
+#[test]
+fn worth_compacting_at_the_edges() {
+    use lunix_gc::compact::{
+        worth_compacting, MIN_GAIN, OUTPUT_COST_PER_EXTENT, OUTPUT_COST_PER_SEGMENT,
+    };
+    assert!(!worth_compacting(0, 0, 0, 0.5));
+    assert!(!worth_compacting(4096, 0, 0, 0.5), "nothing live");
+    assert!(
+        !worth_compacting(u64::MAX, u64::MAX, u64::MAX, 0.5),
+        "saturates, all live"
+    );
+    assert!(worth_compacting(u64::MAX, 1, 1, 0.5));
+    let (live, ext) = (100u64, 2u64);
+    let out = live + ext * OUTPUT_COST_PER_EXTENT + OUTPUT_COST_PER_SEGMENT;
+    assert!(
+        worth_compacting(out + MIN_GAIN, live, ext, 0.5),
+        "exactly the gain"
+    );
+    assert!(
+        !worth_compacting(out + MIN_GAIN - 1, live, ext, 0.5),
+        "one byte short"
+    );
+    // The fraction still rules: half live is not below 0.5.
+    assert!(!worth_compacting(1 << 20, 1 << 19, 1, 0.5));
+    assert!(worth_compacting(1 << 20, (1 << 19) - 1, 1, 0.5));
+}
