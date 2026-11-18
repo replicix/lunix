@@ -72,6 +72,11 @@ pub(crate) struct Coord {
     /// A `persist` failed (at C8 or of the catch-up at open): the next cut
     /// retries it before anything else and fails while it fails (N13).
     pub(crate) index_unpersisted: bool,
+    /// The collector asked for a cut (`GcProgress::cut_wanted`): a FULL below
+    /// the tip must name a compaction output before its source can go.
+    pub(crate) gc_cut: bool,
+    /// The last GC step error, logged once per change.
+    pub(crate) gc_error: Option<String>,
 }
 
 impl Coord {
@@ -92,6 +97,8 @@ impl Coord {
             collector,
             upto_seg: rec.upto_seg,
             index_unpersisted: rec.index_unpersisted,
+            gc_cut: false,
+            gc_error: None,
         }
     }
 }
@@ -216,8 +223,22 @@ impl Inner {
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
         let mut co = crate::engine::lock(&self.coord);
         if self.wanted(&mut co) {
-            self.commit(&mut co, false, None)
+            let res = self.commit(&mut co, false, None);
+            // A cut that failed before it changed the map (no space for it,
+            // above all) still lets the collector work, or a full volume
+            // could never free what its condemned objects hold (M17.B stack
+            // review S-2). `gc_step` checks that the map is the tip's.
+            if res.is_err() && !self.is_failed() {
+                self.gc_step(&mut co);
+            }
+            res
         } else {
+            // An idle volume still steps the collector (M17.A review minor
+            // 4): a pass waiting in its grace finishes without a cut. Its
+            // moves (or a cut it asks for) make the next tick cut.
+            if !self.is_failed() {
+                self.gc_step(&mut co);
+            }
             Ok(CommitOutcome::Idle)
         }
     }
@@ -240,7 +261,8 @@ impl Inner {
     }
 
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.moved.is_empty() || !co.pending_named.is_empty() || co.index_unpersisted {
+        if !co.moved.is_empty() || !co.pending_named.is_empty() || co.index_unpersisted || co.gc_cut
+        {
             return true;
         }
         let dirty = self.journal.last_issued() > co.tip.cut_seq;
@@ -282,7 +304,7 @@ impl Inner {
             c = c.min(poisoned.saturating_sub(1));
         }
         c = c.max(prev);
-        let idle = co.moved.is_empty() && co.pending_named.is_empty();
+        let idle = co.moved.is_empty() && co.pending_named.is_empty() && !co.gc_cut;
         if c == prev && !force && idle && size == co.tip.size {
             return Ok(CommitOutcome::Idle);
         }
@@ -526,6 +548,7 @@ impl Inner {
             co.upto_seg = Some(co.upto_seg.map_or(m, |u| u.max(m)));
         }
         co.pending_named.clear();
+        co.gc_cut = false;
         self.size.store(size, Ordering::Release);
         self.durable_cut.store(c, Ordering::Release);
         add(&self.stats.commits, 1);
@@ -735,9 +758,8 @@ impl Inner {
             chain_floor: co.tip.chain_floor,
             high_water_mark: high_water(&co.retained),
         };
-        let retained = co.retained.clone();
         let view = GcView {
-            retained: &retained,
+            retained: &co.retained,
             tip,
             pins: &*self.pins,
             map: &*self.map,
@@ -756,8 +778,22 @@ impl Inner {
             return;
         };
         match collector.step(&view, budget) {
-            Ok(p) => co.moved.extend(p.moved),
-            Err(e) => tracing::warn!(error = %e, "gc step failed; the pass resumes later"),
+            Ok(p) => {
+                co.moved.extend(p.moved);
+                co.gc_cut |= p.cut_wanted;
+                co.gc_error = None;
+            }
+            Err(e) => {
+                // An output sealed before the failure is named by the next
+                // cut all the same (M17.B stack review M-2).
+                co.moved.extend(collector.take_moved());
+                // Once per distinct error, not at every tick (M-3).
+                let msg = e.to_string();
+                if co.gc_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "gc step failed; the pass resumes later");
+                    co.gc_error = Some(msg);
+                }
+            }
         }
     }
 }

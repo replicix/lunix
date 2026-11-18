@@ -1495,6 +1495,46 @@ pub fn fsck(vol: &TestVolume) -> Option<FsckOutcome> {
     })
 }
 
+/// The leak check at rest: `lunix-fsck --json` ran the GC hook's dry run
+/// (the report carries `gc_dry_run`) and a pass would condemn and delete
+/// nothing.
+///
+/// # Panics
+/// When the binary is not built or cannot run, the dry run did not run, or
+/// GC has work left.
+pub fn assert_no_gc_work(vol: &TestVolume, what: &str) {
+    let bin = fsck_binary().unwrap_or_else(|| panic!("{what}: lunix-fsck is not built"));
+    let args = vol
+        .fsck_args()
+        .unwrap_or_else(|| panic!("{what}: lunix-fsck cannot open this volume"));
+    let out = std::process::Command::new(&bin)
+        .args(args)
+        .arg("--json")
+        .arg(&vol.voldir)
+        .output()
+        .unwrap_or_else(|e| panic!("run {}: {e}", bin.display()));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("{what}: lunix-fsck --json: {e}"));
+    let d = &v["gc_dry_run"];
+    assert!(
+        d.is_object(),
+        "{what}: the GC hook's dry run did not run: {v}"
+    );
+    for k in [
+        "segments_condemned",
+        "segments_deleted",
+        "packs_deleted",
+        "runs_deleted",
+        "commits_deleted",
+    ] {
+        assert_eq!(
+            d[k].as_u64(),
+            Some(0),
+            "{what}: GC left work at rest ({k}): {d}"
+        );
+    }
+}
+
 // ------------------------------------------------------------ sync tracker
 
 /// What [`SyncTracker::crash`] undid.

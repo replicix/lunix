@@ -1094,6 +1094,11 @@ impl GcStateStore for MemStore {
     fn evidence_passes(&self) -> Result<Vec<u64>> {
         Ok(self.st()?.d.evidence.keys().copied().collect())
     }
+
+    fn delete_evidence(&self, pass: u64) -> Result<bool> {
+        let mut st = lock(&self.0.state);
+        Ok(st.d.evidence.remove(&pass).is_some())
+    }
 }
 
 // ----------------------------------------------------------- volume dir

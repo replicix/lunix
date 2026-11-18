@@ -10,8 +10,8 @@ lunix-fsck [--deep] [--json] [--key-file P] [--passphrase-env V] [--rebuild-inde
 ```
 
 Exit status: 0 clean (notes allowed), 1 warnings only, 2 errors, 64 usage.
-The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
-(a test keeps the table complete); `docs` of the crate root list the checks.
+Finding codes, severity and meaning: `lunix_fsck::code::ALL` (a test keeps the
+table complete; `docs` of the crate root list the checks).
 
 ## Decisions
 
@@ -22,13 +22,13 @@ The finding codes, with severity and meaning, are `lunix_fsck::code::ALL`
 3. BLAKE3 goes through `CommitCodec::object_hash` (no `blake3` dependency).
 4. The journal is read with `lunix_format::journal::scan_file`, never through
    `Journal::recover` (its first lane open wipes tails).
-5. Orphan: no commit file on disk names it, no root of GC's retained set (down
-   to the lowest retained `chain_floor`, N24) references it and the condemned
-   list does not. `orphan` after a clean close, else `crash_leftover`.
-6. Repairs run first, then the checks run again. `--truncate-tip` lowers the
-   floor, sets the tip aside, then zeroes the checkpoint; it loses the journal
-   records C9 already reclaimed, and says which. `--delete-orphans` is refused
-   with `--truncate-tip` (the zeroed checkpoint loses `id_high`).
+5. Orphan: above the high-water mark (below it, unreferenced is GC's garbage), no
+   commit file names it, no root of GC's retained set references it, not listed.
+   `orphan` after a clean close, else `crash_leftover`.
+6. Repairs run first, then the checks again. `--truncate-tip` rebuilds the index
+   for the previous commit (every footer, item 11's memory; gc.md), lowers the
+   floor, sets the tip aside, zeroes the checkpoint, names the records C9 lost.
+   `--delete-orphans` is refused with it (the zeroed checkpoint loses `id_high`).
 7. The floor is lowered only through `VolumeDir::reset_rollback_floor`
    (store opened with `allow_floor_reset` only for `--truncate-tip`,
    `--reset-floor` and `--repair-pins`; audited in `state/floor-resets.log`).

@@ -249,19 +249,53 @@ fn publish_inner(
 /// Removes `path` durably: unlink, then directory fsync. Returns whether a
 /// file was removed. Crash points `store.delete.*`.
 pub(crate) fn unlink_durable(inner: &Inner, path: &Path) -> Result<bool, Error> {
-    lunix_iface::crashpoint!("store.delete.before_unlink");
+    unlink_with(
+        inner,
+        path,
+        [
+            || lunix_iface::crashpoint!("store.delete.before_unlink"),
+            || lunix_iface::crashpoint!("store.delete.after_unlink"),
+            || lunix_iface::crashpoint!("store.delete.after_dirsync"),
+        ],
+    )
+}
+
+/// Unlink, then directory fsync, with crash points before the unlink, after
+/// it and after the fsync.
+fn unlink_with(
+    inner: &Inner,
+    path: &Path,
+    [before, unlinked, synced]: [fn(); 3],
+) -> Result<bool, Error> {
+    before();
     let removed = match inner.fs.unlink(path) {
         Ok(()) => true,
         Err(e) if e.kind() == io::ErrorKind::NotFound => false,
         Err(e) => return Err(io_err(e)),
     };
-    lunix_iface::crashpoint!("store.delete.after_unlink");
+    unlinked();
     // Also when nothing was there: an earlier delete may have died between
     // the unlink and the directory fsync.
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     inner.fs.fsync_dir(parent).map_err(io_err)?;
-    lunix_iface::crashpoint!("store.delete.after_dirsync");
+    synced();
     Ok(removed)
+}
+
+/// [`unlink_durable`] for a sealed segment, with its own crash points
+/// `store.segment_delete.*`: a kill after the unlink and before the index
+/// drops the segment's entries leaves entries into a missing file, which a
+/// kill after any other unlink does not.
+pub(crate) fn unlink_segment_durable(inner: &Inner, path: &Path) -> Result<bool, Error> {
+    unlink_with(
+        inner,
+        path,
+        [
+            || lunix_iface::crashpoint!("store.segment_delete.before_unlink"),
+            || lunix_iface::crashpoint!("store.segment_delete.after_unlink"),
+            || lunix_iface::crashpoint!("store.segment_delete.after_dirsync"),
+        ],
+    )
 }
 
 /// Reads a whole small file after checking its size against `max`, so a

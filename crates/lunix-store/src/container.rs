@@ -69,11 +69,34 @@ impl Inner {
     }
 
     /// Deletes a sealed container (unlink, directory fsync) and returns the
-    /// bytes freed; a missing one frees 0.
+    /// bytes freed; a missing one frees 0. A segment deleted through
+    /// `SegmentStore::delete` (GC, `--delete-orphans`) has its own crash
+    /// points (`store.segment_delete.*`); the open's sweep of what lies above
+    /// the mark uses the common ones (`store.delete.*`), so a kill can tell
+    /// the two apart.
     pub(crate) fn delete_container(&self, kind: ContainerKind, id: ObjId) -> Result<u64> {
+        self.delete_container_as(kind, id, kind == ContainerKind::Segment)
+    }
+
+    /// The open's sweep: as [`delete_container`](Self::delete_container) with
+    /// the common crash points for every kind.
+    pub(crate) fn sweep_container(&self, kind: ContainerKind, id: ObjId) -> Result<u64> {
+        self.delete_container_as(kind, id, false)
+    }
+
+    fn delete_container_as(
+        &self,
+        kind: ContainerKind,
+        id: ObjId,
+        segment_points: bool,
+    ) -> Result<u64> {
         let path = self.container_path(kind, id);
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let removed = crate::fsops::unlink_durable(self, &path)?;
+        let removed = if segment_points {
+            crate::fsops::unlink_segment_durable(self, &path)?
+        } else {
+            crate::fsops::unlink_durable(self, &path)?
+        };
         self.cache().remove(id);
         Ok(if removed { size } else { 0 })
     }

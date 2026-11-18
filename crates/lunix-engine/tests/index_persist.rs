@@ -200,6 +200,7 @@ impl Collector for Mover {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
     fn urgent(&mut self, _v: &GcView<'_>, _w: u64) -> Result<GcProgress> {
@@ -208,6 +209,7 @@ impl Collector for Mover {
             freed: 0,
             state: GcState::Idle,
             done: true,
+            cut_wanted: false,
         })
     }
     fn dry_run(&mut self, _v: &GcView<'_>) -> Result<GcPassSummary> {
