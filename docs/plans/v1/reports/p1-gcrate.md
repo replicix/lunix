@@ -273,12 +273,12 @@ Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches r
 2. **GC's share against the writes, in the compaction-bound case.** The M15 profile with a 4 GiB working
    set needs compaction, and compaction runs on the coordinator between cuts. With the share of about a
    quarter (`gc_share`) the store settles for 64K encrypted and 16K integrity and still drifts for 64K
-   integrity, at 1.1 to 1.9 x the model's bound. A larger share, a higher `gc_rate`, or compaction off the
-   coordinator (an interface change: the collector runs under the coordinator mutex) are the levers;
-   each costs foreground throughput or a design change.
+   integrity, at 1.1 to 1.9 x the model's bound. **The remaining gap to the bound (64K integrity, 1.6 to
+   1.9 x) goes to ADR-32 T4 (GC pressure and boost)**, which is where the share against the writes is
+   decided. **Compaction off the coordinator thread** is a candidate follow-up (an interface change: the
+   collector runs under the coordinator mutex).
 3. **No back-pressure on garbage.** Writes are not slowed when garbage outruns GC; the ladder acts only
    at `NoSpace`. The pre-GC 245 GB parking is the same gap.
 4. **Per-object index manifest swaps** (condemn 5.5 ms, delete 13 ms): a batch call would need a frozen
    `ChunkIndex` change.
-5. **The other `stack_gc_kill` cells** (plain 64 KiB, integrity 16 KiB) on the pipelined schedule were
-   not run.
+5. The grace default is unchanged (lead, 2026-11-18).

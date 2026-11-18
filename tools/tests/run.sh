@@ -68,6 +68,31 @@ expect 2 "remote: an id without an ownership entry is refused" rem -m cargo chec
 expect 2 "remote: an id with a slash is refused" rem -m "m1/x" check-id
 expect 2 "remote: an id with a dot is refused" rem -m "m1.x" check-id
 
+# --- the ownership base is origin/main, not a stale local main
+repo="$tmp/repo"
+mkdir -p "$repo"
+git_() { git -C "$repo" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+git_ init -q -b main
+mkdir -p "$repo/tools" "$repo/crates/lunix-gc/src" "$repo/crates/lunix-space/src"
+cp "$tools/check-ownership.sh" "$repo/tools/"
+printf '[gcrate]\npaths = ["crates/lunix-gc/**"]\n' > "$repo/tools/ownership.toml"
+echo a > "$repo/crates/lunix-gc/src/a.rs"
+git_ add -A && git_ commit -q -m base
+git_ checkout -q -b upstream
+echo b > "$repo/crates/lunix-space/src/b.rs"
+git_ add -A && git_ commit -q -m "another milestone, merged upstream"
+git_ update-ref refs/remotes/origin/main upstream
+git_ checkout -q -b p1/gcrate main
+echo c > "$repo/crates/lunix-gc/src/c.rs"
+git_ add -A && git_ commit -q -m own
+git_ merge -q --no-edit upstream
+# local main is still at the base: only origin/main gives the right base
+expect 0 "ownership: a branch merged with origin/main is judged against origin/main" \
+  env -u LUNIX_M LUNIX_BRANCH=p1/gcrate bash "$repo/tools/check-ownership.sh"
+git_ update-ref -d refs/remotes/origin/main
+expect 1 "ownership: without origin/main the stale local main is the base" \
+  env -u LUNIX_M LUNIX_BRANCH=p1/gcrate bash "$repo/tools/check-ownership.sh"
+
 # --- milestone guess from branch names (all names the plan's branches use)
 guess() { # <branch> <wanted milestone>
   set +e

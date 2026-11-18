@@ -244,6 +244,7 @@ paths = [
   "docs/reference/gc.md",
   "tools/ci.sh",
   "tools/remote.sh",
+  "tools/check-ownership.sh",
   "tools/tests/run.sh",
   "tools/ownership.toml",
 ]
