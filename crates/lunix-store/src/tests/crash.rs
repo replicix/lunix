@@ -71,7 +71,7 @@ fn table() -> Vec<(&'static str, Vec<String>)> {
         ("delete_pack", del("store.delete")),
         ("delete_commit", del("store.delete")),
         ("leftovers", del("store.leftover")),
-        ("sweep", del("store.segment_delete")),
+        ("sweep", del("store.delete")),
         (
             "set_aside",
             ["before_rename", "after_rename", "after_dirsync"]

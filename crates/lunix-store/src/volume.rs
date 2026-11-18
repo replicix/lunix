@@ -863,7 +863,7 @@ impl VolumeDir for LocalVolume {
                 continue;
             }
             if raw > req.high_water_mark {
-                self.inner.delete_container(ContainerKind::Segment, id)?;
+                self.inner.sweep_container(ContainerKind::Segment, id)?;
                 report.deleted_segments.push(id);
             } else {
                 report.kept_unreferenced.push(id);
@@ -877,7 +877,7 @@ impl VolumeDir for LocalVolume {
                 continue;
             }
             if raw > req.high_water_mark {
-                self.inner.delete_container(ContainerKind::MapPack, id)?;
+                self.inner.sweep_container(ContainerKind::MapPack, id)?;
                 report.deleted_packs.push(id);
             } else {
                 report.kept_unreferenced.push(id);
