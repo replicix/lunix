@@ -134,6 +134,7 @@ the cap.
 | + 256 MiB per pass (final) | raw 64K integrity | 50 MiB/s | 88 MiB/s | 32 GiB (18 to 28 GiB in the middle, still drifting up) | 17 GiB | 19 GiB |
 | final | raw / ext4 / xfs 64K encrypted | 50 MiB/s (raw) | 91 MiB/s (raw) | 28 / 29 / 26 GiB; raw flat at 24 GiB over its last 4 min | 18 GiB | 25 GiB (raw) |
 | final | raw / ext4 / xfs 16K integrity | 31 MiB/s (raw) | 40 MiB/s (raw) | 11 / 13 / 12 GiB; raw 10 to 14 GiB over its last 6 min | 13 GiB | 12 GiB (raw) |
+| committed, merged with `main` 871e187 (p1/bstop) | raw / ext4 / xfs 64K integrity | 50 MiB/s (raw) | 89 MiB/s (raw) | 28 / 25 / 27 GiB; raw 20 to 33 GiB over its last 6 min | 17 GiB | 23 GiB (raw) |
 
 (The sampler's written and freed counters are valid for the raw cells only: the device counter restarts
 with each device and the file-system cells' status calls returned nothing usable.)
@@ -192,13 +193,16 @@ paced down to one pass per 4 x mark time at worst; that is bounded, not measured
 
 ## Gate
 
-`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`), on a quiet host after the root runs: **all
-green**. 1 828 tests passed, 0 failed, 28 ignored (summed over every `test result` line; 1 819 at
-5773f3a). Among them the 5 new directed pipeline tests, the pipelined crash sweeps at 16 KiB, 64 KiB and
-lean ids, `churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`, `sustained_overwrite_stays_bounded`
-and the `tools/tests` cases. fmt, clippy `-D warnings` (workspace and `lunixd` with
-`testsupport,crashpoints`), the feature edges, the release stack tests with `lunix-fsck`, and
-`check-ownership: gcrate ok (18 changed paths)`.
+`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`) on the tree merged with `main` 871e187
+(5fd36d9 plus the report): 1 902 tests passed, 0 failed, 28 ignored (summed over every `test result`
+line), fmt, clippy `-D warnings` (workspace and `lunixd` with `testsupport,crashpoints`), the feature
+edges, the release stack tests with `lunix-fsck`, `tools/tests`. The script's ownership step compares
+with the local `main` ref, which is behind `origin/main` in this worktree (it listed bstop's paths); the
+same check against the merge base with `origin/main` (`--changed-list`) gives
+`check-ownership: gcrate ok (17 changed paths)`. Before the merge, at a2e9408: all green, 1 828 passed.
+Among the tests: the 5 new directed pipeline tests, the pipelined crash sweeps at 16 KiB, 64 KiB and
+lean ids, `churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`,
+`sustained_overwrite_stays_bounded` and the `tools/tests` cases.
 
 By hand: `gc_kill_loop_plain_16k` on the pipelined schedule: 21 points, 21 reached, 21 kills, all
 verified (1 061 s). Root: seven `fio-verify` cells (above), all passing, host left clean (no ublk device,
@@ -242,9 +246,15 @@ Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches r
   and are not committed (the harness is `p1/m15`'s). The harness ignores a TERM after its teardown:
   `teardown` clears the traps and returns, and the script goes on to the next cell (seen when a run was
   stopped early). That is for M15 to look at.
-- `crates/lunixd/tests/wiring.rs` `journal_damage_is_reported_and_wiped_and_refuse_keeps_it` failed once
-  (a damaged range's `next_seq` 4 instead of 3) in a CI run started at low priority next to a root run;
-  it passed three of three alone. Not changed here.
+- `crates/lunixd/tests/wiring.rs` `journal_damage_is_reported_and_wiped_and_refuse_keeps_it` is flaky on
+  the host: extra journal records (`next_seq` 4 or 5 instead of 3) after the three writes. It is not this
+  branch: on `main` 3e6fb81 it failed 5 of 8 runs of the `wiring` suite, on this branch 1 of 6. Not
+  changed here; worth an issue for its owner.
+- Merge of `main` 871e187 (p1/bstop), conflicts resolved by judgement: `coord.rs` `tick()` keeps both
+  the ADR-32 space cut (`space_cut`, `after_space_cut`) and `gc_share` (a space cut that commits also
+  gives a busy collector its share, which a full volume needs most); `tools/ci.sh` runs both
+  `stack_gc_rate` and `stack_throttle`; `tools/ownership.toml` keeps both entries. `tools/remote.sh`
+  merged cleanly (bstop carried the same id check).
 - rust-skills: one local `macro_rules!` picks the log level of the pass line (tracing needs a constant
   level); no conflict with the project's conventions.
 
