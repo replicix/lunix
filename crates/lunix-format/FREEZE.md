@@ -194,3 +194,10 @@ no backward compatibility while Lunix is in progress); its layout is
 unchanged.
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-15 (amendment (b): journal mark ring, record kind 3)
+
+**Rule change F1 (2026-11-18, ADR-32).** In `volume.json`, a null
+`space.full_timeout_ms` no longer means "wait for ever": it means the
+daemon's default full timeout (60 s). No byte of any golden changes; the
+row of on-disk-formats.md §21 changes with the implementation (T1).
+Maintainer sign-off 2026-11-18 (rule change, no layout change), given with
+the acceptance of ADR-32.
