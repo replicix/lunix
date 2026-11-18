@@ -225,6 +225,48 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# bstop: ADR-32 T1, T2 and T6 (the bounded stop, the discard path, a default
+# cache_max at volume creation).
+[bstop]
+paths = [
+  "crates/lunix-space/src/gate.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/src/lib.rs",
+  "crates/lunix-space/src/policy.rs",
+  "crates/lunix-space/tests/behaviour.rs",
+  "crates/lunix-space/tests/model.rs",
+  "crates/lunix-space/tests/bounded.rs",
+  "crates/lunix-space/tests/common/mod.rs",
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/gc.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/src/queue.rs",
+  "crates/lunix-engine/tests/full.rs",
+  "crates/lunix-engine/tests/gc_control.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-cli/src/cli.rs",
+  "crates/lunix-cli/src/cmd.rs",
+  "crates/lunix-cli/tests/socket.rs",
+  "crates/lunix-cli/tests/snapshots/help-volume-create.txt",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/main.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/control.rs",
+  "crates/lunixd/tests/control_gc.rs",
+  "crates/lunixd/tests/shutdown.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/reference/on-disk-formats.md",
+  "docs/reference/gc.md",
+  "tools/ci.sh",
+  "tools/remote.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 

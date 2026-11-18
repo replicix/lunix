@@ -272,20 +272,7 @@ impl Inner {
                     freed = p.freed,
                     "a commit failed for space: gc urgent pass"
                 );
-                let condemned = co
-                    .collector
-                    .as_ref()
-                    .is_some_and(|c| c.status().condemned_pending > 0);
-                let doubled = co.space_backoff.saturating_mul(2).min(SPACE_URGENT_MAX);
-                co.space_backoff = if p.freed > 0 {
-                    SPACE_URGENT_MIN
-                } else if condemned {
-                    // What it condemned can go once the floor grace ran: the
-                    // next pass is useful then, not later.
-                    doubled.min(self.floor_grace()).max(SPACE_URGENT_MIN)
-                } else {
-                    doubled
-                };
+                co.space_backoff = self.next_backoff(co, co.space_backoff, p.freed);
                 co.absorb(p);
             }
             Err(e) => {
@@ -295,16 +282,54 @@ impl Inner {
         }
     }
 
+    /// The pause after an urgent pass that freed `freed` bytes, from the
+    /// pause `cur` before it: back to the minimum after one that freed bytes,
+    /// at most the floor grace after one that condemned (what it condemned
+    /// can go then, not later), else doubling to the maximum.
+    fn next_backoff(&self, co: &Coord, cur: Duration, freed: u64) -> Duration {
+        let condemned = co
+            .collector
+            .as_ref()
+            .is_some_and(|c| c.status().condemned_pending > 0);
+        let doubled = cur.saturating_mul(2).min(SPACE_URGENT_MAX);
+        if freed > 0 {
+            SPACE_URGENT_MIN
+        } else if condemned {
+            doubled.min(self.floor_grace()).max(SPACE_URGENT_MIN)
+        } else {
+            doubled
+        }
+    }
+
     /// `GcControl::run_urgent`: the urgent pass on the coordinator; its moves
     /// go to the next cut. Returns the bytes freed. Counts as the last urgent
     /// pass for `space_short`.
+    ///
+    /// The ladder asks for it again while writes stay parked; it has a
+    /// back-off of its own (ADR-32, P5): not within the pause after the last
+    /// urgent pass of either path (2 s, doubling to 60 s while ladder passes
+    /// free nothing; unlike `space_short`'s, a successful commit does not
+    /// reset it), in which case it frees nothing and returns at once.
     pub(crate) fn run_urgent(&self, want_bytes: u64) -> Result<u64> {
         let mut co = lock(&self.coord);
         self.check_open()?;
+        let now = self.clock.monotonic();
+        let pause = self.full.ladder_backoff();
+        if co
+            .last_space_urgent
+            .is_some_and(|t| now < t.saturating_add(pause))
+        {
+            return Ok(0);
+        }
         let res = self.with_collector(&mut co, |c, v| c.urgent(v, want_bytes));
-        // Only a pass that ran counts for `space_short`'s pause.
+        // Only a pass that ran counts for the pause.
         if !matches!(&res, Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::Unsupported)) {
             co.last_space_urgent = Some(self.clock.monotonic());
+            let next = match &res {
+                Ok(p) => self.next_backoff(&co, pause, p.freed),
+                Err(_) => pause.saturating_mul(2).min(SPACE_URGENT_MAX),
+            };
+            self.full.set_ladder_backoff(next);
         }
         let p = res?;
         let freed = p.freed;

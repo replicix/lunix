@@ -64,7 +64,14 @@ calling thread runs the collector under the coordinator mutex):
   published after its last call, without waiting for the coordinator or the
   engine. A volume that is not attached is idle, with empty counters.
 - **The space ladder's compact step** is the urgent pass (below): the gate
-  runs it on its own thread when a reservation does not fit. A commit that
+  runs it on its ladder thread when a reservation does not fit, and asks
+  again each second while requests wait for space (ADR-32). That path has a
+  back-off of its own: not sooner than 2 s after the end of the last urgent
+  pass (either kind), doubling up to 60 s while ladder passes free nothing,
+  at most the floor grace after one that condemned something, back to 2 s
+  after one that freed bytes; a successful commit does not reset it. Within
+  the pause the step frees nothing and returns at once. The gate's deadlines
+  never wait for it: they run on its timer thread. A commit that
   fails for space at any step (a destage `NoSpace` from a full host file
   system, an index run that cannot be written) runs it too, from the
   coordinator, at least 2 s after the end of the last urgent pass (either

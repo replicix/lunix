@@ -10,6 +10,15 @@
 //! range, the number leaves the in-flight set and the request completes (a
 //! FUA write first joins the next flush group). `Full` and `NoSpace` from
 //! the journal give the space back and park the tag; no number is consumed.
+//!
+//! The bounded full volume (ADR-32): a write parked in the gate fails
+//! `ENOSPC` when its waiter expires (`EIO` when the volume went read-only);
+//! a write parked for a full ring fails at its `full_timeout` or at once when
+//! the engine stops (`crate::full`). DISCARD and WRITE_ZEROES take their
+//! 64-byte hole records from the reserved region (`reserve_headroom`), so
+//! they never wait for space, and queue only behind other hole requests
+//! parked for the ring, never behind parked writes (two requests in flight
+//! together have no order).
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -106,6 +115,8 @@ struct Mutation {
     end_block: u64,
     outstanding: u32,
     space: SpaceWait,
+    /// `clock.monotonic()` at arrival: the ring-full deadline counts from it.
+    arrived: std::time::Duration,
 }
 
 struct ReadState {
@@ -168,7 +179,10 @@ pub(crate) struct Queue {
     max_buf: u32,
     reqs: HashMap<Tag, Req>,
     appends: HashMap<u64, Pending>,
+    /// Writes waiting for space or the ring, FIFO.
     parked: VecDeque<Tag>,
+    /// DISCARD and WRITE_ZEROES waiting for the ring, FIFO among themselves.
+    parked_holes: VecDeque<Tag>,
     jreads: HashMap<u64, JRead>,
     next_token: u64,
     next_gen: u64,
@@ -192,6 +206,7 @@ impl Queue {
             reqs: HashMap::new(),
             appends: HashMap::new(),
             parked: VecDeque::new(),
+            parked_holes: VecDeque::new(),
             jreads: HashMap::new(),
             next_token: 1,
             next_gen: 1,
@@ -277,11 +292,19 @@ impl Queue {
                             end_block: first + u64::from(req.len) / BLOCK,
                             outstanding: 0,
                             space: SpaceWait::None,
+                            arrived: self.inner.clock.monotonic(),
                         }),
                     },
                 );
-                // FIFO behind writes already parked.
-                let step = if self.parked.is_empty() {
+                // FIFO behind the parked requests of the same class: a hole
+                // never waits behind a write parked for space (ADR-32).
+                let is_hole = record == RecordKind::Hole;
+                let behind = if is_hole {
+                    &self.parked_holes
+                } else {
+                    &self.parked
+                };
+                let step = if behind.is_empty() {
                     self.advance(req.tag, Some(&*buf), done)
                 } else {
                     Step::Parked
@@ -296,7 +319,11 @@ impl Queue {
                             m.data = Some(buf.get(..req.len as usize).unwrap_or(buf).to_vec());
                         }
                     }
-                    self.parked.push_back(req.tag);
+                    if is_hole {
+                        self.parked_holes.push_back(req.tag);
+                    } else {
+                        self.parked.push_back(req.tag);
+                    }
                 }
             }
         }
@@ -357,24 +384,56 @@ impl Queue {
                         m.space = SpaceWait::Waiting(w, b);
                         return Step::Parked;
                     }
-                    WaiterState::Granted => m.space = SpaceWait::Charged(b),
+                    WaiterState::Granted => {
+                        inner.full.set_blocked(false);
+                        m.space = SpaceWait::Charged(b);
+                    }
                     WaiterState::TimedOut | WaiterState::Cancelled => {
-                        self.fail(tag, ENOSPC, done);
+                        // A read-only volume expires its waiters too: that
+                        // is `EIO`, the full volume `ENOSPC` (ADR-32).
+                        let errno = if inner.read_only() { EIO } else { ENOSPC };
+                        self.fail(tag, errno, done);
                         return Step::Done;
                     }
                 },
+                // A hole record frees space: it is admitted from the reserved
+                // region, never parked (ADR-32, P4).
+                SpaceWait::None if m.record == RecordKind::Hole => {
+                    match inner
+                        .space
+                        .reserve_headroom(SpaceKind::JournalReserved, charge)
+                    {
+                        Ok(()) => m.space = SpaceWait::Charged(charge),
+                        Err(e) => {
+                            let errno = if inner.read_only() {
+                                EIO
+                            } else if e.kind() == lunix_iface::ErrorKind::NoSpace {
+                                ENOSPC
+                            } else {
+                                EIO
+                            };
+                            self.fail(tag, errno, done);
+                            return Step::Done;
+                        }
+                    }
+                }
                 SpaceWait::None => {
                     match inner.space.reserve(
                         SpaceKind::JournalReserved,
                         charge,
                         Some(&self.shared.wake),
                     ) {
-                        Ok(ReserveOutcome::Reserved) => m.space = SpaceWait::Charged(charge),
+                        Ok(ReserveOutcome::Reserved) => {
+                            inner.full.set_blocked(false);
+                            m.space = SpaceWait::Charged(charge);
+                        }
                         Ok(ReserveOutcome::Parked(w)) => {
+                            inner.full.set_blocked(true);
                             m.space = SpaceWait::Waiting(w, charge);
                             return Step::Parked;
                         }
                         Ok(ReserveOutcome::NoSpace) => {
+                            inner.full.set_blocked(true);
                             self.fail(tag, ENOSPC, done);
                             return Step::Done;
                         }
@@ -405,6 +464,11 @@ impl Queue {
                 Ok(None) => {
                     inner.space.release(SpaceKind::JournalReserved, charged);
                     m.space = SpaceWait::None;
+                    // Every wait has a deadline (ADR-32, P6).
+                    if let Some(errno) = inner.ring_wait_verdict(m.arrived) {
+                        self.fail(tag, errno, done);
+                        return Step::Done;
+                    }
                     inner.journal_full.store(true, Ordering::Release);
                     return Step::Parked;
                 }
@@ -419,6 +483,9 @@ impl Queue {
             };
             m.space = SpaceWait::None;
             let seq = slot.write_seq;
+            if m.record == RecordKind::Hole {
+                inner.full.note_hole(seq.0);
+            }
             inner.points.hooks().sequenced(self.shared.id, tag, seq);
             let lba = m.next_block;
             let range = BlockRange { lba, blocks };
@@ -789,17 +856,46 @@ impl Queue {
     }
 
     fn retry_parked(&mut self, done: &mut dyn Completer) -> bool {
-        let mut progressed = false;
-        while let Some(&tag) = self.parked.front() {
-            if !self.reqs.contains_key(&tag) {
-                self.parked.pop_front();
-                continue;
+        // A stopped or read-only engine fails what it parked at once
+        // (ADR-32): nothing would ever admit it.
+        let any_parked = !(self.parked.is_empty() && self.parked_holes.is_empty());
+        if any_parked && self.inner.read_only() {
+            let tags: Vec<Tag> = self
+                .parked
+                .drain(..)
+                .chain(self.parked_holes.drain(..))
+                .collect();
+            for tag in tags {
+                self.fail(tag, EIO, done);
             }
-            match self.advance(tag, None, done) {
-                Step::Parked => break,
-                Step::Done => {
-                    self.parked.pop_front();
-                    progressed = true;
+            return true;
+        }
+        let mut progressed = false;
+        for holes in [true, false] {
+            loop {
+                let q = if holes {
+                    &mut self.parked_holes
+                } else {
+                    &mut self.parked
+                };
+                let Some(&tag) = q.front() else {
+                    break;
+                };
+                if !self.reqs.contains_key(&tag) {
+                    q.pop_front();
+                    continue;
+                }
+                match self.advance(tag, None, done) {
+                    Step::Parked => break,
+                    Step::Done => {
+                        let q = if holes {
+                            &mut self.parked_holes
+                        } else {
+                            &mut self.parked
+                        };
+                        q.pop_front();
+                        progressed = true;
+                    }
                 }
             }
         }

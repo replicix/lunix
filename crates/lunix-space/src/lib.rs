@@ -56,21 +56,35 @@
 //! # The ladder
 //!
 //! Steps register per [`LadderStepKind`](lunix_iface::space::LadderStepKind)
-//! and run on the gate's own thread in the order evict cache, evict synced,
-//! compact, throttle destage, until the head waiter fits. A request that does
-//! not fit starts a run (also with `on_full = error`, for the next write);
-//! while requests stay parked the thread starts another run each second. A
-//! step that returns an error is skipped and counted
-//! ([`LunixSpace::step_errors`]). `lunixd` registers no-ops for three of the
-//! four in phase 1 and GC's urgent pass as compact.
+//! and run on the gate's ladder thread (`lunix-space-ladder`) in the order
+//! evict cache, evict synced, compact, throttle destage, until the waiting
+//! requests fit. Their `want` is every waiting reservation plus the resume
+//! mark, less the headroom. A request that does not fit starts a run (also
+//! with `on_full = error`, and on a full volume, for the next write); while
+//! requests stay parked the timer thread asks for another run each second
+//! (the compact step, GC's urgent pass, backs off by itself: ADR-32). A step
+//! that returns an error is skipped and counted ([`LunixSpace::step_errors`]).
+//! `lunixd` registers no-ops for three of the four in phase 1 and GC's urgent
+//! pass as compact.
 //!
-//! # Timeouts
+//! # The bounded stop (ADR-32)
 //!
-//! A parked request carries `clock.monotonic() + full_timeout`.
-//! [`tick`](lunix_iface::space::SpaceGate::tick) expires what is due and lets
-//! the requests behind an expired head be granted. With
-//! `background_timers` the thread sleeps until the nearest deadline and ticks
-//! by itself.
+//! Every parked request has a deadline: its arrival plus `full_timeout`
+//! (`space.full_timeout_ms`, or [`SpaceConfig::full_timeout`], 60 s by
+//! default, when that is null). The first expiry fails every other request
+//! waiting for space and **latches the volume full**: reservations fail at
+//! once (`NoSpace`) until the headroom `limit - used` reaches the resume
+//! mark (the larger of 4 segments and 1 % of the limit, at most half the
+//! limit). `on_full = error` refuses at once and does not latch.
+//! [`reconfigure`](lunix_iface::space::SpaceGate::reconfigure) re-judges
+//! every parked request under the new policy. [`LunixSpace::begin_close`]
+//! (the quiesce rule) fails the space waiters and parks nothing after it.
+//!
+//! Grants and deadlines never wait for the ladder: with `background_timers`
+//! a timer thread (`lunix-space-timer`) takes only the gate's lock and the
+//! probe, sleeps until the nearest deadline or the next refresh, and
+//! [`tick`](lunix_iface::space::SpaceGate::tick) does the same for tests on a
+//! manual clock.
 //!
 //! # Read-only
 //!
@@ -82,5 +96,5 @@ mod ledger;
 mod policy;
 mod probe;
 
-pub use gate::{LunixSpace, SpaceConfig, REFRESH_INTERVAL};
+pub use gate::{LunixSpace, SpaceConfig, DEFAULT_FULL_TIMEOUT, REFRESH_INTERVAL};
 pub use probe::{FsProbe, FsStat, ManualFs, SimFs, StatvfsProbe};

@@ -29,6 +29,7 @@ use crate::deps::{EngineDeps, RollbackFloorStore};
 use crate::destage::Destager;
 use crate::error::OpenError;
 use crate::flush::FlushGroups;
+use crate::full::FullState;
 use crate::points::Points;
 use crate::queue::{Queue, QueueShared};
 use crate::read::{ExtentReader, ReadCtx, ReadPool};
@@ -135,6 +136,8 @@ pub(crate) struct Inner {
     pub(crate) gc_requests: AtomicU64,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
+    /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
+    pub(crate) full: FullState,
 }
 
 impl Inner {
@@ -158,6 +161,8 @@ impl Inner {
     pub(crate) fn poison(&self, seq: u64, what: &str) {
         self.poisoned_at.fetch_min(seq, Ordering::AcqRel);
         self.space.fatal_io(what);
+        // Writes parked for the ring fail now (ADR-32).
+        self.signal_queues();
         tracing::error!(
             write_seq = seq,
             what,
@@ -311,6 +316,7 @@ impl Engine {
             gc_requests: AtomicU64::new(0),
             resize_hook: Mutex::new(None),
             report: rec.report,
+            full: FullState::new(cfg.full_timeout),
             cfg,
         });
         let engine = Self {
@@ -343,6 +349,11 @@ impl Engine {
                 let Some(inner) = weak.upgrade() else {
                     return;
                 };
+                // Writes parked for a full ring see their deadline, or the
+                // stopped engine, without new I/O (ADR-32).
+                if inner.journal_full.load(Ordering::Acquire) {
+                    inner.signal_queues();
+                }
                 if inner.is_failed() {
                     continue;
                 }
@@ -400,6 +411,18 @@ impl Engine {
     /// [`GcStatusHandle`]).
     pub fn gc_status_handle(&self) -> GcStatusHandle {
         GcStatusHandle(Arc::clone(&self.inner.gc_status))
+    }
+
+    /// Sets the ring-full deadline (the volume's resolved `full_timeout`)
+    /// live, after `lunix space` changed it (ADR-32).
+    pub fn set_full_timeout(&self, full_timeout: Duration) {
+        self.inner.full.set_full_timeout(full_timeout);
+    }
+
+    /// FULLs the full volume's window turn still owes after a discard
+    /// (ADR-32, decision M6); 0 outside it.
+    pub fn window_turn_left(&self) -> u32 {
+        self.inner.full.turn_left()
     }
 
     /// The `JournalReserved` bytes the engine believes it holds.

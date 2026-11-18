@@ -537,6 +537,14 @@ impl Daemon {
         let key_file = c.key_file.as_deref().map(Path::new);
         let pass = c.passphrase.as_ref().map(|s| s.expose());
         let (jmax, interval) = (self.cfg.journal_max, self.cfg.commit_interval_ms);
+        let percent = c.store_max_percent.unwrap_or(self.cfg.store_max_percent);
+        if percent != 0 && !(100..=10_000).contains(&percent) {
+            return Err(err(
+                ErrorCode::Invalid,
+                "store_max_percent must be 0, or 100 to 10000",
+            ));
+        }
+        let size = c.size_bytes;
         let tweak = move |j: &mut VolumeJson| {
             if let Some(m) = jmax {
                 j.journal_max = m;
@@ -544,6 +552,7 @@ impl Daemon {
             if let Some(i) = interval {
                 j.commit.interval_ms = i;
             }
+            j.space.cache_max = default_cache_max(size, percent, j.commit.dirty_bytes);
         };
         let params = CreateParams {
             name: &c.name,
@@ -878,6 +887,7 @@ impl Daemon {
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
         op.lock_memory = self.cfg.harden;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
+        op.full_timeout = self.cfg.full_timeout;
         if o.allow_unverifiable_fork {
             tracing::warn!(
                 volume = name,
@@ -1114,6 +1124,8 @@ impl Daemon {
                     st.space
                         .reconfigure(&json.space)
                         .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+                    // The ring-full wait follows the new full_timeout too.
+                    st.engine.set_full_timeout(st.space.full_timeout());
                     st.store
                         .store_volume_json(&json)
                         .map_err(|e| err(ErrorCode::Io, e.to_string()))?;
@@ -1268,15 +1280,21 @@ impl Daemon {
                 Slot::Attached(live) if !live.device.needs_quiesce() => {
                     tracing::info!(volume = %name, "device is stopping or deleted (a detach got past TRY_STOP_DEV): no started request, nothing to quiesce");
                 }
-                Slot::Attached(live) => match live.device.quiesce(t) {
-                    Ok(None) => quiesced += 1,
-                    Ok(Some(e)) => {
-                        quiesced += 1;
-                        engine_failures += 1;
-                        tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                Slot::Attached(live) => {
+                    // The quiesce rule (ADR-32, M5): requests waiting for
+                    // space fail with ENOSPC and nothing parks, so the drain
+                    // can finish.
+                    live.stack.space.begin_close();
+                    match live.device.quiesce(t) {
+                        Ok(None) => quiesced += 1,
+                        Ok(Some(e)) => {
+                            quiesced += 1;
+                            engine_failures += 1;
+                            tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                        }
+                        Err(e) => failed.push((i, e.to_string())),
                     }
-                    Err(e) => failed.push((i, e.to_string())),
-                },
+                }
                 Slot::Orphan { dev_id, .. } => orphans.push(*dev_id),
                 Slot::Detached => {}
             }
@@ -1589,9 +1607,39 @@ impl Drop for Running<'_> {
     }
 }
 
+/// The `space.cache_max` a new volume of `size` bytes gets (ADR-32, M2):
+/// `percent` of the size, 0 for none. Never below the size plus twice the
+/// commit's dirty-bytes trigger: until a cut, the journal holds up to
+/// `commit.dirty_bytes` of writes, and during the cut they are counted twice
+/// (journal and segments), so a small volume's first fill must not reach the
+/// cap.
+pub(crate) fn default_cache_max(size: u64, percent: u32, dirty_bytes: u64) -> Option<u64> {
+    if percent == 0 {
+        return None;
+    }
+    let cap = u64::try_from(u128::from(size) * u128::from(percent) / 100).unwrap_or(u64::MAX);
+    Some(cap.max(size.saturating_add(dirty_bytes.saturating_mul(2))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_volume_gets_twice_its_size_as_cache_max_by_default() {
+        const GIB: u64 = 1 << 30;
+        // ADR-32 M2: 200 % of the size...
+        assert_eq!(default_cache_max(32 * GIB, 200, GIB), Some(64 * GIB));
+        assert_eq!(default_cache_max(32 * GIB, 150, GIB), Some(48 * GIB));
+        // ...never below the size plus two commits' worth of journal.
+        assert_eq!(default_cache_max(GIB, 200, GIB), Some(3 * GIB));
+        assert_eq!(
+            default_cache_max(64 << 20, 200, GIB),
+            Some((64 << 20) + 2 * GIB)
+        );
+        // 0: no cap.
+        assert_eq!(default_cache_max(32 * GIB, 0, GIB), None);
+    }
 
     #[test]
     fn fingerprints_and_cpu_lists_parse() {

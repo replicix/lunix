@@ -154,6 +154,7 @@ fn create(
             .map(|p| abs(p, "--key-file"))
             .transpose()?,
         passphrase: None,
+        store_max_percent: a.store_max_percent,
     };
     // Check everything but the secret before prompting for it.
     Request::VolumeCreate(req.clone())

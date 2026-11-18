@@ -37,6 +37,7 @@ fn create_req(name: &str, dir: &Path, mode: VolumeMode, passphrase: Option<&str>
         map_fanout: None,
         key_file: None,
         passphrase: passphrase.map(Secret::from_text),
+        store_max_percent: None,
     })
 }
 

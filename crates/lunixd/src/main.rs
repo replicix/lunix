@@ -137,6 +137,12 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
             "memory locking: key arena locked; queue and journal buffers are locked at attach"
         );
     }
+    if cfg.full_timeout > std::time::Duration::from_secs(100) {
+        tracing::warn!(
+            full_timeout_ms = u64::try_from(cfg.full_timeout.as_millis()).unwrap_or(u64::MAX),
+            "full_timeout_ms is above 100 s: a write waiting that long for space may trip the kernel's hung-task warning (120 s by default)"
+        );
+    }
     if cfg.metrics.is_some() {
         tracing::warn!(
             "metrics are deferred in phase 1 (plan M12a step 9); the address is ignored"

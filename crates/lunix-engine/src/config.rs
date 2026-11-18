@@ -70,6 +70,11 @@ pub struct EngineConfig {
     /// chain from the tip back to the rollback floor cannot be walked
     /// (`OpenError::ForkUnverifiable`). The caller audits it.
     pub allow_unverifiable_fork: bool,
+    /// The longest a write waits for a full journal ring before it fails
+    /// (ADR-32: `ENOSPC` if the last commit failed for space, else `EIO`):
+    /// the volume's resolved `full_timeout` (60 s by default). A live change
+    /// goes through [`Engine::set_full_timeout`](crate::Engine::set_full_timeout).
+    pub full_timeout: Duration,
 }
 
 impl EngineConfig {
@@ -101,6 +106,7 @@ impl EngineConfig {
             gc_budget: None,
             gc_params: None,
             allow_unverifiable_fork: false,
+            full_timeout: Duration::from_secs(60),
         }
     }
 
