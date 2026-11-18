@@ -292,7 +292,8 @@ fio_json() { sed -n '/^{/,$p' "$1"; }
 # fio_errors FILE: sum of the job-level error codes in a fio JSON report (0 = every job ended without error, a verify
 # failure is a nonzero job error); 999 when the report cannot be read
 fio_errors() {
-  fio_json "$1" | jq -r 'if (.jobs | length) == 0 then 999 else ([.jobs[] | ((.error // 0) | tonumber)] | add) end' 2>/dev/null || echo 999
+  local n; n=$(fio_json "$1" | jq -r 'if (.jobs | length) == 0 then 999 else ([.jobs[] | ((.error // 0) | tonumber)] | add) end' 2>/dev/null)
+  echo "${n:-999}"
 }
 
 # ---- teardown --------------------------------------------------------------------------------------------------

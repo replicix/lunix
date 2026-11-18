@@ -10,8 +10,8 @@
 # the whole script at BUDGET_S (default 72000 = 20 h); a run past the cap is aborted and recorded, never extended.
 #
 # Hit counts: a counting run (LUNIX_CRASH_COUNT) of the same workload gives the number of executions per point;
-# `middle` is (count+1)/2 and `last` is count. Counts of two runs differ a little, so a `last` run that finishes
-# without the crash is repeated once at 90 % of the count (kind last90). A point the workload never reaches is
+# `middle` is (count+1)/2 and `last` is 80 % of the count (runs differ by 10-20 %, so the full count is often not reached). Counts of two runs differ a little, so a `last` run that finishes
+# without the crash is repeated once at 60 % of the count (kind last60). A point the workload never reaches is
 # recorded `unreached`, not passed. If the daemon does not write the counts (it must call
 # lunix_iface::crashpoint::dump_counts on its clean exit; lunix-ublk-testd does, lunixd did not when this script was
 # written) the hits are HITS_FALLBACK (default "1 25 250") and the report says so.
@@ -136,6 +136,14 @@ one_run() {
   detach_vol "$vol"; local drc=$?
   if [ "$drc" != 0 ]; then wait_ping 90; detach_vol "$vol"; drc=$?; fi
   lunix_fsck "$vol" "$label"; local frc=$?
+  # `index_missing` is a warning by design after a crash: the index lags the commit chain and "mount's catch-up restores
+  # it" (fsck code table). Accepted only when it is the sole finding above a note, no `index_lost` or error exists, and one
+  # attach and detach (the catch-up) leaves the volume clean on a second deep fsck.
+  if [ "$frc" != 0 ] && [ "$FSCK_RC" = 1 ] && jq -e '[.findings[] | select(.severity != "note") | .code] | unique == ["index_missing"]' "$OUT/raw/fsck-$label.json" >/dev/null 2>&1; then
+    attach_vol "$vol"; detach_vol "$vol"
+    lunix_fsck "$vol" "$label-2"; frc=$?
+    RUN_NOTES="$RUN_NOTES;index_missing after the crash, second fsck after one mount: exit $FSCK_RC"
+  fi
   crash_seen
   [ "$CRASHED" = 0 ] && RUN_STATUS=unreached
   { wl_ok && [ "$drc" = 0 ] && [ "$frc" = 0 ]; } || RUN_STATUS=fail
@@ -175,7 +183,7 @@ while read -r p; do
   if [ -s "$COUNTS" ]; then
     c=$(awk -v p="$p" '$1==p{print $2}' "$COUNTS"); c=${c:-0}
     if [ "$c" = 0 ]; then say "- UNREACHED $p: the counting run never executed it"; rec "crashpoint/$p" unreached why=count0; continue; fi
-    hits="first:1 mid:$(((c + 1) / 2)) last:$c"
+    hits="first:1 mid:$(((c + 1) / 2)) last:$((c * 8 / 10))"
   else hits="first:$(echo "$HITS_FALLBACK" | cut -d' ' -f1) mid:$(echo "$HITS_FALLBACK" | cut -d' ' -f2) last:$(echo "$HITS_FALLBACK" | cut -d' ' -f3)"; fi
   fss="ext4"; case "$p" in engine.c*) fss="ext4 xfs" ;; esac
   for fs in $fss; do
@@ -186,9 +194,9 @@ while read -r p; do
       one_run "$(echo "$p-$kind-$fs" | tr '.' '_')" "$fs" "LUNIX_CRASH_AT=$p:$hit"
       report_run "$cell" "$p" "$kind" "$hit" "$fs"
       if [ "$kind" = last ] && [ "$RUN_STATUS" = unreached ] && [ "$hit" -gt 4 ]; then
-        h90=$((hit * 9 / 10)); cell="crashpoint/$p/last90-$h90/$fs"; say "## $cell (last run did not reach the count)"
-        one_run "$(echo "$p-last90-$fs" | tr '.' '_')" "$fs" "LUNIX_CRASH_AT=$p:$h90"
-        report_run "$cell" "$p" last90 "$h90" "$fs"
+        h90=$((hit * 3 / 4)); cell="crashpoint/$p/last60-$h90/$fs"; say "## $cell (last run did not reach the count)"
+        one_run "$(echo "$p-last60-$fs" | tr '.' '_')" "$fs" "LUNIX_CRASH_AT=$p:$h90"
+        report_run "$cell" "$p" last60 "$h90" "$fs"
       fi
       [ -e "$OUT/WEDGED" ] && break 3
     done

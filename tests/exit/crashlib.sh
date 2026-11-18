@@ -24,6 +24,9 @@ wl_alive() { kill -0 "$FIO_PID" 2>/dev/null && kill -0 "$S1_PID" 2>/dev/null && 
 wl_finish() {
   local fs=$1 rt=${2:-900}
   wait_fio "$FIO_PID" "$rt"; WL_FIO_RC=$?
+  # the `timeout` wrapper can end before fio has written its report (a stopped fio winds down slowly while the daemon is
+  # recovering): wait for fio itself, then read the report (cp-s1: two cells had an empty error count for that reason)
+  local n=600; while [ "$n" -gt 0 ]; do pgrep -f "output=$OUT/raw/fio-wl-$WL_NAME.json" >/dev/null || break; sleep 0.5; n=$((n - 1)); done
   kill -TERM "$HB_PID" "$S1_PID" "$S2_PID" 2>/dev/null
   wait "$HB_PID" 2>/dev/null; wait "$S1_PID"; local s1=$?; wait "$S2_PID"; local s2=$?
   HB_PID=""; S1_PID=""; S2_PID=""
