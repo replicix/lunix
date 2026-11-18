@@ -10,8 +10,9 @@
 //! [`GcBudget::max_duration`].
 //!
 //! The space ladder's *compact* step and the control socket's `Gc` request talk
-//! to the collector through [`GcControl`], which posts a request to the
-//! coordinator and (for the ladder) waits, so the single-caller rule holds.
+//! to the collector through [`GcControl`], whose calls run the collector on the
+//! calling thread under the coordinator's mutex (never during a cut, the map
+//! at the tip), so the single-caller rule holds.
 
 use std::time::Duration;
 
@@ -221,6 +222,24 @@ pub trait Collector: Send {
     /// Counters.
     fn stats(&self) -> GcStats;
 
+    /// Makes the next `step` start a pass even when none is due (the control
+    /// socket's `Gc`: a pass now, not after the pass interval). A pass in
+    /// progress is not affected; an urgent pass clears the request (it is a
+    /// whole pass). Returns false when the collector does not take requests
+    /// (the default): `GcControl::run_pass` then fails `Unsupported`.
+    fn request_pass(&mut self) -> bool {
+        false
+    }
+
+    /// The collector's state for `GcStatus`. The default carries the counters
+    /// only.
+    fn status(&self) -> GcStatusSnapshot {
+        GcStatusSnapshot {
+            stats: self.stats(),
+            ..GcStatusSnapshot::default()
+        }
+    }
+
     /// Moves a failed `step` or `urgent` sealed before it failed (the step's
     /// error carries none): the engine applies them at the next cut like any
     /// other, so the output is named by that cut.
@@ -244,17 +263,21 @@ pub struct GcStatusSnapshot {
     pub stats: GcStats,
     /// When the last pass finished, milliseconds since the epoch.
     pub last_finished_ms: Option<u64>,
+    /// Control calls waiting for a pass on request (`GcControl::run_pass`);
+    /// set by the engine wiring, 0 from a collector.
+    pub requests: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by
 /// the engine wiring; `Send + Sync`. Never called on a queue thread.
 pub trait GcControl: Send + Sync {
-    /// Queues a pass (or a dry run) on the coordinator and waits for its
-    /// summary. Blocking; used by the control socket's `Gc`.
+    /// Runs a pass (or a dry run) under the coordinator's mutex and returns
+    /// its summary. A pass releases the mutex between its steps and waits out
+    /// its grace. Blocking; used by the control socket's `Gc`.
     fn run_pass(&self, dry_run: bool) -> Result<GcPassSummary>;
 
-    /// Queues an urgent pass wanting `want_bytes` and waits for it; returns
-    /// the bytes freed. Blocking; used by the ladder's compact step.
+    /// Runs an urgent pass wanting `want_bytes` under the coordinator's mutex;
+    /// returns the bytes freed. Blocking; used by the ladder's compact step.
     fn run_urgent(&self, want_bytes: u64) -> Result<u64>;
 
     /// The collector's state. Non-blocking.

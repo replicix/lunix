@@ -33,12 +33,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use lunix_engine::{CommitOutcome, EngineConfig, OnJournalDamage};
+use lunix_format::local::OnFull;
 use lunix_format::{CryptoMode, WriteSeq};
 use lunix_gc::GcConfig;
 use lunix_iface::block::BlockEngine;
+use lunix_iface::space::{ReserveOutcome, SpaceGate, SpaceKind};
 use lunixd::testsupport::{
     assert_no_gc_work, close, damage_journal, fsck, fsck_binary, payload, DeviceModel, Driver,
     ModelOp, Scratch, TestRng, TestVolume, VolumeBuilder,
@@ -101,6 +104,9 @@ enum Step {
     /// Ticks for that many seconds, a forced commit every 2 s (GC steps,
     /// pending moves cut, sources go one commit after their output).
     Idle(u64),
+    /// The space ladder's compact step: a refused reservation starts the
+    /// ladder, which runs GC's urgent pass on the gate's thread (M12c).
+    Ladder,
 }
 
 struct Plan {
@@ -207,6 +213,11 @@ fn plan(cs: u64, seed: u64) -> Plan {
         run.push(Step::Tick);
         if r >= 1 {
             run.push(Step::Idle(IDLE_SECS));
+        }
+        if r == 2 || r == 4 {
+            // After an idle phase longer than the floor grace: the urgent
+            // pass deletes what a pass condemned, condemns and compacts.
+            run.push(Step::Ladder);
         }
     }
     writes(&mut rng, cs, size, 8, &mut run);
@@ -416,6 +427,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
+            Step::Ladder => run_ladder(&stack),
             Step::Reopen => {
                 drop(d);
                 drop(stack);
@@ -431,6 +443,43 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
     drop(d);
     close(stack).expect("child close");
     writeln!(prog, "{n} 0").expect("progress");
+}
+
+/// Refuses one reservation (a `cache_max` at what is charged, `on_full =
+/// error`), which starts the space ladder on the gate's thread, and waits for
+/// its compact step (the urgent pass) to end. Restores the settings.
+fn run_ladder(stack: &lunixd::stack::VolumeStack) {
+    let saved = stack.json.space.clone();
+    let mut tight = saved.clone();
+    tight.on_full = OnFull::Error;
+    tight.cache_max = Some(stack.space.snapshot().used().max(1));
+    stack
+        .space
+        .reconfigure(&tight)
+        .expect("child tight settings");
+    let runs = stack.compact_runs.load(Ordering::Acquire);
+    let errors = stack.space.step_errors();
+    let out = stack
+        .space
+        .reserve(SpaceKind::JournalReserved, 1 << 20, None)
+        .expect("child reserve");
+    assert!(matches!(out, ReserveOutcome::NoSpace), "{out:?}");
+    let start = Instant::now();
+    while stack.compact_runs.load(Ordering::Acquire) == runs {
+        assert_eq!(stack.space.step_errors(), errors, "the compact step failed");
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "the urgent pass did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A failed run never bumps `compact_runs` (the loop would see the
+    // error first); checked once more all the same.
+    assert_eq!(stack.space.step_errors(), errors, "the compact step failed");
+    stack
+        .space
+        .reconfigure(&saved)
+        .expect("child settings back");
 }
 
 /// The child entry: does nothing unless this process was started by a kill
@@ -797,10 +846,10 @@ fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], 
     );
 }
 
-/// Registered GC points the workload does not reach: the urgent pass's own
-/// (the space ladder's compact step; this workload never runs out of
-/// space). Any other unreached point fails the loop.
-const EXPECTED_UNREACHED: &[&str] = &["gc.urgent.after_mark"];
+/// Registered GC points the workload does not reach. The urgent pass's own
+/// (`gc.urgent.after_mark`) is reached through the space ladder
+/// (`Step::Ladder`, M12c). Any unreached point fails the loop.
+const EXPECTED_UNREACHED: &[&str] = &[];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
     // fsck is part of every recovery check: a missing binary fails the loop.

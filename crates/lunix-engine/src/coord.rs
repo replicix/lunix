@@ -12,9 +12,10 @@
 //! classified ([`Retry`]): `MapFull` classes cut smaller, `Later` and
 //! `AfterSpace` fail this attempt (the next trigger retries), `Never` and
 //! `Stop` stop the engine's commits (writes fail, reads continue). Compaction
-//! re-hints run before the destage in their own transaction; a failure there
-//! keeps them for the next cut; their output segments are named by this
-//! cut's FULL all the same (N10: naming an existing sealed segment is always
+//! re-hints run right after a successful destage, in their own transaction
+//! (a failed destage leaves the map at the tip, so GC can still run); a
+//! failure there keeps them for the next cut; their output segments are named
+//! by this cut's FULL all the same (N10: naming an existing sealed segment is always
 //! safe, and `persist` may then cover their relocations). A failure after the
 //! destage committed its transaction (C5, C6) stops further commits in this
 //! process (the in-memory map is ahead of the durable state) until the
@@ -34,16 +35,16 @@ use std::time::Duration;
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
-use lunix_iface::gc::{Collector, GcView, Moved, TipInfo};
+use lunix_iface::gc::{Collector, GcProgress, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
 use lunix_iface::space::SpaceKind;
-use lunix_iface::{Error, Result};
+use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
 use crate::engine::{CommitOutcome, Inner};
-use crate::recover::{high_water, Recovered};
+use crate::recover::Recovered;
 use crate::stats::add;
 
 /// The coordinator's state, under the engine's coordinator mutex.
@@ -72,14 +73,36 @@ pub(crate) struct Coord {
     /// A `persist` failed (at C8 or of the catch-up at open): the next cut
     /// retries it before anything else and fails while it fails (N13).
     pub(crate) index_unpersisted: bool,
+    /// When the last urgent pass ended (a commit that failed for space, or
+    /// the space ladder's compact step): `space_short` waits
+    /// `space_backoff` after it.
+    pub(crate) last_space_urgent: Option<Duration>,
+    /// The pause between two urgent passes run because commits fail for
+    /// space: back to the minimum after a successful commit or a pass that
+    /// freed bytes, at most the floor grace after one that condemned, else
+    /// doubling to a maximum.
+    pub(crate) space_backoff: Duration,
+    /// The last `apply_moved` left moves (for want of room under the map's
+    /// dirty-leaf cap) or failed: moves alone then trigger a cut only once
+    /// per commit interval (each such cut walks the tip's leaves).
+    pub(crate) moves_deferred: bool,
     /// The collector asked for a cut (`GcProgress::cut_wanted`): a FULL below
     /// the tip must name a compaction output before its source can go.
     pub(crate) gc_cut: bool,
     /// The last GC step error, logged once per change.
     pub(crate) gc_error: Option<String>,
+    /// The last error of `apply_moved`, logged once per change.
+    pub(crate) rehint_error: Option<String>,
 }
 
 impl Coord {
+    /// Takes what a collector call handed over: its moves for the next cut,
+    /// and its request for a cut (`GcProgress::cut_wanted`).
+    pub(crate) fn absorb(&mut self, p: GcProgress) {
+        self.moved.extend(p.moved);
+        self.gc_cut |= p.cut_wanted;
+    }
+
     pub(crate) fn new(
         rec: &Recovered,
         collector: Option<Box<dyn Collector>>,
@@ -97,8 +120,12 @@ impl Coord {
             collector,
             upto_seg: rec.upto_seg,
             index_unpersisted: rec.index_unpersisted,
+            last_space_urgent: None,
+            space_backoff: crate::gc::SPACE_URGENT_MIN,
+            moves_deferred: false,
             gc_cut: false,
             gc_error: None,
+            rehint_error: None,
         }
     }
 }
@@ -224,11 +251,21 @@ impl Inner {
         let mut co = crate::engine::lock(&self.coord);
         if self.wanted(&mut co) {
             let res = self.commit(&mut co, false, None);
-            // A cut that failed before it changed the map (no space for it,
-            // above all) still lets the collector work, or a full volume
-            // could never free what its condemned objects hold (M17.B stack
-            // review S-2). `gc_step` checks that the map is the tip's.
-            if res.is_err() && !self.is_failed() {
+            // A commit that failed before it changed the map (no space for
+            // the cut above all, an index run still unpersisted, writes in
+            // flight) still lets the collector work: a volume that cannot
+            // commit must still free what its condemned objects hold (M17.B
+            // stack review S-2, M12c review S-3). So does a commit that had
+            // nothing to cut after all (`Idle`, e.g. a cut held below a
+            // poisoned write; M12c merge review M-3). One rule: `gc_step`
+            // runs when the map is the tip's and does nothing otherwise; a
+            // committed cut stepped it at C10 already. After a failure in
+            // `retry_persist` the collector runs while index entries of named
+            // segments are in memory only (N13): safe, since the tip's names
+            // never count for `named_high` and a FULL is written only after
+            // the persist before it succeeded (M17.B stack re-review M-6).
+            let committed = matches!(res, Ok(CommitOutcome::Committed { .. }));
+            if !committed && !self.is_failed() {
                 self.gc_step(&mut co);
             }
             res
@@ -261,7 +298,13 @@ impl Inner {
     }
 
     fn wanted(&self, co: &mut Coord) -> bool {
-        if !co.moved.is_empty() || !co.pending_named.is_empty() || co.index_unpersisted || co.gc_cut
+        if !co.pending_named.is_empty() || co.index_unpersisted || co.gc_cut {
+            return true;
+        }
+        let now = self.clock.monotonic();
+        if !co.moved.is_empty()
+            && (!co.moves_deferred
+                || now.saturating_sub(co.last_commit_at) >= self.cfg.commit_interval)
         {
             return true;
         }
@@ -270,7 +313,6 @@ impl Inner {
             co.dirty_since = None;
             return false;
         }
-        let now = self.clock.monotonic();
         let since = *co.dirty_since.get_or_insert(now.max(co.last_commit_at));
         let elapsed = now.saturating_sub(since);
         elapsed >= self.cfg.commit_interval
@@ -280,17 +322,32 @@ impl Inner {
     }
 
     /// Cuts at the current `write_seq` and commits (C1-C10). `force`
-    /// commits even when nothing changed; `new_size` grows the volume.
+    /// commits even when nothing changed; `new_size` grows the volume. A
+    /// commit that fails for space, at any step (the destage, the index
+    /// run's retry), runs GC's urgent pass (`space_short`).
     pub(crate) fn commit(
         &self,
         co: &mut Coord,
         force: bool,
         new_size: Option<u64>,
     ) -> Result<CommitOutcome> {
+        let res = self.commit_once(co, force, new_size);
+        match &res {
+            Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
+            Err(_) => {}
+            Ok(_) => co.space_backoff = crate::gc::SPACE_URGENT_MIN,
+        }
+        res
+    }
+
+    fn commit_once(
+        &self,
+        co: &mut Coord,
+        force: bool,
+        new_size: Option<u64>,
+    ) -> Result<CommitOutcome> {
         if self.is_failed() {
-            return Err(Error::Io(std::io::Error::other(
-                "the engine stopped committing after a failure",
-            )));
+            return Err(crate::engine::stopped());
         }
         // N13: no new FULL while index entries of named segments are only
         // in memory.
@@ -387,13 +444,6 @@ impl Inner {
             return Err(CutFail::Other(e));
         }
         lunix_iface::crashpoint!("engine.c2.cut");
-        // C3, first: compaction re-hints, in their own transaction. A
-        // failure keeps them for the next cut (nothing was applied); a later
-        // failure of this cut leaves them applied in memory, pointing at
-        // sealed segments, and still to be named (`pending_named`).
-        if let Err(e) = self.apply_moved(co) {
-            tracing::warn!(error = %e, "compaction re-hints deferred to the next cut; their outputs are named by this cut");
-        }
         // C3: destage; every segment sealed before the map transaction
         // commits, index inserts held back.
         let writes = (c > prev).then(|| WriteSeqRange {
@@ -433,6 +483,29 @@ impl Inner {
         }
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
+        // C3, second: compaction re-hints, in their own transaction, only
+        // after the destage succeeded (M12c review B-1): a destage that fails
+        // (for space, typically) then leaves the map at the tip, so GC (the
+        // urgent pass that frees the space) can still run. A re-hint is
+        // conditional on the old hint, so a chunk this cut rewrote keeps its
+        // new entry. A failure keeps them for the next cut (nothing was
+        // applied); a later failure of this cut leaves them applied in
+        // memory, pointing at sealed segments, still to be named
+        // (`pending_named`).
+        match self.apply_moved(co) {
+            Ok(()) => co.rehint_error = None,
+            Err(e) => {
+                // Whatever failed (the leaf walk, the transaction), the moves
+                // wait: retried once per commit interval, not at every tick
+                // (M12c merge review M-2); logged once per distinct error.
+                co.moves_deferred = true;
+                let msg = e.to_string();
+                if co.rehint_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "compaction re-hints deferred to a later cut; their outputs are named by this cut");
+                    co.rehint_error = Some(msg);
+                }
+            }
+        }
         self.points
             .hit("engine.c3.destaged")
             .map_err(CutFail::Other)?;
@@ -711,13 +784,17 @@ impl Inner {
     /// C3, second half: compaction's `moved` records become conditional
     /// re-hints (a newer write wins). `Moved` carries no chunk number, so
     /// the chunks are found by walking the tip's leaves for the old hints.
+    ///
+    /// The re-hints share the map's dirty-leaf cap with this cut's destage:
+    /// they go in leaf order, in one transaction of at most
+    /// `max_leaves_per_cut` leaves, halved on `MapFull` down to one leaf; the
+    /// moves of the leaves left over stay in `moved` for a later cut
+    /// (`moves_deferred`). Moves whose chunk was rewritten since are done.
     fn apply_moved(&self, co: &mut Coord) -> Result<()> {
         if co.moved.is_empty() {
+            co.moves_deferred = false;
             return Ok(());
         }
-        let mut segs: Vec<SegId> = co.moved.iter().map(|m| m.new.seg).collect();
-        segs.sort_unstable();
-        segs.dedup();
         let olds: HashMap<Hint, Hint> = co.moved.iter().map(|m| (m.old, m.new)).collect();
         let mut hits: Vec<(ChunkNo, Hint, Hint)> = Vec::new();
         let root = co.tip.map_root;
@@ -727,67 +804,84 @@ impl Inner {
                 hits.push((ci, h, new));
             }
         })?;
-        let mut txn = self.map.begin_update()?;
-        for (ci, old, new) in hits {
-            txn.rehint(ci, old, new)?;
-        }
-        txn.commit()?;
-        co.moved.clear();
+        hits.sort_unstable_by_key(|(ci, _, _)| ci.0);
+        let fanout = u64::from(self.cfg.map_fanout.max(1));
+        let mut leaves: Vec<u64> = hits.iter().map(|(ci, _, _)| ci.0 / fanout).collect();
+        leaves.dedup();
+        let mut n = leaves
+            .len()
+            .min(usize::try_from(self.cfg.max_leaves_per_cut.max(1)).unwrap_or(usize::MAX));
+        let applied = loop {
+            let Some(&last) = leaves.get(n.saturating_sub(1)) else {
+                break 0;
+            };
+            let take = hits.partition_point(|(ci, _, _)| ci.0 / fanout <= last);
+            match self.rehint(&hits[..take]) {
+                Ok(()) => break take,
+                Err(e) if e.kind() == ErrorKind::MapFull && n > 1 => n /= 2,
+                Err(e) => {
+                    co.moves_deferred = true;
+                    return Err(e);
+                }
+            }
+        };
+        // Moves of the leaves not applied stay; every other one is done
+        // (applied, or its chunk was rewritten: the move is moot).
+        let left: HashSet<Hint> = hits[applied..].iter().map(|(_, old, _)| *old).collect();
+        let (keep, done): (Vec<Moved>, Vec<Moved>) =
+            co.moved.drain(..).partition(|m| left.contains(&m.old));
+        co.moved = keep;
+        co.moves_deferred = !co.moved.is_empty();
+        let mut segs: Vec<SegId> = done.iter().map(|m| m.new.seg).collect();
+        segs.sort_unstable();
+        segs.dedup();
         for seg in segs {
             if !co.pending_named.contains(&seg) {
                 co.pending_named.push(seg);
             }
         }
+        if co.moves_deferred {
+            tracing::info!(
+                left = co.moved.len(),
+                "compaction re-hints: the map's dirty-leaf cap left some for a later cut"
+            );
+        }
         Ok(())
     }
 
+    /// One re-hint transaction; `MapFull` leaves the map untouched.
+    fn rehint(&self, hits: &[(ChunkNo, Hint, Hint)]) -> Result<()> {
+        if hits.is_empty() {
+            return Ok(());
+        }
+        let mut txn = self.map.begin_update()?;
+        for &(ci, old, new) in hits {
+            txn.rehint(ci, old, new)?;
+        }
+        txn.commit().map(|_| ())
+    }
+
     fn gc_step(&self, co: &mut Coord) {
-        let (Some(budget), Some(params)) = (self.cfg.gc_budget, self.cfg.gc_params) else {
+        let Some(budget) = self.cfg.gc_budget else {
             return;
         };
-        if co.collector.is_none() {
-            return;
-        }
-        // The hook's preconditions (M17): between cuts, map root = tip root.
-        if self.map.root() != co.tip.map_root || self.map.dirty_leaf_count() != 0 {
+        // No collector call starts once a quiesce began (the engine is
+        // about to be dropped; moves made now would be lost with it).
+        if self.closing.load(Ordering::Acquire) {
             return;
         }
-        let tip = TipInfo {
-            commit_seq: co.tip.common.commit_seq,
-            map_root: co.tip.map_root,
-            chain_floor: co.tip.chain_floor,
-            high_water_mark: high_water(&co.retained),
-        };
-        let view = GcView {
-            retained: &co.retained,
-            tip,
-            pins: &*self.pins,
-            map: &*self.map,
-            index: &*self.index,
-            segments: &*self.segments,
-            packs: &*self.packs,
-            commits: &*self.commits,
-            commit_codec: &*self.commit_codec,
-            extents: &*self.extents,
-            state: &*self.gc_state,
-            space: &*self.space,
-            clock: &*self.clock,
-            params,
-        };
-        let Some(collector) = co.collector.as_mut() else {
-            return;
-        };
-        match collector.step(&view, budget) {
+        match self.with_collector(co, |c, v| c.step(v, budget)) {
             Ok(p) => {
-                co.moved.extend(p.moved);
-                co.gc_cut |= p.cut_wanted;
+                co.absorb(p);
                 co.gc_error = None;
             }
+            // No collector, or the map ahead of the tip (the hook's
+            // precondition, M17): nothing to step now.
+            Err(e) if matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::Busy) => {}
+            // Moves sealed before the failure were taken by `with_collector`
+            // (M17.B stack review M-2). Once per distinct error, not at every
+            // tick (M-3).
             Err(e) => {
-                // An output sealed before the failure is named by the next
-                // cut all the same (M17.B stack review M-2).
-                co.moved.extend(collector.take_moved());
-                // Once per distinct error, not at every tick (M-3).
                 let msg = e.to_string();
                 if co.gc_error.as_deref() != Some(msg.as_str()) {
                     tracing::warn!(error = %msg, "gc step failed; the pass resumes later");

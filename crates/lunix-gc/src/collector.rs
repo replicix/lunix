@@ -423,6 +423,9 @@ pub struct Gc {
     /// Compaction sources with an extent that does not open.
     bad_sources: BTreeSet<SegId>,
     outbox: Vec<Moved>,
+    /// A pass was asked for (`request_pass`): the next idle step starts one
+    /// whether or not it is due.
+    forced: bool,
     phase: Phase,
     ctx: Option<PassCtx>,
     last_end: Option<Duration>,
@@ -481,6 +484,7 @@ impl Gc {
             uncertain: BTreeMap::new(),
             bad_sources: BTreeSet::new(),
             outbox: Vec::new(),
+            forced: false,
             phase: Phase::Idle,
             ctx: None,
             last_end: None,
@@ -511,6 +515,7 @@ impl Gc {
             last_pass: self.last_pass.clone(),
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
+            requests: 0,
         }
     }
 
@@ -742,6 +747,9 @@ impl Gc {
     }
 
     fn due(&mut self, view: &GcView<'_>) -> Result<bool> {
+        if self.forced {
+            return Ok(true);
+        }
         let now = view.clock.monotonic();
         if self
             .last_end
@@ -881,6 +889,7 @@ impl Gc {
                 if !self.due(view)? {
                     return Ok(Flow::Yield);
                 }
+                self.forced = false;
                 self.reconcile(view)?;
                 self.ctx = Some(PassCtx::default());
                 self.last_compacted.clear();
@@ -1546,6 +1555,8 @@ impl Collector for Gc {
     fn urgent(&mut self, view: &GcView<'_>, want_bytes: u64) -> Result<GcProgress> {
         self.precheck(view)?;
         self.abort_pass(view);
+        // An urgent pass is a whole pass: it answers a pending request too.
+        self.forced = false;
         self.facts = None;
         let mut freed = 0u64;
         let res = self.urgent_inner(view, want_bytes, &mut freed);
@@ -1618,6 +1629,15 @@ impl Collector for Gc {
 
     fn stats(&self) -> GcStats {
         self.stats
+    }
+
+    fn request_pass(&mut self) -> bool {
+        self.forced = true;
+        true
+    }
+
+    fn status(&self) -> GcStatusSnapshot {
+        Gc::status(self)
     }
 
     fn take_moved(&mut self) -> Vec<Moved> {
