@@ -3,6 +3,7 @@
 # M15 item 2: xfstests `-g quick` on ext4 and xfs, TEST and SCRATCH on Lunix volumes (16 GiB each), at chunk sizes
 # 64 KiB and 16 KiB, and the same groups on a reference (loop devices over files on the same disk) in the same session.
 #
+#   LOOP_SECTOR=4096  (loop reference only: logical sector size of the loop devices; Lunix devices have 4096)
 #   TARGET=lunix|loop   FS=ext4|xfs   CHUNK=65536|16384   GROUP=quick   TESTS="generic/001 ..." (overrides the group)
 #   XFSTESTS_DIR=<abs>  (a built xfstests tree; the lead's host directory, in-tree `./check`)
 #   DEV_GIB=16 (TEST and SCRATCH size)   VOLMODE=integrity|encrypted   CHECK_CAP_S (the cap of `./check`, 21600)
@@ -36,7 +37,7 @@ make_devices_loop() {
   local f n
   for n in test scratch; do
     f="$LUNIX_SPIKE_DIR/$NAME-$n.img"; need_safe "$f"; truncate -s "${DEV_GIB}G" "$f"
-    local l; l=$(losetup -f --show --direct-io=on "$f") || wedged "losetup failed"
+    local l; l=$(losetup -f --show --direct-io=on ${LOOP_SECTOR:+--sector-size "$LOOP_SECTOR"} "$f") || wedged "losetup failed"
     register_device "$l"; LOOPS+=("$l"); eval "DEV_${n^^}=$l"
   done
   add_cleanup 'for l in "${LOOPS[@]}"; do losetup -d "$l"; done; rm -f "$LUNIX_SPIKE_DIR/$NAME-test.img" "$LUNIX_SPIKE_DIR/$NAME-scratch.img"'
@@ -74,9 +75,15 @@ xfstests_cleanup() {
 }
 add_cleanup xfstests_cleanup
 
+# On a host whose coreutils are the Rust ones (uutils, Ubuntu 26.04) xfstests prints `error: error: invalid value for one of the
+# arguments` in front of the output of 244 of 684 ext4 tests (the message is in /usr/bin/coreutils, clap's wording); the tests
+# are written against GNU coreutils. Where the package `gnu-coreutils` ships /usr/bin/gnu<tool>, a directory of <tool> links
+# to them goes first in PATH for ./check, on the reference and on Lunix alike.
+GNUBIN="$OUT/gnubin"; mkdir -p "$GNUBIN"
+for g in /usr/bin/gnu*; do [ -x "$g" ] && ln -sf "$g" "$GNUBIN/$(basename "$g" | sed 's/^gnu//')"; done
 SEL=(-g "$GROUP" -x dangerous); [ -n "${TESTS:-}" ] && read -ra SEL <<< "$TESTS"
 t0=$SECONDS
-( cd "$XFSTESTS_DIR" && HOST_OPTIONS="$OUT/local.config" timeout -k 120 "$CHECK_CAP_S" ./check -E "$OUT/exclude" "${SEL[@]}" > "$OUT/check.stdout" 2>&1 ) &
+( cd "$XFSTESTS_DIR" && PATH="$GNUBIN:$PATH" HOST_OPTIONS="$OUT/local.config" timeout -k 120 "$CHECK_CAP_S" ./check -E "$OUT/exclude" "${SEL[@]}" > "$OUT/check.stdout" 2>&1 ) &
 CHECK_PID=$!
 # Stall watchdog (the same rule for the reference and for Lunix): `./check` has no per-test timeout, and one test that never
 # ends costs the whole run (xfs/118 hung for 4 h on the plain loop reference and the run hit its cap). When ./check's output

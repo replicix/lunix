@@ -34,7 +34,11 @@ ratio_cell() { # name chunk kind(raw|ext4) writer-function
   fi
   "$@" "$d"; ok=$?
   [ "$kind" = raw ] || { sync; umount_fs "$MNT"; guest_fsck "$kind" "$CUR_DEV"; expect "$cell: guest fsck clean" $?; }
-  sleep 3
+  # GC runs on its own: give it GC_SETTLE seconds (default 120, past the 60 s grace) and record its state and the store size
+  # the cell is left with (the store bound of the gate)
+  sleep "${GC_SETTLE:-120}"
+  lx gc "$vol" --status --json > "$d/gc-status.json" 2>&1
+  du -s --block-size=1 "$(vol_dir "$vol")" 2>/dev/null | cut -f1 > "$d/store-bytes-settled.txt"
   status_json "$vol" > "$d/status-attached.json" 2>/dev/null
   detach_vol "$vol"; expect "$cell: detach" $?
   status_json "$vol" > "$d/status-detached.json" 2>/dev/null
