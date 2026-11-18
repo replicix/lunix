@@ -544,6 +544,13 @@ impl Daemon {
                 "store_max_percent must be 0, or 100 to 10000",
             ));
         }
+        if (1..200).contains(&percent) {
+            tracing::warn!(
+                volume = %c.name,
+                store_max_percent = percent,
+                "a cap below 200 % of the size may not hold a full volume at the default compaction threshold (ADR-32)"
+            );
+        }
         let size = c.size_bytes;
         let tweak = move |j: &mut VolumeJson| {
             if let Some(m) = jmax {
@@ -1065,7 +1072,7 @@ impl Daemon {
     fn resize(&self, r: &Resize) -> Result<Response, CtlError> {
         self.entry(&r.name)?;
         let slot = self.slot(&r.name);
-        let g = lock(&slot);
+        let mut g = lock(&slot);
         let live = Self::attached_live(&g, &r.name)?;
         let cur = live.stack.engine.size_bytes();
         if r.size_bytes < cur {
@@ -1089,9 +1096,60 @@ impl Daemon {
                 .store_device_record(&rec)
                 .map_err(|e| err(ErrorCode::Io, format!("state/device: {e}")))?;
         }
-        Ok(Response::Resized {
-            size_bytes: live.stack.engine.size_bytes(),
-        })
+        let new = live.stack.engine.size_bytes();
+        if let Slot::Attached(live) = &mut *g {
+            self.grow_cache_max(&r.name, &mut live.stack, cur, new);
+        }
+        Ok(Response::Resized { size_bytes: new })
+    }
+
+    /// After a grow from `old` to `new` bytes: a default cap (ADR-32, M2)
+    /// follows the size; an explicit one stays (review M6). A cap is the
+    /// default when it equals what `create` writes for the old size with the
+    /// daemon's `store_max_percent` (`default_cache_max`); anything else (a
+    /// `--store-max-percent` other than the daemon's, a `lunix space
+    /// --cache-max`) was chosen by the operator. No cap stays no cap. The
+    /// grow itself is done: a failure here is logged, not returned.
+    fn grow_cache_max(&self, name: &str, st: &mut VolumeStack, old: u64, new: u64) {
+        let pct = self.cfg.store_max_percent;
+        let Some(cap) = st.json.space.cache_max else {
+            return;
+        };
+        let dirty = st.json.commit.dirty_bytes;
+        if pct == 0 || new <= old || default_cache_max(old, pct, dirty) != Some(cap) {
+            if new > old {
+                tracing::info!(
+                    volume = name,
+                    cache_max = cap,
+                    "grown; the explicit cache_max stays"
+                );
+            }
+            return;
+        }
+        let Some(next) = default_cache_max(new, pct, dirty).filter(|n| *n > cap) else {
+            return;
+        };
+        let mut json = st.json.clone();
+        json.space.cache_max = Some(next);
+        let done = st
+            .space
+            .reconfigure(&json.space)
+            .map_err(|e| e.to_string())
+            .and_then(|()| st.store.store_volume_json(&json).map_err(|e| e.to_string()));
+        match done {
+            Ok(()) => {
+                st.json = json;
+                tracing::info!(
+                    volume = name,
+                    old_cache_max = cap,
+                    cache_max = next,
+                    "grown: the default cache_max follows the size"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(volume = name, error = %e, "grown, but cache_max was not raised")
+            }
+        }
     }
 
     fn space(&self, s: &SpaceRequest) -> Result<Response, CtlError> {
@@ -1285,6 +1343,7 @@ impl Daemon {
                     // space fail with ENOSPC and nothing parks, so the drain
                     // can finish.
                     live.stack.space.begin_close();
+                    live.stack.engine.begin_close();
                     match live.device.quiesce(t) {
                         Ok(None) => quiesced += 1,
                         Ok(Some(e)) => {

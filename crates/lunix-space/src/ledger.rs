@@ -113,7 +113,9 @@ impl Ledger {
 
     /// Opens the latch once the headroom reached the resume mark.
     pub fn update_latch(&mut self) {
-        if self.full && self.headroom() >= self.resume_mark() {
+        // At least one byte of headroom: at a zero limit the mark is 0, and
+        // the latch must not open in the call that closed it.
+        if self.full && self.headroom() >= self.resume_mark().max(1) {
             self.full = false;
         }
     }
@@ -240,6 +242,10 @@ impl Ledger {
     /// once closing) the rest fail now, else the overdue ones expire (and
     /// latch). Returns how many failed.
     pub fn rejudge(&mut self, now: Duration) -> usize {
+        if self.policy.on_full == OnFull::Error {
+            // `error` refuses per request; a latch from `wait` ends here.
+            self.full = false;
+        }
         let t = self.policy.full_timeout;
         for p in &mut self.waiters {
             p.deadline = p.arrived.saturating_add(t);

@@ -97,7 +97,7 @@ impl Model {
         (self.limit() / 100).min(self.limit() / 2)
     }
     fn update_latch(&mut self) {
-        if self.full && self.limit().saturating_sub(self.used()) >= self.resume() {
+        if self.full && self.limit().saturating_sub(self.used()) >= self.resume().max(1) {
             self.full = false;
         }
     }
@@ -153,6 +153,9 @@ impl Model {
     }
     /// `reconfigure`'s re-judging.
     fn rejudge(&mut self) {
+        if !self.wait {
+            self.full = false;
+        }
         let t = self.timeout;
         for w in &mut self.q {
             w.deadline = w.arrived + t;

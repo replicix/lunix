@@ -90,12 +90,16 @@ green`, `check-ownership: bstop ok (35 changed paths)`.
 ## Interface changes (lunix-iface), for sign-off
 
 - `ctl::VolumeCreate` gains `store_max_percent: Option<u32>` (`#[serde(default)]`), validated in
-  `Request::validate` (0, or 100 ..= 10 000). No trait changes; `SpaceGate`, `SpaceSnapshot`,
-  `BlockEngine` and `GcControl` are unchanged.
+  `Request::validate` (0, or 100 ..= 10 000).
+- `SpaceGate::reserve_since(kind, bytes, wake, arrived: Duration)`, a **default method** (it calls
+  `reserve` and ignores `arrived`), added for review M1: a parked request's `full_timeout` counts from
+  `arrived`. `LunixSpace` and the testkit's `MemSpace` implement it; no implementer has to change.
+  `SpaceSnapshot`, `BlockEngine` and `GcControl` are unchanged.
 
 Public API of implementation crates (not iface): `lunix_space::{DEFAULT_FULL_TIMEOUT,
 SpaceConfig::full_timeout, LunixSpace::{begin_close, is_full, fulls, resume_mark, full_timeout}}`;
-`lunix_engine::{EngineConfig::full_timeout, Engine::{set_full_timeout, window_turn_left}}`;
+`lunix_engine::{EngineConfig::full_timeout, Engine::{set_full_timeout, window_turn_left,
+begin_close}}`;
 `lunixd::stack::OpenParams::full_timeout`; `lunixd.toml` keys `full_timeout_ms`, `store_max_percent`.
 
 ## Left for T3-T5
@@ -130,3 +134,36 @@ default cache_max`.
 15 GiB under the milestone's host directory after removing the incremental caches (target: debug
 about 13 GiB with the several feature sets ci.sh builds, release 1.7 GiB). **Over the 10 GiB budget**;
 the target can be deleted at any time (the next gate rebuilds it).
+
+## Review response (01-p1-bstop-review.md, verdict "merge after fixes")
+
+Every finding is fixed on `p1/bstop`; the second commit carries them. Where the text above and this
+section differ, this section holds. Gate after the fixes: full `tools/ci.sh` on the host, **1874
+passed, 0 failed, 27 ignored**, `ci: all green`, `check-ownership: bstop ok (42 changed paths)`.
+The remote target was cleaned afterwards (`cargo clean`).
+
+| finding | fix | test |
+|---|---|---|
+| **M1** a queued write got a fresh `full_timeout` at the gate | new default iface method `SpaceGate::reserve_since(.., arrived)`; the queue passes `Mutation::arrived`; `LunixSpace` computes `deadline = arrived + full_timeout` and expires (and latches) at once a request already past it; `MemSpace` follows | engine `writes_queued_behind_a_parked_one_wait_at_most_full_timeout_from_their_arrival` (three writes on one queue: each ends at its arrival + 5 s); space `a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival` |
+| **M2** the window turn armed only in a blocked tick | no counter: `FullState::hole_commit` is the `commit_seq` of the last commit that took a hole record, set in `cut_and_commit` for every commit (any caller); at open it is the tip and the highest replayed hole record is noted, so the first cut after a restart sets it. While refusing, `space_cut` owes a forced FULL while fewer than `retain_last + 1` commits followed it | `the_window_turns_when_a_normal_commit_cut_the_discard_before_the_stop` (cases 1-3, `error` and `wait`), `the_window_turns_after_a_restart` (case 4), `a_full_volume_cuts_its_discards_and_turns_the_retained_window` |
+| **M3** ring-parked writes outlived a quiesce | `Engine::begin_close()` (inherent), called beside `space.begin_close()` in `quiesce_all`: a ring wait answers at once when a commit attempt fails after the close (`ENOSPC` if for space), else within `CLOSE_RING_BOUND` (5 s) | `begin_close_answers_a_ring_wait_once_a_commit_fails_for_space`, `begin_close_answers_a_ring_wait_within_its_bound_when_no_commit_fails`; the stack quiesce test calls both |
+| **M4** `JournalReserved` of the active ring files | the engine keeps every record's charge by `write_seq` (a FIFO per lane, one for the replayed records) and releases at C9 every charge at or below the cut; the journal's `ReclaimReport::bytes` is no longer used for the ledger. No journal code or format change. The ledger now equals what a restart charges | `journal_charges_are_released_per_cut`; `stack_throttle.rs` now runs on the production 64 MiB ring files and the restart test asserts 16 of 16 refused (was 12) |
+| **M5** a discard refused below the reserve | hole records are charged with `SpaceGate::charge` (no limit check); deviation 8 is gone | `a_discard_is_admitted_with_no_reserved_region_left` |
+| **M6** a grow kept the old cap | `resize` raises a **default** cap to the default for the new size; a cap is the default when it equals `default_cache_max(old size, daemon store_max_percent, dirty_bytes)`, which is what `create` wrote; any other value (another `--store-max-percent`, a `lunix space --cache-max`) is explicit and stays; no cap stays no cap. A warning when the effective percentage is below 200 (create and daemon start) | `control.rs`: the grow raises the cap, a later explicit cap survives the next grow |
+| m1 | `limit == 0`: the latch opens only with at least one byte of headroom. The engine logs the first refusal of an episode with `used` and `limit` (the gate has no `tracing`; its lines stay T5). Compacting below `live_threshold` under the latch is T4's | `at_a_zero_limit_the_latch_stays_closed` |
+| m2 | a ring wait lasts `max(full_timeout, 60 s)` while commits succeed, `full_timeout` once a commit attempt failed since the write arrived | `a_ring_wait_with_commits_running_lasts_at_least_60_s_then_fails_eio`, `a_ring_wait_fails_enospc_at_full_timeout_after_a_commit_failed_for_space` |
+| m3 | "refusing" is the gate's waiters, or the queue flag confirmed by `used + 1 MiB > limit`; the turn no longer depends on the flag | the M2 tests; `a_volume_that_admits_writes_does_not_cut_for_a_discard` |
+| m4 | the timer asks the ladder while latched | `the_timer_asks_the_ladder_while_the_volume_is_latched_with_no_waiter` |
+| m5 | the ladder thread pauses 100 ms after a run that freed nothing, whatever asks meanwhile | `refused_writes_in_a_loop_do_not_spin_the_ladder` |
+| m6 | the ladder back-off returns to 2 s when a write is admitted after a refusal | (one line in `set_blocked`; covered by the stack discard test) |
+| m7 | `commit_nospace` stays true until a commit succeeds | the ENOSPC ring test (a `Later` failure after the space one) |
+| m8 | each queue publishes `ring_parked`; the coordinator wakes only those queues | (behavioural; the ring tests) |
+| m9 | a switch to `on_full = error` opens the latch | `a_switch_to_on_full_error_opens_the_latch` |
+| m10 | gone with M5 | |
+| m11 | doc line on `EngineConfig::full_timeout` | |
+| tests | P6 `ENOSPC` and the ring-parked hole `ENOSPC` branches through a test-destager hook (`Retry::AfterSpace` now fails with `NoSpace`, `tests/common/mod.rs`); `stack_throttle.rs`: `full_timeout` 10 s, a park counts only after 2.5 s (a cut in flight double-counts for a moment), every "at once" bound is 5 s, the deadline is checked from both sides | |
+| deviation 11 | DESIGN §2, §4.3, §19 and the GLOSSARY "Space ladder" now describe the bounded wait and the latch | |
+
+Updated deviations: 2 (the flag is now confirmed against the ledger), 6 (the cap's floor needs no
+ring-file term once M4 is fixed), 8 (gone), 10 (the stack tests use the production ring files),
+11 (done). The journal finding is fixed in the engine as the review recommended.

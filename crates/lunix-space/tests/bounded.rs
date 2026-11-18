@@ -326,3 +326,137 @@ fn the_ladder_wants_every_waiting_reservation_plus_the_resume_mark() {
     drop(tx);
     g.shutdown();
 }
+
+#[test]
+fn a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival() {
+    // Review M1: `reserve_since` takes the request's arrival.
+    let ck = clock();
+    let (g, _fs) = gate(
+        1000,
+        settings(0, OnFull::Wait, Some(Duration::from_secs(5))),
+        ck.clone(),
+    );
+    reserved(g.reserve(K, 1000, None).unwrap());
+    ck.advance(Duration::from_secs(10));
+    // Arrived at 7 s, reaches the gate at 10 s: due at 12 s.
+    let w = parked(
+        g.reserve_since(K, 10, None, Duration::from_secs(7))
+            .unwrap(),
+    );
+    ck.advance(Duration::from_millis(1999));
+    assert_eq!(g.tick(), 0);
+    ck.advance(Duration::from_millis(1));
+    assert_eq!(g.tick(), 1);
+    assert_eq!(w.state(), WaiterState::TimedOut);
+    // One that waited its whole full_timeout in its queue expires at once
+    // (and latches).
+    let (g, _fs) = gate(
+        1000,
+        settings(0, OnFull::Wait, Some(Duration::from_secs(5))),
+        ck.clone(),
+    );
+    reserved(g.reserve(K, 995, None).unwrap());
+    assert!(!g.is_full());
+    let late = g
+        .reserve_since(K, 200, None, Duration::from_secs(1))
+        .unwrap();
+    match late {
+        ReserveOutcome::Parked(w) => assert_eq!(w.state(), WaiterState::TimedOut),
+        other => panic!("{other:?}"),
+    }
+    assert!(g.is_full());
+}
+
+#[test]
+fn at_a_zero_limit_the_latch_stays_closed() {
+    // Review m1: the mark is 0 at a zero limit; the latch must not open in
+    // the call that closed it.
+    let ck = clock();
+    let (g, _fs) = gate(
+        0,
+        settings(0, OnFull::Wait, Some(Duration::from_secs(1))),
+        ck.clone(),
+    );
+    assert_eq!(g.snapshot().limit, 0);
+    let w = parked(g.reserve(K, 1, None).unwrap());
+    ck.advance(Duration::from_secs(1));
+    assert_eq!(g.tick(), 1);
+    assert_eq!(w.state(), WaiterState::TimedOut);
+    assert!(g.is_full());
+    refused(g.reserve(K, 1, None).unwrap());
+    assert_eq!(g.snapshot().waiters, 0, "fails at once, parks nothing");
+}
+
+#[test]
+fn a_switch_to_on_full_error_opens_the_latch() {
+    // Review m9: `error` refuses per request; a latch from `wait` ends.
+    let ck = clock();
+    let (g, _fs) = gate(
+        1000,
+        settings(0, OnFull::Wait, Some(Duration::from_secs(1))),
+        ck.clone(),
+    );
+    reserved(g.reserve(K, 995, None).unwrap());
+    let _w = parked(g.reserve(K, 50, None).unwrap());
+    ck.advance(Duration::from_secs(1));
+    assert_eq!(g.tick(), 1);
+    assert!(g.is_full());
+    refused(g.reserve(K, 1, None).unwrap());
+    g.reconfigure(&settings(0, OnFull::Error, None)).unwrap();
+    assert!(!g.is_full());
+    reserved(g.reserve(K, 1, None).unwrap());
+}
+
+/// A step that frees nothing and counts its runs.
+struct Nothing(Arc<AtomicU64>);
+
+impl LadderStep for Nothing {
+    fn run(&mut self, _w: u64, _u: Urgency) -> lunix_iface::Result<Freed> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Freed(0))
+    }
+}
+
+#[test]
+fn refused_writes_in_a_loop_do_not_spin_the_ladder() {
+    // Review m5: after a run that freed nothing the ladder pauses 100 ms.
+    let (g, _fs) = gate(100, settings(0, OnFull::Error, None), clock());
+    let runs = Arc::new(AtomicU64::new(0));
+    g.register(LadderStepKind::Compact, Box::new(Nothing(runs.clone())));
+    reserved(g.reserve(K, 100, None).unwrap());
+    let t0 = Instant::now();
+    let mut refusals = 0u64;
+    while t0.elapsed() < Duration::from_millis(500) {
+        refused(g.reserve(K, 1, None).unwrap());
+        refusals += 1;
+    }
+    let n = runs.load(Ordering::SeqCst);
+    assert!(refusals > 100, "{refusals}");
+    assert!((1..=8).contains(&n), "{n} ladder runs in 0.5 s");
+    g.shutdown();
+}
+
+#[test]
+fn the_timer_asks_the_ladder_while_the_volume_is_latched_with_no_waiter() {
+    // Review m4: a latched volume with no write left still gets urgent
+    // passes (a guest that only discards).
+    let mut cfg = common::config(settings(0, OnFull::Wait, Some(Duration::from_millis(100))));
+    cfg.background_timers = true;
+    let (g, _fs) = gate_cfg(100, 0, cfg, Arc::new(SystemClock));
+    let runs = Arc::new(AtomicU64::new(0));
+    g.register(LadderStepKind::Compact, Box::new(Nothing(runs.clone())));
+    reserved(g.reserve(K, 100, None).unwrap());
+    let w = parked(g.reserve(K, 1, None).unwrap());
+    wait_until("the expiry", Duration::from_secs(5), || {
+        w.state() == WaiterState::TimedOut
+    });
+    assert!(g.is_full());
+    let before = runs.load(Ordering::SeqCst);
+    wait_until(
+        "a run asked for by the timer",
+        Duration::from_secs(5),
+        || runs.load(Ordering::SeqCst) > before,
+    );
+    assert_eq!(g.snapshot().waiters, 0);
+    g.shutdown();
+}

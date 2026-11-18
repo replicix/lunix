@@ -78,6 +78,11 @@ pub(crate) struct Recovered {
     pub(crate) stats: Option<EngineStats>,
     pub(crate) report: RecoveryReport,
     pub(crate) journal_charged: u64,
+    /// `(write_seq, record bytes)` of every replayed record: their
+    /// `JournalReserved` charge goes at the first cut above them.
+    pub(crate) journal_charges: Vec<(u64, u64)>,
+    /// The highest `write_seq` of a replayed hole record (0: none).
+    pub(crate) last_hole: u64,
     pub(crate) upto_seg: Option<SegId>,
     /// The catch-up's entries could not be persisted: the first cut retries.
     pub(crate) index_unpersisted: bool,
@@ -365,6 +370,8 @@ pub(crate) fn recover(
         }
     }
     let mut journal_charged = 0u64;
+    let mut journal_charges = Vec::with_capacity(rec.records.len());
+    let mut last_hole = 0u64;
     for r in &rec.records {
         let range = BlockRange {
             lba: r.record.lba,
@@ -372,12 +379,17 @@ pub(crate) fn recover(
         };
         match r.record.kind {
             RecordKind::Write => d.overlay.insert_write(range, r.loc, r.record.write_seq),
-            RecordKind::Hole => d.overlay.insert_hole(range, r.record.write_seq),
+            RecordKind::Hole => {
+                last_hole = last_hole.max(r.record.write_seq.0);
+                d.overlay.insert_hole(range, r.record.write_seq);
+            }
             // The journal keeps marks out of `records`; one that slipped in
             // changes no block and is not the engine's to charge.
             RecordKind::Mark => continue,
         }
-        journal_charged += record_bytes(r.record.kind, r.record.blocks);
+        let bytes = record_bytes(r.record.kind, r.record.blocks);
+        journal_charged += bytes;
+        journal_charges.push((r.record.write_seq.0, bytes));
     }
     points.hit("engine.recover.journal")?;
     lunix_iface::crashpoint!("engine.recover.journal");
@@ -436,6 +448,8 @@ pub(crate) fn recover(
         stats,
         report,
         journal_charged,
+        journal_charges,
+        last_hole,
         upto_seg,
         index_unpersisted,
     })

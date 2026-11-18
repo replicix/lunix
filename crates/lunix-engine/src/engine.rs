@@ -29,7 +29,7 @@ use crate::deps::{EngineDeps, RollbackFloorStore};
 use crate::destage::Destager;
 use crate::error::OpenError;
 use crate::flush::FlushGroups;
-use crate::full::FullState;
+use crate::full::{FullState, JournalCharges};
 use crate::points::Points;
 use crate::queue::{Queue, QueueShared};
 use crate::read::{ExtentReader, ReadCtx, ReadPool};
@@ -138,6 +138,9 @@ pub(crate) struct Inner {
     pub(crate) report: RecoveryReport,
     /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
     pub(crate) full: FullState,
+    /// The `JournalReserved` charge of every record above the last cut,
+    /// released per cut at C9 (ADR-32 review M4).
+    pub(crate) jcharges: JournalCharges,
 }
 
 impl Inner {
@@ -316,7 +319,8 @@ impl Engine {
             gc_requests: AtomicU64::new(0),
             resize_hook: Mutex::new(None),
             report: rec.report,
-            full: FullState::new(cfg.full_timeout),
+            full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
+            jcharges: JournalCharges::new(lanes, rec.journal_charges),
             cfg,
         });
         let engine = Self {
@@ -350,10 +354,9 @@ impl Engine {
                     return;
                 };
                 // Writes parked for a full ring see their deadline, or the
-                // stopped engine, without new I/O (ADR-32).
-                if inner.journal_full.load(Ordering::Acquire) {
-                    inner.signal_queues();
-                }
+                // stopped engine, without new I/O (ADR-32); only the queues
+                // that hold one are woken.
+                inner.signal_ring_parked();
                 if inner.is_failed() {
                     continue;
                 }
@@ -419,10 +422,21 @@ impl Engine {
         self.inner.full.set_full_timeout(full_timeout);
     }
 
-    /// FULLs the full volume's window turn still owes after a discard
-    /// (ADR-32, decision M6); 0 outside it.
-    pub fn window_turn_left(&self) -> u32 {
-        self.inner.full.turn_left()
+    /// FULLs the full volume's window turn owes after a discard (ADR-32,
+    /// decision M6) while writes are refused or parked for space; 0 when
+    /// they are not.
+    pub fn window_turn_left(&self) -> u64 {
+        let co = lock(&self.inner.coord);
+        self.inner.window_turn_left(&co)
+    }
+
+    /// The volume is about to quiesce (ADR-32 review M3, beside
+    /// `LunixSpace::begin_close`): a write parked for a full journal ring
+    /// fails as soon as a commit attempt fails, and at most a few seconds
+    /// later otherwise, so the queues can drain. One-way.
+    pub fn begin_close(&self) {
+        self.inner.full.begin_close(self.inner.clock.monotonic());
+        self.inner.signal_queues();
     }
 
     /// The `JournalReserved` bytes the engine believes it holds.

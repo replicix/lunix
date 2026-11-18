@@ -22,6 +22,9 @@ use crate::probe::FsProbe;
 /// How often the timer thread re-reads the file system.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
+/// The ladder thread's pause after a run that freed nothing.
+const LADDER_IDLE_PAUSE: Duration = Duration::from_millis(100);
+
 /// The daemon's default wait at the limit when `space.full_timeout_ms` is
 /// null (ADR-32, FREEZE rule change F1): 60 s, the dm-thin default, under the
 /// kernel's 120 s hung-task threshold.
@@ -144,17 +147,21 @@ impl Shared {
         self.ladder_cv.notify_all();
     }
 
-    fn run_ladder(&self, mut want: u64) {
+    /// Runs the steps in order until the waiting requests fit; returns the
+    /// bytes they freed.
+    fn run_ladder(&self, mut want: u64) -> u64 {
         let steps: Vec<SharedStep> = lock(&self.steps).values().cloned().collect();
         self.ladder_runs.fetch_add(1, Ordering::Relaxed);
+        let mut total = 0u64;
         for step in steps {
             let outcome = lock(&step).run(want, Urgency::Urgent);
             match outcome {
                 Ok(freed) if freed.0 > 0 => {
+                    total = total.saturating_add(freed.0);
                     let st = lock(&self.st);
                     want = st.ledger.ladder_want();
                     if want == 0 || (!st.ledger.full && st.ledger.head_shortfall() == 0) {
-                        return;
+                        return total;
                     }
                 }
                 Ok(_) => {}
@@ -163,6 +170,7 @@ impl Shared {
                 }
             }
         }
+        total
     }
 
     /// The ladder thread: runs the steps when a run is wanted. It may block
@@ -177,8 +185,26 @@ impl Shared {
             if st.ladder_want > 0 {
                 let want = std::mem::take(&mut st.ladder_want);
                 drop(st);
-                self.run_ladder(want);
+                let freed = self.run_ladder(want);
                 st = lock(&self.st);
+                if freed == 0 {
+                    // A run that freed nothing (the compact step's own
+                    // back-off answers at once): pause before the next one,
+                    // whatever asks meanwhile, so refused writes in a loop
+                    // cannot spin this thread. Shutdown ends the pause.
+                    let until = std::time::Instant::now() + LADDER_IDLE_PAUSE;
+                    while !st.shutdown {
+                        let left = until.saturating_duration_since(std::time::Instant::now());
+                        if left.is_zero() {
+                            break;
+                        }
+                        st = self
+                            .ladder_cv
+                            .wait_timeout(st, left)
+                            .unwrap_or_else(|p| p.into_inner())
+                            .0;
+                    }
+                }
                 continue;
             }
             st = self.ladder_cv.wait(st).unwrap_or_else(|p| p.into_inner());
@@ -204,7 +230,9 @@ impl Shared {
                 st = lock(&self.st);
                 // Parked and still short: try the ladder again (the compact
                 // step itself backs off between urgent passes).
-                if st.ledger.head_shortfall() > 0 && !lock(&self.steps).is_empty() {
+                if (st.ledger.head_shortfall() > 0 || st.ledger.full)
+                    && !lock(&self.steps).is_empty()
+                {
                     let want = st.ledger.ladder_want();
                     self.kick_ladder(&mut st, want);
                 }
@@ -405,6 +433,16 @@ impl SpaceGate for LunixSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
+        self.reserve_since(kind, bytes, wake, self.sh.clock.monotonic())
+    }
+
+    fn reserve_since(
+        &self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: Duration,
+    ) -> Result<ReserveOutcome> {
         if kind == SpaceKind::Headroom {
             return Err(Error::invalid(
                 "the Headroom kind is charged with reserve_headroom",
@@ -450,7 +488,8 @@ impl SpaceGate for LunixSpace {
             return Ok(ReserveOutcome::NoSpace);
         }
         let waiter = Waiter::new(wake.cloned());
-        let arrived = self.sh.clock.monotonic();
+        let now = self.sh.clock.monotonic();
+        let arrived = arrived.min(now);
         let deadline = arrived.saturating_add(st.ledger.policy.full_timeout);
         st.ledger.waiters.push_back(Parked {
             waiter: waiter.clone(),
@@ -459,6 +498,12 @@ impl SpaceGate for LunixSpace {
             arrived,
             deadline,
         });
+        if deadline <= now {
+            // It waited its full_timeout in its queue already (ADR-32: the
+            // wait counts from the arrival): it expires now, and latches.
+            st.ledger.expire(now);
+            return Ok(ReserveOutcome::Parked(waiter));
+        }
         let want = st.ledger.ladder_want();
         self.sh.kick_ladder(&mut st, want);
         // A new deadline: the timer thread recomputes its sleep.

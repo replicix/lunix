@@ -143,6 +143,12 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
             "full_timeout_ms is above 100 s: a write waiting that long for space may trip the kernel's hung-task warning (120 s by default)"
         );
     }
+    if (1..200).contains(&cfg.store_max_percent) {
+        tracing::warn!(
+            store_max_percent = cfg.store_max_percent,
+            "store_max_percent below 200: a new volume's cap may not hold it full at the default compaction threshold (ADR-32)"
+        );
+    }
     if cfg.metrics.is_some() {
         tracing::warn!(
             "metrics are deferred in phase 1 (plan M12a step 9); the address is ignored"

@@ -14,13 +14,14 @@
 //! `cache_max` with incompressible data that is never overwritten (no
 //! garbage: GC cannot help), leaves writes parked, and ends them one way:
 //!
-//! * the deadline: they fail `ENOSPC` within `full_timeout` (3 s here) and
+//! * the deadline: they fail `ENOSPC` within `full_timeout` (10 s here) and
 //!   the volume latches full, later writes fail at once (P1);
 //! * `lunix space --on-full error` (`reconfigure`): they fail at once (P2);
 //! * the quiesce rule (`begin_close`, what `QuiesceAll` calls before
 //!   `QUIESCE_DEV`): they fail at once and the engine's final commit runs
 //!   (P3; the drain itself needs a ublk device, so root, and is the M15
-//!   full-volume cell);
+//!   full-volume cell); `Engine::begin_close`, called beside it, covers the
+//!   writes parked for the ring (engine tests);
 //! * a kill (the stack dropped without a commit), `on_full = error` written
 //!   to `volume.json`, a reopen and the writes reissued: each fails at once
 //!   and nothing parks.
@@ -60,6 +61,14 @@ const CS: u32 = 64 << 10;
 const SIZE: u64 = 128 << 20;
 const CAP: u64 = 64 << 20;
 const IO: u32 = 256 << 10;
+/// The `full_timeout_ms` of the tests that wait it out.
+const FULL_TIMEOUT_MS: u64 = 10_000;
+const FULL_TIMEOUT: Duration = Duration::from_millis(FULL_TIMEOUT_MS);
+/// What "at once" may take on a loaded host.
+const SLACK: Duration = Duration::from_secs(5);
+/// A write still parked this long (more than two commit intervals of 1 s)
+/// waits for space for good.
+const PARKED: Duration = Duration::from_millis(2500);
 
 /// The completions of one queue handler.
 struct Done {
@@ -211,12 +220,10 @@ fn volume(t: &Scratch, full_timeout_ms: Option<u64>) -> TestVolume {
     let mut b = VolumeBuilder::new(t.path())
         .mode(CryptoMode::Integrity)
         .chunk_size(CS)
-        .size_bytes(SIZE)
-        // Ring files of about 1 MiB: the journal gives `JournalReserved`
-        // back a whole ring file at a time once a cut covers it, and the
-        // production file (64 MiB) is as large as this volume's cap, so its
-        // active file alone would hold the cap (see the bstop report).
-        .small_journal(16);
+        // The production ring files (64 MiB, as large as the cap): the
+        // engine releases `JournalReserved` per cut, not per ring file
+        // (review M4).
+        .size_bytes(SIZE);
     b.engine = Some(Arc::new(gc_tune));
     b.json = Some(Box::new(move |j: &mut VolumeJson| {
         j.space.cache_max = Some(CAP);
@@ -228,8 +235,11 @@ fn volume(t: &Scratch, full_timeout_ms: Option<u64>) -> TestVolume {
     b.create().expect("create")
 }
 
-/// Writes fresh 256 KiB blocks, one at a time, until one does not complete
-/// within a second (it waits for space). Returns the offset after the last
+/// Writes fresh 256 KiB blocks, one at a time, until one waits for space
+/// for good: still not done [`PARKED`] after it went in, with the gate
+/// holding a waiter. A shorter wait is the double count of a cut in flight
+/// (its segment bounds and the journal it reclaims are both charged until
+/// C9), which the next commit ends. Returns the offset after the last
 /// block written and the parked tag.
 fn fill_until_parked(q: &mut Queue, stack: &VolumeStack) -> (u64, Tag) {
     let mut off = 0u64;
@@ -246,7 +256,7 @@ fn fill_until_parked(q: &mut Queue, stack: &VolumeStack) -> (u64, Tag) {
                 assert!(s.is_ok(), "a fill write failed: {s:?}");
                 break;
             }
-            if start.elapsed() > Duration::from_millis(1500) && stack.space.snapshot().waiters > 0 {
+            if start.elapsed() > PARKED && stack.space.snapshot().waiters > 0 {
                 return (off, t);
             }
             assert!(
@@ -288,24 +298,26 @@ fn all_enospc(statuses: &[IoStatus]) {
 #[test]
 fn e1_parked_writes_fail_with_enospc_within_full_timeout_and_the_volume_latches() {
     let t = Scratch::new("bstop-deadline");
-    let vol = volume(&t, Some(3000));
+    let vol = volume(&t, Some(FULL_TIMEOUT_MS));
     let stack = vol.open_with(fast_gc).expect("open");
     let mut q = Queue::new(&stack);
     fill_and_park(&mut q, &stack, 31);
     let start = Instant::now();
-    let st = q.wait_all(Duration::from_secs(10));
+    let st = q.wait_all(FULL_TIMEOUT + SLACK);
     let took = start.elapsed();
     all_enospc(&st);
-    // Parked about a second already when the clock started: 3 s from its
-    // arrival, plus one second of slack.
-    assert!(took < Duration::from_secs(4), "took {took:?}");
+    // The head parked before the clock started: within full_timeout of its
+    // arrival, plus slack for a loaded host.
+    assert!(took < FULL_TIMEOUT + SLACK, "took {took:?}");
+    // And not much earlier: the wait is the configured one.
+    assert!(took + SLACK > FULL_TIMEOUT, "took {took:?}");
     assert!(stack.space.is_full(), "the volume latched full");
     assert_eq!(stack.space.fulls(), 1);
     // Latched: a write fails at once, nothing parks.
     let t0 = Instant::now();
     let w = q.write(0, 7);
     assert_eq!(q.wait(w, Duration::from_secs(5)).errno(), Some(ENOSPC));
-    assert!(t0.elapsed() < Duration::from_millis(500));
+    assert!(t0.elapsed() < SLACK, "{:?}", t0.elapsed());
     assert_eq!(stack.space.snapshot().waiters, 0);
     // Reads go on.
     assert_eq!(q.read(0), payload(1 << 2, IO as usize));
@@ -328,11 +340,7 @@ fn e1_a_switch_to_on_full_error_releases_the_parked_writes_at_once() {
     stack.space.reconfigure(&s).expect("reconfigure");
     let st = q.wait_all(Duration::from_secs(5));
     all_enospc(&st);
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
+    assert!(start.elapsed() < SLACK, "{:?}", start.elapsed());
     assert_eq!(stack.space.snapshot().waiters, 0);
     drop(q);
     close(stack).expect("close");
@@ -347,9 +355,10 @@ fn e1_the_quiesce_rule_fails_the_parked_writes_and_the_final_commit_runs() {
     fill_and_park(&mut q, &stack, 31);
     let start = Instant::now();
     stack.space.begin_close();
-    let st = q.wait_all(Duration::from_secs(5));
+    stack.engine.begin_close();
+    let st = q.wait_all(SLACK);
     all_enospc(&st);
-    assert!(start.elapsed() < Duration::from_secs(1));
+    assert!(start.elapsed() < SLACK);
     // Nothing is held: the queue would drain; the final commit runs.
     assert!(q.outstanding.is_empty());
     drop(q);
@@ -383,14 +392,14 @@ fn e1_a_kill_and_a_restart_with_on_full_error_fail_the_reissued_writes_at_once()
     assert_eq!(stack.json.space.on_full, OnFull::Error);
     let mut q = Queue::new(&stack);
     // The reissued writes: each is answered at once, nothing parks. The
-    // reopen's exact accounting may have found a little room (bounds held
-    // before the kill), so the first ones may fit; the store is at its cap.
+    // journal is charged per cut before and after the kill (review M4), so
+    // the reopen finds the store at its cap: every one is refused.
     let mut enospc = 0;
     for i in 0..16u64 {
         let t0 = Instant::now();
         let w = q.write((off + i * u64::from(IO)) % SIZE, 20_000 + i);
         let s = q.wait(w, Duration::from_secs(5));
-        assert!(t0.elapsed() < Duration::from_secs(1), "{:?}", t0.elapsed());
+        assert!(t0.elapsed() < SLACK, "{:?}", t0.elapsed());
         assert_eq!(stack.space.snapshot().waiters, 0, "nothing parks");
         if s.errno() == Some(ENOSPC) {
             enospc += 1;
@@ -398,7 +407,7 @@ fn e1_a_kill_and_a_restart_with_on_full_error_fail_the_reissued_writes_at_once()
             assert!(s.is_ok(), "{s:?}");
         }
     }
-    assert!(enospc >= 12, "only {enospc} of 16 refused");
+    assert_eq!(enospc, 16, "only {enospc} of 16 refused");
     drop(q);
     close(stack).expect("close");
 }
@@ -406,11 +415,11 @@ fn e1_a_kill_and_a_restart_with_on_full_error_fail_the_reissued_writes_at_once()
 #[test]
 fn a_discard_on_a_full_volume_brings_the_space_back_and_writes_succeed() {
     let t = Scratch::new("bstop-discard");
-    let vol = volume(&t, Some(3000));
+    let vol = volume(&t, Some(FULL_TIMEOUT_MS));
     let stack = vol.open_with(fast_gc).expect("open");
     let mut q = Queue::new(&stack);
     let written = fill_and_park(&mut q, &stack, 3);
-    all_enospc(&q.wait_all(Duration::from_secs(10)));
+    all_enospc(&q.wait_all(FULL_TIMEOUT + SLACK));
     assert!(stack.space.is_full());
     // Discard everything written, in requests of at most the buffer size.
     let start = Instant::now();

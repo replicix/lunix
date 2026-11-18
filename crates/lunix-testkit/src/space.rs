@@ -179,6 +179,17 @@ impl SpaceGate for MemSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
+        self.reserve_since(kind, bytes, wake, self.clock.monotonic())
+    }
+
+    /// The wait of a parked request counts from `arrived` (ADR-32).
+    fn reserve_since(
+        &self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: Duration,
+    ) -> Result<ReserveOutcome> {
         let mut st = lock(&self.st);
         if st.read_only {
             return Err(Error::ReadOnly);
@@ -192,7 +203,10 @@ impl SpaceGate for MemSpace {
         }
         let want = st.used().saturating_add(bytes).saturating_sub(st.limit());
         let waiter = Waiter::new(wake.cloned());
-        let deadline = st.cfg.full_timeout.map(|t| self.clock.monotonic() + t);
+        let deadline = st
+            .cfg
+            .full_timeout
+            .map(|t| arrived.min(self.clock.monotonic()) + t);
         st.waiters.push_back(Parked {
             waiter: waiter.clone(),
             kind,

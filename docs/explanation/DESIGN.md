@@ -88,8 +88,11 @@ A **volume** is a thin block device of a given size. Its data path is:
   `async{T,B,B_max}` (local/local), `sync` (local/s3) and `write-through`
   (s3/s3). fsync from the file system above arrives as FLUSH/FUA.
 - **Space policy:** `free_floor` (bytes or % of the host FS), `on_full =
-  wait|error`, `full_timeout`, `cache_max` (bytes). The local store never
-  exceeds `min(cache_max, fs_free - free_floor)`.
+  wait|error`, `full_timeout` (null: the daemon's `full_timeout_ms`, 60 s
+  by default; a write never waits for ever, ADR-32), `cache_max` (bytes;
+  `lunix volume create` writes 200 % of the size by default, ADR-32). The
+  local store never exceeds `min(cache_max, fs_free - free_floor)`, plus
+  the reserved region and one cut in flight.
 - **Owner:** the host that holds the lease. Only the owner writes,
   destages, commits and garbage-collects.
 
@@ -375,10 +378,20 @@ journal):
   1. Evict clean cache.
   2. Evict cold synced segments.
   3. Compact (local-only; a real step in phase 1, §11).
-  4. Throttle destage and upload.
-  5. Apply `on_full`: `wait` parks the request, until `full_timeout` if
-     one is set, then ENOSPC; `error` returns ENOSPC immediately (ublk
-     maps it to `BLK_STS_NOSPC`).
+  4. Throttle destage and upload (unused in phase 1; ADR-32 paces the
+     admission below the limit instead).
+  5. Apply `on_full` (ADR-32): `wait` parks the request FIFO for at most
+     `full_timeout` from its arrival, then ENOSPC, and the volume
+     **latches full**: every write waiting for space fails with it and
+     writes fail at once until the headroom passes the resume mark (the
+     larger of 4 segments and 1 % of the limit); reads, FLUSH and discards
+     go on. `error` returns ENOSPC immediately (ublk maps it to
+     `BLK_STS_NOSPC`). A policy change re-judges the parked requests; a
+     quiesce fails them, so the drain finishes.
+- Every wait has a deadline, the wait for a full journal ring included
+  (ADR-32). Discards and write-zeroes are never refused for space and do
+  not queue behind parked writes; on a refusing volume the coordinator
+  cuts them and turns the retained window so their space comes back.
 - A reserve of 2 × the segment size, plus the commit and map headroom, is
   never handed to writes.
 
@@ -1646,7 +1659,7 @@ ADR-16 and ADR-22 set the shape.
 | S3 unreachable, sync | FLUSH waits (hard) or EIO after `flush_timeout` | per-volume policy |
 | network partition, owner isolated | lease renewal fails → self-fence → read-only | the new owner steals after TTL; the zombie gets 412 |
 | two daemons attach the same volume | the second waits for the lease or fails | the EPOCH commit decides; there is never a double writer |
-| local FS full | space ladder → wait or ENOSPC | §4.3 |
+| local FS full | space ladder → a bounded wait (`full_timeout`), then ENOSPC and the full latch until space returns | §4.3, ADR-32 |
 | host FS EIO / corruption | volume read-only, alert | re-import from the bucket |
 | bucket object corrupt | the fetch fails verification | read from a mirror; scrub repairs |
 | backend rollback / substitution | a spliced or re-ordered chain (`parent_hash`, epoch) or a stale lease is detected; an older valid prefix is detected on a host with a floor (`Rollback`, `Fork`; §8.4, §15) and not on one without | refuse to mount; a host or client with no floor cannot tell |

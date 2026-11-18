@@ -277,6 +277,26 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     fn reserve(&self, kind: SpaceKind, bytes: u64, wake: Option<&WakeFd>)
         -> Result<ReserveOutcome>;
 
+    /// [`reserve`](Self::reserve) for a request that arrived at `arrived`
+    /// (`Clock::monotonic` of the gate's clock), earlier than this call: a
+    /// write that waited in its queue behind a parked one. A parked request's
+    /// `full_timeout` counts from `arrived`, not from this call (ADR-32: a
+    /// write waits at most `full_timeout` from its arrival); one already past
+    /// it expires at once. The default ignores `arrived`.
+    ///
+    /// # Errors
+    /// As [`reserve`](Self::reserve).
+    fn reserve_since(
+        &self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: std::time::Duration,
+    ) -> Result<ReserveOutcome> {
+        let _ = arrived;
+        self.reserve(kind, bytes, wake)
+    }
+
     /// Charges `bytes` to `kind` from the reserved headroom: no limit check,
     /// never parks.
     ///

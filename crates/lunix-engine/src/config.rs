@@ -74,6 +74,9 @@ pub struct EngineConfig {
     /// (ADR-32: `ENOSPC` if the last commit failed for space, else `EIO`):
     /// the volume's resolved `full_timeout` (60 s by default). A live change
     /// goes through [`Engine::set_full_timeout`](crate::Engine::set_full_timeout).
+    /// Whoever builds the engine keeps it equal to the space gate's
+    /// resolved `full_timeout` (`lunixd`'s `open_volume` copies it); a
+    /// ring-full wait is at least 60 s while commits succeed.
     pub full_timeout: Duration,
 }
 
