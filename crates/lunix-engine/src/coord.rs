@@ -43,6 +43,9 @@ use lunix_iface::space::SpaceKind;
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
+use crate::engine::{CommitOutcome, Inner};
+use crate::recover::Recovered;
+use crate::stats::add;
 
 /// The shortest time between two cuts made for pending compaction moves
 /// alone (`wanted`).
@@ -51,9 +54,14 @@ const MOVES_CUT_GAP: Duration = Duration::from_secs(1);
 /// After a cut, a busy collector steps for up to the cut's time divided by
 /// this (`gc_share`): a quarter of the coordinator.
 const GC_SHARE_DIVISOR: u32 = 3;
-use crate::engine::{CommitOutcome, Inner};
-use crate::recover::Recovered;
-use crate::stats::add;
+
+/// The longest share after one cut (`gc_share`): a long cut does not hold the
+/// coordinator (the ladder, `grow`, the window turn, ring-parked writes) for
+/// a third of its time.
+const GC_SHARE_MAX: Duration = Duration::from_secs(1);
+
+/// Steps in a row without the clock moving that end a share (`gc_share`).
+const GC_SHARE_STALLS: u32 = 8;
 
 /// The coordinator's state, under the engine's coordinator mutex.
 pub(crate) struct Coord {
@@ -893,20 +901,29 @@ impl Inner {
     }
 
     /// After a cut, while a pass has work it can do now (`gc_busy`): more
-    /// steps, for up to a third of the time the cut took, so the collector
-    /// gets about a quarter of the coordinator under writes that keep it
-    /// cutting back to back (one step per cut gave it a few percent, and a
-    /// 4 GiB working set outran compaction; milestone gcrate). The next cut
-    /// waits that long; each step still ends one unit past its budget.
+    /// steps, for up to a third of the time the cut took and at most
+    /// [`GC_SHARE_MAX`], so the collector gets about a quarter of the
+    /// coordinator under writes that keep it cutting back to back (one step
+    /// per cut gave it a few percent, and a 4 GiB working set outran
+    /// compaction; milestone gcrate). The next cut waits that long; each step
+    /// still ends one unit past its budget, and a clock that does not move
+    /// over [`GC_SHARE_STALLS`] steps (a manual one) ends the share.
     fn gc_share(&self, co: &mut Coord, cut_started: Duration) {
         let now = self.clock.monotonic();
-        let until = now.saturating_add(now.saturating_sub(cut_started) / GC_SHARE_DIVISOR);
-        while self.gc_busy.load(Ordering::Acquire)
+        let share = (now.saturating_sub(cut_started) / GC_SHARE_DIVISOR).min(GC_SHARE_MAX);
+        let until = now.saturating_add(share);
+        let mut last = now;
+        let mut stalled = 0u32;
+        while stalled < GC_SHARE_STALLS
+            && self.gc_busy.load(Ordering::Acquire)
             && !self.is_failed()
             && !self.closing.load(Ordering::Acquire)
-            && self.clock.monotonic() < until
+            && last < until
         {
             self.gc_step(co);
+            let t = self.clock.monotonic();
+            stalled = if t == last { stalled + 1 } else { 0 };
+            last = t;
         }
     }
 

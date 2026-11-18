@@ -134,6 +134,7 @@ the cap.
 | + 256 MiB per pass (final) | raw 64K integrity | 50 MiB/s | 88 MiB/s | 32 GiB (18 to 28 GiB in the middle, still drifting up) | 17 GiB | 19 GiB |
 | final | raw / ext4 / xfs 64K encrypted | 50 MiB/s (raw) | 91 MiB/s (raw) | 28 / 29 / 26 GiB; raw flat at 24 GiB over its last 4 min | 18 GiB | 25 GiB (raw) |
 | final | raw / ext4 / xfs 16K integrity | 31 MiB/s (raw) | 40 MiB/s (raw) | 11 / 13 / 12 GiB; raw 10 to 14 GiB over its last 6 min | 13 GiB | 12 GiB (raw) |
+| duty cap on the mark only (re-review m-1), share at most 1 s | raw 64K integrity | 41 MiB/s | 71 MiB/s | 24 GiB (peak 26.6; 16.6 to 24.9 GiB over its last 5 min) | 16 GiB | 17 GiB |
 | committed, merged with `main` 871e187 (p1/bstop) | raw / ext4 / xfs 64K integrity | 50 MiB/s (raw) | 89 MiB/s (raw) | 28 / 25 / 27 GiB; raw 20 to 33 GiB over its last 6 min | 17 GiB | 23 GiB (raw) |
 
 (The sampler's written and freed counters are valid for the raw cells only: the device counter restarts
@@ -182,8 +183,21 @@ paced down to one pass per 4 x mark time at worst; that is bounded, not measured
   (`churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`): reads against the flat oracle during
   GC, reopen, `lunix-fsck --deep`, the at-rest store bound, no GC work left (M-2).
 - `crates/lunixd/tests/stack_gc_kill.rs`: the kill loop runs the pipelined schedule by default
-  (`LUNIX_GC_PIPELINE=0` for the whole sequence). The kill loops stay out of CI, as before; the plain
-  16 KiB loop was run by hand (21 of 21, see Gate).
+  (`LUNIX_GC_PIPELINE=0` for the whole sequence). The kill loops stay out of CI, as before; all three
+  cells were run by hand on the pipelined schedule: plain 16 KiB (a2e9408), plain 64 KiB and integrity
+  16 KiB (d4812d2): 21 points reached, 21 kills, every one verified, in each.
+- `crates/lunix-engine/tests/gc_pacing.rs` (6, re-review M-2): with a collector that moves the manual
+  clock inside its steps: the share after a cut is a third of the cut, at most 1 s, ends when the clock
+  stands still and is not taken by a collector with no work; moves cut at once on an idle volume, at
+  most once a second under writes while a pass is busy, and at once again when it is not.
+- `crates/lunix-gc/src/tests/pipeline.rs` (4 more, re-review M-2): a pass that condemns only commit
+  objects and packs does not hurry the next; the next pass waits three times the last mark time (set
+  through `last_mark`, now measured on the view's clock); after an abandoned pass the next waits
+  `pass_interval` although graces ended; an idle check after a busy pass clears "busy".
+- `stack_gc_ladder` `the_ladder_compact_step_on_the_daemon_schedule` and `stack_throttle`
+  `a_discard_on_a_full_volume_brings_the_space_back_on_the_daemon_schedule` (re-review M-1): the
+  ladder's compact step and a full volume's discard, window turn and readmission on the pipelined
+  schedule.
 - `crates/lunixd/tests/stack_gc_rate.rs`, `sustained_overwrite_stays_bounded` (M-3): 150 s; `P` is the
   run's mean pass period and `R` the rate over `G + 3P` before each sample; it asserts that the store
   does not keep growing (the last third's peak is at most the middle third's plus `R x P`), a 1.5 x
@@ -282,3 +296,17 @@ Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches r
 4. **Per-object index manifest swaps** (condemn 5.5 ms, delete 13 ms): a batch call would need a frozen
    `ChunkIndex` change.
 5. The grace default is unchanged (lead, 2026-11-18).
+6. **The grace trigger keeps a burst of passes going** (re-review m-3). Every pass on a written volume
+   condemns a commit object and packs; when their grace ends, the trigger starts a pass one gap after
+   the last, busy or not, so after a busy burst a trickle of writes can keep passes about a gap apart.
+   The duty cap bounds the cost. A fix: let a grace end hurry the next pass only when a segment, or
+   `BUSY_FREED` bytes, wait behind it.
+7. **A pin placed between a pipelined mark and its deletes** (re-review m-6) protects the commit object
+   (`Facts` are per step) but not what only its root reaches (the liveness is the mark's). The pipelined
+   order puts the condemn units between the mark and the deletes, so the window is longer than the M17
+   recheck's, which has the same exposure. Not reachable in phase 1 (no pin on an old commit is ever
+   created); record it for the milestone that creates pins.
+8. **Not measured** (re-review m-7): a large-map run (a map ten or more times the root cells'); and why
+   64K integrity does worse than 64K encrypted at a similar intake (1.6 to 1.9 x against 1.4 x). The
+   duty cap that counted all of a pass's work (re-review m-1, now mark time only) is the likely part of
+   it; the rerun after that change is below.

@@ -367,3 +367,126 @@ fn a_pin_between_condemn_and_delete_keeps_the_commit_and_its_root() {
     }
     s.check_ledger().unwrap();
 }
+
+// ---------------------------------------------- pacing (re-review M-2)
+
+/// Steps once; true when a pass started (the step left the idle state, or
+/// a pass ended within it).
+fn starts(s: &mut Sim) -> bool {
+    let before = s.gc.stats().passes;
+    let p = s.unit().unwrap();
+    p.state != GcState::Idle || s.gc.stats().passes != before
+}
+
+/// A pass that condemns only commit objects and map packs is not busy: the
+/// next pass waits `pass_interval`, not `busy_interval`.
+#[test]
+fn a_pass_that_condemns_only_commits_and_packs_does_not_hurry_the_next() {
+    let mut s = sim();
+    churn(&mut s, 1, 0);
+    s.clock.advance(Duration::from_secs(1));
+    pass_now(&mut s);
+    // Cuts without new data: old commit objects and packs die, no segment.
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(Duration::from_secs(31));
+    pass_now(&mut s);
+    let last = s.gc.status().last_pass.unwrap();
+    assert_eq!(last.segments_condemned, 0, "{last:?}");
+    assert!(
+        s.gc.condemned()
+            .iter()
+            .any(|o| matches!(o, ObjectRef::Commit(_))),
+        "the pass condemned no commit object"
+    );
+    // A new tip after the busy interval does not start a pass...
+    s.clock.advance(Duration::from_secs(3));
+    s.commit().unwrap();
+    assert!(!starts(&mut s), "a pass followed after the busy interval");
+    // ...the pass interval does.
+    s.clock.advance(Duration::from_secs(28));
+    assert!(starts(&mut s), "no pass after the pass interval");
+}
+
+/// The duty cap: the next pipelined pass waits at least three times the
+/// last pass's mark time, also when graces end and the tip moves.
+#[test]
+fn the_next_pass_waits_three_times_the_last_mark() {
+    let mut s = sim();
+    condemned_at_start(&mut s);
+    assert!(s.gc.min_gap() < Duration::from_secs(3));
+    // As if the mark had taken 20 s on the view's clock.
+    s.gc.last_mark = Duration::from_secs(20);
+    assert_eq!(s.gc.min_gap(), Duration::from_secs(60));
+    s.clock.advance(GRACE + Duration::from_secs(1));
+    churn(&mut s, 1, 1000);
+    assert!(
+        starts(&mut s),
+        "61 s after the pass, past the 60 s gap: a pass is due"
+    );
+    pass_now(&mut s);
+    s.gc.last_mark = Duration::from_secs(20);
+    s.clock.advance(Duration::from_secs(30));
+    churn(&mut s, 1, 2000);
+    assert!(!starts(&mut s), "a pass inside the duty gap");
+    s.clock.advance(Duration::from_secs(31));
+    assert!(starts(&mut s), "no pass after the duty gap");
+}
+
+/// An abandoned pipelined pass: the next one waits `pass_interval`, also for
+/// a grace that has ended.
+#[test]
+fn after_an_abandoned_pass_the_next_waits_the_pass_interval() {
+    let mut s = sim();
+    condemned_at_start(&mut s);
+    s.clock.advance(GRACE + Duration::from_secs(1));
+    churn(&mut s, 1, 1000);
+    s.arm_fault("index.drop.before", 1, false);
+    let mut failed = false;
+    for _ in 0..10_000 {
+        match s.unit() {
+            Ok(p) if p.done || p.state == GcState::Idle => break,
+            Ok(_) => {}
+            Err(_) => {
+                failed = true;
+                break;
+            }
+        }
+    }
+    assert!(failed, "the armed delete fault was not hit");
+    s.disarm_faults();
+    assert_eq!(s.gc.state(), GcState::Idle);
+    // Graces have ended and the tip is new, but the busy pace is off.
+    s.clock.advance(Duration::from_secs(5));
+    churn(&mut s, 1, 2000);
+    assert!(!starts(&mut s), "a pass 5 s after an abandoned one");
+    s.clock.advance(Duration::from_secs(26));
+    assert!(starts(&mut s), "no retry after the pass interval");
+    units_to_end(&mut s);
+    s.check_roots().unwrap();
+}
+
+/// An idle check after a busy pass clears "busy": a tip that moves later
+/// waits for `pass_interval`.
+#[test]
+fn an_idle_check_after_a_busy_pass_clears_busy() {
+    let mut s = sim();
+    condemned_at_start(&mut s);
+    // The graces end without a new tip: a pass deletes everything listed.
+    s.clock.advance(GRACE + Duration::from_secs(1));
+    pass_now(&mut s);
+    assert!(s.gc.condemned().is_empty(), "{:?}", s.gc.condemned());
+    let last = s.gc.status().last_pass.unwrap();
+    assert!(last.segments_deleted > 0, "{last:?}");
+    // Busy interval over, nothing changed: the idle check.
+    s.clock.advance(Duration::from_secs(3));
+    assert!(!starts(&mut s));
+    // A new tip now waits for the pass interval.
+    s.clock.advance(Duration::from_secs(3));
+    churn(&mut s, 1, 1000);
+    assert!(!starts(&mut s), "the idle check did not clear busy");
+    // The idle check looked at +3 s: the next look is 30 s after it.
+    s.clock.advance(Duration::from_secs(28));
+    assert!(starts(&mut s));
+}

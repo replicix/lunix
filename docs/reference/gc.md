@@ -17,11 +17,15 @@ condemned objects hold): one rule, the step runs whenever the map is the
 tip's. Moves of a call that failed, and a cut the collector asks for
 (`GcProgress::cut_wanted`), reach the next cut whichever path called it.
 A step does small units of work until its budget (`gc_step_budget_ms`, default
-50 ms) is spent, so a background step never holds up a cut for longer than one
-unit past the budget. While the pass in progress has work a step can do now
-(it is not idle and not waiting out its grace) the background thread ticks
-every 10 ms instead of every 100 ms, so the collector gets most of the
-coordinator's time and the cuts still come between its steps. The urgent pass
+50 ms) is spent, so a step never runs for longer than one unit past the
+budget. While the pass in progress has work a step can do now (it is not idle,
+not waiting out its grace, and not compaction at its rate cap) the background
+thread ticks every 10 ms instead of every 100 ms, and after each cut the
+collector steps on for up to a third of that cut's time, at most 1 s
+(`gc_share`): under writes that keep the coordinator cutting it gets about a
+quarter of it, and the next cut waits that long. Under writes, pending
+compaction moves cut at most once a second while a pass is busy (on an idle
+volume at once). The urgent pass
 and a dry run are one call each and hold the coordinator for a whole mark
 (and the urgent pass's compaction).
 
@@ -38,17 +42,17 @@ one interval later (a deferral for the store or the floor writes no evidence).
 order inside a pass is mark, condemn, delete, compact).
 A scheduled pass does not wait out the grace in the middle of the pass: its
 one mark is the recheck of every listed object whose grace ended before the
-mark began (the urgent pass's rule, with the full grace), it deletes those,
-then condemns what is newly dead and compacts. Objects whose grace still runs
+mark began (the urgent pass's rule, with the full grace): after condemning
+what is newly dead it deletes those, then compacts. Objects whose grace still runs
 are left alone without an evidence line. A pass that changed something is
 followed by the next after 5 s (`busy_interval`) instead of 30 s, and a grace
 that ends starts a pass without waiting for a new tip or the 30 s. "Changed
 something" means reclaim work: a segment condemned, deleted or compacted, or
 64 MiB freed; the commit objects and map packs every cut leaves dead do not
 count, so a lightly written volume keeps the 30 s pace. Whatever the pace, a
-pass follows the last one at the earliest after three times that pass's own
-work (time inside its units), so marking a large map takes at most about a
-quarter of the coordinator. After an abandoned pass the next waits 30 s.
+pass follows the last one at the earliest after three times that pass's mark
+time, so marking a large map takes at most about a quarter of the coordinator
+(deletes and compaction are not capped: they are the reclaim). After an abandoned pass the next waits 30 s.
 `condemned_pending` in `lunix gc --status` is normally non-zero under this
 schedule: it holds about one grace's worth of dead objects waiting for it,
 which is not a backlog (a backlog shows as a store that keeps growing, or as
@@ -268,7 +272,8 @@ pass, and is left alone. Candidates are also at or below the high-water mark,
 not condemned, not an unnamed output, and not introduced by the tip FULL
 (younger than one commit interval). With `u = live / file size` they are
 ranked by LFS cost-benefit `(1 - u) · age / (1 + u)`, where `age` is the tip's high-water
-mark minus the segment id, best first; up to 1 GiB of live bytes per pass.
+mark minus the segment id, best first; up to 1 GiB of live bytes per pass
+(256 MiB under the daemon's schedule).
 
 Live extents are copied in chunk-number order (LBA locality). Each is read,
 opened with its full chunk id and re-sealed through the extent codec, which
@@ -281,8 +286,10 @@ idle volume. These cuts, and the one the collector asks for before a source
 can go, are ordinary FULLs: on an idle volume they consume the retained
 window, so the retained FULLs may soon all be GC cuts of the same data (M17.B
 stack review M-5). Compaction reads at most `gc_rate` bytes per second
-(default 64 MiB/s) plus one step's worth, and at most the step budget's bytes
-per step; a `gc_rate` of 0 compacts nothing.
+(default 64 MiB/s) plus one step's allowance, and at most that allowance per
+step: the daemon allows one second of `gc_rate` per step (so a pass may read up
+to 64 MiB ahead of the rate), and the step's time budget bounds it; a `gc_rate`
+of 0 compacts nothing.
 
 The source segments become dead once the index's current copies are in the
 output; the next pass condemns them.
@@ -308,8 +315,8 @@ scratch is bounded.
 | `gc_step_budget_ms` | 50 | time one step may spend |
 
 Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
-daemon's), 30 s between passes and 5 s after a pass that changed something, 1 GiB of
-live bytes compacted per pass, a root walked in at most 64 leaf batches of at
+daemon's), 30 s between passes and 5 s after a pass that did reclaim work, 1 GiB of
+live bytes compacted per pass (256 MiB for the daemon), a root walked in at most 64 leaf batches of at
 least 16 leaves, 32 decoded footers cached.
 
 ## `state/gc/condemned`, body version 1

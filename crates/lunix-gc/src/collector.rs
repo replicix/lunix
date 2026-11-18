@@ -203,6 +203,8 @@ struct PassProfile {
     steps: u64,
     /// The current `step` call is counted in `steps`.
     step_counted: bool,
+    /// Time in mark units on the view's clock.
+    mark_view: Duration,
 }
 
 /// Phases a pass profile tracks.
@@ -214,11 +216,6 @@ const PHASE_NAMES: [&str; PHASES] = [
 ];
 
 impl PassProfile {
-    /// Time inside units, all phases.
-    fn active_total(&self) -> Duration {
-        self.active.iter().sum()
-    }
-
     fn ms(d: Duration) -> u64 {
         u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
     }
@@ -580,8 +577,9 @@ pub struct Gc {
     /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
     /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
-    /// Time inside units of the last finished pass (the duty-cycle cap).
-    last_active: Duration,
+    /// Time the last finished pass spent in its marks, on the view's clock
+    /// (the duty-cycle cap, [`Gc::min_gap`]). Tests set it directly.
+    pub(crate) last_mark: Duration,
     /// The last pass was abandoned: the grace trigger waits `pass_interval`.
     last_aborted: bool,
     /// When the last mark of a scheduled pass began: a listed object whose
@@ -643,7 +641,7 @@ impl Gc {
             prof: PassProfile::default(),
             whole: true,
             last_pass_busy: false,
-            last_active: Duration::ZERO,
+            last_mark: Duration::ZERO,
             last_aborted: false,
             last_mark_start: None,
         }
@@ -948,14 +946,16 @@ impl Gc {
     }
 
     /// The shortest time between two pipelined passes: `busy_interval`, and
-    /// at least [`DUTY_FACTOR`] times the last pass's own work, so that
-    /// passes take at most about a quarter of the coordinator however large
-    /// the map is.
-    fn min_gap(&self) -> Duration {
+    /// at least [`DUTY_FACTOR`] times the last pass's mark time, so that
+    /// marking takes at most about a quarter of the coordinator however large
+    /// the map is. Only the mark counts: deletes and compaction are the
+    /// reclaim itself, and capping them too held the collector to about an
+    /// eighth of the coordinator (gcrate re-review m-1).
+    pub(crate) fn min_gap(&self) -> Duration {
         self.cfg
             .busy_interval
             .min(self.cfg.pass_interval)
-            .max(self.last_active.saturating_mul(DUTY_FACTOR))
+            .max(self.last_mark.saturating_mul(DUTY_FACTOR))
     }
 
     /// Writes the pass's evidence object when it has lines; returns its
@@ -1075,7 +1075,13 @@ impl Gc {
     ) -> Result<Flow> {
         let before = self.phase.index();
         let t = std::time::Instant::now();
+        let v0 = view.clock.monotonic();
         let res = self.unit_inner(view, budget, freed, step_bytes);
+        if matches!(before, Some(0 | 3)) {
+            // A mark unit (the condemn mark or the recheck), on the view's
+            // clock: the duty cap's measure.
+            self.prof.mark_view += view.clock.monotonic().saturating_sub(v0);
+        }
         if before.is_none() && self.phase.index().is_some() {
             self.prof = PassProfile {
                 started: Some(t),
@@ -1094,7 +1100,7 @@ impl Gc {
             self.prof.entered[j].get_or_insert_with(|| st.elapsed());
         }
         if matches!(res, Ok(Flow::PassDone)) {
-            self.last_active = self.prof.active_total();
+            self.last_mark = self.prof.mark_view;
             self.log_pass("step");
         }
         res
@@ -1111,21 +1117,21 @@ impl Gc {
         macro_rules! pass_line {
             ($level:ident) => {
                 tracing::$level!(
-            how,
-            pass = p.pass,
-            wall_ms = PassProfile::ms(wall),
-            steps = self.prof.steps,
-            phases = %self.prof.phases(),
-            condemned = p.segments_condemned,
-            segments_deleted = p.segments_deleted,
-            packs_deleted = p.packs_deleted,
-            runs_deleted = p.runs_deleted,
-            commits_deleted = p.commits_deleted,
-            compacted = p.segments_compacted,
-            bytes_freed = p.bytes_freed,
-            bytes_moved = p.bytes_moved,
-            pending = self.list.entries.len(),
-            "gc pass done"
+                    how,
+                    pass = p.pass,
+                    wall_ms = PassProfile::ms(wall),
+                    steps = self.prof.steps,
+                    phases = %self.prof.phases(),
+                    condemned = p.segments_condemned,
+                    segments_deleted = p.segments_deleted,
+                    packs_deleted = p.packs_deleted,
+                    runs_deleted = p.runs_deleted,
+                    commits_deleted = p.commits_deleted,
+                    compacted = p.segments_compacted,
+                    bytes_freed = p.bytes_freed,
+                    bytes_moved = p.bytes_moved,
+                    pending = self.list.entries.len(),
+                    "gc pass done"
                 )
             };
         }
@@ -1787,7 +1793,9 @@ impl Gc {
         self.ctx = Some(PassCtx::default());
         self.last_compacted.clear();
         let mut m = Mark::new(self.cfg);
+        let m0 = view.clock.monotonic();
         m.run(view)?;
+        let mark_time = view.clock.monotonic().saturating_sub(m0);
         point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
         self.after_mark(&l);
@@ -1873,8 +1881,7 @@ impl Gc {
             }
         }
         self.finish_pass(view)?;
-        // One call: its own work is its wall time.
-        self.last_active = self.prof.started.map_or(Duration::ZERO, |t| t.elapsed());
+        self.last_mark = mark_time;
         self.log_pass("urgent");
         Ok(())
     }

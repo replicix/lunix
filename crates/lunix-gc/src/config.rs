@@ -57,7 +57,8 @@ pub struct GcConfig {
     /// (default 30 s). A pass also needs a reason to run: a new tip, a
     /// non-empty condemned list or changed pins.
     pub pass_interval: Duration,
-    /// Live bytes compaction may rewrite in one pass (default 1 GiB).
+    /// Live bytes compaction may rewrite in one pass (default 1 GiB; 256 MiB
+    /// in [`GcConfig::daemon`]).
     pub compact_per_pass: u64,
     /// New leaves one mark unit walks and resolves (default 32: 16 384
     /// entries at fanout 512).
@@ -74,14 +75,16 @@ pub struct GcConfig {
     /// during that wait is condemned only by the next pass and waits a whole
     /// grace again, so under sustained overwrite the store holds about two
     /// graces plus a pass interval of writes. On, a scheduled pass does not
-    /// wait: its one mark is the recheck of every listed object whose grace
-    /// ended before the mark began (as in the urgent pass), then it condemns
-    /// what is newly dead and compacts. An object waits one grace plus at
+    /// wait: it condemns what its one mark finds newly dead, and that mark is
+    /// the recheck of every object listed before it whose grace ended before
+    /// the mark began (as in the urgent pass): those are deleted; then it
+    /// compacts. An object waits one grace plus at
     /// most two pass periods. A pass on request (`request_pass`) always runs
     /// the whole sequence.
     pub pipeline: bool,
-    /// With `pipeline`: the time between a pass that changed something
-    /// (condemned, deleted or compacted) and the next one, instead of
+    /// With `pipeline`: the time between a pass that did reclaim work (a
+    /// segment condemned, deleted or compacted, or 64 MiB freed) and the next
+    /// one, at least three times its mark time, instead of
     /// `pass_interval` (default 5 s), so passes follow each other while
     /// garbage keeps coming.
     pub busy_interval: Duration,
