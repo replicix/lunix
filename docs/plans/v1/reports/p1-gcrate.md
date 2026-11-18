@@ -207,19 +207,16 @@ paced down to one pass per 4 x mark time at worst; that is bounded, not measured
 
 ## Gate
 
-`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`) on the tree merged with `main` 871e187
-(5fd36d9 plus the report): 1 902 tests passed, 0 failed, 28 ignored (summed over every `test result`
-line), fmt, clippy `-D warnings` (workspace and `lunixd` with `testsupport,crashpoints`), the feature
-edges, the release stack tests with `lunix-fsck`, `tools/tests`. The script's ownership step compares
-with the local `main` ref, which is behind `origin/main` in this worktree (it listed bstop's paths); the
-same check against the merge base with `origin/main` (`--changed-list`) gives
-`check-ownership: gcrate ok (17 changed paths)`. Before the merge, at a2e9408: all green, 1 828 passed.
-Among the tests: the 5 new directed pipeline tests, the pipelined crash sweeps at 16 KiB, 64 KiB and
-lean ids, `churn_pipelined_plain_16k`, `churn_pipelined_encrypted_64k`,
-`sustained_overwrite_stays_bounded` and the `tools/tests` cases.
+`tools/ci.sh` on the test host (`LUNIX_CPUS=0-7`, `-j 8`) on the tree merged with `main` 94a735a
+(e8910ce): **all green**, 1 926 tests passed, 0 failed, 28 ignored (summed over every `test result`
+line); fmt, clippy `-D warnings` (workspace and `lunixd` with `testsupport,crashpoints`), the feature
+edges, the release stack tests with `lunix-fsck`, `tools/tests`, and `check-ownership: gcrate ok (22
+changed paths)` (the base is now the merge base with `origin/main`). Earlier rounds: a2e9408 all green,
+1 828 passed; the merge with 871e187, 1 902 passed.
 
-By hand: `gc_kill_loop_plain_16k` on the pipelined schedule: 21 points, 21 reached, 21 kills, all
-verified (1 061 s). Root: seven `fio-verify` cells (above), all passing, host left clean (no ublk device,
+By hand, on the pipelined schedule: `gc_kill_loop_plain_16k` (a2e9408), `gc_kill_loop_plain_64k` and
+`gc_kill_loop_integrity_16k` (d4812d2): 21 points, 21 reached, 21 kills, all verified, in each (1 061,
+959 and 972 s). Root: seven `fio-verify` cells (above), all passing, host left clean (no ublk device,
 mount or daemon of this milestone; `ublk-leftovers: clean` after every run).
 
 Remote disk: 2.8 GiB after the gate (`target/debug` and the incremental caches removed, the release build kept); scratch 3 MiB (logs).
