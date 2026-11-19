@@ -377,3 +377,21 @@ paths = [
 # binary runs (root cause and fix).
 [gcflake]
 paths = ["crates/lunixd/tests/stack_gc.rs", "tools/ownership.toml"]
+
+# tipstat: ADR-33 T5, the status path reads a published tip and takes no
+# coordinator mutex.
+[tipstat]
+paths = [
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/Cargo.toml",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/tip_view.rs",
+  "crates/lunixd/Cargo.toml",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/tests/status_lockfree.rs",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
