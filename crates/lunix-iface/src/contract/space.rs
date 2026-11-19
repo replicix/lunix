@@ -6,7 +6,7 @@ use std::time::Duration;
 use lunix_format::local::OnFull;
 
 use super::wait_until;
-use crate::clock::ManualClock;
+use crate::clock::{Clock, ManualClock};
 use crate::error::ErrorKind;
 use crate::space::{
     Freed, LadderStep, LadderStepKind, ReserveOutcome, SpaceGate, SpaceKind, Urgency, WaiterState,
@@ -177,6 +177,46 @@ pub fn timeout_expires_waiters_on_the_clock<
     assert_eq!(g.tick(), 1);
     assert_eq!(w.state(), WaiterState::TimedOut);
     assert_eq!(used(&*g), 100);
+}
+
+/// `reserve_since`: a parked request's `full_timeout` counts from its
+/// arrival, not from the call (ADR-32).
+pub fn a_wait_counts_from_the_arrival<
+    G: SpaceGate,
+    M: Fn(SpaceSetup, Arc<ManualClock>) -> Arc<G>,
+>(
+    make: &M,
+) {
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let mut setup = SpaceSetup::new(100, 0, OnFull::Wait);
+    setup.full_timeout = Some(Duration::from_secs(1));
+    let g = make(setup, clock.clone());
+    reserved(g.reserve(K, 100, None).expect("reserve"));
+    let arrived = clock.monotonic();
+    clock.advance(Duration::from_millis(600));
+    let ReserveOutcome::Parked(w) = g.reserve_since(K, 10, None, arrived).expect("reserve") else {
+        panic!("expected a parked request");
+    };
+    clock.advance(Duration::from_millis(450));
+    assert_eq!(g.tick(), 1, "due at its arrival plus full_timeout");
+    assert_eq!(w.state(), WaiterState::TimedOut);
+    // Already past it, on a fresh (unlatched) gate: refused without
+    // parking, and without latching the volume (it never waited in the gate).
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let mut setup = SpaceSetup::new(100, 0, OnFull::Wait);
+    setup.full_timeout = Some(Duration::from_secs(1));
+    let g = make(setup, clock.clone());
+    reserved(g.reserve(K, 100, None).expect("reserve"));
+    let arrived = clock.monotonic();
+    clock.advance(Duration::from_secs(2));
+    assert!(!g.snapshot().full);
+    assert!(matches!(
+        g.reserve_since(K, 10, None, arrived).expect("reserve"),
+        ReserveOutcome::NoSpace
+    ));
+    let snap = g.snapshot();
+    assert_eq!(snap.waiters, 0);
+    assert!(!snap.full, "a late refusal does not latch");
 }
 
 /// Writes cannot take the headroom; commit-time reservations can.

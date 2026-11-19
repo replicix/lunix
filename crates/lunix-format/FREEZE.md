@@ -194,3 +194,25 @@ no backward compatibility while Lunix is in progress); its layout is
 unchanged.
 
 Re-signed by: the maintainer (Attila Nagy) on 2026-11-15 (amendment (b): journal mark ring, record kind 3)
+
+**Rule change F1 (2026-11-18, ADR-32).** In `volume.json`, a null
+`space.full_timeout_ms` no longer means "wait for ever": it means the
+daemon's default full timeout (60 s). No byte of any golden changes; the
+row of on-disk-formats.md §21 changes with the implementation (T1).
+Maintainer sign-off 2026-11-18 (rule change, no layout change), given with
+the acceptance of ADR-32.
+
+**Rule change F2 (2026-11-18, ADR-32 amendment "the cap percentage").**
+`volume.json` records how the store's cap was set:
+`space.cache_max_percent` (a percentage of the volume size, 100 ..= 10 000)
+or `space.cache_max` (an absolute byte count). At most one of them is
+non-null; both null means no cap. Both keys are required: a file that lacks
+one of the two keys is refused (no default, no migration: Lunix keeps no
+backward compatibility while it is in progress). A percentage means
+`percent` of the volume size, never below the size plus 2 ×
+`commit.dirty_bytes`; it is resolved against the size at every open, on
+`lunix space` and on every grow. An absolute cap stays as it is on a grow.
+The golden `14-volume.json` gains the `"cache_max_percent": null` line; the
+rows of on-disk-formats.md §21 change with it. Maintainer sign-off
+2026-11-18 (layout change of `volume.json`), given with the decision "Store %
+in volume.json".

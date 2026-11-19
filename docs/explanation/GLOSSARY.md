@@ -141,8 +141,9 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
   (ADR-27). Each is `local` or `s3`, and says where data must be before
   a write or a FLUSH completes.
 - **Space ladder:** what happens as local space runs out: evict clean →
-  compact (real in phase 1 for local-only volumes) → throttle → `on_full` (`wait` with an optional timeout, or
-  `error` = ENOSPC).
+  compact (real in phase 1 for local-only volumes) → throttle → `on_full`
+  (`wait` for at most `full_timeout`, 60 s by default, then ENOSPC and the
+  full latch; or `error` = ENOSPC at once). ADR-32.
 - **Heat map:** a `heat/<seq>` object of hot ranges and first-touch
   order, used to warm a new owner's cache.
 - **Authority transfer:** moving the arbiter role from one backend to

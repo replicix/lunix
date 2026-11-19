@@ -229,24 +229,32 @@ fn wake_fd_is_signalled_on_grant_and_on_timeout() {
 }
 
 #[test]
-fn an_expired_head_unblocks_the_smaller_request_behind_it() {
+fn an_expired_head_fails_the_requests_behind_it_and_latches_the_volume_full() {
+    // ADR-32: the first expiry fails every request waiting for space (it no
+    // longer lets the ones behind it in) and latches the volume full.
     let ck = clock();
     let (g, _fs) = gate(
-        100,
+        1000,
         settings(0, OnFull::Wait, Some(Duration::from_secs(1))),
         ck.clone(),
     );
-    reserved(g.reserve(K, 80, None).unwrap());
+    reserved(g.reserve(K, 995, None).unwrap());
     let big = parked(g.reserve(K, 50, None).unwrap());
     ck.advance(Duration::from_millis(500));
-    let small = parked(g.reserve(K, 10, None).unwrap());
+    let small = parked(g.reserve(K, 1, None).unwrap());
     // The small one fits, but may not overtake.
     assert_eq!(small.state(), WaiterState::Pending);
     ck.advance(Duration::from_millis(500));
-    assert_eq!(g.tick(), 1);
+    assert_eq!(g.tick(), 2);
     assert_eq!(big.state(), WaiterState::TimedOut);
-    assert_eq!(small.state(), WaiterState::Granted);
-    assert_eq!(g.snapshot().used(), 90);
+    assert_eq!(small.state(), WaiterState::TimedOut);
+    assert!(g.is_full(), "headroom 5 is below the resume mark of 10");
+    assert_eq!(g.snapshot().used(), 995);
+    // Latched: a write that fits fails at once.
+    assert!(matches!(
+        g.reserve(K, 1, None).unwrap(),
+        ReserveOutcome::NoSpace
+    ));
 }
 
 #[test]
@@ -472,6 +480,15 @@ fn reconfigure_applies_live_and_rejects_invalid_settings() {
         ..settings(0, OnFull::Wait, None)
     };
     assert_eq!(g.reconfigure(&bad).unwrap_err().kind(), ErrorKind::Invalid);
+    // FREEZE F2: a percentage cap reaches the gate resolved to bytes; one
+    // that is not is refused, by `reconfigure` and by `new`.
+    let pct = SpaceSettings {
+        cache_max_percent: Some(200),
+        ..settings(0, OnFull::Wait, None)
+    };
+    assert_eq!(g.reconfigure(&pct).unwrap_err().kind(), ErrorKind::Invalid);
+    let fs = Arc::new(lunix_space::SimFs::new(1000, 0));
+    assert!(LunixSpace::new(common::config(pct), fs, clock()).is_err());
     for p in ["101%", "x%", "%", "10", "-1%", "1000%"] {
         let bad = SpaceSettings {
             free_floor: FreeFloor::Percent(p.into()),

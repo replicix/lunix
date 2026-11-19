@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lunix_crypto::{Argon2Cost, AttachError};
 use lunix_engine::{GcStatusHandle, OnJournalDamage};
@@ -42,8 +42,8 @@ use crate::device::{
 };
 use crate::registry::Registry;
 use crate::stack::{
-    create_volume, lock_volume, open_volume, read_pins_unlocked, unlock, AttachCredential,
-    CreateParams, OpenParams, StackError, VolumeStack,
+    create_volume, effective_space, lock_volume, open_volume, read_pins_unlocked, unlock,
+    AttachCredential, CreateParams, OpenParams, StackError, VolumeStack,
 };
 use crate::{fsio, lock};
 
@@ -537,6 +537,20 @@ impl Daemon {
         let key_file = c.key_file.as_deref().map(Path::new);
         let pass = c.passphrase.as_ref().map(|s| s.expose());
         let (jmax, interval) = (self.cfg.journal_max, self.cfg.commit_interval_ms);
+        let percent = c.store_max_percent.unwrap_or(self.cfg.store_max_percent);
+        if percent != 0 && !(100..=10_000).contains(&percent) {
+            return Err(err(
+                ErrorCode::Invalid,
+                "store_max_percent must be 0, or 100 to 10000",
+            ));
+        }
+        if (1..200).contains(&percent) {
+            tracing::warn!(
+                volume = %c.name,
+                store_max_percent = percent,
+                "a cap below 200 % of the size may not hold a full volume at the default compaction threshold (ADR-32)"
+            );
+        }
         let tweak = move |j: &mut VolumeJson| {
             if let Some(m) = jmax {
                 j.journal_max = m;
@@ -544,6 +558,10 @@ impl Daemon {
             if let Some(i) = interval {
                 j.commit.interval_ms = i;
             }
+            // The percentage, not its bytes: a grow recomputes the cap
+            // (FREEZE F2). 0: no cap.
+            j.space.cache_max = None;
+            j.space.cache_max_percent = (percent != 0).then_some(percent);
         };
         let params = CreateParams {
             name: &c.name,
@@ -879,6 +897,7 @@ impl Daemon {
         op.lock_memory = self.cfg.harden;
         op.destage_workers = self.cfg.destage_workers;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
+        op.full_timeout = self.cfg.full_timeout;
         if o.allow_unverifiable_fork {
             tracing::warn!(
                 volume = name,
@@ -1056,7 +1075,7 @@ impl Daemon {
     fn resize(&self, r: &Resize) -> Result<Response, CtlError> {
         self.entry(&r.name)?;
         let slot = self.slot(&r.name);
-        let g = lock(&slot);
+        let mut g = lock(&slot);
         let live = Self::attached_live(&g, &r.name)?;
         let cur = live.stack.engine.size_bytes();
         if r.size_bytes < cur {
@@ -1071,18 +1090,70 @@ impl Daemon {
                 "the size must be a multiple of the chunk size",
             ));
         }
-        live.device
-            .grow(r.size_bytes)
-            .map_err(|e| device_error(&e))?;
+        let grown = live.device.grow(r.size_bytes);
+        // Whatever the grow reported, the engine may have committed a new
+        // size: the cap follows it before any later step can fail (review
+        // m2 of p1/bstop-fu; `grow_cache_max` writes nothing, cannot fail).
+        let new = live.stack.engine.size_bytes();
+        if new > cur {
+            if let Slot::Attached(live) = &mut *g {
+                self.grow_cache_max(&r.name, &mut live.stack, cur, new);
+            }
+        }
+        let live = Self::attached_live(&g, &r.name)?;
+        grown.map_err(|e| device_error(&e))?;
         if let Some(rec) = live.device.record() {
             live.stack
                 .store
                 .store_device_record(&rec)
                 .map_err(|e| err(ErrorCode::Io, format!("state/device: {e}")))?;
         }
-        Ok(Response::Resized {
-            size_bytes: live.stack.engine.size_bytes(),
-        })
+        Ok(Response::Resized { size_bytes: new })
+    }
+
+    /// After a grow from `old` to `new` bytes (FREEZE F2): a percentage cap
+    /// (`space.cache_max_percent`) is recomputed from the new size and the
+    /// gate reconfigured; `volume.json` keeps the percentage, so it needs no
+    /// write. An absolute `cache_max` stays, with a warning when it is below
+    /// the new size plus two commits. No cap stays no cap. The grow itself
+    /// is done: a failure here is logged, not returned.
+    fn grow_cache_max(&self, name: &str, st: &mut VolumeStack, old: u64, new: u64) {
+        if new <= old {
+            return;
+        }
+        let dirty = st.json.commit.dirty_bytes;
+        if let Some(pct) = st.json.space.cache_max_percent {
+            let eff = effective_space(&st.json, new);
+            match st.space.reconfigure(&eff) {
+                Ok(()) => tracing::info!(
+                    volume = name,
+                    cache_max_percent = pct,
+                    cache_max = eff.cache_max,
+                    "grown: the cap follows the size"
+                ),
+                Err(e) => {
+                    tracing::warn!(volume = name, error = %e, "grown, but the cap was not raised")
+                }
+            }
+            return;
+        }
+        let Some(cap) = st.json.space.cache_max else {
+            return;
+        };
+        if cap < new.saturating_add(dirty.saturating_mul(2)) {
+            tracing::warn!(
+                volume = name,
+                cache_max = cap,
+                size = new,
+                "grown; the absolute cache_max stays and is below the new size plus two commits: the volume will refuse writes before it is full (raise it with lunix space --cache-max)"
+            );
+        } else {
+            tracing::info!(
+                volume = name,
+                cache_max = cap,
+                "grown; the absolute cache_max stays"
+            );
+        }
     }
 
     fn space(&self, s: &SpaceRequest) -> Result<Response, CtlError> {
@@ -1101,7 +1172,9 @@ impl Daemon {
                 json.space.full_timeout_ms = Some(t);
             }
             if let Some(c) = s.cache_max {
+                // An absolute cap replaces a percentage (FREEZE F2).
                 json.space.cache_max = Some(c);
+                json.space.cache_max_percent = None;
             }
             json.validate()
                 .map_err(|e| err(ErrorCode::Invalid, format!("space: {e}")))
@@ -1112,13 +1185,23 @@ impl Daemon {
                 if change {
                     let mut json = st.json.clone();
                     apply(&mut json)?;
-                    st.space
-                        .reconfigure(&json.space)
-                        .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+                    // The file first: a gate changed for a policy the file
+                    // does not hold would be undone silently by the next
+                    // grow or restart (review m3 of p1/bstop-fu).
                     st.store
                         .store_volume_json(&json)
                         .map_err(|e| err(ErrorCode::Io, e.to_string()))?;
                     st.json = json;
+                    st.space
+                        .reconfigure(&effective_space(&st.json, st.engine.size_bytes()))
+                        .map_err(|e| {
+                            err(
+                                ErrorCode::Invalid,
+                                format!("volume.json is written, the gate kept its policy: {e}"),
+                            )
+                        })?;
+                    // The ring-full wait follows the new full_timeout too.
+                    st.engine.set_full_timeout(st.space.full_timeout());
                 }
                 Ok(Response::Space(SpaceBody {
                     settings: st.json.space.clone(),
@@ -1269,15 +1352,29 @@ impl Daemon {
                 Slot::Attached(live) if !live.device.needs_quiesce() => {
                     tracing::info!(volume = %name, "device is stopping or deleted (a detach got past TRY_STOP_DEV): no started request, nothing to quiesce");
                 }
-                Slot::Attached(live) => match live.device.quiesce(t) {
-                    Ok(None) => quiesced += 1,
-                    Ok(Some(e)) => {
-                        quiesced += 1;
-                        engine_failures += 1;
-                        tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                Slot::Attached(live) => {
+                    // The quiesce rule (ADR-32, M5): requests waiting for
+                    // space fail with ENOSPC and nothing parks, so the drain
+                    // can finish.
+                    live.stack.space.begin_close();
+                    if t <= COORD_PERIOD {
+                        tracing::warn!(
+                            volume = %name,
+                            quiesce_timeout_ms = u64::try_from(t.as_millis()).unwrap_or(u64::MAX),
+                            "quiesce_timeout_ms is 100 ms or less: writes parked for a full journal ring fail with EIO at once"
+                        );
                     }
-                    Err(e) => failed.push((i, e.to_string())),
-                },
+                    live.stack.engine.begin_close(close_ring_bound(t));
+                    match live.device.quiesce(t) {
+                        Ok(None) => quiesced += 1,
+                        Ok(Some(e)) => {
+                            quiesced += 1;
+                            engine_failures += 1;
+                            tracing::error!(volume = %name, error = %e, "final commit after QUIESCE_DEV failed; the next start recovers from the journal");
+                        }
+                        Err(e) => failed.push((i, e.to_string())),
+                    }
+                }
                 Slot::Orphan { dev_id, .. } => orphans.push(*dev_id),
                 Slot::Detached => {}
             }
@@ -1590,9 +1687,76 @@ impl Drop for Running<'_> {
     }
 }
 
+/// How long a write parked for a full journal ring may still wait for its
+/// cut once a quiesce began (review N3): two thirds of `quiesce_timeout`,
+/// and at most the timeout less one coordinator period (100 ms, the latency
+/// of the answer), so the answer comes before `QUIESCE_DEV` gives up (final
+/// review m-B, p1/bstop-fu review m1). A timeout of 100 ms or less (the root
+/// fault scripts use 1 ms to make `QUIESCE_DEV` fail) gives 0: every ring
+/// wait is answered at once.
+pub(crate) fn close_ring_bound(quiesce_timeout: Duration) -> Duration {
+    (quiesce_timeout * 2 / 3).min(quiesce_timeout.saturating_sub(COORD_PERIOD))
+}
+
+/// The engine's `background_period` (`EngineConfig::new`): how often the
+/// coordinator wakes the queues that hold a ring-parked write.
+const COORD_PERIOD: Duration = Duration::from_millis(100);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ring_bound_at_quiesce_is_two_thirds_of_quiesce_timeout() {
+        assert_eq!(
+            close_ring_bound(Duration::from_secs(30)),
+            Duration::from_secs(20)
+        );
+        // The answer (the bound plus one coordinator period) comes inside
+        // the timeout whenever the timeout is above that period.
+        for ms in [150u64, 300, 600, 1000, 3000] {
+            let t = Duration::from_millis(ms);
+            assert!(close_ring_bound(t) + COORD_PERIOD <= t, "{ms} ms");
+            assert!(close_ring_bound(t) <= t * 2 / 3, "{ms} ms");
+        }
+        assert_eq!(close_ring_bound(Duration::from_millis(1)), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_percentage_cap_is_its_share_of_the_size_with_a_floor() {
+        const GIB: u64 = 1 << 30;
+        let default_cache_max =
+            |size, pct, dirty| (pct != 0).then(|| crate::stack::cache_cap(size, pct, dirty));
+        // ADR-32 M2: 200 % of the size...
+        assert_eq!(default_cache_max(32 * GIB, 200, GIB), Some(64 * GIB));
+        assert_eq!(default_cache_max(32 * GIB, 150, GIB), Some(48 * GIB));
+        // ...never below the size plus two commits' worth of journal.
+        assert_eq!(default_cache_max(GIB, 200, GIB), Some(3 * GIB));
+        assert_eq!(
+            default_cache_max(64 << 20, 200, GIB),
+            Some((64 << 20) + 2 * GIB)
+        );
+        // 0: no cap.
+        assert_eq!(default_cache_max(32 * GIB, 0, GIB), None);
+    }
+
+    #[test]
+    fn a_percentage_cap_follows_the_size_and_an_absolute_one_stays() {
+        // FREEZE F2: what the gate gets for each size.
+        const GIB: u64 = 1 << 30;
+        let mut j = VolumeJson::new("v", "/d");
+        j.space.cache_max_percent = Some(200);
+        let at = |j: &VolumeJson, size| effective_space(j, size).cache_max;
+        assert_eq!(at(&j, 32 * GIB), Some(64 * GIB));
+        assert_eq!(at(&j, 100 * GIB), Some(200 * GIB), "a grow recomputes it");
+        assert_eq!(effective_space(&j, GIB).cache_max_percent, None, "resolved");
+        j.space.cache_max_percent = None;
+        j.space.cache_max = Some(20 * GIB);
+        assert_eq!(at(&j, 32 * GIB), Some(20 * GIB));
+        assert_eq!(at(&j, 100 * GIB), Some(20 * GIB), "an absolute cap stays");
+        j.space.cache_max = None;
+        assert_eq!(at(&j, 100 * GIB), None);
+    }
 
     #[test]
     fn fingerprints_and_cpu_lists_parse() {

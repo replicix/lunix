@@ -99,6 +99,16 @@ fn fast_gc(o: &mut OpenParams) {
     });
 }
 
+/// The daemon's pipelined schedule (`GcConfig::daemon`), a scheduled pass at
+/// most every second (gcrate review M-2).
+fn daemon_gc(o: &mut OpenParams) {
+    o.gc = Some(GcConfig {
+        pass_interval: Duration::from_secs(1),
+        busy_interval: Duration::from_secs(1),
+        ..GcConfig::daemon()
+    });
+}
+
 fn segments(stack: &VolumeStack) -> BTreeSet<u64> {
     SegmentStore::list(&stack.store)
         .expect("list")
@@ -234,13 +244,18 @@ fn write_chunk(d: &mut Driver, model: &mut DeviceModel, cs: u32, c: u64, seed: u
 }
 
 fn churn(mode: CryptoMode, cs: u32) {
+    churn_with(mode, cs, fast_gc, "");
+}
+
+/// The churn oracle with the collector settings `gc` (`tag` tells runs apart).
+fn churn_with(mode: CryptoMode, cs: u32, gc: fn(&mut OpenParams), tag: &str) {
     let region = env_or("LUNIX_GC_CHURN_MIB", 32) << 20;
     let rounds = env_or("LUNIX_GC_CHURN_ROUNDS", 10);
     let size = region * 2;
-    let tag = format!("m17b-churn-{mode:?}-{}k", cs >> 10).to_lowercase();
+    let tag = format!("m17b-churn{tag}-{mode:?}-{}k", cs >> 10).to_lowercase();
     let t = Scratch::new(&tag);
     let vol = builder(t.path(), mode, cs, size).create().expect("create");
-    let stack = vol.open_with(fast_gc).expect("open");
+    let stack = vol.open_with(gc).expect("open");
     let mut d = Driver::new(&stack).expect("driver");
     let mut model = DeviceModel::new(size);
     let mut rng = TestRng::new(0x6c17_b000 ^ u64::from(cs) ^ ((mode as u64) << 32));
@@ -318,7 +333,7 @@ fn churn(mode: CryptoMode, cs: u32) {
     drop(d);
     close(stack).expect("close");
     // From disk, after a reopen.
-    let stack = vol.open_with(fast_gc).expect("reopen");
+    let stack = vol.open_with(gc).expect("reopen");
     let mut d = Driver::new(&stack).expect("driver");
     check_all(&stack, &mut d, &model, &format!("{tag} reopened"));
     drop(d);
@@ -410,6 +425,17 @@ fn churn_encrypted_16k() {
 #[test]
 fn churn_encrypted_64k() {
     churn(CryptoMode::Encrypted, 64 << 10);
+}
+
+/// The churn oracle under the daemon's pipelined schedule.
+#[test]
+fn churn_pipelined_plain_16k() {
+    churn_with(CryptoMode::Plain, 16 << 10, daemon_gc, "-pipelined");
+}
+
+#[test]
+fn churn_pipelined_encrypted_64k() {
+    churn_with(CryptoMode::Encrypted, 64 << 10, daemon_gc, "-pipelined");
 }
 
 /// A volume whose first segments are a quarter live, the FULL with all of it

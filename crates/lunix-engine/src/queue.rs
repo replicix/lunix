@@ -10,6 +10,15 @@
 //! range, the number leaves the in-flight set and the request completes (a
 //! FUA write first joins the next flush group). `Full` and `NoSpace` from
 //! the journal give the space back and park the tag; no number is consumed.
+//!
+//! The bounded full volume (ADR-32): a write parked in the gate fails
+//! `ENOSPC` when its waiter expires (`EIO` when the volume went read-only);
+//! a write parked for a full ring fails at its `full_timeout` or at once when
+//! the engine stops (`crate::full`). DISCARD and WRITE_ZEROES take their
+//! 64-byte hole records from the reserved region (`reserve_headroom`), so
+//! they never wait for space, and queue only behind other hole requests
+//! parked for the ring, never behind parked writes (two requests in flight
+//! together have no order).
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -61,6 +70,9 @@ pub(crate) struct QueueShared {
     /// overlay. C1 waits on it.
     inflight: Mutex<BTreeSet<u64>>,
     deferred: Mutex<Vec<Deferred>>,
+    /// The queue holds a request parked for a full journal ring (the
+    /// background coordinator wakes it for the deadline).
+    pub(crate) ring_parked: std::sync::atomic::AtomicBool,
 }
 
 impl QueueShared {
@@ -70,6 +82,7 @@ impl QueueShared {
             wake,
             inflight: Mutex::new(BTreeSet::new()),
             deferred: Mutex::new(Vec::new()),
+            ring_parked: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -106,6 +119,10 @@ struct Mutation {
     end_block: u64,
     outstanding: u32,
     space: SpaceWait,
+    /// `clock.monotonic()` at arrival: every wait counts from it.
+    arrived: std::time::Duration,
+    /// Parked for a full journal ring.
+    ring_wait: bool,
 }
 
 struct ReadState {
@@ -168,7 +185,10 @@ pub(crate) struct Queue {
     max_buf: u32,
     reqs: HashMap<Tag, Req>,
     appends: HashMap<u64, Pending>,
+    /// Writes waiting for space or the ring, FIFO.
     parked: VecDeque<Tag>,
+    /// DISCARD and WRITE_ZEROES waiting for the ring, FIFO among themselves.
+    parked_holes: VecDeque<Tag>,
     jreads: HashMap<u64, JRead>,
     next_token: u64,
     next_gen: u64,
@@ -192,6 +212,7 @@ impl Queue {
             reqs: HashMap::new(),
             appends: HashMap::new(),
             parked: VecDeque::new(),
+            parked_holes: VecDeque::new(),
             jreads: HashMap::new(),
             next_token: 1,
             next_gen: 1,
@@ -277,11 +298,20 @@ impl Queue {
                             end_block: first + u64::from(req.len) / BLOCK,
                             outstanding: 0,
                             space: SpaceWait::None,
+                            arrived: self.inner.clock.monotonic(),
+                            ring_wait: false,
                         }),
                     },
                 );
-                // FIFO behind writes already parked.
-                let step = if self.parked.is_empty() {
+                // FIFO behind the parked requests of the same class: a hole
+                // never waits behind a write parked for space (ADR-32).
+                let is_hole = record == RecordKind::Hole;
+                let behind = if is_hole {
+                    &self.parked_holes
+                } else {
+                    &self.parked
+                };
+                let step = if behind.is_empty() {
                     self.advance(req.tag, Some(&*buf), done)
                 } else {
                     Step::Parked
@@ -296,7 +326,11 @@ impl Queue {
                             m.data = Some(buf.get(..req.len as usize).unwrap_or(buf).to_vec());
                         }
                     }
-                    self.parked.push_back(req.tag);
+                    if is_hole {
+                        self.parked_holes.push_back(req.tag);
+                    } else {
+                        self.parked.push_back(req.tag);
+                    }
                 }
             }
         }
@@ -357,24 +391,56 @@ impl Queue {
                         m.space = SpaceWait::Waiting(w, b);
                         return Step::Parked;
                     }
-                    WaiterState::Granted => m.space = SpaceWait::Charged(b),
+                    WaiterState::Granted => {
+                        inner.note_admitted();
+                        m.space = SpaceWait::Charged(b);
+                    }
                     WaiterState::TimedOut | WaiterState::Cancelled => {
-                        self.fail(tag, ENOSPC, done);
+                        // A read-only volume expires its waiters too: that
+                        // is `EIO`, the full volume `ENOSPC` (ADR-32).
+                        let errno = if inner.read_only() {
+                            EIO
+                        } else {
+                            inner.note_refused();
+                            ENOSPC
+                        };
+                        self.fail(tag, errno, done);
                         return Step::Done;
                     }
                 },
+                // A hole record frees space: it is charged without a limit
+                // check (its 64 bytes go into a preallocated ring file; the
+                // ring, which has a deadline, is its bound), never parked and
+                // never refused for space (ADR-32, P4; review M5).
+                SpaceWait::None if m.record == RecordKind::Hole => {
+                    match inner.space.charge(SpaceKind::JournalReserved, charge) {
+                        Ok(()) => m.space = SpaceWait::Charged(charge),
+                        Err(_) => {
+                            self.fail(tag, EIO, done);
+                            return Step::Done;
+                        }
+                    }
+                }
+                // The wait counts from the request's arrival, also when it
+                // queued behind a parked write first (review M1).
                 SpaceWait::None => {
-                    match inner.space.reserve(
+                    match inner.space.reserve_since(
                         SpaceKind::JournalReserved,
                         charge,
                         Some(&self.shared.wake),
+                        m.arrived,
                     ) {
-                        Ok(ReserveOutcome::Reserved) => m.space = SpaceWait::Charged(charge),
+                        Ok(ReserveOutcome::Reserved) => {
+                            inner.note_admitted();
+                            m.space = SpaceWait::Charged(charge);
+                        }
                         Ok(ReserveOutcome::Parked(w)) => {
+                            let _ = inner.full.set_blocked(true, inner.clock.monotonic());
                             m.space = SpaceWait::Waiting(w, charge);
                             return Step::Parked;
                         }
                         Ok(ReserveOutcome::NoSpace) => {
+                            inner.note_refused();
                             self.fail(tag, ENOSPC, done);
                             return Step::Done;
                         }
@@ -405,6 +471,12 @@ impl Queue {
                 Ok(None) => {
                     inner.space.release(SpaceKind::JournalReserved, charged);
                     m.space = SpaceWait::None;
+                    // Every wait has a deadline (ADR-32, P6).
+                    if let Some(errno) = inner.ring_wait_verdict(m.arrived) {
+                        self.fail(tag, errno, done);
+                        return Step::Done;
+                    }
+                    m.ring_wait = true;
                     inner.journal_full.store(true, Ordering::Release);
                     return Step::Parked;
                 }
@@ -418,7 +490,11 @@ impl Queue {
                 }
             };
             m.space = SpaceWait::None;
+            m.ring_wait = false;
             let seq = slot.write_seq;
+            if m.record == RecordKind::Hole {
+                inner.full.note_hole(seq.0);
+            }
             inner.points.hooks().sequenced(self.shared.id, tag, seq);
             let lba = m.next_block;
             let range = BlockRange { lba, blocks };
@@ -437,6 +513,9 @@ impl Queue {
                     m.next_block += blocks;
                     m.outstanding += 1;
                     inner.journal_charged.fetch_add(charged, Ordering::AcqRel);
+                    inner
+                        .jcharges
+                        .push(usize::from(self.shared.id.0), seq.0, charged);
                     let record = m.record;
                     self.appends.insert(
                         seq.0,
@@ -789,19 +868,55 @@ impl Queue {
     }
 
     fn retry_parked(&mut self, done: &mut dyn Completer) -> bool {
-        let mut progressed = false;
-        while let Some(&tag) = self.parked.front() {
-            if !self.reqs.contains_key(&tag) {
-                self.parked.pop_front();
-                continue;
+        // A stopped or read-only engine fails what it parked at once
+        // (ADR-32): nothing would ever admit it.
+        let any_parked = !(self.parked.is_empty() && self.parked_holes.is_empty());
+        if any_parked && self.inner.read_only() {
+            let tags: Vec<Tag> = self
+                .parked
+                .drain(..)
+                .chain(self.parked_holes.drain(..))
+                .collect();
+            for tag in tags {
+                self.fail(tag, EIO, done);
             }
-            match self.advance(tag, None, done) {
-                Step::Parked => break,
-                Step::Done => {
-                    self.parked.pop_front();
-                    progressed = true;
+            self.shared.ring_parked.store(false, Ordering::Relaxed);
+            return true;
+        }
+        let mut progressed = false;
+        for holes in [true, false] {
+            loop {
+                let q = if holes {
+                    &mut self.parked_holes
+                } else {
+                    &mut self.parked
+                };
+                let Some(&tag) = q.front() else {
+                    break;
+                };
+                if !self.reqs.contains_key(&tag) {
+                    q.pop_front();
+                    continue;
+                }
+                match self.advance(tag, None, done) {
+                    Step::Parked => break,
+                    Step::Done => {
+                        let q = if holes {
+                            &mut self.parked_holes
+                        } else {
+                            &mut self.parked
+                        };
+                        q.pop_front();
+                        progressed = true;
+                    }
                 }
             }
+        }
+        let ring = self.parked.iter().chain(self.parked_holes.iter()).any(
+            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_wait),
+        );
+        if self.shared.ring_parked.load(Ordering::Relaxed) != ring {
+            self.shared.ring_parked.store(ring, Ordering::Relaxed);
         }
         progressed
     }

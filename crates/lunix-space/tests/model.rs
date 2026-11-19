@@ -1,6 +1,7 @@
-//! Model tests: a straight-line reference of the ledger and the wait queue,
-//! driven by proptest (5 000 sequences) against the real gate, plus the
-//! million-pair exactness run.
+//! Model tests: a straight-line reference of the ledger, the wait queue, the
+//! deadlines and the full latch (ADR-32), driven by proptest (5 000
+//! sequences) against the real gate, plus the million-pair exactness run.
+//! After every step no request is pending past its `full_timeout`.
 
 mod common;
 
@@ -27,7 +28,11 @@ enum Op {
     SetExternal(u64),
     Refresh,
     Reconf { wait: bool, timeout_ms: Option<u64> },
+    Close,
 }
+
+/// The gate's default for a null `full_timeout_ms`.
+const DEFAULT_MS: u64 = 60_000;
 
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
@@ -42,6 +47,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => Just(Op::Refresh),
         1 => (any::<bool>(), proptest::option::of(1u64..900))
             .prop_map(|(wait, timeout_ms)| Op::Reconf { wait, timeout_ms }),
+        1 => Just(Op::Close),
     ]
 }
 
@@ -57,7 +63,8 @@ struct MW {
     id: usize,
     kind: usize,
     bytes: u64,
-    deadline: Option<u64>,
+    arrived: u64,
+    deadline: u64,
     st: St,
 }
 
@@ -66,10 +73,13 @@ struct Model {
     q: Vec<MW>,
     all: Vec<St>,
     wait: bool,
-    timeout: Option<u64>,
+    /// The resolved `full_timeout` in ms.
+    timeout: u64,
     now: u64,
     ext: u64,
     headroom: u64,
+    full: bool,
+    closing: bool,
 }
 
 impl Model {
@@ -82,6 +92,29 @@ impl Model {
     fn fits(&self, b: u64) -> bool {
         self.used() + b <= self.limit()
     }
+    /// No segment reserve in these gates: 1 % of the limit, at most half.
+    fn resume(&self) -> u64 {
+        (self.limit() / 100).min(self.limit() / 2)
+    }
+    fn update_latch(&mut self) {
+        if self.full && self.limit().saturating_sub(self.used()) >= self.resume().max(1) {
+            self.full = false;
+        }
+    }
+    fn fail_all(&mut self) -> usize {
+        let mut ids = vec![];
+        for w in &mut self.q {
+            if w.st == St::Pending {
+                w.st = St::TimedOut;
+                ids.push(w.id);
+            }
+        }
+        for &id in &ids {
+            self.set(id, St::TimedOut);
+        }
+        self.q.clear();
+        ids.len()
+    }
     fn set(&mut self, id: usize, st: St) {
         self.all[id] = st;
     }
@@ -91,6 +124,7 @@ impl Model {
         }
     }
     fn grant(&mut self) {
+        self.update_latch();
         loop {
             self.prune_front();
             let Some(f) = self.q.first() else { return };
@@ -102,23 +136,36 @@ impl Model {
             self.set(w.id, St::Granted);
         }
     }
+    /// The first expiry fails every waiter and latches the volume full.
     fn tick(&mut self) -> usize {
         let now = self.now;
-        let mut n = 0;
-        let mut ids = vec![];
-        for w in &mut self.q {
-            if w.st == St::Pending && w.deadline.is_some_and(|d| d <= now) {
-                w.st = St::TimedOut;
-                ids.push(w.id);
-                n += 1;
-            }
+        if !self
+            .q
+            .iter()
+            .any(|w| w.st == St::Pending && w.deadline <= now)
+        {
+            return 0;
         }
-        for id in ids {
-            self.set(id, St::TimedOut);
-        }
-        self.q.retain(|w| w.st == St::Pending);
+        let n = self.fail_all();
+        self.full = true;
         self.grant();
         n
+    }
+    /// `reconfigure`'s re-judging.
+    fn rejudge(&mut self) {
+        if !self.wait {
+            self.full = false;
+        }
+        let t = self.timeout;
+        for w in &mut self.q {
+            w.deadline = w.arrived + t;
+        }
+        self.grant();
+        if !self.wait || self.closing {
+            self.fail_all();
+        } else {
+            self.tick();
+        }
     }
 }
 
@@ -136,10 +183,12 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
         q: vec![],
         all: vec![],
         wait,
-        timeout: timeout_ms,
+        timeout: timeout_ms.unwrap_or(DEFAULT_MS),
         now: 0,
         ext: 0,
         headroom,
+        full: false,
+        closing: false,
     };
     let mut waiters: Vec<Waiter> = vec![];
 
@@ -159,11 +208,15 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
                     if m.used() + bytes >= limit - limit / 20 {
                         m.grant();
                     }
+                    m.update_latch();
                     m.prune_front();
-                    if (m.q.is_empty() || !m.wait) && m.fits(*bytes) {
+                    let no_wait = !m.wait || m.closing;
+                    if m.full {
+                        1
+                    } else if (m.q.is_empty() || no_wait) && m.fits(*bytes) {
                         m.held[k.index()] += bytes;
                         0
-                    } else if !m.wait {
+                    } else if no_wait {
                         1
                     } else {
                         let id = m.all.len();
@@ -172,7 +225,8 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
                             id,
                             kind: k.index(),
                             bytes: *bytes,
-                            deadline: m.timeout.map(|t| m.now + t),
+                            arrived: m.now,
+                            deadline: m.now + m.timeout,
                             st: St::Pending,
                         });
                         2
@@ -270,11 +324,17 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
                 ))
                 .expect("reconfigure");
                 m.wait = *w;
-                m.timeout = *t;
+                m.timeout = t.unwrap_or(DEFAULT_MS);
+                m.rejudge();
+            }
+            Op::Close => {
+                g.begin_close();
+                m.closing = true;
                 m.grant();
+                m.fail_all();
             }
         }
-        check(&g, &m, &waiters);
+        check(&g, &mut m, &waiters);
     }
 
     // Drain: everything returns and the ledger is exactly zero.
@@ -292,7 +352,19 @@ fn run_case(headroom: u64, wait: bool, timeout_ms: Option<u64>, ops: &[Op]) {
     assert_eq!(snap.waiters, 0);
 }
 
-fn check(g: &LunixSpace, m: &Model, waiters: &[Waiter]) {
+fn check(g: &LunixSpace, m: &mut Model, waiters: &[Waiter]) {
+    m.update_latch();
+    assert_eq!(g.is_full(), m.full, "the full latch");
+    assert_eq!(g.snapshot().full, m.full, "the snapshot's latch");
+    // Every parked request has a deadline, and none is pending past it.
+    for w in m.q.iter().filter(|w| w.st == St::Pending) {
+        assert!(
+            w.deadline > m.now,
+            "waiter {} pending past its deadline",
+            w.id
+        );
+        assert!(w.deadline - w.arrived <= m.timeout);
+    }
     let snap = g.snapshot();
     assert_eq!(snap.by_kind, m.held, "held per kind");
     assert_eq!(snap.limit, m.limit(), "limit");

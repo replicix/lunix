@@ -9,7 +9,9 @@
 #
 # <milestone> defaults to $LUNIX_M, then to a guess from the branch name
 # (p1/m1-a -> m1a; $LUNIX_BRANCH overrides the git branch). The changed files are `git diff --name-only` against
-# `git merge-base HEAD main` (plus untracked files), or the lines of
+# the merge base of HEAD and `origin/main` (`main` only when there is no
+# `origin/main`: a local `main` behind the remote would count paths merged
+# from it as the branch's), plus untracked files, or the lines of
 # --changed-list / .lunix-changed-files (written by tools/remote.sh sync, for
 # hosts that have no .git).
 set -euo pipefail
@@ -109,7 +111,9 @@ changed=()
 if [ -n "$list" ]; then
   mapfile -t changed < "$list"
 elif has_git; then
-  [ -n "$base" ] || base="$(git -C "$root" merge-base HEAD main)"
+  if [ -z "$base" ]; then
+    base="$(git -C "$root" merge-base HEAD origin/main 2>/dev/null || git -C "$root" merge-base HEAD main)"
+  fi
   mapfile -t changed < <({ git -C "$root" diff --name-only "$base"; git -C "$root" ls-files --others --exclude-standard; } | sort -u)
 elif [ -f "$root/.lunix-changed-files" ]; then
   mapfile -t changed < "$root/.lunix-changed-files"

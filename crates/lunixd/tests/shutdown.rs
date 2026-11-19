@@ -26,6 +26,7 @@ fn create(d: &mut Daemon, name: &str, dir: &Path) -> PathBuf {
         map_fanout: None,
         key_file: None,
         passphrase: None,
+        store_max_percent: None,
     })) {
         Outcome::Ok(Response::VolumeCreated(c)) => PathBuf::from(c.dir),
         o => panic!("{o:?}"),

@@ -175,6 +175,11 @@ pub struct VolumeCreate {
     /// A passphrase slot (for volumes that move).
     #[serde(default)]
     pub passphrase: Option<Secret>,
+    /// `space.cache_max_percent` of the new volume (ADR-32 M2, FREEZE F2;
+    /// the cap follows a grow): 0 writes no cap, else 100 ..= 10000; `None`
+    /// takes the daemon's `store_max_percent` (200 by default).
+    #[serde(default)]
+    pub store_max_percent: Option<u32>,
 }
 
 /// What the client supplies to unlock a volume.
@@ -381,6 +386,11 @@ impl Request {
                 }
                 if c.map_fanout.is_some_and(|f| f != 256 && f != 512) {
                     return Err(RequestInvalid("map_fanout"));
+                }
+                if c.store_max_percent
+                    .is_some_and(|p| p != 0 && !(100..=10_000).contains(&p))
+                {
+                    return Err(RequestInvalid("store_max_percent"));
                 }
                 if let Compress::Zstd { level } = c.compress {
                     if !(-7..=22).contains(&level) {

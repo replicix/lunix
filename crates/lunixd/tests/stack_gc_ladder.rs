@@ -69,6 +69,16 @@ fn fast_gc(o: &mut OpenParams) {
     });
 }
 
+/// The daemon's pipelined schedule (`GcConfig::daemon`), a pass at most
+/// every second (milestone gcrate, re-review M-1).
+fn daemon_gc(o: &mut OpenParams) {
+    o.gc = Some(GcConfig {
+        pass_interval: Duration::from_secs(1),
+        busy_interval: Duration::from_secs(1),
+        ..GcConfig::daemon()
+    });
+}
+
 fn segment_bytes(stack: &VolumeStack) -> (usize, u64) {
     let mut n = 0;
     let mut b = 0;
@@ -86,7 +96,10 @@ fn segment_bytes(stack: &VolumeStack) -> (usize, u64) {
 /// error`), which starts the ladder on the gate's thread, and waits for the
 /// compact step (the urgent pass) to end. Restores the settings.
 fn run_ladder(stack: &VolumeStack) {
-    let saved = stack.json.space.clone();
+    let saved = lunixd::stack::effective_space(
+        &stack.json,
+        lunix_iface::block::BlockEngine::size_bytes(&*stack.engine),
+    );
     let mut tight = saved.clone();
     tight.on_full = OnFull::Error;
     tight.cache_max = Some(stack.space.snapshot().used().max(1));
@@ -115,7 +128,17 @@ fn run_ladder(stack: &VolumeStack) {
 
 #[test]
 fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
-    let t = Scratch::new("m12c-ladder");
+    ladder_compact_step("m12c-ladder", fast_gc);
+}
+
+/// The same on the daemon's pipelined schedule.
+#[test]
+fn the_ladder_compact_step_on_the_daemon_schedule() {
+    ladder_compact_step("gcrate-ladder", daemon_gc);
+}
+
+fn ladder_compact_step(tag: &str, gc: fn(&mut OpenParams)) {
+    let t = Scratch::new(tag);
     let cs = 64u32 << 10;
     let region = 8u64 << 20;
     let size = 64u64 << 20;
@@ -132,7 +155,7 @@ fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
         gc_tune(c);
     }));
     let vol = b.create().expect("create");
-    let stack = vol.open_with(fast_gc).expect("open");
+    let stack = vol.open_with(gc).expect("open");
     let mut d = Driver::new(&stack).expect("driver");
 
     // Six whole rewrites, a commit after each: the first rounds die whole.

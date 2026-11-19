@@ -494,8 +494,15 @@ impl lunix_engine::Destager for FaultyDestager {
         ctx: &lunix_engine::DestageCtx<'_>,
     ) -> std::result::Result<lunix_engine::DestageOutcome, lunix_engine::DestageFailure> {
         if let Some(retry) = lock(&self.fail).take() {
+            // `AfterSpace` is what a full host file system gives (a
+            // `NoSpace` error); every other class an I/O error.
+            let error = if retry == lunix_engine::Retry::AfterSpace {
+                lunix_iface::Error::NoSpace
+            } else {
+                lunix_iface::Error::Io(std::io::Error::other("injected destage failure"))
+            };
             return Err(lunix_engine::DestageFailure {
-                error: lunix_iface::Error::Io(std::io::Error::other("injected destage failure")),
+                error,
                 retry,
                 chunk: cut.chunks.first().map(|c| c.chunk),
             });

@@ -12,7 +12,8 @@ Included here are:
   destage, segments, Merkle map, commits and fencing, cache, GC, mirrors,
   resize, security, CSI, the failure matrix and the performance targets.
 - [Decisions (ADRs)](DECISIONS.md): what was chosen, what was rejected,
-  and why. All accepted on 2026-11-12.
+  and why. All accepted on 2026-11-12, except ADR-32 (write back-pressure),
+  accepted on 2026-11-18.
 
 ## Research notes
 
@@ -50,3 +51,8 @@ source.
   [spikes/leafenc](../../spikes/leafenc/).
 - [Fact-check](research/2026-11-11-fact-check.md): primary-source
   verification of the design-critical claims.
+- [Write back-pressure and the full volume](research/2026-11-18-write-backpressure.md):
+  why a write can park for ever today, the rate law of a store with a GC
+  grace, prior art (OpenZFS, RocksDB, LFS, SSDs, dm-thin), the paced
+  admission band and bounded full-volume behaviour accepted as ADR-32,
+  with the test list and an implementation sketch.

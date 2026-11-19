@@ -69,12 +69,13 @@ fn create() -> impl Strategy<Value = VolumeCreate> {
             proptest::option::of(any::<u16>()),
             proptest::option::of(path()),
             proptest::option::of(secret()),
+            proptest::option::of(any::<u32>()),
         ),
     )
         .prop_map(
             |(
                 (name, dir, size_bytes, chunk_size, mode, compress),
-                (id_len, map_fanout, key_file, passphrase),
+                (id_len, map_fanout, key_file, passphrase, store_max_percent),
             )| {
                 VolumeCreate {
                     name,
@@ -87,6 +88,7 @@ fn create() -> impl Strategy<Value = VolumeCreate> {
                     map_fanout,
                     key_file,
                     passphrase,
+                    store_max_percent,
                 }
             },
         )
@@ -404,18 +406,23 @@ fn response() -> impl Strategy<Value = Response> {
             }),
         Just(Response::Detached),
         any::<u64>().prop_map(|size_bytes| Response::Resized { size_bytes }),
-        (figures(), any::<u64>(), proptest::option::of(any::<u64>())).prop_map(
-            |(figures, headroom, cache_max)| {
+        (
+            figures(),
+            any::<u64>(),
+            proptest::option::of(any::<u64>()),
+            proptest::option::of(any::<u32>()),
+        )
+            .prop_map(|(figures, headroom, cache_max, cache_max_percent)| {
                 Response::Space(SpaceBody {
                     settings: SpaceSettings {
                         headroom,
                         cache_max,
+                        cache_max_percent,
                         ..SpaceSettings::default()
                     },
                     figures,
                 })
-            }
-        ),
+            }),
         any::<u32>().prop_map(|devices| Response::Quiesced { devices }),
         summary().prop_map(Response::Gc),
         gc_status().prop_map(Response::GcStatus),
@@ -623,6 +630,7 @@ fn validation_bounds() {
             map_fanout: None,
             key_file: None,
             passphrase: None,
+            store_max_percent: None,
         };
         f(&mut c);
         Request::VolumeCreate(c)
@@ -634,6 +642,10 @@ fn validation_bounds() {
     assert!(!ok(create(&|c| c.chunk_size = 2 << 20)));
     assert!(!ok(create(&|c| c.id_len = 8)));
     assert!(!ok(create(&|c| c.map_fanout = Some(100))));
+    assert!(ok(create(&|c| c.store_max_percent = Some(0))));
+    assert!(ok(create(&|c| c.store_max_percent = Some(150))));
+    assert!(!ok(create(&|c| c.store_max_percent = Some(99))));
+    assert!(!ok(create(&|c| c.store_max_percent = Some(10_001))));
     assert!(!ok(create(&|c| c.compress = Compress::Zstd { level: 40 })));
     assert!(!ok(create(&|c| {
         c.mode = VolumeMode::Plain;

@@ -17,16 +17,26 @@ pub(crate) enum Floor {
 pub(crate) struct Policy {
     pub floor: Floor,
     pub on_full: OnFull,
-    pub full_timeout: Option<Duration>,
+    /// The wait at the limit: `space.full_timeout_ms`, or the daemon's
+    /// default when that is null (FREEZE rule change F1, ADR-32).
+    pub full_timeout: Duration,
     pub cache_max: Option<u64>,
     pub headroom: u64,
 }
 
 impl Policy {
-    /// Applies the `VolumeJson::validate` rules that concern `space`.
-    pub fn from_settings(s: &SpaceSettings) -> Result<Self> {
+    /// Applies the `VolumeJson::validate` rules that concern `space`; a null
+    /// `full_timeout_ms` resolves to `default_timeout`.
+    pub fn from_settings(s: &SpaceSettings, default_timeout: Duration) -> Result<Self> {
         if s.full_timeout_ms == Some(0) {
             return Err(Error::invalid("space.full_timeout_ms must be at least 1"));
+        }
+        // The gate knows no volume size: a percentage cap reaches it
+        // resolved to bytes (FREEZE F2; `lunixd::stack::effective_space`).
+        if s.cache_max_percent.is_some() {
+            return Err(Error::invalid(
+                "space.cache_max_percent must be resolved to cache_max against the volume size",
+            ));
         }
         let floor = match &s.free_floor {
             FreeFloor::Bytes(b) => Floor::Bytes(*b),
@@ -47,7 +57,9 @@ impl Policy {
         Ok(Self {
             floor,
             on_full: s.on_full,
-            full_timeout: s.full_timeout_ms.map(Duration::from_millis),
+            full_timeout: s
+                .full_timeout_ms
+                .map_or(default_timeout, Duration::from_millis),
             cache_max: s.cache_max,
             headroom: s.headroom,
         })

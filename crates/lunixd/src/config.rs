@@ -30,6 +30,8 @@
 //! | `idle_trim_ms` | 10000 | once every volume has been idle this long, empty the read caches and trim the heap (0: never) |
 //! | `conn_idle_timeout_ms` | 60000 | close a control connection idle this long |
 //! | `destage_workers` | `max(2, cpus / 2)` | destage pool worker threads (hash, dedup, compress, seal) per attached volume; 1 to 64, 0 is refused |
+//! | `full_timeout_ms` | 60000 | the wait at the limit of a volume whose `space.full_timeout_ms` is null (ADR-32); 1000 ..= 3600000, a warning above 100000 (the kernel's hung-task threshold is 120 s) |
+//! | `store_max_percent` | 200 | `space.cache_max_percent` of new volumes (ADR-32 M2, FREEZE F2); 0 writes no cap, else 100 ..= 10000 |
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -99,6 +101,10 @@ pub struct DaemonConfig {
     /// Destage pool worker threads per attached volume (`None`: the pool's
     /// default, `max(2, cpus / 2)`).
     pub destage_workers: Option<usize>,
+    /// The wait at the limit when a volume's `space.full_timeout_ms` is null.
+    pub full_timeout: Duration,
+    /// `space.cache_max_percent` of new volumes (0: no cap).
+    pub store_max_percent: u32,
 }
 
 /// Most destage worker threads the config accepts.
@@ -130,6 +136,8 @@ impl Default for DaemonConfig {
             idle_trim: Some(Duration::from_secs(10)),
             conn_idle_timeout: Duration::from_secs(60),
             destage_workers: None,
+            full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
+            store_max_percent: 200,
         }
     }
 }
@@ -320,6 +328,20 @@ impl DaemonConfig {
                     ));
                 }
                 self.destage_workers = usize::try_from(w).ok();
+            }
+            "full_timeout_ms" => {
+                let t = n(v)?;
+                if !(1000..=3_600_000).contains(&t) {
+                    return Err("full_timeout_ms must be 1000 to 3600000".into());
+                }
+                self.full_timeout = Duration::from_millis(t);
+            }
+            "store_max_percent" => {
+                let p = n(v)?;
+                if p != 0 && !(100..=10_000).contains(&p) {
+                    return Err("store_max_percent must be 0, or 100 to 10000".into());
+                }
+                self.store_max_percent = u32::try_from(p).map_err(|_| "too large".to_string())?;
             }
             other => return Err(format!("unknown key {other:?}")),
         }
