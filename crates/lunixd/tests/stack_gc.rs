@@ -91,6 +91,21 @@ fn builder(parent: &std::path::Path, mode: CryptoMode, cs: u32, size: u64) -> Vo
     b
 }
 
+/// The B-1 tests count ticks: a recheck that defers a source asks for a cut
+/// (`GcProgress::cut_wanted`), and the engine makes it at the next tick, as it
+/// must. The tests assert that no cut falls inside the source's pass, so the
+/// whole of a pass after its grace (recheck, deletes, compaction, evidence)
+/// must run in ONE step, as it does when the host is idle. With the default
+/// 50 ms step budget a loaded host ends a step between the recheck and the
+/// pass's end, and the legitimate cut lands in between (milestone gcflake).
+/// A step budget that never runs out makes the step boundaries those of the
+/// collector (a grace wait, a rate cap), not of the host's speed.
+fn whole_pass_steps(c: &mut EngineConfig) {
+    if let Some(b) = &mut c.gc_budget {
+        b.max_duration = Duration::from_secs(3600);
+    }
+}
+
 /// A pass every second.
 fn fast_gc(o: &mut OpenParams) {
     o.gc = Some(GcConfig {
@@ -477,7 +492,15 @@ fn compaction_then_truncate(mode: CryptoMode, cs: u32, killed: bool) {
     .to_lowercase();
     let t = Scratch::new(&tag);
     let size = 64u64 << 20;
-    let vol = builder(t.path(), mode, cs, size).create().expect("create");
+    let mut b = builder(t.path(), mode, cs, size);
+    let tuned = b.engine.clone();
+    b.engine = Some(Arc::new(move |c: &mut EngineConfig| {
+        if let Some(t) = &tuned {
+            t(c);
+        }
+        whole_pass_steps(c);
+    }));
+    let vol = b.create().expect("create");
     let stack = vol.open_with(fast_gc).expect("open");
     let mut d = Driver::new(&stack).expect("driver");
     let mut model = DeviceModel::new(size);

@@ -372,3 +372,8 @@ paths = [
   "docs/explanation/research/*zstd-dictionaries-on-block-devices*",
   "docs/explanation/research/figures/dict-study/**",
 ]
+
+# gcflake: the stack_gc compaction_then_truncate failure when the whole test
+# binary runs (root cause and fix).
+[gcflake]
+paths = ["crates/lunixd/tests/stack_gc.rs", "tools/ownership.toml"]
