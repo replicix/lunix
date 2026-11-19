@@ -1,0 +1,20 @@
+1795027593974 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795027593974 INFO  lunixd: lunixd started socket=$SCRATCH/m16-chunksize-state/ctl.sock
+1795027593974 INFO  lunixd::server: control socket ready
+1795027594083 INFO  lunixd::audit: {"ts_ms":1795027594083,"uid":0,"gid":0,"pid":2246112,"method":"volume_create","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795027609633 INFO  lunixd::daemon: volume opened volume="cspgbenc16ext41" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795027609690 INFO  lunixd::daemon: attached volume="cspgbenc16ext41" recovered=false ms=15600
+1795027609690 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=cspgbenc16ext41 locked_bytes=582094848
+1795027609690 INFO  lunixd::audit: {"ts_ms":1795027609690,"uid":0,"gid":0,"pid":2246123,"method":"attach","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795027610122 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795030278310 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795030385710 INFO  lunixd::daemon: gc pass on request volume=cspgbenc16ext41 dry_run=false pass=9 bytes_freed=3053704937 segments_deleted=408 segments_compacted=234 ms=99069
+1795030385710 INFO  lunixd::audit: {"ts_ms":1795030385710,"uid":0,"gid":0,"pid":2261053,"method":"gc","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795030491781 INFO  lunixd::daemon: gc pass on request volume=cspgbenc16ext41 dry_run=false pass=10 bytes_freed=863013102 segments_deleted=51 segments_compacted=0 ms=31062
+1795030491781 INFO  lunixd::audit: {"ts_ms":1795030491781,"uid":0,"gid":0,"pid":2261802,"method":"gc","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795030572166 INFO  lunixd::daemon: gc pass on request volume=cspgbenc16ext41 dry_run=false pass=0 bytes_freed=0 segments_deleted=0 segments_compacted=0 ms=5375
+1795030572166 INFO  lunixd::audit: {"ts_ms":1795030572166,"uid":0,"gid":0,"pid":2262284,"method":"gc","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795030647253 INFO  lunixd::audit: {"ts_ms":1795030647253,"uid":0,"gid":0,"pid":2262671,"method":"detach","volume":"cspgbenc16ext41","outcome":"ok","code":null,"message":null}
+1795030697657 INFO  lunixd::server: signal: quiescing every device
+1795030697657 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

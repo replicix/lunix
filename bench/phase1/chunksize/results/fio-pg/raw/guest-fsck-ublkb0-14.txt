@@ -1,0 +1,7 @@
+e2fsck 1.47.4 (6-Mar-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+/dev/ublkb0: 1409/3145728 files (1.3% non-contiguous), 4429731/12582912 blocks

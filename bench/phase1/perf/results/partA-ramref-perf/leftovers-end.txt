@@ -1,0 +1,3 @@
+note: module ublk_drv loaded
+note: module brd loaded
+ublk-leftovers: clean

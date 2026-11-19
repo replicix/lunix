@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 109  of event 'cpu/cycles/P'
+# Event count (approx.): 3273643661
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                 
+# ........  ...............  .................  .......................................................................................................................................................................................................................................................................
+#
+     9.48%  lunix-space      lunixd             [.] crc32c::hw_x86_64::crc_u64_parallel3
+            |
+            ---<usize as core::cmp::PartialOrd>::lt (inlined)
+               <core::ops::range::Range<usize> as core::iter::range::RangeIteratorImpl>::spec_next (inlined)
+               <core::ops::range::Range<usize> as core::iter::traits::iterator::Iterator>::next (inlined)
+               crc32c::hw_x86_64::crc_u64_parallel3
+
+     8.08%  lunix-space      lunixd             [.] _blake3_hash_many_avx512
+            |
+            ---_blake3_hash_many_avx512
+               |          
+               |--5.37%--0
+               |          
+               |--1.36%--0xc80
+               |          
+                --1.35%--0x3530
+
+     7.47%  lunix-space      libc.so.6          [.] __memset_avx512_unaligned_erms
+            |
+            ---__memset_avx512_unaligned_erms
+               0
+
+     6.77%  lunix-space      lunixd             [.] <lunix_index::bloom::Bloom>::maybe_contains
+            |          
+            |--4.05%--<lunix_index::bloom::Bloom>::maybe_contains::{closure#0} (inlined)
+            |          core::iter::traits::iterator::Iterator::all::check::<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0} (inlined)
+            |          core::iter::adapters::map::map_try_fold::<u64, (usize, u64), (), core::ops::control_flow::ControlFlow<()>, <lunix_index::bloom::Bloom>::positions::{closure#0}, core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}>::{closure#0} (inlined)
+            |          <core::ops::range::Range<u64> as core::iter::traits::iterator::Iterator>::try_fold::<(), core::iter::adapters::map::map_try_fold<u64, (usize, u64), (), core::ops::control_flow::ControlFlow<()>, <lunix_index::bloom::Bloom>::positions::{closure#0}, core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}>::{closure#0}, core::ops::control_flow::ControlFlow<()>> (inlined)
+            |          <core::iter::adapters::map::Map<core::ops::range::Range<u64>, <lunix_index::bloom::Bloom>::positions::{closure#0}> as core::iter::traits::iterator::Iterator>::try_fold::<(), core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}, core::ops::control_flow::ControlFlow<()>> (inlined)
+            |          <core::iter::adapters::map::Map<core::ops::range::Range<u64>, <lunix_index::bloom::Bloom>::positions::{closure#0}> as core::iter::traits::iterator::Iterator>::all::<<lunix_index::bloom::Bloom>::maybe_contains::{closure#0}> (inlined)
+            |          <lunix_index::bloom::Bloom>::maybe_contains
+            |          0x7f128821c9f0
+            |          0x1
+            |          
+            |--1.36%--<lunix_index::bloom::Bloom>::positions::{closure#0} (inlined)
+            |          core::iter::adapters::map::map_try_fold::<u64, (usize, u64), (), core::ops::control_flow::ControlFlow<()>, <lunix_index::bloom::Bloom>::positions::{closure#0}, core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}>::{closure#0} (inlined)
+            |          <core::ops::range::Range<u64> as core::iter::traits::iterator::Iterator>::try_fold::<(), core::iter::adapters::map::map_try_fold<u64, (usize, u64), (), core::ops::control_flow::ControlFlow<()>, <lunix_index::bloom::Bloom>::positions::{closure#0}, core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}>::{closure#0}, core::ops::control_flow::ControlFlow<()>> (inlined)
+            |          <core::iter::adapters::map::Map<core::ops::range::Range<u64>, <lunix_index::bloom::Bloom>::positions::{closure#0}> as core::iter::traits::iterator::Iterator>::try_fold::<(), core::iter::traits::iterator::Iterator::all::check<(usize, u64), <lunix_index::bloom::Bloom>::maybe_contains::{closure#0}>::{closure#0}, core::ops::control_flow::ControlFlow<()>> (inlined)
+            |          <core::iter::adapters::map::Map<core::ops::range::Range<u64>, <lunix_index::bloom::Bloom>::positions::{closure#0}> as core::iter::traits::iterator::Iterator>::all::<<lunix_index::bloom::Bloom>::maybe_contains::{closure#0}> (inlined)
+            |          <lunix_index::bloom::Bloom>::maybe_contains
+            |          0x7f128821c9f0
+            |          0x1
+            |          
+             --1.35%--<lunix_index::bloom::Bloom>::maybe_contains
+                       0x7f128821c9f0
+                       0x1
+
+     5.42%  lunix-space      [kernel.kallsyms]  [k] filemap_read
+            |
+            ---filemap_read
+               vfs_read
+               __x64_sys_pread64
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               __syscall_cancel_arch
+               <std::sys::fd::unix::FileDesc>::read_at (inlined)
+               <std::sys::fs::unix::File>::read_at (inlined)
+               <std::fs::File as std::os::unix::fs::FileExt>::read_at
+               <std::fs::File as std::os::unix::fs::FileExt>::read_exact_at
+               |          
+               |--1.36%--0x6df8aa32aa00472f
+               |          
+               |--1.36%--0
+               |          
+               |--1.35%--0x71be3deea87cf418
+               |          
+                --1.35%--0x6ddbb3d03fae9410
+
+     5.39%  lunix-space      lunixd             [.] <lunix_index::run::Run>::lookup

@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 262  of event 'cpu/cycles/P'
+# Event count (approx.): 9060574090
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                        
+# ........  ...............  .................  ..............................................................................................................................................................................................................................................................
+#
+    12.04%  lunix-space      lunixd             [.] crc32c::hw_x86_64::crc_u64_parallel3
+            |          
+            |--9.63%--<usize as core::cmp::PartialOrd>::lt (inlined)
+            |          <core::ops::range::Range<usize> as core::iter::range::RangeIteratorImpl>::spec_next (inlined)
+            |          <core::ops::range::Range<usize> as core::iter::traits::iterator::Iterator>::next (inlined)
+            |          crc32c::hw_x86_64::crc_u64_parallel3
+            |          
+             --1.93%--<crc32c::hw_tables::CrcTable>::shift_u64 (inlined)
+                       crc32c::hw_x86_64::crc_u64_parallel3
+
+     8.73%  lunix-space      libc.so.6          [.] __memcmp_evex_movbe
+            |
+            ---__memcmp_evex_movbe
+
+     6.32%  lunix-space      lunixd             [.] aws_lc_0_47_0_sha256_block_data_order_hw
+            |
+            ---aws_lc_0_47_0_sha256_block_data_order_hw
+               |          
+                --5.83%--<core::result::Result<(), aws_lc_rs::error::Unspecified>>::expect (inlined)
+                          <aws_lc_rs::hmac::Context>::update (inlined)
+                          lunix_crypto::mac::hmac_sha256
+                          0x8b481a77013c01e8
+
+     5.30%  lunix-space      lunixd             [.] <lunix_index::LsmIndex as lunix_iface::index::ChunkIndex>::get
+            |          
+             --4.82%--<std::sys::sync::rwlock::futex::RwLock>::read_unlock (inlined)
+                       <std::sync::poison::rwlock::RwLockReadGuard<lunix_index::Inner> as core::ops::drop::Drop>::drop (inlined)
+                       core::ptr::drop_glue::<std::sync::poison::rwlock::RwLockReadGuard<lunix_index::Inner>> (inlined)
+                       <lunix_index::LsmIndex as lunix_iface::index::ChunkIndex>::get
+                       0x1
+
+     4.87%  lunix-space      lunixd             [.] <lunix_gc::mark::Mark>::unit
+            |          
+             --4.39%--<alloc::sync::Arc<lunix_gc::footers::FooterIndex> as core::ops::drop::Drop>::drop (inlined)
+                       core::ptr::drop_glue::<alloc::sync::Arc<lunix_gc::footers::FooterIndex>> (inlined)
+                       <lunix_gc::mark::Mark>::resolve (inlined)
+                       <lunix_gc::mark::Mark>::unit
+                       0x1
+
+     3.43%  lunix-space      libc.so.6          [.] __memset_avx512_unaligned_erms
+            |
+            ---__memset_avx512_unaligned_erms
+               |          
+                --2.94%--0
+
+     3.42%  lunix-space      lunixd             [.] core::slice::sort::shared::smallsort::small_sort_general::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt>
+            |          
+            |--1.47%--core::slice::sort::shared::smallsort::bidirectional_merge::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt> (inlined)
+            |          core::slice::sort::shared::smallsort::small_sort_general_with_scratch::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt> (inlined)
+            |          core::slice::sort::shared::smallsort::small_sort_general::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt>
+            |          
+             --0.97%--core::ptr::copy_nonoverlapping::<(u32, u64)> (inlined)
+                       <core::slice::sort::shared::smallsort::CopyOnDrop<(u32, u64)> as core::ops::drop::Drop>::drop (inlined)
+                       core::ptr::drop_glue::<core::slice::sort::shared::smallsort::CopyOnDrop<(u32, u64)>> (inlined)
+                       core::slice::sort::shared::smallsort::insert_tail::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt> (inlined)
+                       core::slice::sort::shared::smallsort::small_sort_general_with_scratch::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt> (inlined)
+                       core::slice::sort::shared::smallsort::small_sort_general::<(u32, u64), <(u32, u64) as core::cmp::PartialOrd>::lt>
+
+     3.41%  lunix-space      [kernel.kallsyms]  [k] filemap_read
+            |
+            ---filemap_read
+               vfs_read
+               __x64_sys_pread64
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               __syscall_cancel_arch
+               <std::sys::fd::unix::FileDesc>::read_at (inlined)
+               <std::sys::fs::unix::File>::read_at (inlined)
+               <std::fs::File as std::os::unix::fs::FileExt>::read_at

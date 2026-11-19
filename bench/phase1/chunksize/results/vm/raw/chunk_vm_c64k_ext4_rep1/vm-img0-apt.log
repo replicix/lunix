@@ -1,0 +1,481 @@
+Hit:1 http://archive.ubuntu.com/ubuntu noble InRelease
+Get:2 http://security.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+Get:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Get:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+Get:5 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages [1,198 kB]
+Get:6 http://archive.ubuntu.com/ubuntu noble/universe amd64 Packages [15.0 MB]
+Get:7 http://security.ubuntu.com/ubuntu noble-security/main Translation-en [239 kB]
+Get:8 http://security.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
+Get:9 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1,229 kB]
+Get:10 http://security.ubuntu.com/ubuntu noble-security/universe Translation-en [248 kB]
+Get:11 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.3 kB]
+Get:12 http://security.ubuntu.com/ubuntu noble-security/universe amd64 c-n-f Metadata [24.2 kB]
+Get:13 http://security.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1,792 kB]
+Get:14 http://security.ubuntu.com/ubuntu noble-security/restricted Translation-en [414 kB]
+Get:15 http://security.ubuntu.com/ubuntu noble-security/multiverse amd64 Packages [45.4 kB]
+Get:16 http://security.ubuntu.com/ubuntu noble-security/multiverse Translation-en [12.7 kB]
+Get:17 http://security.ubuntu.com/ubuntu noble-security/multiverse amd64 Components [208 B]
+Get:18 http://security.ubuntu.com/ubuntu noble-security/multiverse amd64 c-n-f Metadata [468 B]
+Get:19 http://archive.ubuntu.com/ubuntu noble/universe Translation-en [5,982 kB]
+Get:20 http://archive.ubuntu.com/ubuntu noble/universe amd64 Components [3,871 kB]
+Get:21 http://archive.ubuntu.com/ubuntu noble/universe amd64 c-n-f Metadata [301 kB]
+Get:22 http://archive.ubuntu.com/ubuntu noble/multiverse amd64 Packages [269 kB]
+Get:23 http://archive.ubuntu.com/ubuntu noble/multiverse Translation-en [118 kB]
+Get:24 http://archive.ubuntu.com/ubuntu noble/multiverse amd64 Components [35.0 kB]
+Get:25 http://archive.ubuntu.com/ubuntu noble/multiverse amd64 c-n-f Metadata [8,328 B]
+Get:26 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1,455 kB]
+Get:27 http://archive.ubuntu.com/ubuntu noble-updates/main Translation-en [317 kB]
+Get:28 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
+Get:29 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1,714 kB]
+Get:30 http://archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [345 kB]
+Get:31 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
+Get:32 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 c-n-f Metadata [34.9 kB]
+Get:33 http://archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1,887 kB]
+Get:34 http://archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [433 kB]
+Get:35 http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages [50.7 kB]
+Get:36 http://archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [14.6 kB]
+Get:37 http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+Get:38 http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 c-n-f Metadata [656 B]
+Get:39 http://archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [40.6 kB]
+Get:40 http://archive.ubuntu.com/ubuntu noble-backports/main Translation-en [9,172 B]
+Get:41 http://archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5,740 B]
+Get:42 http://archive.ubuntu.com/ubuntu noble-backports/main amd64 c-n-f Metadata [368 B]
+Get:43 http://archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [31.0 kB]
+Get:44 http://archive.ubuntu.com/ubuntu noble-backports/universe Translation-en [18.6 kB]
+Get:45 http://archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
+Get:46 http://archive.ubuntu.com/ubuntu noble-backports/universe amd64 c-n-f Metadata [1,588 B]
+Get:47 http://archive.ubuntu.com/ubuntu noble-backports/restricted amd64 Components [212 B]
+Get:48 http://archive.ubuntu.com/ubuntu noble-backports/restricted amd64 c-n-f Metadata [116 B]
+Get:49 http://archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Packages [748 B]
+Get:50 http://archive.ubuntu.com/ubuntu noble-backports/multiverse Translation-en [340 B]
+Get:51 http://archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Components [212 B]
+Get:52 http://archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 c-n-f Metadata [116 B]
+Fetched 38.3 MB in 4s (10.8 MB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following packages have been kept back:
+  linux-headers-generic linux-headers-virtual linux-image-virtual
+  linux-virtual
+The following packages will be upgraded:
+  apt apt-utils bind9-dnsutils bind9-host bind9-libs ca-certificates
+  cloud-init distro-info distro-info-data gir1.2-glib-2.0 git git-man
+  libapt-pkg6.0t64 libbrotli1 libc-bin libc-dev-bin libc-devtools libc6
+  libc6-dev libglib2.0-0t64 libglib2.0-bin libglib2.0-data libgstreamer1.0-0
+  liblzma5 libmspack0t64 libnss3 libpcre2-8-0 libperl5.38t64 libsqlite3-0
+  linux-libc-dev linux-tools-common locales needrestart perl perl-base
+  perl-modules-5.38 python3-distro-info python3-jwt python3-pyasn1
+  python3-twisted snapd sosreport tmux ubuntu-pro-client
+  ubuntu-pro-client-l10n xz-utils zlib1g
+Preconfiguring packages ...
+47 upgraded, 0 newly installed, 0 to remove and 4 not upgraded.
+Need to get 0 B/65.1 MB of archives.
+After this operation, 36.4 MB disk space will be freed.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../libperl5.38t64_5.38.2-3.2ubuntu0.7_amd64.deb ...
+Unpacking libperl5.38t64:amd64 (5.38.2-3.2ubuntu0.7) over (5.38.2-3.2ubuntu0.6) ...
+Preparing to unpack .../perl_5.38.2-3.2ubuntu0.7_amd64.deb ...
+Unpacking perl (5.38.2-3.2ubuntu0.7) over (5.38.2-3.2ubuntu0.6) ...
+Preparing to unpack .../perl-base_5.38.2-3.2ubuntu0.7_amd64.deb ...
+Unpacking perl-base (5.38.2-3.2ubuntu0.7) over (5.38.2-3.2ubuntu0.6) ...
+Setting up perl-base (5.38.2-3.2ubuntu0.7) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../0-perl-modules-5.38_5.38.2-3.2ubuntu0.7_all.deb ...
+Unpacking perl-modules-5.38 (5.38.2-3.2ubuntu0.7) over (5.38.2-3.2ubuntu0.6) ...
+Preparing to unpack .../1-libc-devtools_2.39-0ubuntu8.12_amd64.deb ...
+Unpacking libc-devtools (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Preparing to unpack .../2-libc6-dev_2.39-0ubuntu8.12_amd64.deb ...
+Unpacking libc6-dev:amd64 (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Preparing to unpack .../3-libc-dev-bin_2.39-0ubuntu8.12_amd64.deb ...
+Unpacking libc-dev-bin (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Preparing to unpack .../4-linux-libc-dev_6.8.0-149.149_amd64.deb ...
+Unpacking linux-libc-dev:amd64 (6.8.0-149.149) over (6.8.0-147.147) ...
+Preparing to unpack .../5-libc6_2.39-0ubuntu8.12_amd64.deb ...
+Unpacking libc6:amd64 (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Setting up libc6:amd64 (2.39-0ubuntu8.12) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../zlib1g_1%3a1.3.dfsg-3.1ubuntu2.3_amd64.deb ...
+Unpacking zlib1g:amd64 (1:1.3.dfsg-3.1ubuntu2.3) over (1:1.3.dfsg-3.1ubuntu2.2) ...
+Setting up zlib1g:amd64 (1:1.3.dfsg-3.1ubuntu2.3) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../libc-bin_2.39-0ubuntu8.12_amd64.deb ...
+Unpacking libc-bin (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Setting up libc-bin (2.39-0ubuntu8.12) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../liblzma5_5.6.1+really5.4.5-1ubuntu0.4_amd64.deb ...
+Unpacking liblzma5:amd64 (5.6.1+really5.4.5-1ubuntu0.4) over (5.6.1+really5.4.5-1ubuntu0.3) ...
+Setting up liblzma5:amd64 (5.6.1+really5.4.5-1ubuntu0.4) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../libapt-pkg6.0t64_2.8.4ubuntu0.1_amd64.deb ...
+Unpacking libapt-pkg6.0t64:amd64 (2.8.4ubuntu0.1) over (2.8.3) ...
+Setting up libapt-pkg6.0t64:amd64 (2.8.4ubuntu0.1) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../apt_2.8.4ubuntu0.1_amd64.deb ...
+Unpacking apt (2.8.4ubuntu0.1) over (2.8.3) ...
+Setting up apt (2.8.4ubuntu0.1) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75072 files and directories currently installed.)
+Preparing to unpack .../apt-utils_2.8.4ubuntu0.1_amd64.deb ...
+Unpacking apt-utils (2.8.4ubuntu0.1) over (2.8.3) ...
+Preparing to unpack .../libpcre2-8-0_10.42-4ubuntu2.2_amd64.deb ...
+Unpacking libpcre2-8-0:amd64 (10.42-4ubuntu2.2) over (10.42-4ubuntu2.1) ...
+Setting up libpcre2-8-0:amd64 (10.42-4ubuntu2.2) ...
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 75115 files and directories currently installed.)
+Preparing to unpack .../00-ca-certificates_20260816ubuntu0.24.04.2_all.deb ...
+Unpacking ca-certificates (20260816ubuntu0.24.04.2) over (20260601~24.04.1) ...
+Preparing to unpack .../01-distro-info-data_2026.10.12-0ubuntu0.24.04.1_all.deb ...
+Unpacking distro-info-data (2026.10.12-0ubuntu0.24.04.1) over (0.72-0ubuntu0.24.04.1) ...
+Preparing to unpack .../02-distro-info_1.7ubuntu0.1_amd64.deb ...
+Unpacking distro-info (1.7ubuntu0.1) over (1.7build1) ...
+Preparing to unpack .../03-libglib2.0-data_2.80.0-6ubuntu3.10_all.deb ...
+Unpacking libglib2.0-data (2.80.0-6ubuntu3.10) over (2.80.0-6ubuntu3.9) ...
+Preparing to unpack .../04-libglib2.0-bin_2.80.0-6ubuntu3.10_amd64.deb ...
+Unpacking libglib2.0-bin (2.80.0-6ubuntu3.10) over (2.80.0-6ubuntu3.9) ...
+Preparing to unpack .../05-gir1.2-glib-2.0_2.80.0-6ubuntu3.10_amd64.deb ...
+Unpacking gir1.2-glib-2.0:amd64 (2.80.0-6ubuntu3.10) over (2.80.0-6ubuntu3.9) ...
+Preparing to unpack .../06-libglib2.0-0t64_2.80.0-6ubuntu3.10_amd64.deb ...
+Unpacking libglib2.0-0t64:amd64 (2.80.0-6ubuntu3.10) over (2.80.0-6ubuntu3.9) ...
+Preparing to unpack .../07-libsqlite3-0_3.45.1-1ubuntu2.9_amd64.deb ...
+Unpacking libsqlite3-0:amd64 (3.45.1-1ubuntu2.9) over (3.45.1-1ubuntu2.8) ...
+Preparing to unpack .../08-locales_2.39-0ubuntu8.12_all.deb ...
+Unpacking locales (2.39-0ubuntu8.12) over (2.39-0ubuntu8.9) ...
+Preparing to unpack .../09-ubuntu-pro-client-l10n_38ubuntu0~24.04_amd64.deb ...
+Unpacking ubuntu-pro-client-l10n (38ubuntu0~24.04) over (37.2ubuntu~24.04.1) ...
+Preparing to unpack .../10-ubuntu-pro-client_38ubuntu0~24.04_amd64.deb ...
+Unpacking ubuntu-pro-client (38ubuntu0~24.04) over (37.2ubuntu~24.04.1) ...
+Preparing to unpack .../11-bind9-dnsutils_1%3a9.18.39-0ubuntu0.24.04.9_amd64.deb ...
+Unpacking bind9-dnsutils (1:9.18.39-0ubuntu0.24.04.9) over (1:9.18.39-0ubuntu0.24.04.8) ...
+Preparing to unpack .../12-bind9-host_1%3a9.18.39-0ubuntu0.24.04.9_amd64.deb ...
+Unpacking bind9-host (1:9.18.39-0ubuntu0.24.04.9) over (1:9.18.39-0ubuntu0.24.04.8) ...
+Preparing to unpack .../13-bind9-libs_1%3a9.18.39-0ubuntu0.24.04.9_amd64.deb ...
+Unpacking bind9-libs:amd64 (1:9.18.39-0ubuntu0.24.04.9) over (1:9.18.39-0ubuntu0.24.04.8) ...
+Preparing to unpack .../14-python3-distro-info_1.7ubuntu0.1_all.deb ...
+Unpacking python3-distro-info (1.7ubuntu0.1) over (1.7build1) ...
+Preparing to unpack .../15-xz-utils_5.6.1+really5.4.5-1ubuntu0.4_amd64.deb ...
+Unpacking xz-utils (5.6.1+really5.4.5-1ubuntu0.4) over (5.6.1+really5.4.5-1ubuntu0.3) ...
+Preparing to unpack .../16-git-man_1%3a2.43.0-1ubuntu7.4_all.deb ...
+Unpacking git-man (1:2.43.0-1ubuntu7.4) over (1:2.43.0-1ubuntu7.3) ...
+Preparing to unpack .../17-git_1%3a2.43.0-1ubuntu7.4_amd64.deb ...
+Unpacking git (1:2.43.0-1ubuntu7.4) over (1:2.43.0-1ubuntu7.3) ...
+Preparing to unpack .../18-libbrotli1_1.1.0-2ubuntu0.1_amd64.deb ...
+Unpacking libbrotli1:amd64 (1.1.0-2ubuntu0.1) over (1.1.0-2build2) ...
+Preparing to unpack .../19-libgstreamer1.0-0_1.24.2-1ubuntu0.2_amd64.deb ...
+Unpacking libgstreamer1.0-0:amd64 (1.24.2-1ubuntu0.2) over (1.24.2-1ubuntu0.1) ...
+Preparing to unpack .../20-libmspack0t64_0.11-1.1ubuntu0.24.04.1_amd64.deb ...
+Unpacking libmspack0t64:amd64 (0.11-1.1ubuntu0.24.04.1) over (0.11-1.1build1) ...
+Preparing to unpack .../21-libnss3_2%3a3.98-1ubuntu0.3_amd64.deb ...
+Unpacking libnss3:amd64 (2:3.98-1ubuntu0.3) over (2:3.98-1ubuntu0.2) ...
+Preparing to unpack .../22-linux-tools-common_6.8.0-149.149_all.deb ...
+Unpacking linux-tools-common (6.8.0-149.149) over (6.8.0-147.147) ...
+Preparing to unpack .../23-needrestart_3.6-7ubuntu4.6_all.deb ...
+Unpacking needrestart (3.6-7ubuntu4.6) over (3.6-7ubuntu4.5) ...
+Preparing to unpack .../24-python3-jwt_2.7.0-1ubuntu0.4_all.deb ...
+Unpacking python3-jwt (2.7.0-1ubuntu0.4) over (2.7.0-1ubuntu0.3) ...
+Preparing to unpack .../25-python3-pyasn1_0.4.8-4ubuntu0.4_all.deb ...
+Unpacking python3-pyasn1 (0.4.8-4ubuntu0.4) over (0.4.8-4ubuntu0.3) ...
+Preparing to unpack .../26-python3-twisted_24.3.0-1ubuntu0.3_all.deb ...
+Unpacking python3-twisted (24.3.0-1ubuntu0.3) over (24.3.0-1ubuntu0.2) ...
+Preparing to unpack .../27-snapd_2.78+ubuntu24.04_amd64.deb ...
+Unpacking snapd (2.78+ubuntu24.04) over (2.77.1+ubuntu24.04) ...
+Preparing to unpack .../28-sosreport_4.11.2-0ubuntu0~24.04.2_amd64.deb ...
+Unpacking sosreport (4.11.2-0ubuntu0~24.04.2) over (4.11.2-0ubuntu0~24.04.1) ...
+Preparing to unpack .../29-tmux_3.4-1ubuntu0.2_amd64.deb ...
+Unpacking tmux (3.4-1ubuntu0.2) over (3.4-1ubuntu0.1) ...
+Preparing to unpack .../30-cloud-init_26.2-0ubuntu1~24.04.2_all.deb ...
+Unpacking cloud-init (26.2-0ubuntu1~24.04.2) over (26.1-0ubuntu1~24.04.1) ...
+Setting up cloud-init (26.2-0ubuntu1~24.04.2) ...
+Installing new version of config file /etc/cloud/templates/hosts.azurelinux.tmpl ...
+Installing new version of config file /etc/cloud/templates/sources.list.debian.tmpl ...
+Installing new version of config file /etc/profile.d/Z99-cloud-locale-test.sh ...
+Installing new version of config file /etc/profile.d/Z99-cloudinit-warnings.sh ...
+Setting up apt-utils (2.8.4ubuntu0.1) ...
+Setting up bind9-libs:amd64 (1:9.18.39-0ubuntu0.24.04.9) ...
+Setting up python3-jwt (2.7.0-1ubuntu0.4) ...
+Setting up distro-info-data (2026.10.12-0ubuntu0.24.04.1) ...
+Setting up libbrotli1:amd64 (1.1.0-2ubuntu0.1) ...
+Setting up libsqlite3-0:amd64 (3.45.1-1ubuntu2.9) ...
+Setting up libmspack0t64:amd64 (0.11-1.1ubuntu0.24.04.1) ...
+Setting up linux-libc-dev:amd64 (6.8.0-149.149) ...
+Setting up libnss3:amd64 (2:3.98-1ubuntu0.3) ...
+Setting up locales (2.39-0ubuntu8.12) ...
+Generating locales (this might take a while)...
+  en_US.UTF-8... done
+Generation complete.
+Setting up ca-certificates (20260816ubuntu0.24.04.2) ...
+Updating certificates in /etc/ssl/certs...
+rehash: warning: skipping ca-certificates.crt,it does not contain exactly one certificate or CRL
+4 added, 5 removed; done.
+Running hooks in /etc/ca-certificates/update.d...
+done.
+Setting up libglib2.0-0t64:amd64 (2.80.0-6ubuntu3.10) ...
+No schema files found: doing nothing.
+Setting up libglib2.0-data (2.80.0-6ubuntu3.10) ...
+Setting up python3-twisted (24.3.0-1ubuntu0.3) ...
+Setting up xz-utils (5.6.1+really5.4.5-1ubuntu0.4) ...
+Setting up perl-modules-5.38 (5.38.2-3.2ubuntu0.7) ...
+Setting up gir1.2-glib-2.0:amd64 (2.80.0-6ubuntu3.10) ...
+Setting up sosreport (4.11.2-0ubuntu0~24.04.2) ...
+Setting up python3-pyasn1 (0.4.8-4ubuntu0.4) ...
+Setting up git-man (1:2.43.0-1ubuntu7.4) ...
+Setting up libperl5.38t64:amd64 (5.38.2-3.2ubuntu0.7) ...
+Setting up libc-dev-bin (2.39-0ubuntu8.12) ...
+Setting up bind9-host (1:9.18.39-0ubuntu0.24.04.9) ...
+Setting up linux-tools-common (6.8.0-149.149) ...
+Setting up python3-distro-info (1.7ubuntu0.1) ...
+Setting up tmux (3.4-1ubuntu0.2) ...
+Setting up libgstreamer1.0-0:amd64 (1.24.2-1ubuntu0.2) ...
+Setcap worked! gst-ptp-helper is not suid!
+Setting up libc-devtools (2.39-0ubuntu8.12) ...
+Setting up distro-info (1.7ubuntu0.1) ...
+Setting up snapd (2.78+ubuntu24.04) ...
+Setting up libglib2.0-bin (2.80.0-6ubuntu3.10) ...
+Setting up perl (5.38.2-3.2ubuntu0.7) ...
+Setting up git (1:2.43.0-1ubuntu7.4) ...
+Setting up libc6-dev:amd64 (2.39-0ubuntu8.12) ...
+Setting up bind9-dnsutils (1:9.18.39-0ubuntu0.24.04.9) ...
+Setting up ubuntu-pro-client (38ubuntu0~24.04) ...
+Installing new version of config file /etc/apparmor.d/ubuntu_pro_esm_cache ...
+Setting up ubuntu-pro-client-l10n (38ubuntu0~24.04) ...
+Setting up needrestart (3.6-7ubuntu4.6) ...
+Installing new version of config file /etc/needrestart/notify.d/400-notify-send ...
+Processing triggers for rsyslog (8.2312.0-3ubuntu9.4) ...
+invoke-rc.d: unknown initscript, /etc/init.d/rsyslog not found.
+Running in chroot, ignoring request.
+Processing triggers for man-db (2.12.0-4build2) ...
+Processing triggers for dbus (1.14.10-4ubuntu4.1) ...
+Processing triggers for debianutils (5.17build1) ...
+Processing triggers for libc-bin (2.39-0ubuntu8.12) ...
+
+Failed to retrieve available kernel versions.
+
+The processor microcode seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+available: 248
+Reading package lists...
+Building dependency tree...
+Reading state information...
+strace is already the newest version (6.8-0ubuntu2).
+strace set to manually installed.
+patch is already the newest version (2.7.6-7build3).
+patch set to manually installed.
+diffutils is already the newest version (1:3.10-1ubuntu0.1).
+git is already the newest version (1:2.43.0-1ubuntu7.4).
+git set to manually installed.
+curl is already the newest version (8.5.0-2ubuntu10.16).
+curl set to manually installed.
+wget is already the newest version (1.21.4-1ubuntu4.5).
+wget set to manually installed.
+rsync is already the newest version (3.2.7-1ubuntu1.5).
+rsync set to manually installed.
+openssh-client is already the newest version (1:9.6p1-3ubuntu13.20).
+openssh-client set to manually installed.
+openssh-server is already the newest version (1:9.6p1-3ubuntu13.20).
+tmux is already the newest version (3.4-1ubuntu0.2).
+tmux set to manually installed.
+screen is already the newest version (4.9.1-1ubuntu1).
+screen set to manually installed.
+vim is already the newest version (2:9.1.0016-1ubuntu7.20).
+vim set to manually installed.
+nano is already the newest version (7.2-2ubuntu0.2).
+nano set to manually installed.
+htop is already the newest version (3.3.0-4build1).
+htop set to manually installed.
+sysstat is already the newest version (12.6.1-2).
+sysstat set to manually installed.
+lsof is already the newest version (4.95.0-1build3).
+lsof set to manually installed.
+jq is already the newest version (1.7.1-3ubuntu0.24.04.2).
+jq set to manually installed.
+tcpdump is already the newest version (4.99.4-3ubuntu4.24.04.1).
+tcpdump set to manually installed.
+netcat-openbsd is already the newest version (1.226-1ubuntu2).
+netcat-openbsd set to manually installed.
+python3-requests is already the newest version (2.31.0+dfsg-1ubuntu1.2).
+python3-requests set to manually installed.
+python3-yaml is already the newest version (6.0.1-2build2).
+python3-yaml set to manually installed.
+python3-jinja2 is already the newest version (3.1.2-1ubuntu1.3).
+python3-setuptools is already the newest version (68.1.2-2ubuntu1.2).
+python3-setuptools set to manually installed.
+python3-cryptography is already the newest version (41.0.7-4ubuntu0.4).
+python3-cryptography set to manually installed.
+perl is already the newest version (5.38.2-3.2ubuntu0.7).
+perl set to manually installed.
+tcl is already the newest version (8.6.14build1).
+tcl set to manually installed.
+xz-utils is already the newest version (5.6.1+really5.4.5-1ubuntu0.4).
+xz-utils set to manually installed.
+zstd is already the newest version (1.5.5+dfsg2-2build1.1).
+zstd set to manually installed.
+cpio is already the newest version (2.15+dfsg-1ubuntu2.1).
+cpio set to manually installed.
+tar is already the newest version (1.35+dfsg-3ubuntu0.4).
+tar set to manually installed.
+bash-completion is already the newest version (1:2.11-8).
+bash-completion set to manually installed.
+man-db is already the newest version (2.12.0-4build2).
+man-db set to manually installed.
+manpages-dev is already the newest version (6.7-2).
+manpages-dev set to manually installed.
+less is already the newest version (590-2ubuntu2.1).
+less set to manually installed.
+file is already the newest version (1:5.45-3build1).
+file set to manually installed.
+bc is already the newest version (1.07.1-3ubuntu4).
+bc set to manually installed.
+ed is already the newest version (1.20.1-1).
+ed set to manually installed.
+gawk is already the newest version (1:5.2.1-2ubuntu0.1).
+gawk set to manually installed.
+sed is already the newest version (4.9-2ubuntu0.24.04.1).
+sed set to manually installed.
+grep is already the newest version (3.11-4build1).
+findutils is already the newest version (4.9.0-5build1).
+coreutils is already the newest version (9.4-3ubuntu6.3).
+coreutils set to manually installed.
+cryptsetup is already the newest version (2:2.7.0-1ubuntu4.2).
+cryptsetup set to manually installed.
+lvm2 is already the newest version (2.03.16-3ubuntu3.2).
+lvm2 set to manually installed.
+mdadm is already the newest version (4.3-1ubuntu2.1).
+mdadm set to manually installed.
+parted is already the newest version (3.6-4build1).
+parted set to manually installed.
+gdisk is already the newest version (1.0.10-1build1).
+gdisk set to manually installed.
+xfsprogs is already the newest version (6.6.0-1ubuntu2.1).
+xfsprogs set to manually installed.
+btrfs-progs is already the newest version (6.6.3-1.1build2).
+btrfs-progs set to manually installed.
+e2fsprogs is already the newest version (1.47.0-2.4~exp1ubuntu4.1).
+e2fsprogs set to manually installed.
+dosfstools is already the newest version (4.2-1.1build1).
+dosfstools set to manually installed.
+ntfs-3g is already the newest version (1:2022.10.3-1.2ubuntu3.2).
+ntfs-3g set to manually installed.
+squashfs-tools is already the newest version (1:4.6.1-1build1).
+squashfs-tools set to manually installed.
+fuse3 is already the newest version (3.14.0-5build1).
+fuse3 set to manually installed.
+ethtool is already the newest version (1:6.7-1build1).
+ethtool set to manually installed.
+iproute2 is already the newest version (6.1.0-1ubuntu6.4).
+iproute2 set to manually installed.
+iptables is already the newest version (1.8.10-3ubuntu2).
+iptables set to manually installed.
+nftables is already the newest version (1.0.9-1ubuntu0.1).
+nftables set to manually installed.
+logrotate is already the newest version (3.21.0-2build1).
+logrotate set to manually installed.
+rsyslog is already the newest version (8.2312.0-3ubuntu9.4).
+rsyslog set to manually installed.
+cron is already the newest version (3.0pl1-184ubuntu2).
+cron set to manually installed.
+lsb-release is already the newest version (12.0-2).
+lsb-release set to manually installed.
+ca-certificates is already the newest version (20260816ubuntu0.24.04.2).
+ca-certificates set to manually installed.
+gnupg is already the newest version (2.4.4-2ubuntu17.6).
+gnupg set to manually installed.
+software-properties-common is already the newest version (0.99.49.4).
+software-properties-common set to manually installed.
+ufw is already the newest version (0.36.2-6).
+ufw set to manually installed.
+iputils-ping is already the newest version (3:20240117-1ubuntu0.1).
+iputils-ping set to manually installed.
+Some packages could not be installed. This may mean that you have
+requested an impossible situation or if you are using the unstable
+distribution that some required packages have not yet been created
+or been moved out of Incoming.
+The following information may help to resolve the situation:
+
+The following packages have unmet dependencies:
+ exim4 : Depends: exim4-daemon-light (>= 4.97-4ubuntu4.8) but it is not installable or
+                  exim4-daemon-heavy (>= 4.97-4ubuntu4.8) but it is not installable or
+                  exim4-daemon-custom (>= 4.97-4ubuntu4.8) but it is not installable
+ exim4-config : Conflicts: postfix but 3.8.6-1ubuntu0.1 is to be installed
+ ntp : Depends: ntpsec but it is not installable
+E: Unable to correct problems, you have held broken packages.
+bulk install failed, one by one
+skipped: dh-make
+skipped: fakeroot
+skipped: lintian
+skipped: clang
+skipped: llvm
+skipped: lld
+skipped: ninja-build
+skipped: meson
+skipped: scons
+skipped: ccache
+skipped: shellcheck
+skipped: cppcheck
+skipped: cryptsetup
+skipped: lvm2
+skipped: mdadm
+skipped: parted
+skipped: gdisk
+skipped: xfsprogs
+skipped: btrfs-progs
+skipped: e2fsprogs
+skipped: dosfstools
+skipped: ntfs-3g
+skipped: squashfs-tools
+skipped: fuse3
+skipped: nfs-common
+skipped: cifs-utils
+skipped: ethtool
+skipped: iproute2
+skipped: iptables
+skipped: nftables
+skipped: bridge-utils
+skipped: vlan
+skipped: ifenslave
+skipped: wireguard-tools
+skipped: openvpn
+skipped: logrotate
+skipped: rsyslog
+skipped: cron
+skipped: anacron
+skipped: at
+skipped: lsb-release
+skipped: ca-certificates
+skipped: gnupg
+skipped: software-properties-common
+skipped: apt-transport-https
+skipped: bind9-utils
+skipped: bind9
+skipped: dnsmasq
+skipped: unbound
+skipped: chrony
+skipped: ntp
+skipped: fail2ban
+skipped: ufw
+skipped: apparmor-utils
+skipped: auditd
+skipped: exim4
+skipped: postfix
+skipped: mutt
+skipped: mailutils
+skipped: mc
+skipped: ranger
+skipped: ncdu
+skipped: fzf
+skipped: ripgrep
+skipped: fd-find
+skipped: bat
+skipped: silversearcher-ag
+skipped: net-tools
+skipped: iputils-ping
+skipped: ipset
+skipped: conntrack
+skipped: sshfs
+skipped: davfs2
+skipped: s3fs

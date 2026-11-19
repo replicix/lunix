@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cpu/cycles/P'
+# Event count (approx.): 76453425724
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                              
+# ........  ...............  .................  ....................................................................................................................................
+#
+     5.05%  lunix-q2         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--2.13%--<std::sys::sync::mutex::futex::Mutex>::unlock (inlined)
+            |          <std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State> as core::ops::drop::Drop>::drop (inlined)
+            |          core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State>> (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--1.17%--<alloc::sync::Arc<[u8]> as core::clone::Clone>::clone (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+             --1.12%--<core::option::Option<lunix_engine::cache::Slot>>::as_mut (inlined)
+                       <lunix_engine::cache::ChunkCache>::get
+
+     4.76%  lunix-q3         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--2.22%--<std::sys::sync::mutex::futex::Mutex>::unlock (inlined)
+            |          <std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State> as core::ops::drop::Drop>::drop (inlined)
+            |          core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State>> (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--1.58%--<alloc::sync::Arc<[u8]> as core::clone::Clone>::clone (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+             --0.69%--<core::option::Option<lunix_engine::cache::Slot>>::as_mut (inlined)
+                       <lunix_engine::cache::ChunkCache>::get
+
+     4.55%  lunix-q3         [kernel.kallsyms]  [k] choose_idle_cpu
+            |
+            ---choose_idle_cpu
+               |          
+               |--3.18%--select_idle_sibling
+               |          select_task_rq
+               |          try_to_wake_up
+               |          |          
+               |          |--2.68%--autoremove_wake_function
+               |          |          __wake_up_common
+               |          |          __wake_up
+               |          |          sbitmap_queue_wake_up
+               |          |          sbitmap_queue_clear
+               |          |          __blk_mq_free_request
+               |          |          ublk_ch_uring_cmd_local
+               |          |          io_uring_cmd
+               |          |          __io_issue_sqe
+               |          |          io_issue_sqe
+               |          |          io_submit_sqe
+               |          |          io_submit_sqes
+               |          |          __do_sys_io_uring_enter
+               |          |          do_syscall_64
+               |          |          entry_SYSCALL_64_after_hwframe
+               |          |          syscall
+               |          |          0x3
+               |          |          0x7fc3b0000db0
+               |          |          
+               |           --0.50%--io_req_local_work_add
+               |                     blkdev_bio_end_io_async
+               |                     blk_update_request
+               |                     __ublk_complete_rq
+               |                     ublk_ch_uring_cmd_local
+               |                     io_uring_cmd
+               |                     __io_issue_sqe
+               |                     io_issue_sqe
+               |                     io_submit_sqe
+               |                     io_submit_sqes
+               |                     __do_sys_io_uring_enter
+               |                     do_syscall_64
+               |                     entry_SYSCALL_64_after_hwframe
+               |                     syscall
+               |                     0x3
+               |                     0x7fc3b0000db0

@@ -1,0 +1,1 @@
+attached pa64k as /run/m16ref/m16-parta-state/dev/pa64k (4 queues, depth 128)

@@ -1,0 +1,1 @@
+attached cspgbenc16ext41 as $SCRATCH/m16-chunksize-state/dev/cspgbenc16ext41 (4 queues, depth 128)

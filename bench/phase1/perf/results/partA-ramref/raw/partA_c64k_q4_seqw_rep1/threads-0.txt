@@ -1,0 +1,17 @@
+lunix-q2 115.060 1
+lunix-q3 114.830 1
+lunix-space 31.040 1
+lunix-coord 22.520 1
+lunix-read-2 0.290 1
+lunix-read-0 0.290 1
+lunix-read-3 0.280 1
+lunix-read-1 0.280 1
+lunixd-trim 0.110 1
+iou-wrk-2682845 0.050 1
+iou-wrk-2682846 0.040 1
+lunix-q1 0.030 1
+lunix-q0 0.030 1
+lunix-journal-f 0.000 1
+lunixd-ctl 0.000 3
+lunixd 0.000 1
+iou-wrk-2682828 0.000 1

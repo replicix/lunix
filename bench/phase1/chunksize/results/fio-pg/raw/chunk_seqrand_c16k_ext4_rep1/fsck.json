@@ -1,0 +1,76 @@
+{
+  "exit": 0,
+  "volume": "4dc16af3-de12-452d-9591-e30c02a59ba4",
+  "mode": "integrity",
+  "tip": 500,
+  "deep": true,
+  "findings": [
+    {
+      "code": "gc_dry_run",
+      "severity": "note",
+      "object": "gc",
+      "message": "a pass would condemn 0 segments and delete 0 segments, 1 packs, 0 index runs and 0 commits (955636 bytes), and compact 0 segments (0 live bytes)"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "map/0000000000000afc",
+      "message": "condemned (955636 bytes): a pass deletes it after its grace and a recheck"
+    }
+  ],
+  "counts": {
+    "gc_dry_run": 1,
+    "gc_pending": 1
+  },
+  "ratios": {
+    "chunk_size": 16384,
+    "chunk_count": 3145728,
+    "mapped_chunks": 1049071,
+    "hole_chunks": 2096657,
+    "unique_chunks": 1042998,
+    "unresolved_entries": 0,
+    "dedup_ratio": 1.0058226382025661,
+    "unique_ulen": 17088479232,
+    "unique_clen": 8655973290,
+    "compression_ratio": 1.9741834522227366,
+    "hole_share": 0.6665093104044596,
+    "bytes": {
+      "segments": 11043482204,
+      "map_packs": 35963086,
+      "commits": 5892,
+      "index": 172047880,
+      "journal": 1077936128,
+      "other": 881470
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 1,
+    "runs_deleted": 0,
+    "commits_deleted": 0,
+    "segments_compacted": 0,
+    "bytes_freed": 955636,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "commits": 3,
+    "segments": 677,
+    "packs": 39,
+    "extents": 1317026,
+    "map_nodes": 2172,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 1727432
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 261212
+}

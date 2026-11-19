@@ -1,0 +1,19 @@
+1795012163098 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795012163099 INFO  lunixd: lunixd started socket=$SCRATCH/m16-chunksize-state/ctl.sock
+1795012163099 INFO  lunixd::server: control socket ready
+1795012163206 INFO  lunixd::audit: {"ts_ms":1795012163206,"uid":0,"gid":0,"pid":2169440,"method":"volume_create","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795012178763 INFO  lunixd::daemon: volume opened volume="csrandmi64ext41" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795012178817 INFO  lunixd::daemon: attached volume="csrandmi64ext41" recovered=false ms=15604
+1795012178817 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=csrandmi64ext41 locked_bytes=582094848
+1795012178817 INFO  lunixd::audit: {"ts_ms":1795012178817,"uid":0,"gid":0,"pid":2169451,"method":"attach","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795012178958 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014133093 INFO  lunixd::daemon: gc pass on request volume=csrandmi64ext41 dry_run=false pass=4 bytes_freed=9221133959 segments_deleted=604 segments_compacted=2905 ms=134543
+1795014133093 INFO  lunixd::audit: {"ts_ms":1795014133093,"uid":0,"gid":0,"pid":2176076,"method":"gc","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795014453930 INFO  lunixd::daemon: gc pass on request volume=csrandmi64ext41 dry_run=false pass=6 bytes_freed=47372122351 segments_deleted=2831 segments_compacted=670 ms=245828
+1795014453930 INFO  lunixd::audit: {"ts_ms":1795014453930,"uid":0,"gid":0,"pid":2176575,"method":"gc","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795014665975 INFO  lunixd::daemon: gc pass on request volume=csrandmi64ext41 dry_run=false pass=8 bytes_freed=7860549917 segments_deleted=471 segments_compacted=366 ms=137036
+1795014665975 INFO  lunixd::audit: {"ts_ms":1795014665975,"uid":0,"gid":0,"pid":2177358,"method":"gc","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795014741057 INFO  lunixd::audit: {"ts_ms":1795014741057,"uid":0,"gid":0,"pid":2177930,"method":"detach","volume":"csrandmi64ext41","outcome":"ok","code":null,"message":null}
+1795014803623 INFO  lunixd::server: signal: quiescing every device
+1795014803623 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

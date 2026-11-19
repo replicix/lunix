@@ -116,30 +116,34 @@ wl_vm() {
 vm_churn() { # d i name
   local d=$1 i=$2 f="$MNT/images/img$2.raw" root="$LUNIX_SPIKE_DIR/mnt/$NAME-img$2"
   need_safe "$root"; mkdir -p "$root"
-  local loop part; loop=$(losetup -fP --show "$f") || return 1; VM_LOOPS+=("$loop"); register_device "$loop"
-  part=$(lsblk -nrpo NAME,FSTYPE,SIZE -b "$loop" | awk '$2 ~ /ext4|xfs/ {print $3, $1}' | sort -nr | head -1 | cut -d' ' -f2); part=${part:-$loop}
-  mount -o nosuid,nodev "$part" "$root" || return 1; VM_MOUNTS+=("$root")
-  mount -t proc proc "$root/proc" && VM_MOUNTS+=("$root/proc")
-  # the host's /dev is bound read-only (apt and dpkg scripts need /dev/null); this is not a device from the image.
-  # This is the ONE exception to CONVENTIONS rule 3 (every mount nosuid,nodev under the scratch directory): a nodev
-  # mount cannot offer device nodes and mknod is forbidden inside it; accepted by the lead on 2026-11-18.
-  mount --rbind -o ro /dev "$root/dev" 2>/dev/null && VM_MOUNTS+=("$root/dev")
-  local cache="$LUNIX_SPIKE_DIR/apt-cache-img$i"; mkdir -p "$cache" "$root/var/cache/apt/archives"
-  mount --bind "$cache" "$root/var/cache/apt/archives" && VM_MOUNTS+=("$root/var/cache/apt/archives")
-  cat /run/systemd/resolve/resolv.conf 2>/dev/null > "$root/etc/resolv.conf" || cp /etc/resolv.conf "$root/etc/resolv.conf"
-  printf '#!/bin/sh\nexit 101\n' > "$root/usr/sbin/policy-rc.d"; chmod +x "$root/usr/sbin/policy-rc.d"
-  cp "$BENCH/packages.txt" "$root/tmp/packages.txt"
-  chroot "$root" dpkg-query -f '.\n' -W | wc -l > "$d/vm-img$i-pkgs-before.txt"
-  local t0=$SECONDS
-  timeout -k 60 "$VM_STEP_CAP" chroot "$root" /bin/bash -c '
-    set -e; export DEBIAN_FRONTEND=noninteractive
-    apt-get update -q; apt-get -y -q upgrade
-    avail=""; for p in $(grep -v "^#" /tmp/packages.txt); do apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: [^(]" && avail="$avail $p"; done
-    echo "available: $(echo $avail | wc -w)"
-    apt-get -y -q --no-install-recommends install $avail' > "$d/vm-img$i-apt.log" 2>&1; local rc=$?
-  echo "apt_seconds=$((SECONDS - t0)) rc=$rc" >> "$d/vm-timing.txt"
-  chroot "$root" dpkg-query -f '.\n' -W | wc -l > "$d/vm-img$i-pkgs-after.txt"
+  [ "${VM_GROW_GIB:-6}" -gt 0 ] && truncate -s "+${VM_GROW_GIB:-6}G" "$f"
+  local loop part k; loop=$(losetup -fP --show "$f") || return 1; VM_LOOPS+=("$loop"); register_device "$loop"
+  # the partition nodes of a loop device appear a moment after losetup -P (udev): wait for them (up to 20 s) before the
+  # largest ext4 or xfs partition is chosen; an image without a partition table is mounted whole
+  udevadm settle --timeout=20 2>/dev/null
+  for k in $(seq 1 40); do
+    part=$(lsblk -nrpo NAME,FSTYPE,SIZE,TYPE -b "$loop" | awk '$4 == "part" && $2 ~ /ext4|xfs/ {print $3, $1}' | sort -nr | head -1 | cut -d' ' -f2)
+    [ -n "$part" ] && break
+    [ -z "$(blkid -p -o value -s PTTYPE "$loop" 2>/dev/null)" ] && break   # no partition table: the whole device
+    sleep 0.5
+  done
+  part=${part:-$loop}
+  # the cloud images' root file systems are nearly full (2-3 GiB): grow the copy on the volume (sparse, so the volume only
+  # stores what is written) and its root partition (the last one, number 1) and ext4 file system before the churn
+  if [ "$part" != "$loop" ] && [ "${VM_GROW_GIB:-6}" -gt 0 ]; then
+    { growpart "$loop" 1 && udevadm settle --timeout=20 && e2fsck -fy "$part"; resize2fs "$part"; } > "$d/vm-img$i-grow.txt" 2>&1 || true
+  fi
+  # the chroot work runs in a private mount namespace (vm-chroot.sh): nothing it mounts propagates to the host's other mount
+  # namespaces, and everything is gone when it exits; only then is the loop device released
+  local t0=$SECONDS out rc
+  out=$(unshare --mount --propagation private bash "$here/vm-chroot.sh" "$part" "$root" "$LUNIX_SPIKE_DIR/apt-cache-img$i" "$BENCH/packages.txt" "$VM_STEP_CAP" "$d/vm-img$i-apt.log"); rc=$?
+  echo "$out" > "$d/vm-img$i-chroot.txt"
+  grep -o 'pkgs_before=.*' <<< "$out" | cut -d= -f2 > "$d/vm-img$i-pkgs-before.txt"
+  grep -o 'pkgs_after=.*' <<< "$out" | cut -d= -f2 > "$d/vm-img$i-pkgs-after.txt"
+  local arc; arc=$(grep -o 'apt_rc=.*' <<< "$out" | cut -d= -f2); [ -n "$arc" ] || arc=$rc
+  echo "apt_seconds=$((SECONDS - t0)) rc=$arc" >> "$d/vm-timing.txt"
   sync; vm_unmount_all
+  rc=$arc; [ "${rc:-1}" = 0 ] || rc=1
   return $rc
 }
 

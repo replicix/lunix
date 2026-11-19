@@ -1,0 +1,19 @@
+1795040233834 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795040233834 INFO  lunixd: lunixd started socket=$SCRATCH/m16-chunksize-state/ctl.sock
+1795040233834 INFO  lunixd::server: control socket ready
+1795040233875 INFO  lunixd::audit: {"ts_ms":1795040233875,"uid":0,"gid":0,"pid":2485611,"method":"volume_create","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795040249520 INFO  lunixd::daemon: volume opened volume="csvm16ext41" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795040249574 INFO  lunixd::daemon: attached volume="csvm16ext41" recovered=false ms=15693
+1795040249574 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=csvm16ext41 locked_bytes=582094848
+1795040249574 INFO  lunixd::audit: {"ts_ms":1795040249574,"uid":0,"gid":0,"pid":2485622,"method":"attach","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795040250023 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795043497668 INFO  lunixd::daemon: gc pass on request volume=csvm16ext41 dry_run=false pass=26 bytes_freed=283041279 segments_deleted=30 segments_compacted=13 ms=86261
+1795043497668 INFO  lunixd::audit: {"ts_ms":1795043497668,"uid":0,"gid":0,"pid":2646787,"method":"gc","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795043707643 INFO  lunixd::daemon: gc pass on request volume=csvm16ext41 dry_run=false pass=28 bytes_freed=100792908 segments_deleted=13 segments_compacted=2 ms=134966
+1795043707643 INFO  lunixd::audit: {"ts_ms":1795043707643,"uid":0,"gid":0,"pid":2647491,"method":"gc","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795043844523 INFO  lunixd::daemon: gc pass on request volume=csvm16ext41 dry_run=false pass=29 bytes_freed=5017620 segments_deleted=2 segments_compacted=0 ms=61869
+1795043844523 INFO  lunixd::audit: {"ts_ms":1795043844523,"uid":0,"gid":0,"pid":2648380,"method":"gc","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795043919615 INFO  lunixd::audit: {"ts_ms":1795043919615,"uid":0,"gid":0,"pid":2649018,"method":"detach","volume":"csvm16ext41","outcome":"ok","code":null,"message":null}
+1795044048924 INFO  lunixd::server: signal: quiescing every device
+1795044048924 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

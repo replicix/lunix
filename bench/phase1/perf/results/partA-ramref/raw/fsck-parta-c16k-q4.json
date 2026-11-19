@@ -1,0 +1,82 @@
+{
+  "exit": 0,
+  "volume": "addc02df-70f4-49f7-ab84-963f44a4ea29",
+  "mode": "integrity",
+  "tip": 291,
+  "deep": true,
+  "findings": [
+    {
+      "code": "gc_dry_run",
+      "severity": "note",
+      "object": "gc",
+      "message": "a pass would condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 1 commits (1868 bytes), and compact 5 segments (35766245 live bytes)"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000f05.seg",
+      "message": "condemned (16855108 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000120",
+      "message": "condemned (1868 bytes): a pass deletes it after its grace and a recheck"
+    }
+  ],
+  "counts": {
+    "gc_dry_run": 1,
+    "gc_pending": 2
+  },
+  "ratios": {
+    "chunk_size": 16384,
+    "chunk_count": 1048576,
+    "mapped_chunks": 131072,
+    "hole_chunks": 917504,
+    "unique_chunks": 131072,
+    "unresolved_entries": 0,
+    "dedup_ratio": 1.0,
+    "unique_ulen": 2147483648,
+    "unique_clen": 1088196389,
+    "compression_ratio": 1.9734339037583408,
+    "hole_share": 0.875,
+    "bytes": {
+      "segments": 1401216689,
+      "map_packs": 4606970,
+      "commits": 7280,
+      "index": 305699088,
+      "journal": 1077936128,
+      "other": 22046081
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 0,
+    "runs_deleted": 0,
+    "commits_deleted": 1,
+    "segments_compacted": 5,
+    "bytes_freed": 1868,
+    "bytes_moved": 35766245
+  },
+  "stats": {
+    "commits": 4,
+    "segments": 90,
+    "packs": 11,
+    "extents": 167139,
+    "map_nodes": 319,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 2048
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 115788
+}

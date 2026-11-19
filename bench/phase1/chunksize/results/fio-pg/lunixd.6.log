@@ -1,0 +1,19 @@
+1795024538956 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795024538956 INFO  lunixd: lunixd started socket=$SCRATCH/m16-chunksize-state/ctl.sock
+1795024538956 INFO  lunixd::server: control socket ready
+1795024539064 INFO  lunixd::audit: {"ts_ms":1795024539064,"uid":0,"gid":0,"pid":2229002,"method":"volume_create","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795024554604 INFO  lunixd::daemon: volume opened volume="cspgbenc64xfs1" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795024554659 INFO  lunixd::daemon: attached volume="cspgbenc64xfs1" recovered=false ms=15589
+1795024554659 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=cspgbenc64xfs1 locked_bytes=582094848
+1795024554659 INFO  lunixd::audit: {"ts_ms":1795024554659,"uid":0,"gid":0,"pid":2229013,"method":"attach","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795024554802 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795027262630 INFO  lunixd::daemon: gc pass on request volume=cspgbenc64xfs1 dry_run=false pass=12 bytes_freed=3708795736 segments_deleted=463 segments_compacted=320 ms=82635
+1795027262630 INFO  lunixd::audit: {"ts_ms":1795027262630,"uid":0,"gid":0,"pid":2244112,"method":"gc","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795027419446 INFO  lunixd::daemon: gc pass on request volume=cspgbenc64xfs1 dry_run=false pass=14 bytes_freed=1472261141 segments_deleted=94 segments_compacted=0 ms=81807
+1795027419446 INFO  lunixd::audit: {"ts_ms":1795027419446,"uid":0,"gid":0,"pid":2244810,"method":"gc","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795027494958 INFO  lunixd::daemon: gc pass on request volume=cspgbenc64xfs1 dry_run=false pass=0 bytes_freed=0 segments_deleted=0 segments_compacted=0 ms=502
+1795027494958 INFO  lunixd::audit: {"ts_ms":1795027494958,"uid":0,"gid":0,"pid":2245558,"method":"gc","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795027570048 INFO  lunixd::audit: {"ts_ms":1795027570048,"uid":0,"gid":0,"pid":2245901,"method":"detach","volume":"cspgbenc64xfs1","outcome":"ok","code":null,"message":null}
+1795027591920 INFO  lunixd::server: signal: quiescing every device
+1795027591920 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

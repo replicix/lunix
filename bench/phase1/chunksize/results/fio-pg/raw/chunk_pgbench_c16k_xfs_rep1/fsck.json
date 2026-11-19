@@ -1,0 +1,60 @@
+{
+  "exit": 0,
+  "volume": "3b32fca5-574d-4ab7-8c50-aa5d07e3594f",
+  "mode": "integrity",
+  "tip": 403,
+  "deep": true,
+  "findings": [],
+  "counts": {},
+  "ratios": {
+    "chunk_size": 16384,
+    "chunk_count": 3145728,
+    "mapped_chunks": 1174881,
+    "hole_chunks": 1970847,
+    "unique_chunks": 1174567,
+    "unresolved_entries": 0,
+    "dedup_ratio": 1.0002673325574445,
+    "unique_ulen": 19244105728,
+    "unique_clen": 1624258292,
+    "compression_ratio": 11.847934421996474,
+    "hole_share": 0.6265153884887695,
+    "bytes": {
+      "segments": 2151418233,
+      "map_packs": 213561819,
+      "commits": 6828,
+      "index": 343861112,
+      "journal": 1077936128,
+      "other": 557114
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 0,
+    "runs_deleted": 0,
+    "commits_deleted": 0,
+    "segments_compacted": 0,
+    "bytes_freed": 0,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "commits": 3,
+    "segments": 151,
+    "packs": 57,
+    "extents": 1468948,
+    "map_nodes": 2498,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 2247525
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 290944
+}

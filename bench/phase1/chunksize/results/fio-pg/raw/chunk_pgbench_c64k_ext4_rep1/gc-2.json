@@ -1,0 +1,12 @@
+{
+  "pass": 13,
+  "dry_run": false,
+  "segments_condemned": 38,
+  "segments_deleted": 39,
+  "packs_deleted": 11,
+  "runs_deleted": 0,
+  "commits_deleted": 11,
+  "segments_compacted": 0,
+  "bytes_freed": 582392993,
+  "bytes_moved": 0
+}

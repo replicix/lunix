@@ -1,0 +1,12 @@
+CHANGED: partition=1 start=227328 old: size=4384735 end=4612062 new: size=16965632 end=17192959
+e2fsck 1.47.4 (6-Mar-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cloudimg-rootfs: 74172/274176 files (0.0% non-contiguous), 448606/548091 blocks
+resize2fs 1.47.4 (6-Mar-2025)
+Resizing the filesystem on /dev/loop0p1 to 2120704 (4k) blocks.
+The filesystem on /dev/loop0p1 is now 2120704 (4k) blocks long.
+

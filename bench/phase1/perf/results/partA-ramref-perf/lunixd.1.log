@@ -1,0 +1,370 @@
+1795050133462 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795050133462 INFO  lunixd: lunixd started socket=/run/m16ref/m16-parta-state/ctl.sock
+1795050133462 INFO  lunixd::server: control socket ready
+1795050133517 INFO  lunixd::audit: {"ts_ms":1795050133517,"uid":0,"gid":0,"pid":2745578,"method":"volume_create","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795050134173 INFO  lunixd::daemon: volume opened volume="pa64k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795050134220 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=691
+1795050134221 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=582094848
+1795050134221 INFO  lunixd::audit: {"ts_ms":1795050134221,"uid":0,"gid":0,"pid":2745604,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795050182751 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050183421 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050183968 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050183968 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=412824844 freed=0 urgency=Urgent
+1795050184068 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050184068 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=412824844 freed=0 urgency=Urgent
+1795050184963 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050184963 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=412972300 freed=0 urgency=Urgent
+1795050185959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050185960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413021452 freed=0 urgency=Urgent
+1795050186959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050186959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413070604 freed=0 urgency=Urgent
+1795050187958 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050187958 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413119756 freed=0 urgency=Urgent
+1795050188959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050188959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413173004 freed=0 urgency=Urgent
+1795050189958 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050189958 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413222156 freed=0 urgency=Urgent
+1795050190959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050190959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413271308 freed=0 urgency=Urgent
+1795050191959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050191960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413320460 freed=0 urgency=Urgent
+1795050192959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050192959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413369612 freed=0 urgency=Urgent
+1795050193959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050193959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413418764 freed=0 urgency=Urgent
+1795050194960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050194960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413467916 freed=151316 urgency=Urgent
+1795050195962 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050195962 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413324556 freed=0 urgency=Urgent
+1795050196959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050196959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413373708 freed=0 urgency=Urgent
+1795050197960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050197960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413426956 freed=0 urgency=Urgent
+1795050198959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050198960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413476108 freed=0 urgency=Urgent
+1795050199961 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050199961 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413525260 freed=0 urgency=Urgent
+1795050200960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050200960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413574412 freed=0 urgency=Urgent
+1795050201960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050201960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413623564 freed=0 urgency=Urgent
+1795050202961 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050202961 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413672716 freed=0 urgency=Urgent
+1795050203960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050203960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413721868 freed=0 urgency=Urgent
+1795050204959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050204960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413832460 freed=0 urgency=Urgent
+1795050205959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050205959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413881612 freed=0 urgency=Urgent
+1795050206960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050206960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413930764 freed=0 urgency=Urgent
+1795050207959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050207959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=413979916 freed=0 urgency=Urgent
+1795050208959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050208959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414029068 freed=0 urgency=Urgent
+1795050209960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050209960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414078220 freed=0 urgency=Urgent
+1795050210959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050210959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414127372 freed=0 urgency=Urgent
+1795050211959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050211959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414176524 freed=0 urgency=Urgent
+1795050212959 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050212959 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414225676 freed=0 urgency=Urgent
+1795050213960 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050213960 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414274828 freed=0 urgency=Urgent
+1795050214988 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414323980 freed=418984342 urgency=Urgent
+1795050215195 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050215829 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=728483084 freed=738128611 urgency=Urgent
+1795050216095 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=728483084 freed=741154877 urgency=Urgent
+1795050216102 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050216659 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050217232 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050217232 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=570504460 freed=163051040 urgency=Urgent
+1795050217342 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050217342 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=570504460 freed=0 urgency=Urgent
+1795050218189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050218190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407459084 freed=0 urgency=Urgent
+1795050219189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050219189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407508236 freed=0 urgency=Urgent
+1795050220188 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050220189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407557388 freed=0 urgency=Urgent
+1795050221188 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050221189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407606540 freed=0 urgency=Urgent
+1795050222189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050222189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407655692 freed=0 urgency=Urgent
+1795050223188 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050223189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407704844 freed=0 urgency=Urgent
+1795050224189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050224189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407753996 freed=0 urgency=Urgent
+1795050225189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050225189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407803148 freed=0 urgency=Urgent
+1795050226189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050226189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407852300 freed=0 urgency=Urgent
+1795050227189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050227189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407901452 freed=0 urgency=Urgent
+1795050228190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050228190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407950604 freed=0 urgency=Urgent
+1795050229190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050229190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=407999756 freed=0 urgency=Urgent
+1795050230191 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050230191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408048908 freed=0 urgency=Urgent
+1795050231189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050231190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408098060 freed=0 urgency=Urgent
+1795050232189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050232189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408147212 freed=0 urgency=Urgent
+1795050233189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050233189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408196364 freed=0 urgency=Urgent
+1795050234189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050234189 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408245516 freed=0 urgency=Urgent
+1795050235189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050235190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408294668 freed=0 urgency=Urgent
+1795050236190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050236190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408347916 freed=0 urgency=Urgent
+1795050237190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050237191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408397068 freed=0 urgency=Urgent
+1795050238189 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050238190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408446220 freed=0 urgency=Urgent
+1795050239190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050239190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408495372 freed=0 urgency=Urgent
+1795050240190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050240190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408544524 freed=0 urgency=Urgent
+1795050241190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050241190 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408593676 freed=0 urgency=Urgent
+1795050242190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050242191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408642828 freed=0 urgency=Urgent
+1795050243191 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050243191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408691980 freed=0 urgency=Urgent
+1795050244191 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050244191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408741132 freed=0 urgency=Urgent
+1795050245190 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050245191 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408790284 freed=0 urgency=Urgent
+1795050246275 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=408839436 freed=420713829 urgency=Urgent
+1795050246482 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050247183 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050247183 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=841000204 freed=427037202 urgency=Urgent
+1795050247293 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050247294 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=841000204 freed=0 urgency=Urgent
+1795050248173 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=414008588 freed=420713957 urgency=Urgent
+1795050248380 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050249152 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=845935884 freed=858255887 urgency=Urgent
+1795050249359 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050249952 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050249952 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=841610508 freed=9455855 urgency=Urgent
+1795050250942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050250942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832189708 freed=0 urgency=Urgent
+1795050251941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050251941 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832238860 freed=0 urgency=Urgent
+1795050252941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050252942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832288012 freed=0 urgency=Urgent
+1795050253941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050253942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832337164 freed=0 urgency=Urgent
+1795050254942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050254943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832390412 freed=0 urgency=Urgent
+1795050255942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050255942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832439564 freed=0 urgency=Urgent
+1795050256941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050256942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832488716 freed=0 urgency=Urgent
+1795050257942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050257942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832537868 freed=0 urgency=Urgent
+1795050258942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050258942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832587020 freed=0 urgency=Urgent
+1795050259941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050259942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832636172 freed=0 urgency=Urgent
+1795050260942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050260942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832685324 freed=0 urgency=Urgent
+1795050261943 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050261943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832734476 freed=0 urgency=Urgent
+1795050262942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050262942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832783628 freed=0 urgency=Urgent
+1795050263941 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050263942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832832780 freed=0 urgency=Urgent
+1795050264942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050264942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832881932 freed=0 urgency=Urgent
+1795050265942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050265942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832931084 freed=0 urgency=Urgent
+1795050266942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050266942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=832980236 freed=0 urgency=Urgent
+1795050267942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050267942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833029388 freed=0 urgency=Urgent
+1795050268942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050268942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833078540 freed=0 urgency=Urgent
+1795050269942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050269942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833127692 freed=0 urgency=Urgent
+1795050270943 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050270943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833176844 freed=0 urgency=Urgent
+1795050271942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050271943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833225996 freed=0 urgency=Urgent
+1795050272942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050272942 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833275148 freed=0 urgency=Urgent
+1795050273942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050273943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833324300 freed=0 urgency=Urgent
+1795050274942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050274943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833373452 freed=0 urgency=Urgent
+1795050275942 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050275943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833430796 freed=0 urgency=Urgent
+1795050276943 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050276943 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833479948 freed=0 urgency=Urgent
+1795050278001 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050278001 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=833529100 freed=269765008 urgency=Urgent
+1795050278944 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050278945 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=563762444 freed=0 urgency=Urgent
+1795050280161 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050280161 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=563811596 freed=404616435 urgency=Urgent
+1795050281004 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=294462732 freed=302913944 urgency=Urgent
+1795050292021 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=26866956 freed=33657178 urgency=Urgent
+1795050292139 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=26866956 freed=33657140 urgency=Urgent
+1795050292222 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=35812620 freed=50485720 urgency=Urgent
+1795050292378 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=447756 freed=16828563 urgency=Urgent
+1795050292442 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=67220748 freed=67314119 urgency=Urgent
+1795050292609 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=992588 freed=16828568 urgency=Urgent
+1795050292692 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=129352972 freed=134628471 urgency=Urgent
+1795050292849 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=34060 freed=16828566 urgency=Urgent
+1795050292966 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=95352076 freed=38968536 urgency=Urgent
+1795050292967 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050293952 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050293953 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=204035340 freed=0 urgency=Urgent
+1795050294871 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050294872 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288634124 freed=0 urgency=Urgent
+1795050295867 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050295868 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288683276 freed=0 urgency=Urgent
+1795050296867 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050296867 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288732428 freed=0 urgency=Urgent
+1795050297868 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050297869 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288785676 freed=0 urgency=Urgent
+1795050298869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050298870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288867596 freed=0 urgency=Urgent
+1795050299869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050299870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288916748 freed=0 urgency=Urgent
+1795050300869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050300870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=288965900 freed=0 urgency=Urgent
+1795050301870 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050301870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289023244 freed=0 urgency=Urgent
+1795050302869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050302870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289072396 freed=0 urgency=Urgent
+1795050303869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050303870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289121548 freed=0 urgency=Urgent
+1795050304869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050304870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289170700 freed=0 urgency=Urgent
+1795050305870 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050305870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289219852 freed=0 urgency=Urgent
+1795050306869 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050306870 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289269004 freed=0 urgency=Urgent
+1795050307868 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050307869 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289322252 freed=0 urgency=Urgent
+1795050308868 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050308869 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289416460 freed=0 urgency=Urgent
+1795050309868 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050309869 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289465612 freed=0 urgency=Urgent
+1795050310867 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795050310868 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289514764 freed=0 urgency=Urgent
+1795050311926 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=289563916 freed=302914269 urgency=Urgent
+1795050312012 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=468236 freed=16828540 urgency=Urgent
+1795050312065 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=4912396 freed=16828563 urgency=Urgent
+1795050312066 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050312331 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=230016268 freed=235599970 urgency=Urgent
+1795050312437 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=185612 freed=16828643 urgency=Urgent
+1795050312495 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=45774092 freed=50485687 urgency=Urgent
+1795050312633 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=632076 freed=16828571 urgency=Urgent
+1795050312693 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=68678924 freed=83710384 urgency=Urgent
+1795050312855 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=939276 freed=16828540 urgency=Urgent
+1795050312923 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=113345804 freed=117799807 urgency=Urgent
+1795050313100 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=12391692 freed=16828599 urgency=Urgent
+1795050313179 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=140961036 freed=151457033 urgency=Urgent
+1795050313333 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=6333708 freed=16828563 urgency=Urgent
+1795050313399 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=98645260 freed=100971395 urgency=Urgent
+1795050313554 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=58636 freed=16828593 urgency=Urgent
+1795050313625 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=120165644 freed=134628582 urgency=Urgent
+1795050313773 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=5575948 freed=16828544 urgency=Urgent
+1795050313836 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=95225100 freed=100971299 urgency=Urgent
+1795050313988 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=11126028 freed=16828542 urgency=Urgent
+1795050314054 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=110855436 freed=117799972 urgency=Urgent
+1795050314211 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=9917708 freed=16828504 urgency=Urgent
+1795050314282 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=120890636 freed=134628639 urgency=Urgent
+1795050314431 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=3126540 freed=16828595 urgency=Urgent
+1795050314493 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=93828364 freed=100971423 urgency=Urgent
+1795050314661 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=8852748 freed=16828548 urgency=Urgent
+1795050314735 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=129262860 freed=140049843 urgency=Urgent
+1795050314883 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=6087948 freed=16828575 urgency=Urgent
+1795050314951 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=98379020 freed=100971398 urgency=Urgent
+1795050315116 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=14308620 freed=16828535 urgency=Urgent
+1795050315183 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=116733196 freed=117800089 urgency=Urgent
+1795050315342 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=15840524 freed=16828575 urgency=Urgent
+1795050315412 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=119866636 freed=134628644 urgency=Urgent
+1795050315558 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=165132 freed=16828513 urgency=Urgent
+1795050315607 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=89609484 freed=97612473 urgency=Urgent
+1795050315768 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=460044 freed=16828619 urgency=Urgent
+1795050315815 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=113485068 freed=117799902 urgency=Urgent
+1795050315834 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050316010 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=21772 freed=16828625 urgency=Urgent
+1795050316061 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=145433868 freed=151457253 urgency=Urgent
+1795050316193 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=439564 freed=16828541 urgency=Urgent
+1795050316239 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=81851660 freed=84142872 urgency=Urgent
+1795050316253 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050316424 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=34060 freed=16828546 urgency=Urgent
+1795050316473 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=149075212 freed=151457111 urgency=Urgent
+1795050316621 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=324876 freed=16828550 urgency=Urgent
+1795050316675 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=100979980 freed=68015725 urgency=Urgent
+1795050316785 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=94713100 freed=0 urgency=Urgent
+1795050317772 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=113489164 freed=0 urgency=Urgent
+1795050318768 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=123147532 freed=0 urgency=Urgent
+1795050319762 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=134427916 freed=0 urgency=Urgent
+1795050320761 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=134481164 freed=0 urgency=Urgent
+1795050321761 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=134538508 freed=0 urgency=Urgent
+1795050322791 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=134591756 freed=134628371 urgency=Urgent
+1795050322828 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=1025356 freed=16828574 urgency=Urgent
+1795050322865 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=1025356 freed=16828527 urgency=Urgent
+1795050322866 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050323113 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=208131340 freed=218771315 urgency=Urgent
+1795050323258 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=6165772 freed=16828558 urgency=Urgent
+1795050323314 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=74237196 freed=86304651 urgency=Urgent
+1795050323424 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=771340 freed=16828574 urgency=Urgent
+1795050323477 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=41694476 freed=38681427 urgency=Urgent
+1795050323487 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050323680 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=357644 freed=0 urgency=Urgent
+1795050323736 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=195687692 freed=0 urgency=Urgent
+1795050324722 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=256902412 freed=269257368 urgency=Urgent
+1795050324822 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050325020 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=196273420 freed=201942975 urgency=Urgent
+1795050325080 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=196273420 freed=201942955 urgency=Urgent
+1795050325320 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050325514 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=195802380 freed=201942878 urgency=Urgent
+1795050325719 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=263436 freed=16828580 urgency=Urgent
+1795050325773 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=148661516 freed=151457237 urgency=Urgent
+1795050325858 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=468236 freed=16828662 urgency=Urgent
+1795050325899 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=20018444 freed=33657172 urgency=Urgent
+1795050325926 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050326115 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=156382476 freed=168285621 urgency=Urgent
+1795050326172 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=156382476 freed=168285876 urgency=Urgent
+1795050326421 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=43902220 freed=50485805 urgency=Urgent
+1795050326471 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=43902220 freed=59831263 urgency=Urgent
+1795050326472 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050326664 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=135374092 freed=151457125 urgency=Urgent
+1795050326725 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=135374092 freed=151457163 urgency=Urgent
+1795050326966 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=34227468 freed=50485624 urgency=Urgent
+1795050327014 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=34227468 freed=50485805 urgency=Urgent
+1795050327015 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050327206 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=135046412 freed=151457048 urgency=Urgent
+1795050327266 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=135046412 freed=151457112 urgency=Urgent
+1795050327490 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=33887500 freed=50485768 urgency=Urgent
+1795050327537 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=33887500 freed=50485691 urgency=Urgent
+1795050327538 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795050327742 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=134718732 freed=67314921 urgency=Urgent
+1795050328733 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=91505932 freed=0 urgency=Urgent
+1795050329733 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=119153932 freed=0 urgency=Urgent
+1795050330703 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=158905612 freed=0 urgency=Urgent
+1795050331702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=158971148 freed=0 urgency=Urgent
+1795050332702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159032588 freed=0 urgency=Urgent
+1795050333702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159094028 freed=0 urgency=Urgent
+1795050334702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159155468 freed=0 urgency=Urgent
+1795050335702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159216908 freed=0 urgency=Urgent
+1795050336702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159278348 freed=0 urgency=Urgent
+1795050337702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159339788 freed=0 urgency=Urgent
+1795050338702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159401228 freed=0 urgency=Urgent
+1795050339702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159462668 freed=0 urgency=Urgent
+1795050340702 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159524108 freed=0 urgency=Urgent
+1795050341703 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159585548 freed=0 urgency=Urgent
+1795050342714 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=159646988 freed=168285686 urgency=Urgent
+1795050390273 INFO  lunixd::audit: {"ts_ms":1795050390273,"uid":0,"gid":0,"pid":2751095,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795050395302 INFO  lunixd::server: signal: quiescing every device
+1795050395302 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

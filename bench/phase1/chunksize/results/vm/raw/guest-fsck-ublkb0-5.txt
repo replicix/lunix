@@ -1,0 +1,13 @@
+e2fsck 1.47.4 (6-Mar-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Inode 1703938 extent tree (at level 2) could be narrower.  Optimize? no
+
+Inode 1703939 extent tree (at level 2) could be narrower.  Optimize? no
+
+Inode 1703940 extent tree (at level 2) could be narrower.  Optimize? no
+
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+/dev/ublkb0: 16/3145728 files (0.0% non-contiguous), 6700052/12582912 blocks

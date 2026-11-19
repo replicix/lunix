@@ -1,0 +1,214 @@
+{
+  "exit": 0,
+  "volume": "6968c9b3-07d6-4350-8e1f-54ab67a8fed8",
+  "mode": "integrity",
+  "tip": 488,
+  "deep": true,
+  "findings": [
+    {
+      "code": "gc_dry_run",
+      "severity": "note",
+      "object": "gc",
+      "message": "a pass would condemn 0 segments and delete 0 segments, 19 packs, 9 index runs and 12 commits (48327982 bytes), and compact 0 segments (0 live bytes)"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000829.seg",
+      "message": "condemned (16853378 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000832.seg",
+      "message": "condemned (16857690 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000836.seg",
+      "message": "condemned (16853667 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000083f.seg",
+      "message": "condemned (16855429 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000845.seg",
+      "message": "condemned (16855761 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000084b.seg",
+      "message": "condemned (16856072 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000084e.seg",
+      "message": "condemned (16851482 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000852.seg",
+      "message": "condemned (16852872 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000855.seg",
+      "message": "condemned (16855928 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000858.seg",
+      "message": "condemned (16855417 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000085b.seg",
+      "message": "condemned (16851738 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000085e.seg",
+      "message": "condemned (16857280 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000861.seg",
+      "message": "condemned (16856162 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000864.seg",
+      "message": "condemned (16851296 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000867.seg",
+      "message": "condemned (16857566 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000086a.seg",
+      "message": "condemned (16855976 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000086f.seg",
+      "message": "condemned (16855048 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000872.seg",
+      "message": "condemned (16852483 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000875.seg",
+      "message": "condemned (16857777 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000878.seg",
+      "message": "condemned (16857269 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000087b.seg",
+      "message": "condemned (16858538 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/000000000000087e.seg",
+      "message": "condemned (16859339 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000881.seg",
+      "message": "condemned (16851311 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "segments/0000000000000884.seg",
+      "message": "condemned (16859031 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    }
+  ],
+  "counts": {
+    "gc_dry_run": 1,
+    "gc_pending": 69
+  },
+  "ratios": {
+    "chunk_size": 16384,
+    "chunk_count": 3145728,
+    "mapped_chunks": 1328876,
+    "hole_chunks": 1816852,
+    "unique_chunks": 1322545,
+    "unresolved_entries": 0,
+    "dedup_ratio": 1.0047869826735574,
+    "unique_ulen": 21668577280,
+    "unique_clen": 10894779463,
+    "compression_ratio": 1.988895447915135,
+    "hole_share": 0.5775616963704427,
+    "bytes": {
+      "segments": 13668897630,
+      "map_packs": 279763053,
+      "commits": 20132,
+      "index": 232545616,
+      "journal": 1077936128,
+      "other": 883423
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 19,
+    "runs_deleted": 9,
+    "commits_deleted": 12,
+    "segments_compacted": 0,
+    "bytes_freed": 48327982,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "commits": 15,
+    "segments": 839,
+    "packs": 64,
+    "extents": 1661592,
+    "map_nodes": 3045,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 3186830
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 306208
+}

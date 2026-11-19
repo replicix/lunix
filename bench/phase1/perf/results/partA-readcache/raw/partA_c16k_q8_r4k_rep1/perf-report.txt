@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cpu/cycles/P'
+# Event count (approx.): 49161876449
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+# ........  ...............  .................  .........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    20.11%  lunix-read-2     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |
+            ---<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+               <lunix_engine::cache::ChunkCache>::insert
+
+    18.86%  lunix-read-0     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |
+            ---<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+               <lunix_engine::cache::ChunkCache>::insert
+
+    17.93%  lunix-read-3     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |
+            ---<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+               <lunix_engine::cache::ChunkCache>::insert
+
+    17.00%  lunix-read-1     lunixd             [.] <lunix_engine::cache::ChunkCache>::insert
+            |
+            ---<core::slice::iter::Iter<core::option::Option<lunix_engine::cache::Slot>> as core::iter::traits::iterator::Iterator>::position::<<core::option::Option<lunix_engine::cache::Slot>>::is_none> (inlined)
+               <lunix_engine::cache::ChunkCache>::insert
+
+     0.49%  lunix-q7         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+     0.47%  lunix-read-0     lunixd             [.] _blake3_hash_many_avx512
+     0.46%  lunix-q5         [kernel.kallsyms]  [k] __smp_call_single_queue
+     0.42%  lunix-read-1     [kernel.kallsyms]  [k] asm_sysvec_apic_timer_interrupt
+     0.38%  lunix-q6         [kernel.kallsyms]  [k] __smp_call_single_queue
+     0.38%  lunix-q4         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+     0.35%  lunix-read-2     [kernel.kallsyms]  [k] __raw_callee_save___pv_queued_spin_unlock
+     0.34%  lunix-q4         [kernel.kallsyms]  [k] choose_idle_cpu
+     0.33%  lunix-q7         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+     0.31%  lunix-q6         [kernel.kallsyms]  [k] _copy_from_iter
+     0.31%  lunix-q5         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+     0.31%  lunix-read-1     [kernel.kallsyms]  [k] perf_iterate_ctx
+     0.29%  lunix-q7         [kernel.kallsyms]  [k] choose_idle_cpu
+     0.27%  lunix-read-2     lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+     0.26%  lunix-q6         lunixd             [.] <lunix_map::lru::Lru>::get
+     0.26%  lunix-read-2     libc.so.6          [.] __memmove_avx512_unaligned_erms
+     0.26%  lunix-read-3     lunixd             [.] <std::sys::sync::mutex::futex::Mutex>::lock_contended
+     0.25%  lunix-q6         [kernel.kallsyms]  [k] choose_idle_cpu
+     0.24%  lunix-q6         [kernel.kallsyms]  [k] __raw_spin_lock_irqsave
+     0.24%  lunix-q4         lunixd             [.] <std::sys::sync::mutex::futex::Mutex>::lock_contended
+     0.24%  lunix-q6         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+     0.23%  lunix-q5         [kernel.kallsyms]  [k] choose_idle_cpu
+     0.22%  lunix-read-1     [kernel.kallsyms]  [k] map_anon_folio_pte_nopf
+     0.22%  lunix-q4         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+     0.21%  lunix-q4         [kernel.kallsyms]  [k] io_req_local_work_add
+     0.21%  lunix-q6         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+     0.20%  lunix-q7         [kernel.kallsyms]  [k] _copy_from_iter
+     0.20%  lunix-read-2     lunixd             [.] _blake3_hash_many_avx512
+     0.20%  lunix-q5         [kernel.kallsyms]  [k] io_complete_rw
+     0.19%  lunix-q5         [kernel.kallsyms]  [k] ublk_copy_user_pages.isra.0
+     0.19%  lunix-q5         lunixd             [.] <lunix_map::map::RadixMap>::entry_of
+     0.19%  lunix-q5         [kernel.kallsyms]  [k] __pv_queued_spin_lock_slowpath
+     0.19%  lunix-read-1     [kernel.kallsyms]  [k] lock_vma_under_rcu
+     0.19%  lunix-q4         [kernel.kallsyms]  [k] io_complete_rw
+     0.19%  lunix-read-1     lunixd             [.] ZSTD_decompressSequences_bmi2.constprop.0
+     0.18%  lunix-read-3     [kernel.kallsyms]  [k] __raw_callee_save___pv_queued_spin_unlock
+     0.18%  lunix-q5         [kernel.kallsyms]  [k] io_req_local_work_add
+     0.18%  lunix-q5         [kernel.kallsyms]  [k] set_task_cpu
+     0.18%  lunix-read-3     [kernel.kallsyms]  [k] filemap_get_read_batch
+     0.17%  lunix-read-1     libc.so.6          [.] __memset_avx512_unaligned_erms
+     0.17%  lunix-q4         [kernel.kallsyms]  [k] ublk_dispatch_req
+     0.17%  lunix-read-3     [kernel.kallsyms]  [k] _copy_to_iter
+     0.17%  lunix-read-1     [kernel.kallsyms]  [k] native_write_msr
+     0.17%  lunix-q5         [kernel.kallsyms]  [k] __raw_spin_lock_irqsave
+     0.16%  lunix-q4         [kernel.kallsyms]  [k] __smp_call_single_queue
+     0.16%  lunix-read-3     [kernel.kallsyms]  [k] asm_sysvec_apic_timer_interrupt
+     0.16%  lunix-read-0     lunixd             [.] <std::sys::sync::mutex::futex::Mutex>::lock_contended
+     0.16%  lunix-read-1     lunixd             [.] _blake3_hash_many_avx512
+     0.16%  lunix-q4         lunixd             [.] <lunix_map::map::RadixMap>::entry_of

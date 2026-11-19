@@ -1,0 +1,4 @@
+created volume cspgbenc64ext41 (integrity, uuid 3cc8acfa-348e-4764-bbe2-4dcf559b80d4)
+directory        $SCRATCH/m16-chunksize-vols/3cc8acfa-348e-4764-bbe2-4dcf559b80d4
+key file         $SCRATCH/m16-chunksize-vols/3cc8acfa-348e-4764-bbe2-4dcf559b80d4/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

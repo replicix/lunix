@@ -1,0 +1,155 @@
+1795014806248 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795014806248 INFO  lunixd: lunixd started socket=$SCRATCH/m16-chunksize-state/ctl.sock
+1795014806248 INFO  lunixd::server: control socket ready
+1795014806354 INFO  lunixd::audit: {"ts_ms":1795014806354,"uid":0,"gid":0,"pid":2178176,"method":"volume_create","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795014821869 INFO  lunixd::daemon: volume opened volume="csrandmi16ext41" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795014821925 INFO  lunixd::daemon: attached volume="csrandmi16ext41" recovered=false ms=15565
+1795014821925 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=csrandmi16ext41 locked_bytes=582094848
+1795014821925 INFO  lunixd::audit: {"ts_ms":1795014821925,"uid":0,"gid":0,"pid":2178187,"method":"attach","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795014822353 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014827659 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014843138 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014857045 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014867992 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014878278 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014889574 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014901777 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014910917 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014921436 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014935992 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014949498 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014954106 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014972483 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014983553 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795014995465 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015009783 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015024351 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015034766 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015045134 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015057092 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015073522 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015087414 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015103311 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015120482 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015135266 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015147688 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015161940 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015176455 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015189081 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015201790 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015214578 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015226998 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015240117 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015254968 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015271161 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015287734 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015302070 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015317420 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015332202 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015349300 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015365871 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015382845 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015400048 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015416619 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015434263 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015451539 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015468568 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015486102 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015501647 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015517710 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015533745 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015538876 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015552304 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015561251 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015566109 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015586621 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015601024 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015614626 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015633817 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015655696 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015676082 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015694751 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015713343 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015731211 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015752544 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015771539 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015790687 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015803516 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015816222 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015824578 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015841215 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015856350 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015871469 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015886363 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015902220 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015917490 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015932772 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015947586 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015963111 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015978811 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795015996146 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016015115 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016034136 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016053194 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016070620 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016088150 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016105998 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016123320 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016140454 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016157661 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016175271 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016193311 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016208072 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016221705 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016237104 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016250959 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016261827 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016273200 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016282842 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016292677 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016302460 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016312394 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016322323 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016332361 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016342387 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016352555 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016362536 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016372654 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016383465 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016394417 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016406028 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016417227 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016427328 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016434570 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016441111 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016451280 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016457538 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016467747 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016473839 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016484147 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016491223 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016502718 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016509879 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016521047 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016528213 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016540287 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016546667 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016557764 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016563907 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016574753 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016581279 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016592092 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016598983 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016610979 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016618783 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016630755 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795016765789 INFO  lunixd::daemon: gc pass on request volume=csrandmi16ext41 dry_run=false pass=5 bytes_freed=4563895064 segments_deleted=209 segments_compacted=490 ms=135169
+1795016765789 INFO  lunixd::audit: {"ts_ms":1795016765789,"uid":0,"gid":0,"pid":2186352,"method":"gc","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795017021484 INFO  lunixd::daemon: gc pass on request volume=csrandmi16ext41 dry_run=false pass=7 bytes_freed=9930846655 segments_deleted=590 segments_compacted=486 ms=180685
+1795017021484 INFO  lunixd::audit: {"ts_ms":1795017021484,"uid":0,"gid":0,"pid":2187273,"method":"gc","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795017236172 INFO  lunixd::daemon: gc pass on request volume=csrandmi16ext41 dry_run=false pass=9 bytes_freed=6998414807 segments_deleted=394 segments_compacted=204 ms=139678
+1795017236172 INFO  lunixd::audit: {"ts_ms":1795017236172,"uid":0,"gid":0,"pid":2188426,"method":"gc","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795017311274 INFO  lunixd::audit: {"ts_ms":1795017311274,"uid":0,"gid":0,"pid":2189357,"method":"detach","volume":"csrandmi16ext41","outcome":"ok","code":null,"message":null}
+1795017351883 INFO  lunixd::server: signal: quiescing every device
+1795017351883 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

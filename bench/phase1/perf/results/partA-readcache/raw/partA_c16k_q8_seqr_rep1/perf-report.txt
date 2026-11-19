@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3K of event 'cpu/cycles/P'
+# Event count (approx.): 153076651863
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                              
+# ........  ...............  .................  ....................................................................................................................................
+#
+     8.94%  lunix-q7         [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x7
+               0x7ff5d8000de0
+
+     8.75%  lunix-q5         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     8.70%  lunix-q4         [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x4
+               0x7ff5d8000de0
+
+     8.34%  lunix-q6         [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x6
+               0x7ff5d8000de0
+
+     8.09%  lunix-q7         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     8.01%  lunix-q6         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+     7.92%  lunix-q4         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms

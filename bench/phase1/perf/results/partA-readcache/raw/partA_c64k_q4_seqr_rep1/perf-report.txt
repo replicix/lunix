@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cpu/cycles/P'
+# Event count (approx.): 87290571850
+#
+# Overhead  Command          Shared Object      Symbol                                                                                                                                                                    
+# ........  ...............  .................  ..........................................................................................................................................................................
+#
+    20.79%  lunix-q3         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+    20.20%  lunix-q2         libc.so.6          [.] __memmove_avx512_unaligned_erms
+            |
+            ---__memmove_avx512_unaligned_erms
+
+    19.30%  lunix-q2         [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x2
+               0x7fc3b0000db0
+
+    18.73%  lunix-q3         [kernel.kallsyms]  [k] _copy_from_iter
+            |
+            ---_copy_from_iter
+               ublk_copy_user_pages.isra.0
+               __ublk_complete_rq
+               ublk_ch_uring_cmd_local
+               io_uring_cmd
+               __io_issue_sqe
+               io_issue_sqe
+               io_submit_sqe
+               io_submit_sqes
+               __do_sys_io_uring_enter
+               do_syscall_64
+               entry_SYSCALL_64_after_hwframe
+               syscall
+               0x3
+               0x7fc3b0000db0
+
+     3.28%  lunix-q3         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--1.16%--<alloc::sync::Arc<[u8]> as core::clone::Clone>::clone (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--1.06%--<std::sys::sync::mutex::futex::Mutex>::unlock (inlined)
+            |          <std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State> as core::ops::drop::Drop>::drop (inlined)
+            |          core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State>> (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+             --0.71%--<core::option::Option<lunix_engine::cache::Slot>>::as_mut (inlined)
+                       <lunix_engine::cache::ChunkCache>::get
+
+     2.93%  lunix-q2         lunixd             [.] <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--1.01%--<std::sys::sync::mutex::futex::Mutex>::unlock (inlined)
+            |          <std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State> as core::ops::drop::Drop>::drop (inlined)
+            |          core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<lunix_engine::cache::State>> (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+            |--0.71%--<core::option::Option<lunix_engine::cache::Slot>>::as_mut (inlined)
+            |          <lunix_engine::cache::ChunkCache>::get
+            |          
+             --0.61%--<alloc::sync::Arc<[u8]> as core::clone::Clone>::clone (inlined)
+                       <lunix_engine::cache::ChunkCache>::get

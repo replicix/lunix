@@ -1,0 +1,4 @@
+copy_seconds=2
+apt_seconds=967 rc=0
+apt_seconds=903 rc=0
+apt_seconds=1158 rc=0

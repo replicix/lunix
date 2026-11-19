@@ -1,0 +1,13 @@
+# started on Wed Nov 18 23:28:27 2026
+
+
+ Performance counter stats for process id '2650787':
+
+         18,760.72 msec task-clock                                                            
+            89,160      context-switches                                                      
+                23      cpu-migrations                                                        
+    72,038,463,331      cycles                                                                
+    35,069,830,107      instructions                                                          
+
+      10.004588112 seconds time elapsed
+

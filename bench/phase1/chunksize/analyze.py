@@ -197,7 +197,7 @@ def main():
         else:
             c3t = "not evaluated (no --parta verdict file)"
         out.append(f"1. stored bytes (data plus map) per logical GiB written, VM-image and pgbench workloads together: 16 KiB {s16:.4f}, 64 KiB {s64:.4f} "
-                   f"-> 16 KiB is {100 * (1 - s16 / s64):.1f} % {'lower' if s16 <= s64 else 'higher'} (need >= 15 % lower): **{'holds' if cl1 else 'does not hold'}**")
+                   f"-> 16 KiB is {abs(100 * (1 - s16 / s64)):.1f} % {'lower' if s16 <= s64 else 'higher'} (need >= 15 % lower): **{'holds' if cl1 else 'does not hold'}**")
         out.append(f"2. daemon CPU seconds per logical GiB: 16 KiB {p16:.3f}, 64 KiB {p64:.3f} -> {p16 / p64:.2f}x (need <= 1.3x): **{'holds' if cl2 else 'does not hold'}**")
         out.append(f"3. Part A: {c3t}: **{'holds' if cl3 else ('not evaluated' if cl3 is None else 'does not hold')}**")
         rec16 = cl1 and cl2 and bool(cl3)
@@ -209,10 +209,10 @@ def main():
             for fs in sorted({k[1] for k in d}):
                 x16, x64 = d.get((16384, fs)), d.get((65536, fs))
                 if x16 and x64:
-                    out.append(f"| {w} | {fs} | {x16['med']:.4f} | {x64['med']:.4f} | {100 * (1 - x16['med'] / x64['med']):.1f} % lower |")
+                    out.append(f"| {w} | {fs} | {x16['med']:.4f} | {x64['med']:.4f} | {abs(100 * (1 - x16['med'] / x64['med'])):.1f} % {'lower' if x16['med'] <= x64['med'] else 'higher'} |")
         out.append("\n### Proposed Gate outcome block for ADR-5 (the lead appends it after the maintainer decides)\n")
         out.append("```\n**Gate outcome (phase 1, M16):** advisory rule applied to the VM-image and pgbench workloads on ext4 and xfs volumes.\n"
-                   f"Stored bytes per logical GiB written (data plus map): 16 KiB {s16:.4f}, 64 KiB {s64:.4f} ({100 * (1 - s16 / s64):.1f} % {'lower' if s16 <= s64 else 'higher'}; clause 1 {'holds' if cl1 else 'does not hold'}).\n"
+                   f"Stored bytes per logical GiB written (data plus map): 16 KiB {s16:.4f}, 64 KiB {s64:.4f} ({abs(100 * (1 - s16 / s64)):.1f} % {'lower' if s16 <= s64 else 'higher'}; clause 1 {'holds' if cl1 else 'does not hold'}).\n"
                    f"Daemon CPU per GiB: {p16 / p64:.2f}x (clause 2 {'holds' if cl2 else 'does not hold'}). Part A: {c3t} (clause 3 {'holds' if cl3 else ('not evaluated' if cl3 is None else 'does not hold')}).\n"
                    f"Recommendation: {verdict} as the default; both sizes stay supported per volume. Evidence: bench/phase1/chunksize/RESULTS.md.\n```")
     text = "\n".join(out) + "\n"

@@ -1,0 +1,12 @@
+CHANGED: partition=1 start=262144 old: size=6027264 end=6289407 new: size=18610176 end=18872319
+e2fsck 1.47.4 (6-Mar-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+/dev/loop0p1: 25931/188416 files (0.2% non-contiguous), 203809/753408 blocks
+resize2fs 1.47.4 (6-Mar-2025)
+Resizing the filesystem on /dev/loop0p1 to 2326272 (4k) blocks.
+The filesystem on /dev/loop0p1 is now 2326272 (4k) blocks long.
+

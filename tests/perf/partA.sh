@@ -114,6 +114,9 @@ for chunk in "${_c[@]}"; do
   say ""; say "## chunk ${ck} KiB"
   cell_reset; start_lunixd || wedged "lunixd did not start"
   mkvol "$VOL" $((VOL_GIB * GIB)) "$chunk" "$VOLMODE"; expect "create $VOL" $? || exit 1
+  # READ_CACHE_BYTES: a supplementary run with a read cache that holds the working set (volume.json read_cache_max; the
+  # default 128 MiB does not, so the plan's "cache hits" row reads from the store); unset = the volume default
+  if [ -n "${READ_CACHE_BYTES:-}" ]; then set_vj "$VOL" read_cache_max "$READ_CACHE_BYTES"; expect "read_cache_max = $READ_CACHE_BYTES" $? || exit 1; fi
   for q in "${_q[@]}"; do
     qc_var="QCPUS_$q"; qc=${!qc_var:-$QCPUS_8}
     say ""; say "### chunk ${ck} KiB, $q queues (queue CPUs $qc)"
@@ -124,8 +127,10 @@ for chunk in "${_c[@]}"; do
     export DEV="$CUR_DEV" WS RUNTIME=$RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=32 SEED=1
     FIO_GRACE=600 fio_run "fill-c${ck}-q$q" "$((WS_GIB * 60))" "$JOBDIR/fill.fio"; expect "write the ${WS_GIB} GiB working set" $? || FAIL=1
     for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" r4k r4k "$rep" "$RUNTIME" 128; done
-    for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" w4k w4k "$rep" "$W_RUNTIME" 128; done
-    for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqw seqw "$rep" "$RUNTIME" 32; done
+    if [ "${SKIP_WRITE_CELLS:-0}" != 1 ]; then   # the supplementary read-cache run skips the journal-bound write cells
+      for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" w4k w4k "$rep" "$W_RUNTIME" 128; done
+      for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqw seqw "$rep" "$RUNTIME" 32; done
+    fi
     for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqr seqr "$rep" "$RUNTIME" 32; done
     if [ "$VERIFY_READS" = 1 ]; then
       detach_vol "$VOL"; expect "detach for verify_reads" $? || exit 1
