@@ -711,9 +711,7 @@ impl Window {
     /// The target's record starts before the window: read back far enough to
     /// find its start (a record is at most `MAX_ENC` long) and scan again.
     fn resolve_before(&self, cx: &Cx<'_>, p: &Parsed, buf: &mut [u8]) -> Result<()> {
-        let Cx {
-            file, gen, loc, ..
-        } = *cx;
+        let Cx { file, gen, loc, .. } = *cx;
         let (t, end) = (loc.offset, loc.offset + buf.len() as u64);
         let a = sys::floor4k(end.saturating_sub(MAX_ENC)).max(B);
         if a >= p.base {

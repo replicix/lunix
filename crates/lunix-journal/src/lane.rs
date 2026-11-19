@@ -488,12 +488,11 @@ impl FileLane {
             // takes a file only without one), before any completion. A batch
             // the cap did not admit still evicts what it overwrote.
             match &batch.copy {
-                Some(c) => self.sh.window.insert_batch(
-                    self.id,
-                    batch.ordinal,
-                    batch.start,
-                    Arc::clone(c),
-                ),
+                Some(c) => {
+                    self.sh
+                        .window
+                        .insert_batch(self.id, batch.ordinal, batch.start, Arc::clone(c))
+                }
                 None => self.sh.window.evict_range(
                     self.id,
                     batch.ordinal,
