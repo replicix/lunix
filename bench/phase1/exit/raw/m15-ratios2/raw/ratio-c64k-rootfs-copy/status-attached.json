@@ -1,0 +1,63 @@
+{
+  "name": "r64krootfscopy",
+  "uuid": "9e20e9bf-9cd9-4805-bbf8-1104f8a56e1d",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 65536,
+  "mode": "integrity",
+  "device": "<scratch>/m15-ratios-state/dev/r64krootfscopy",
+  "stats": {
+    "bytes_written": 6329978880,
+    "bytes_read": 158445568,
+    "ops_read": 2216,
+    "ops_write": 16890,
+    "ops_flush": 43,
+    "ops_discard": 33,
+    "ops_write_zeroes": 261,
+    "flush_groups": 78,
+    "flush_group_waiters": 78,
+    "flush_group_max": 1,
+    "chunks_total": 634121,
+    "chunks_zero": 536874,
+    "dedup_hits": 815,
+    "stored_ulen": 6319767552,
+    "stored_clen": 2263311798,
+    "cold_rmw": 1019,
+    "dirty_leaves": 0,
+    "commits": 99,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      613269641,
+      38662449,
+      8278027768,
+      501581093,
+      2462920829
+    ]
+  },
+  "space": {
+    "used": 2284158889,
+    "limit": 68719476736,
+    "fs_free": 252968546304,
+    "journal": 0,
+    "segments": 2273601935,
+    "cache": 0,
+    "map": 5848038,
+    "index": 4708040,
+    "commits": 876,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 268435456,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 32,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 99,
+  "last_commit_ms": 1795097844710,
+  "dedup_ratio": 1.0084515513522483,
+  "compression_ratio": 2.7922655453767047,
+  "rollback_floor": {
+    "max_commit_seq": 99,
+    "tip_hash": "d6e69cc38805d05628f882e9ce44fa33381ce33d971d929a8a399ca0903485bf"
+  }
+}

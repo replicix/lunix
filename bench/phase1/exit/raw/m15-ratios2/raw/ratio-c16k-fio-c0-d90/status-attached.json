@@ -1,0 +1,63 @@
+{
+  "name": "r16kfioc0d90",
+  "uuid": "d66d93c3-46b2-4434-9cf8-0e4a84923ba5",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 16384,
+  "mode": "integrity",
+  "device": "<scratch>/m15-ratios-state/dev/r16kfioc0d90",
+  "stats": {
+    "bytes_written": 4294967296,
+    "bytes_read": 4299300864,
+    "ops_read": 32932,
+    "ops_write": 262144,
+    "ops_flush": 1,
+    "ops_discard": 0,
+    "ops_write_zeroes": 0,
+    "flush_groups": 1,
+    "flush_group_waiters": 1,
+    "flush_group_max": 1,
+    "chunks_total": 262144,
+    "chunks_zero": 0,
+    "dedup_hits": 235873,
+    "stored_ulen": 430424064,
+    "stored_clen": 430424064,
+    "cold_rmw": 0,
+    "dirty_leaves": 0,
+    "commits": 68,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      472618904,
+      35805991,
+      18198458,
+      57241954,
+      284858767
+    ]
+  },
+  "space": {
+    "used": 444607820,
+    "limit": 68719476736,
+    "fs_free": 271764729856,
+    "journal": 0,
+    "segments": 433147089,
+    "cache": 0,
+    "map": 9852503,
+    "index": 1607304,
+    "commits": 924,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 67108864,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 1,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 68,
+  "last_commit_ms": 1795098805504,
+  "dedup_ratio": 9.978455330973317,
+  "compression_ratio": 1.0,
+  "rollback_floor": {
+    "max_commit_seq": 68,
+    "tip_hash": "e96a5a7cba9664f361b90cb1d0b7af333344b26253c9bb3473f3eaa8c828f44a"
+  }
+}

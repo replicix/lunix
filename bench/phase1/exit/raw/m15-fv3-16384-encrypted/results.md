@@ -1,0 +1,130 @@
+# M15 fio verify (2026-11-19T10:09:56Z, kernel 7.0.0, 16 cpus; 3 cells, profiles: 1:1 32:1 128:1 1:8 32:8 128:8, runtime 600 s)
+- script cap 19000 s: run through the wrapper with LUNIX_ROOT_TIMEOUT >= 19600
+
+## cell fio-verify/raw/c16k/encrypted
+- PASS create volume v16rawencrypted (32 GiB, chunk 16384, encrypted)
+- PASS attach v16rawencrypted (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 12 GiB, space used 12 GiB, gc {"state":"compacting","condemned_pending":181,"last_pass":{"pass":36,"dry_run":false,"segments_condemned":34,"segments_deleted":45,"packs_deleted":10,"runs_dele
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 16 GiB, space used 15 GiB, gc {"state":"compacting","condemned_pending":151,"last_pass":{"pass":64,"dry_run":false,"segments_condemned":16,"segments_deleted":92,"packs_deleted":12,"runs_dele
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 25 GiB, space used 25 GiB, gc {"state":null,"condemned_pending":470,"last_pass":{"pass":84,"dry_run":false,"segments_condemned":58,"segments_deleted":90,"packs_deleted":0,"runs_deleted":9,"c
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 31 GiB, space used 31 GiB, gc {"state":"condemning","condemned_pending":576,"last_pass":{"pass":97,"dry_run":false,"segments_condemned":235,"segments_deleted":44,"packs_deleted":6,"runs_dele
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 37 GiB, space used 37 GiB, gc {"state":null,"condemned_pending":520,"last_pass":{"pass":109,"dry_run":false,"segments_condemned":90,"segments_deleted":88,"packs_deleted":2,"runs_deleted":18,
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c16k/encrypted p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c16k/encrypted p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 43 GiB, space used 42 GiB, gc {"state":"deleting","condemned_pending":635,"last_pass":{"pass":118,"dry_run":false,"segments_condemned":295,"segments_deleted":67,"packs_deleted":14,"runs_dele
+- PASS detach v16rawencrypted
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_raw_c16k_encrypted-1]
+- PASS fio-verify/raw/c16k/encrypted: attach again
+- PASS fio-verify/raw/c16k/encrypted p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c16k/encrypted: detach
+- PASS fio-verify/raw/c16k/encrypted: lunix fsck --deep clean (exit 0)
+
+## cell fio-verify/ext4/c16k/encrypted
+- PASS create volume v16ext4encrypted (32 GiB, chunk 16384, encrypted)
+- PASS attach v16ext4encrypted (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 13 GiB, space used 13 GiB, gc {"state":"compacting","condemned_pending":215,"last_pass":{"pass":31,"dry_run":false,"segments_condemned":48,"segments_deleted":45,"packs_deleted":5,"runs_delet
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 19 GiB, space used 18 GiB, gc {"state":null,"condemned_pending":165,"last_pass":{"pass":55,"dry_run":false,"segments_condemned":55,"segments_deleted":227,"packs_deleted":38,"runs_deleted":9,
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 29 GiB, space used 28 GiB, gc {"state":"marking","condemned_pending":503,"last_pass":{"pass":74,"dry_run":false,"segments_condemned":183,"segments_deleted":53,"packs_deleted":6,"runs_deleted
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 36 GiB, space used 35 GiB, gc {"state":null,"condemned_pending":210,"last_pass":{"pass":88,"dry_run":false,"segments_condemned":99,"segments_deleted":46,"packs_deleted":7,"runs_deleted":9,"c
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 44 GiB, space used 43 GiB, gc {"state":"marking","condemned_pending":379,"last_pass":{"pass":99,"dry_run":false,"segments_condemned":241,"segments_deleted":46,"packs_deleted":6,"runs_deleted
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c16k/encrypted p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c16k/encrypted p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 54 GiB, space used 54 GiB, gc {"state":"marking","condemned_pending":168,"last_pass":{"pass":105,"dry_run":false,"segments_condemned":88,"segments_deleted":123,"packs_deleted":49,"runs_delet
+- PASS fio-verify/ext4/c16k/encrypted: guest fsck clean after the runs
+- PASS detach v16ext4encrypted
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_ext4_c16k_encrypted-1]
+- PASS fio-verify/ext4/c16k/encrypted: attach again
+- PASS fio-verify/ext4/c16k/encrypted p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c16k/encrypted: guest fsck clean after verify_only
+- PASS fio-verify/ext4/c16k/encrypted: detach
+- PASS fio-verify/ext4/c16k/encrypted: lunix fsck --deep clean (exit 0)
+
+## cell fio-verify/xfs/c16k/encrypted
+- PASS create volume v16xfsencrypted (32 GiB, chunk 16384, encrypted)
+- PASS attach v16xfsencrypted (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 14 GiB, space used 14 GiB, gc {"state":"deleting","condemned_pending":262,"last_pass":{"pass":30,"dry_run":false,"segments_condemned":49,"segments_deleted":45,"packs_deleted":5,"runs_deleted
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 19 GiB, space used 19 GiB, gc {"state":"compacting","condemned_pending":313,"last_pass":{"pass":56,"dry_run":false,"segments_condemned":28,"segments_deleted":60,"packs_deleted":7,"runs_delet
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 29 GiB, space used 29 GiB, gc {"state":"deleting","condemned_pending":455,"last_pass":{"pass":73,"dry_run":false,"segments_condemned":110,"segments_deleted":42,"packs_deleted":10,"runs_delet
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 39 GiB, space used 38 GiB, gc {"state":"deleting","condemned_pending":542,"last_pass":{"pass":86,"dry_run":false,"segments_condemned":219,"segments_deleted":47,"packs_deleted":10,"runs_delet
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 44 GiB, space used 43 GiB, gc {"state":"compacting","condemned_pending":274,"last_pass":{"pass":93,"dry_run":false,"segments_condemned":281,"segments_deleted":51,"packs_deleted":27,"runs_del
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c16k/encrypted p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/encrypted p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 59 GiB, space used 58 GiB, gc {"state":"compacting","condemned_pending":420,"last_pass":{"pass":96,"dry_run":false,"segments_condemned":108,"segments_deleted":125,"packs_deleted":44,"runs_de
+- PASS fio-verify/xfs/c16k/encrypted: guest fsck clean after the runs
+- PASS detach v16xfsencrypted
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_xfs_c16k_encrypted-1]
+- PASS fio-verify/xfs/c16k/encrypted: attach again
+- PASS fio-verify/xfs/c16k/encrypted p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c16k/encrypted: guest fsck clean after verify_only
+- PASS fio-verify/xfs/c16k/encrypted: detach
+- PASS fio-verify/xfs/c16k/encrypted: lunix fsck --deep clean (exit 0)
+
+## end
+- PASS every cell produced a result record (3 of 3)
+overall FAIL=0

@@ -1,0 +1,10 @@
+- date: 2026-11-19T03:18:39Z
+- cpu: AMD EPYC 9R45, 16 cpus online, SMT: 0
+- kernel: 7.0.0, distro: Ubuntu 26.04
+- memory: 31 GiB
+- governor: not exposed (virtual machine, no cpufreq)
+- io_uring_disabled: 0
+- fio: fio-3.41, e2fsprogs: e2fsck 1.47.2 (1-Jan-2025), xfsprogs: mkfs.xfs version 6.18.0
+- lunixd: <m15>/target/release/lunixd lunixd 0.1.0
+- cpu sets: daemon 0-3, fio 4-7; queues 4; journal_max 536870912
+- git revision: uncommitted or unknown (the host copy has no .git)

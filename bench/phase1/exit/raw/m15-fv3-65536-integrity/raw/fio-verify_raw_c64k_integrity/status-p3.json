@@ -1,0 +1,63 @@
+{
+  "name": "v64rawintegrity",
+  "uuid": "ea847e92-99ae-45cf-86d2-85b42ac88b67",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 65536,
+  "mode": "integrity",
+  "device": "<scratch>/m15-fio-state/dev/v64rawintegrity",
+  "stats": {
+    "bytes_written": 110933438464,
+    "bytes_read": 101711687680,
+    "ops_read": 1246180,
+    "ops_write": 1365663,
+    "ops_flush": 75412,
+    "ops_discard": 37766,
+    "ops_write_zeroes": 37646,
+    "flush_groups": 75412,
+    "flush_group_waiters": 75412,
+    "flush_group_max": 1,
+    "chunks_total": 2697494,
+    "chunks_zero": 116952,
+    "dedup_hits": 740,
+    "stored_ulen": 169069903872,
+    "stored_clen": 162940762985,
+    "cold_rmw": 1420486,
+    "dirty_leaves": 0,
+    "commits": 1433,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      16168426237,
+      4848804717,
+      3890294301,
+      18778190329,
+      247889561380
+    ]
+  },
+  "space": {
+    "used": 53677654254,
+    "limit": 68719476736,
+    "fs_free": 213177716736,
+    "journal": 0,
+    "segments": 53256510408,
+    "cache": 0,
+    "map": 267637798,
+    "index": 153413064,
+    "commits": 92984,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 268435456,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 1789,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 1434,
+  "last_commit_ms": 1795048370310,
+  "dedup_ratio": 1.000286843719014,
+  "compression_ratio": 1.037615761548657,
+  "rollback_floor": {
+    "max_commit_seq": 1434,
+    "tip_hash": "5fd231fe0a946b6f731dd1d3ff2988ecca2a0a75af721db3e21000b4f316b11a"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "v16xfsencrypted",
+  "uuid": "94aca3ae-d37b-4ca2-96df-f87a29d9fa49",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 16384,
+  "mode": "encrypted",
+  "device": "<scratch>/m15-fio-state/dev/v16xfsencrypted",
+  "stats": {
+    "bytes_written": 19448659968,
+    "bytes_read": 12799512576,
+    "ops_read": 227465,
+    "ops_write": 316737,
+    "ops_flush": 29213,
+    "ops_discard": 32,
+    "ops_write_zeroes": 1,
+    "flush_groups": 47060,
+    "flush_group_waiters": 47060,
+    "flush_group_max": 1,
+    "chunks_total": 3433135,
+    "chunks_zero": 2103541,
+    "dedup_hits": 0,
+    "stored_ulen": 21784068096,
+    "stored_clen": 20868390074,
+    "cold_rmw": 254202,
+    "dirty_leaves": 0,
+    "commits": 151,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      2405603677,
+      799608988,
+      4189410952,
+      2294774688,
+      29058709521
+    ]
+  },
+  "space": {
+    "used": 15570958570,
+    "limit": 68719476736,
+    "fs_free": 279182340096,
+    "journal": 54795840,
+    "segments": 15163781125,
+    "cache": 0,
+    "map": 259450677,
+    "index": 92916624,
+    "commits": 14304,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 402653184,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 163,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 151,
+  "last_commit_ms": 1795091768891,
+  "dedup_ratio": 1.0,
+  "compression_ratio": 1.0438787093183985,
+  "rollback_floor": {
+    "max_commit_seq": 151,
+    "tip_hash": "c7a84c6269d86dc47156e23b0d1356478fc6f66ba808e2fdbca714fe4cac3bad"
+  }
+}

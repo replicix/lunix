@@ -1,0 +1,28 @@
+{
+  "state": null,
+  "condemned_pending": 0,
+  "moved_pending": 0,
+  "last_pass": {
+    "pass": 19,
+    "dry_run": false,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 4,
+    "runs_deleted": 0,
+    "commits_deleted": 0,
+    "segments_compacted": 0,
+    "bytes_freed": 615427,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "passes": 20,
+    "live_bytes": 2241543035,
+    "dead_bytes": 44097920,
+    "bytes_freed": 7799912,
+    "segments_compacted": 1,
+    "compaction_read": 1530,
+    "compaction_written": 1748
+  },
+  "last_finished_ms": 1795101610880,
+  "requests": 0
+}

@@ -1,0 +1,63 @@
+{
+  "name": "r16krandom",
+  "uuid": "7baee0bc-c75f-4313-9bcc-a43bf2bfe4a0",
+  "state": "attached",
+  "size_bytes": 34359738368,
+  "chunk_size": 16384,
+  "mode": "integrity",
+  "device": "<scratch>/m15-ratios-state/dev/r16krandom",
+  "stats": {
+    "bytes_written": 4294967296,
+    "bytes_read": 4299300864,
+    "ops_read": 32932,
+    "ops_write": 262144,
+    "ops_flush": 1,
+    "ops_discard": 0,
+    "ops_write_zeroes": 0,
+    "flush_groups": 1,
+    "flush_group_waiters": 1,
+    "flush_group_max": 1,
+    "chunks_total": 262144,
+    "chunks_zero": 0,
+    "dedup_hits": 0,
+    "stored_ulen": 4294967296,
+    "stored_clen": 4294967296,
+    "cold_rmw": 0,
+    "dirty_leaves": 0,
+    "commits": 68,
+    "extent_auth_failures": 0,
+    "stage_ns": [
+      472466179,
+      65810884,
+      168766184,
+      571903528,
+      6313399128
+    ]
+  },
+  "space": {
+    "used": 4343228097,
+    "limit": 68719476736,
+    "fs_free": 286768943104,
+    "journal": 0,
+    "segments": 4321972107,
+    "cache": 0,
+    "map": 8496530,
+    "index": 12758480,
+    "commits": 980,
+    "headroom_held": 0,
+    "waiters": 0
+  },
+  "journal_used": 67108864,
+  "journal_capacity": 536870912,
+  "journal_marks_written": 1,
+  "journal_marks_skipped": 0,
+  "locked_bytes": 582094848,
+  "last_commit_seq": 68,
+  "last_commit_ms": 1795101040451,
+  "dedup_ratio": 1.0,
+  "compression_ratio": 1.0,
+  "rollback_floor": {
+    "max_commit_seq": 68,
+    "tip_hash": "9bdae70ad86d1db841a62a457f5964f04b9d4e2a6b105a85754c52e71e86c2d3"
+  }
+}

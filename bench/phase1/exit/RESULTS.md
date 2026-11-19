@@ -17,7 +17,7 @@ for the runs below; `6d16fbf` for the rerun). Exact fio job files: `bench/phase1
 
 | item | state | verdict |
 |---|---|---|
-| 1 fio verify | stalled once (see below); rerun pending | pending |
+| 1 fio verify | 12 cells on `03b858e` | **PASS** (zero errors, fsck clean, peak store 64 GiB); settled store bound not shown by these cells |
 | 2 xfstests | all six runs complete; comparison below | ext4: no Lunix-only failure but the reference fails 244 of 684 for an environment reason (needs a fix before it means anything); xfs: 3 Lunix-only (xfs/129, 234, 253), one reference hang excluded (xfs/118) |
 | 3a kill -9 loops | ext4 100 cycles, xfs 50 cycles | **PASS** |
 | 3b crash points | 66 points x 3 hits, six slices (79 points in the merged build, 13 not run yet) | 170 PASS, 13 FAIL (all explained below, none a Lunix defect so far), 25 UNREACHED; to be rerun on the fixed harness |
@@ -72,7 +72,12 @@ compression within 15 % of 1/(1-c), random data stored at most 1.01x: **met at b
 | random data, stored / logical | | 1.0063 | 1.0016 | | | |
 
 Store sizes (segments + metadata, du of the volume directory including the 0.5 GiB journal ring) are in `raw/m15-ratios-out`.
-GC passes in these cells were not recorded (no collector in the build): rerun with the merged build for the store bound per cell.
+
+**GC settle (rerun `ratios2`, binaries of main `03b858e`, before pace, jwin and tipstat):** every cell waited 120 s after the write
+(past the 60 s grace) and recorded `lunix gc --status`: in all 24 cells the collector is idle (state none, 0 condemned pending, 4-19
+passes done) and the store is the live data plus the 0.5 GiB journal ring (for example c64 random: segments 4102 MiB, store 4627 MiB;
+c64 c90 d90: segments 43 MiB, store 565 MiB; the same figures before and after the settle), i.e. 1.0 x live, inside the 1.3 x bound.
+The ratio table above is from `ratios2` as well (both chunk sizes, same figures as the first run to the third digit).
 
 ## 2 xfstests (`-g quick -x dangerous`, 16 GiB TEST and SCRATCH, reference = loop devices over files on the same disk)
 
@@ -134,20 +139,49 @@ Coverage gaps (25 UNREACHED, 16 points with no late variant that passed, listed 
 variance of the hit counts; since cp-s3 the late hit is 80 % of the count with a 60 % fallback. All gaps, the 13 failed
 cells and the 13 points the merged build adds are to be rerun with the merged build (they also exercise the `gc.*` points).
 
-## 1 fio verify: found and diagnosed, rerun pending
+## 1 fio verify (rerun on the merged build): PASS in all 12 cells
 
-First run (`fv-65536-integrity`, build without the collector, main at `fe151c2`): profile 5 (QD 128, 8 jobs) stalled at 07:45Z
-on a **full volume with no collector in the build**: space used 245.5 GB against a limit of 245.1 GB (segments 242 GB), one
-waiter in the space gate, 128 requests in flight, every daemon thread waiting; the host disk fell to 49 GB free and M15 held
-more than the plan's 100 GiB. Cleaned up (device deleted after its daemon was gone, W1a), nothing left behind.
-Rerun on the build with `6d16fbf` (`fv2-*`): the first slice (64 KiB, integrity: raw, ext4, xfs) stopped every cell at its
-80 GiB store cap in profile 1 (28 GiB after profile 0, 81 GiB after profile 1): GC was running (passes, condemned segments,
-deletions in `gc-status-p*.json`) but reclaim lags writes because a pass waits out the 60 s grace in the middle. The fix is the
-GC schedule of `p1/gcrate`; the four slices are to be rerun on it. **Rows pending.**
+**Build note:** these runs (and `ratios2`) used binaries of main `03b858e` (bstop, bstop-fu, gcrate merged), i.e. **before the later
+`pace`, `jwin` and `tipstat` changes**. A rerun on the final main is needed if those change the I/O path.
+
+Per cell (target x chunk x mode): 6 profiles (QD 1/32/128 x 1 and 8 jobs, 4 GiB each, 600 s, bssplit 4k-1M, crc32c with state save,
+trim companion, discard and write-zeroes by `trimcheck.py`), then detach, attach, `fio --verify_only` of every profile, detach.
+For every cell and every profile: fio exit 0 with zero job errors (zero verify failures), `trimcheck` clean; guest fsck clean after the
+runs and after `verify_only` (ext4, xfs); `lunix fsck --deep` clean after each detach; every cell produced its result record. About
+68 min per cell. **Zero failures.**
+
+| target | chunk | mode | peak store GiB (after a profile) | store after the runs / after verify_only and detach GiB | live data GiB (fsck) | store / live (fsck categories) | GC passes (after p0 -> after p5) |
+|---|---|---|---|---|---|---|---|
+| raw | 64 K | integrity | 63 | 63.2 / 55.9 | 25.8 | 2.43 | 46 -> 123 |
+| ext4 | 64 K | integrity | 63 | 63.5 / 56.5 | 30.8 | 2.04 | 32 -> 174 |
+| xfs | 64 K | integrity | 63 | 64.0 / 62.2 | 31.1 | 2.04 | 34 -> 188 |
+| raw | 64 K | encrypted | 64 | 64.3 / 55.7 | 25.6 | 2.49 | 46 -> 140 |
+| ext4 | 64 K | encrypted | 64 | 64.3 / 63.7 | 30.8 | 2.07 | 34 -> 150 |
+| xfs | 64 K | encrypted | 64 | 64.0 / 59.4 | 31.1 | 2.04 | 37 -> 184 |
+| raw | 16 K | integrity | 43 | 43.7 / 35.1 | 25.5 | 1.69 | 37 -> 127 |
+| ext4 | 16 K | integrity | 51 | 51.8 / 44.0 | 29.9 | 1.71 | 32 -> 108 |
+| xfs | 16 K | integrity | 60 | 60.6 / 55.2 | 30.9 | 1.94 | 32 -> 102 |
+| raw | 16 K | encrypted | 43 | 42.8 / 34.8 | 25.5 | 1.66 | 36 -> 118 |
+| ext4 | 16 K | encrypted | 54 | 54.6 / 48.1 | 30.7 | 1.76 | 31 -> 105 |
+| xfs | 16 K | encrypted | 59 | 59.3 / 50.5 | 30.7 | 1.91 | 30 -> 96 |
+
+Every cell stayed under the 80 GiB store cap and the plan's 100 GiB (the volume's store never passed 64 GiB; the first run without
+GC filled 245 GB, the second, with the old GC schedule, passed 80 GiB after two profiles). The collector state and the space
+ledger after every profile are in `raw/m15-fv3-*/raw/*/gc-status-p*.json` and `status-p*.json`.
+**The store bound is not shown by these cells:** the cells end under write load and do not wait out a final pass and grace, so
+"store after the runs" is about 1.7-2.5 x live data, above the 1.3 x of the M17.B oracle (which applies after the final pass and grace).
+The settled figure comes from the ratio cells below (nothing left to collect) and from a final pass in the next fio-verify rerun
+(a `lx gc` and a 100 s wait before the last detach, not in this script yet).
+
+The earlier stall, kept for the record: the first fio-verify run (build without the collector, main `fe151c2`) stalled in profile 5 at
+07:45Z on a **full volume with no collector in the build**: space used 245.5 GB against a limit of 245.1 GB, one waiter in the space gate,
+128 requests in flight, every daemon thread waiting; the disk fell to 49 GB free and M15 held more than 100 GiB. It was cleaned up
+(the device deleted after its daemon was gone, W1a) and nothing was left behind. The rerun on `6d16fbf` stopped at the cap in profile 1 (a pass
+waited out the 60 s grace in the middle); `p1/gcrate` fixed that.
 
 ## Not done / pending, in order
 
-1. fio verify, four slices, after `p1/gcrate` merges (GC stats per profile are recorded by the script).
+1. fio verify: a final GC pass and settle before the last detach, to show the 1.3 x store bound at the end of a cell (the cells above end under load).
 2. Crash points: the 13 failed cells, the 25 UNREACHED variants and the 13 new points, on the merged build.
 3. xfstests: the ext4 environment error, then both ext4 sides; the sector-size check for xfs/129, 234, 253.
 4. Ratios and kill loops are done; a GC pass per ratio cell for the store bound is part of the rerun with the merged build.

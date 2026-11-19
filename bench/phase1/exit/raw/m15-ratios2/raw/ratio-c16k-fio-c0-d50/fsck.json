@@ -1,0 +1,60 @@
+{
+  "exit": 0,
+  "volume": "36b41bef-3378-40bf-bb16-61c77f52c536",
+  "mode": "integrity",
+  "tip": 68,
+  "deep": true,
+  "findings": [],
+  "counts": {},
+  "ratios": {
+    "chunk_size": 16384,
+    "chunk_count": 2097152,
+    "mapped_chunks": 262144,
+    "hole_chunks": 1835008,
+    "unique_chunks": 130741,
+    "unresolved_entries": 0,
+    "dedup_ratio": 2.0050634460498236,
+    "unique_ulen": 2142060544,
+    "unique_clen": 2142060544,
+    "compression_ratio": 1.0,
+    "hole_share": 0.875,
+    "bytes": {
+      "segments": 2155530598,
+      "map_packs": 9294607,
+      "commits": 940,
+      "index": 6384368,
+      "journal": 541065216,
+      "other": 43022
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 0,
+    "runs_deleted": 0,
+    "commits_deleted": 0,
+    "segments_compacted": 0,
+    "bytes_freed": 0,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "commits": 3,
+    "segments": 137,
+    "packs": 68,
+    "extents": 131456,
+    "map_nodes": 520,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 262144
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 104132
+}
