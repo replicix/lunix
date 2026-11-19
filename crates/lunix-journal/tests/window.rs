@@ -581,6 +581,186 @@ fn records_beyond_the_stop_point_read_before_the_wipe_never_come_back() {
     }
 }
 
+/// What `wipe_rig` leaves: the journal recovered but no lane open, and the
+/// valid record `S` beyond the recovery stop point.
+struct WipeRig {
+    j: FileJournal,
+    s: Written,
+}
+
+/// Life one writes R0 (1 block), D (255 blocks), S (1 block); D is then
+/// damaged on disk, so recovery keeps R0 only and S is a valid record beyond
+/// the stop point, which the first lane open wipes. The cap is one batch.
+/// A second life that writes F (255 blocks, as D was) then N lands N exactly
+/// where S is; F is admitted and leaves 8128 bytes of room, so N (2 blocks,
+/// 8256 bytes) is not, and S (4160) would fit.
+fn wipe_rig(cfg: &JournalConfig) -> WipeRig {
+    let (j, mut l) = fresh(cfg);
+    write_rec(&mut *l, 0, 1);
+    complete_appends(&mut *l, 1);
+    let d = write_rec(&mut *l, 1, 255);
+    complete_appends(&mut *l, 1);
+    let s = write_rec(&mut *l, 2, 1);
+    complete_appends(&mut *l, 1);
+    group_flush(&j);
+    drop((j, l));
+    flip_byte(&path_of(cfg, 0, d.ordinal), d.start + 64 + 10);
+    let j = open_journal(cfg);
+    assert_eq!(seqs(&recover_all(&j)), vec![1]);
+    WipeRig { j, s }
+}
+
+/// Holds the first read-around of `rig` after its window was read.
+struct Held {
+    entered: std::sync::mpsc::Receiver<()>,
+    release: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+fn hold_first_read(j: &FileJournal) -> Held {
+    use std::sync::{Arc, Condvar, Mutex};
+    let (tx, entered) = std::sync::mpsc::channel();
+    let tx = Mutex::new(tx);
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let rel = Arc::clone(&release);
+    j.set_read_hook(Some(Arc::new(move |_| {
+        if first.swap(false, Ordering::SeqCst) {
+            tx.lock().expect("tx").send(()).expect("entered");
+            let (m, cv) = &*rel;
+            let mut g = m.lock().expect("lock");
+            while !*g {
+                g = cv.wait(g).expect("wait");
+            }
+        }
+    })));
+    Held { entered, release }
+}
+
+impl Held {
+    fn wait_entered(&self) {
+        self.entered.recv_timeout(T).expect("the reader is held");
+    }
+
+    fn release(&self) {
+        let (m, cv) = &*self.release;
+        *m.lock().expect("lock") = true;
+        cv.notify_all();
+    }
+}
+
+/// The data of N: not `pattern(seq)`, which S (the same sequence number, as
+/// the second life reissues it) would equal.
+fn n_data() -> Vec<u8> {
+    pattern(0xABCD, 2)
+}
+
+/// After the wipe, F then N (not admitted) are written where D and S were.
+fn write_f_and_n(j: &FileJournal) -> (Box<dyn JournalLane>, Written) {
+    let mut l = open_lane(j, 0);
+    write_rec(&mut *l, 10, 255);
+    complete_appends(&mut *l, 1);
+    let n = match l.try_reserve(RecordKind::Write, 2).expect("reserve") {
+        lunix_iface::journal::SlotOutcome::Reserved(slot) => {
+            let seq = slot.write_seq.0;
+            let a = l.append(slot, 11, &n_data()).expect("append");
+            Written {
+                seq,
+                lane: 0,
+                ordinal: a.loc.ordinal,
+                start: a.loc.offset - 64,
+                len: 64 + 2 * 4096,
+                blocks: 2,
+                lba: 11,
+            }
+        }
+        other => panic!("{other:?}"),
+    };
+    complete_appends(&mut *l, 1);
+    (l, n)
+}
+
+fn first_block(j: &FileJournal, w: &Written) -> Vec<u8> {
+    let mut b = vec![0u8; 4096];
+    j.read_at(loc_of(w), &mut b).expect("read_at");
+    b
+}
+
+#[test]
+fn a_read_held_across_the_wipe_cannot_index_what_it_read() {
+    let dir = scratch();
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.resident_max = Some(BATCH_CAP);
+    let rig = wipe_rig(&cfg);
+    let held = hold_first_read(&rig.j);
+    std::thread::scope(|sc| {
+        let (j, s) = (&rig.j, &rig.s);
+        // The reader reads the window of S (valid before the wipe) and stops
+        // before it indexes anything.
+        let r = sc.spawn(move || {
+            let mut b = vec![0u8; 4096];
+            j.read_at(loc_of(s), &mut b).expect("the pre-wipe read");
+        });
+        held.wait_entered();
+        let (l, n) = write_f_and_n(&rig.j);
+        assert_eq!(n.start, rig.s.start, "N is written where S was");
+        held.release();
+        r.join().expect("reader");
+        // S, indexed after the wipe, would be served in N's place.
+        assert_eq!(first_block(&rig.j, &n), n_data()[..4096]);
+        drop(l);
+    });
+}
+
+#[test]
+fn a_read_that_waits_for_a_window_read_before_the_wipe_does_not_use_it() {
+    let dir = scratch();
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.resident_max = Some(BATCH_CAP);
+    let rig = wipe_rig(&cfg);
+    let held = hold_first_read(&rig.j);
+    std::thread::scope(|sc| {
+        let (j, s) = (&rig.j, &rig.s);
+        let r = sc.spawn(move || {
+            let mut b = vec![0u8; 4096];
+            j.read_at(loc_of(s), &mut b).expect("the pre-wipe read");
+        });
+        held.wait_entered();
+        let (l, n) = write_f_and_n(&rig.j);
+        // N is not resident (not admitted): its reader joins the flight of
+        // the held read of the same window and waits for it.
+        let f = sc.spawn({
+            let (j, n) = (&rig.j, n);
+            move || first_block(j, &n)
+        });
+        wait_until("the reader waits on the held window read", || {
+            rig.j.window_stats().shared_reads >= 1
+        });
+        held.release();
+        r.join().expect("reader");
+        let got = f.join().expect("follower");
+        assert_eq!(got, n_data()[..4096], "not the stale record S");
+        drop(l);
+    });
+}
+
+#[test]
+fn a_batch_that_the_cap_did_not_admit_evicts_what_overlaps_it() {
+    let dir = scratch();
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.resident_max = Some(BATCH_CAP);
+    let (j, mut l) = fresh(&cfg);
+    let f0 = write_rec(&mut *l, 0, 1);
+    complete_appends(&mut *l, 1);
+    // A stale entry where the next batch starts, with the room it needs gone.
+    let next = f0.start + 8192;
+    j.plant_window_entry(LaneId(0), f0.ordinal, next, &[0xEE; 8000]);
+    let b = write_rec(&mut *l, 1, 256);
+    complete_appends(&mut *l, 1);
+    assert_eq!(b.start, next);
+    assert_eq!(j.window_stats().batches_skipped, 1, "B was not admitted");
+    assert_eq!(first_block(&j, &b), pattern(b.seq, 256)[..4096]);
+}
+
 #[test]
 fn many_threads_past_the_cap_read_exact_bytes() {
     let dir = scratch();

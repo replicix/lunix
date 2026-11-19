@@ -127,6 +127,26 @@ impl FileJournal {
         self.sh.fail_any.store(true, Ordering::Relaxed);
     }
 
+    /// Test hook: `f` is called, with the location asked, by a `read_at`
+    /// read-around after its window was read and before anything of it is
+    /// indexed. It may block the reader there.
+    #[doc(hidden)]
+    pub fn set_read_hook(&self, f: Option<std::sync::Arc<dyn Fn(JournalLoc) + Send + Sync>>) {
+        self.sh.window.set_read_hook(f);
+    }
+
+    /// Test hook: puts `bytes` into the window at `(lane, ordinal, offset)`
+    /// as a batch copy would be, within the cap.
+    ///
+    /// # Panics
+    /// If the cap has no room.
+    #[doc(hidden)]
+    pub fn plant_window_entry(&self, lane: LaneId, ordinal: u32, start: u64, bytes: &[u8]) {
+        self.sh
+            .window
+            .plant(lane.0, ordinal, start, std::sync::Arc::from(bytes));
+    }
+
     /// Test hook: the next batch write completes as a failed one (`EIO`), as
     /// a device error would; the journal is poisoned at its first record.
     #[doc(hidden)]

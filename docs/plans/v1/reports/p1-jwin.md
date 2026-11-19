@@ -17,7 +17,7 @@ note `docs/explanation/research/2026-11-19-write-throughput.md` (§4.1, §7). Bu
 | T2 CRC (W6) | only verified records are served or made resident; a record that fails its checksum, or has no valid header where the location says, fails the read with `Corrupt` and `buf` is not written. A sub-range read of a damaged record fails too | `window.rs` | `a_record_damaged_on_disk_after_the_write_fails_the_read_and_is_never_served`, `a_damaged_header_fails_the_read_too`, unit tests of the scanner |
 | T2 cut records | a record cut by the window's end is completed with one more read (forward; done by the leader, so the walk through the file does not read the window again for it); a record that starts before the window and holds the target is found with one backward read of at most 1 MiB | `window.rs` | `a_record_cut_by_the_window_edge_is_completed_with_one_read` (both directions, exactly one window read and one completing read), `a_record_that_runs_a_few_bytes_past_the_edge_needs_the_completing_read` |
 | T2 file ends, reclaim | the last window is clamped to the file length; a location reclaimed meanwhile gives `NotFound` or `Corrupt`, never other bytes, and leaves nothing resident | `window.rs` | `files_that_are_not_a_megabyte_multiple_end_in_a_short_window`, `a_location_reclaimed_while_it_is_read_never_returns_stale_bytes`, `readers_see_exact_bytes_during_appends_and_reclaim` |
-| property | window and file return the same bytes (live, with and without a one-batch cap, and after a restart), for random records and sub-ranges, and they equal the written pattern | `tests/window.rs` | `the_window_and_the_file_return_the_same_bytes` (12 cases) |
+| property | window and file return the same bytes (live, with and without a one-batch cap, and after a restart), for random records and sub-ranges, and they equal the written pattern | `tests/window.rs` | `the_window_and_the_file_return_the_same_bytes` (64 cases, one or two lanes) |
 | config | `lunixd.toml` key `journal_resident_max` (at least 2097152, default the volume's `journal_max`), in the reference table of `lunixd/src/config.rs`, wired through `OpenParams::journal_resident_max` to `JournalConfig::resident_max` | `lunixd/src/{config,daemon}.rs`, `stack/mod.rs` | `journal_resident_max_is_validated`, the full-file parse test |
 | docs | DESIGN §4.1 (resident window, read-around, reclaim) and §5 step 1; the lunix-journal crate docs (`lib.rs`, `window.rs`; the README is over the 40-line limit the ownership check allows to change) | | |
 
@@ -80,14 +80,31 @@ Not changed: the acknowledgement, the group flush, FUA, C6, recovery and every o
 
 None.
 
+## Second review round (41ac24e: MERGE AFTER FIXES)
+
+- **Follower and the wipe.** A read that waits for another thread's window read and finds that read older than its own start (a wipe in between,
+  `p.epoch != cx.epoch`) does its own read and resolve instead of serving from the old window.
+- **Tests that fail without the wiring** (a reader held between its window read and its indexing, through `FileJournal::set_read_hook`, a hidden test hook;
+  `plant_window_entry` is the second hidden hook). Each was run with its fix removed and failed, with it present they pass:
+  `a_read_held_across_the_wipe_cannot_index_what_it_read` (the epoch captured after the read instead of before it: fails),
+  `a_read_that_waits_for_a_window_read_before_the_wipe_does_not_use_it` (the follower's epoch check off: fails; `WindowStats::shared_reads` lets the
+  test release the held read only once the follower waits, no sleeps), `a_batch_that_the_cap_did_not_admit_evicts_what_overlaps_it` (the `None` arm
+  of `finish_write` removed: fails). Their rig writes F (255 blocks, admitted, leaving 8 128 bytes of room) and N (2 blocks, not admitted) where the
+  damaged D and the stale valid S were; N's data is not `pattern(seq)` because S and N share a sequence number.
+- **M2 control.** `stack_window.rs` now creates the volume with `CodecPolicy::None`; a control test commits the same writes undamaged and finds every
+  record verbatim in the store; the failing run compares the file list (names and sizes) before and after the failed cut. `stack_window` is in the
+  release stack list of `tools/ci.sh` (and `tools/ci.sh` in `[jwin]`).
+- `fail_next_batch_write`: a relaxed load guards the swap. m7: `wake_raised` is set when the lane signals and cleared in `poll`; the error paths that push
+  completions (a failed submit of a batch or of a read) signal too, so a hit never waits behind them. `resolve_before` keeps a clone of the record it offers
+  to the window, so a refused insert frees it outside the lane lock.
+- **m5 has no test.** The path (a failed `submit_and_wait` in the lane's drop) cannot be made to fail without dropping the ring while a write is in flight,
+  that is, freeing a buffer the kernel may still write; the normal drop is tested (`a_lane_dropped_with_writes_in_flight_indexes_them_all`).
+
 ## Gate
 
-`tools/ci.sh` on the host (CPUs 8-15, `-j 4`), rebased on `origin/main` 57deabf (first round; the review round was rebased on 62d4d59 and re-run, see below): green, ownership included. 2 036 tests passed, 0 failed, 28 ignored
-(the ignored are the existing by-hand cells). New: 15 tests in `lunix-journal/tests/window.rs` (one of them the 12-case property test),
-4 unit tests in `window.rs`, 1 in `lunixd/src/config.rs`. The existing journal, recovery, kill, crash-point and stack suites pass unchanged.
+GATE_PLACEHOLDER
 
 ## Commits
 
-One commit on `p1/jwin`, `journal: resident window and checked read-around (ADR-33 T1, T2)` (signed); its hash is in the lead's message.
-
-Remote disk use (review round: see the end of this file; first round): about 22 GiB at the end of the gate (debug and release targets of the whole workspace plus the source copy), above the 10 GiB budget; the directory was deleted afterwards.
+The branch holds the first-round commit (4b5301e), the review round (feb0d72, 145e44e, 9e3e7b6, fbb94a5), the merge of `origin/main` 62d4d59 (41ac24e) and
+the commit of the second review round; the lead's message has the final hash.

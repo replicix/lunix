@@ -104,6 +104,8 @@ pub(crate) struct FileLane {
     id: u16,
     ring: IoUring,
     wake: WakeFd,
+    /// A wake was signalled for `out` and not yet polled.
+    wake_raised: bool,
     pool: Vec<AlignedBuf>,
     free_bufs: Vec<usize>,
     fixed: bool,
@@ -204,6 +206,7 @@ impl FileLane {
             id,
             ring,
             wake,
+            wake_raised: false,
             pool,
             free_bufs,
             fixed,
@@ -225,6 +228,17 @@ impl FileLane {
             next_token: 1,
             locked,
         })
+    }
+
+    /// Wakes the queue for completions that are ready without I/O. One signal
+    /// per poll: `wake_raised` is cleared when `poll` hands the completions
+    /// out, so completions queued by error paths that never signal (they
+    /// leave `wake_raised` false) do not suppress the signal of a later hit.
+    fn raise_wake(&mut self) {
+        if !self.wake_raised {
+            self.wake_raised = true;
+            self.wake.signal();
+        }
     }
 
     fn active(&self) -> &Active {
@@ -469,6 +483,7 @@ impl FileLane {
             self.free_bufs.push(batch.buf);
         }
         self.sh.coord.notify();
+        self.raise_wake();
     }
 
     fn finish_write(&mut self, id: usize, res: i32) {
@@ -477,7 +492,9 @@ impl FileLane {
         };
         self.batch_free.push(id);
         self.inflight_writes -= 1;
-        let res = if self.sh.fail_write.swap(false, Ordering::AcqRel) {
+        let res = if self.sh.fail_write.load(Ordering::Relaxed)
+            && self.sh.fail_write.swap(false, Ordering::AcqRel)
+        {
             -libc::EIO
         } else {
             res
@@ -735,7 +752,7 @@ impl JournalLane for FileLane {
                 status: IoStatus::err(libc::ENOENT),
                 buf,
             });
-            self.wake.signal();
+            self.raise_wake();
             return Ok(());
         };
         if buf.is_empty() {
@@ -744,7 +761,7 @@ impl JournalLane for FileLane {
                 status: IoStatus::ok(0),
                 buf,
             });
-            self.wake.signal();
+            self.raise_wake();
             return Ok(());
         }
         // The resident window first (ADR-33): the bytes as written, no I/O.
@@ -752,17 +769,12 @@ impl JournalLane for FileLane {
         let hit = self.sh.window.copy_hit(loc, &mut buf);
         self.sh.window.count(hit);
         if hit {
-            // One signal per poll is enough: an earlier ready completion
-            // already raised it.
-            let first = self.out.is_empty();
             self.out.push(JournalCompletion::Read {
                 token,
                 status: IoStatus::ok(buf.len() as u32),
                 buf,
             });
-            if first {
-                self.wake.signal();
-            }
+            self.raise_wake();
             return Ok(());
         }
         let a0 = crate::sys::floor4k(loc.offset);
@@ -808,6 +820,7 @@ impl JournalLane for FileLane {
                 // entry: leak it rather than reuse it.
                 std::mem::forget(req.abuf);
             }
+            self.raise_wake();
             self.read_free.push(id);
         }
         Ok(())
@@ -819,6 +832,7 @@ impl JournalLane for FileLane {
         // completions); there is nobody to return it to.
         let _ = self.maybe_submit(false);
         out.append(&mut self.out);
+        self.wake_raised = false;
     }
 
     fn completed_watermark(&self) -> WriteSeq {

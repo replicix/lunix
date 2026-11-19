@@ -284,6 +284,7 @@ paths = [
   "crates/lunix-engine/tests/common/mod.rs",
   "crates/lunix-iface/src/space.rs",
   "crates/lunix-iface/src/journal.rs",
+  "tools/ci.sh",
   "crates/lunix-iface/src/contract/space.rs",
   "crates/lunix-iface/src/contract/mod.rs",
   "crates/lunix-iface/tests/trivial/space.rs",

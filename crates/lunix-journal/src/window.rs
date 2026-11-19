@@ -95,6 +95,8 @@ const MAX_ENC: u64 = RECORD_HEADER_LEN as u64 + MAX_WRITE_BLOCKS as u64 * BLOCK 
 const HDR: usize = RECORD_HEADER_LEN;
 
 type Lane = BTreeMap<(u32, u64), Arc<[u8]>>;
+/// A test hook: see [`Window::set_read_hook`].
+pub(crate) type ReadHook = Arc<dyn Fn(JournalLoc) + Send + Sync>;
 type FlightKey = (u16, u32, u64);
 
 /// Counters of the resident window (ADR-33).
@@ -115,6 +117,9 @@ pub struct WindowStats {
     pub window_reads: u64,
     /// Reads that completed a record cut by a window edge.
     pub completing_reads: u64,
+    /// Reads that waited for another thread's read of their window instead of
+    /// reading it.
+    pub shared_reads: u64,
     /// Reads failed because the record's checksum did not verify (or no valid
     /// record covered the location).
     pub check_failures: u64,
@@ -135,6 +140,10 @@ pub(crate) struct Window {
     window_reads: AtomicU64,
     completing_reads: AtomicU64,
     check_failures: AtomicU64,
+    shared: AtomicU64,
+    /// Test hook, called with the target after a window was read and before
+    /// anything of it is indexed.
+    hook: Mutex<Option<ReadHook>>,
 }
 
 /// What a read-around needs to know about its target.
@@ -330,6 +339,8 @@ impl Window {
             window_reads: AtomicU64::new(0),
             completing_reads: AtomicU64::new(0),
             check_failures: AtomicU64::new(0),
+            shared: AtomicU64::new(0),
+            hook: Mutex::new(None),
         }
     }
 
@@ -343,6 +354,7 @@ impl Window {
             batches_skipped: self.skipped.load(r),
             window_reads: self.window_reads.load(r),
             completing_reads: self.completing_reads.load(r),
+            shared_reads: self.shared.load(r),
             check_failures: self.check_failures.load(r),
         }
     }
@@ -525,6 +537,22 @@ impl Window {
         }
     }
 
+    /// Test hook: `f` runs in a read-around after its window was read and
+    /// before anything of it is indexed (it may block the reader there).
+    pub(crate) fn set_read_hook(&self, f: Option<ReadHook>) {
+        *lock(&self.hook) = f;
+    }
+
+    /// Test hook: indexes `bytes` at `(ordinal, start)` as a batch copy would,
+    /// within the cap.
+    ///
+    /// # Panics
+    /// If the cap does not have room.
+    pub(crate) fn plant(&self, lane: u16, ordinal: u32, start: u64, bytes: Arc<[u8]>) {
+        assert!(self.reserve_batch(bytes.len() as u64), "no room to plant");
+        self.insert_batch(lane, ordinal, start, bytes);
+    }
+
     pub(crate) fn count(&self, hit: bool) {
         let c = if hit { &self.hits } else { &self.misses };
         c.fetch_add(1, Ordering::Relaxed);
@@ -596,10 +624,18 @@ impl Window {
         loop {
             match self.claim(key) {
                 Claim::Follow(f) => {
+                    self.shared.fetch_add(1, Ordering::Relaxed);
                     let Some(p) = f.wait() else {
                         // The leader failed: try again, possibly as the leader.
                         continue;
                     };
+                    // A window read before a wipe may hold records the wipe
+                    // zeroed and the lane has since rewritten: what it yields
+                    // is never served to a read that began after the wipe.
+                    if p.epoch != cx.epoch {
+                        let own = self.fill(cx)?;
+                        return self.resolve(cx, &own, buf);
+                    }
                     return match self.resolve(cx, &p, buf) {
                         // The leader's snapshot may predate the target (a
                         // batch that was not admitted is written after any
@@ -643,6 +679,10 @@ impl Window {
         }
         let raw = sys::read_aligned(&file.file, w0, (w1 - w0) as usize).map_err(io_err)?;
         self.window_reads.fetch_add(1, Ordering::Relaxed);
+        let hook = lock(&self.hook).clone();
+        if let Some(h) = hook {
+            h(loc);
+        }
         let scan = scan_records(raw.as_slice(), w0, gen, w0.max(B));
         let mut recs = Vec::with_capacity(scan.recs.len());
         for &(q, enc) in &scan.recs {
@@ -732,7 +772,7 @@ impl Window {
             let bytes: Arc<[u8]> = Arc::from(&comb[at..at + enc]);
             let i = (t - q) as usize;
             buf.copy_from_slice(&bytes[i..i + buf.len()]);
-            self.insert_record(cx, q, bytes);
+            self.insert_record(cx, q, Arc::clone(&bytes));
             return Ok(());
         }
         if scan.bad.iter().any(|&(q, enc)| q < t && end <= q + enc) {
