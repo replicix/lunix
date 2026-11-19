@@ -58,7 +58,7 @@ The second commit carries these fixes.
 | **M1** a paced request that fits got ENOSPC and could latch the volume | the gate's queue is in order of `reserve` calls, not of arrival, so a request behind the head can be due: the grant loop admits the head (and what stands before the due request) when any waiter behind it has waited its cap (`due_behind`; the bucket takes the debt); `park` refuses a due request only when it does not fit, otherwise it is admitted with what stands before it; `expire` is reached only by requests that wait for space (the cap is never later than the deadline) | `an_old_request_behind_a_young_head_admits_both_and_latches_nothing`, `a_request_that_fits_and_is_past_its_deadline_on_first_contact_is_admitted` (old `arrived`, two queues' order, `full_timeout` 3 s under a 10 s cap); the new property test `requests_that_fit_are_never_refused_whatever_their_arrival` (arrivals up to 40 s in the past, `full_timeout` and cap drawn 1 to 14 s, FUA and bulk: no `NoSpace`, `fulls` 0, `enospc` 0, all granted) |
 | **M2** a FUA write waited behind the paced writes of its queue | `handle` lets a `Sync` write (FUA, at most 256 KiB) go to the gate while its queue has writes parked, unless one waits for the journal ring (two requests in flight have no order, the note's own argument for holes) | stack `a_fua_write_overtakes_the_paced_writes_of_its_own_queue`: eight 256 KiB writes at 64 KiB/s (the bucket's first megabyte goes through, the rest are paced), the FUA write on the same queue completes inside 2 s (it waited until the bulk writes were through before the fix) |
 | **M3** `on_full = error`: a paced request that stopped fitting waited out `full_timeout` and latched | the grant loop refuses a head that does not fit at once under `error` while the band is on (the band-off case is `rejudge`'s `fail_unfit`, as before); `expire` never latches under `error` | `under_on_full_error_a_paced_request_that_stops_fitting_is_refused_at_once` |
-| m1 debt | `Bucket::refill` clamps the debt to one second of the current rate | `the_debt_is_bounded_by_one_second_of_the_rate` (a rate that fell) |
+| m1 debt | `Bucket::refill` clamps the debt to one second of the current rate | `a_debt_taken_at_a_high_rate_is_clamped_when_the_rate_falls` |
 | m2 FUA-only writer | documented here: an O_DSYNC workload of small writes is never paced (ADR), goes from full speed to the hard mark and keeps the bucket at its debt floor, so bulk writes then pass by their cap | |
 | m3 compaction rate cap across a pressure change | the cap counts in a window that restarts when the rate changes (`compact::rate_cap`) | `rate_tests::bytes_read_at_a_higher_rate_are_not_charged_to_a_lower_one` |
 | m4 pressure never ends on a resting volume | a `slowdown` with no writer (nothing admitted in 10 s, nothing waiting) counts as open: the pressure ends after the hold, and the 30 s line stops; `stop` and `full` stay urgent | `a_volume_resting_in_the_band_with_no_writer_loses_its_pressure` (engine), `a_volume_resting_inside_the_band_has_no_pressure_after_the_hold`, `a_resting_band_volume_logs_no_status_line` |
@@ -68,6 +68,23 @@ The second commit carries these fixes.
 | m10 tests | the directed grace test starts its second mark at 45 s (between the floor, 31 s, and the configured grace, 61 s) and asserts it is before 61 s; the F-4 quiesce test no longer sleeps: a second thread reports `Engine::is_closing()` (new accessor) and the step waits for it | both |
 | m11 | a stack test with `throttle = false` (`with_the_band_off_the_volume_is_never_paced`) | |
 
+### Re-review of bbf0964 (01-p1-pace-rereview.md, verdict MERGE), one last commit
+
+| finding | fix | test |
+|---|---|---|
+| **N1** an overdue newcomer behind a space waiter latched the volume | `park`: after the grant pass, a newcomer that is still pending and past its deadline is popped and refused (`NoSpace`, no latch); what stands before it keeps its own deadline | `an_overdue_newcomer_behind_a_space_waiter_is_refused_and_latches_nothing` (fails with the fix removed, checked by hand) |
+| m7 contract `Paced` arm unreachable | the case drives a gate with 8 MiB of headroom under a 32 MiB soft mark, so the second megabyte is paced; the suite also runs against a gate with the band on (`contract_band`), plus a test that the arm is taken there | `contract_band::*`, `the_band_gate_paces_in_the_contract_case` |
+| m2-b ring guard and overlap order | `MemSpace` gets scripted pacing (`set_pacing`); engine tests: a FUA write overtakes a paced write and the later `write_seq` wins an overlap, also after a cut; a FUA write never passes a write waiting for the ring (it fails with the guard removed, checked by hand) | `lunix-engine/tests/fua_queue.rs` |
+| m10 spin loops | both loops of the quiesce test (and the helper's) are bounded at 30 s and fail instead of hanging | `gc_pacing.rs` |
+| m3-b `band_rate` condition | dropped: under `error` the grant loop refuses a head that does not fit whatever the band; `rejudge` keeps its old order (grant what fits, then refuse) through `grant_inner(.., false)`, so the reference model still holds | model, `under_on_full_error_...` |
+| property test | `mixed_requests_keep_fifo_and_the_cap`: fitting and non-fitting requests (a 9 MiB one against 8 MiB of headroom), FUA and bulk, random arrivals, `full_timeout` and cap, `wait` and `error`: grants in FIFO order, a request not held up by a space waiter granted within its cap and one step, `error` never latches nor refuses a request that fits, a latch only after a space waiter's own deadline, everything ends | `tests/pace.rs` |
+| m2-a | comment at the overtaking code in `queue.rs` | |
+| m3-a | the `Paced` doc says the refusal under `error` comes at the gate's next grant pass (within a second), not at the instant | |
+| nit `due_behind` | the scan stops at the first request that does not fit | |
+| nit report name | the m1 row names `a_debt_taken_at_a_high_rate_is_clamped_when_the_rate_falls` | |
+
+Gate after the re-review fixes: full `tools/ci.sh` on the host, `ci: all green`, **2015 passed, 0 failed, 28 ignored**, `check-ownership: pace ok (47 changed paths)`. The remote target was deleted afterwards.
+
 Left, as the review allows:
 
 - **m8**: cross-key config errors are reported at line 0 (as for every whole-file rule of `config.rs`).
@@ -76,7 +93,7 @@ Left, as the review allows:
 - **m11**: every stack test still drives one queue, except that M2's test is the same-queue case; the M1 cases are gate-level because the queue hands the gate at most one request at a time.
 - **deviation 9**: ADR-32's status line is the lead's to fix at merge.
 
-Gate after the fixes: full `tools/ci.sh` on the host, `ci: all green`, **2012 passed, 0 failed, 29 ignored** (summed `test result`
+Gate after the first fixes: full `tools/ci.sh` on the host, `ci: all green`, **2012 passed, 0 failed, 29 ignored** (summed `test result`
 lines), `check-ownership: pace ok (45 changed paths)`. The remote target was deleted afterwards.
 
 ## For the maintainer

@@ -68,7 +68,12 @@ impl Collector for Scripted {
             s.quiesce_now.store(true, Ordering::SeqCst);
             // The quiesce sets the engine's `closing` flag before it waits
             // for the coordinator: go on only once that is seen.
+            let t0 = std::time::Instant::now();
             while !s.closing_seen.load(Ordering::SeqCst) {
+                assert!(
+                    t0.elapsed() < Duration::from_secs(30),
+                    "the quiesce never set `closing`"
+                );
                 std::thread::yield_now();
             }
         }
@@ -256,14 +261,19 @@ fn a_quiesce_ends_the_share_and_no_collector_step_follows() {
     let script3 = Arc::clone(&script);
     std::thread::scope(|s| {
         s.spawn(move || {
+            let t0 = std::time::Instant::now();
             while !script2.quiesce_now.load(Ordering::SeqCst) {
+                if t0.elapsed() > Duration::from_secs(30) {
+                    return;
+                }
                 std::thread::yield_now();
             }
             // Sets `closing`, then waits for the coordinator mutex.
             let _ = engine.quiesce();
         });
         s.spawn(move || {
-            while !engine.is_closing() {
+            let t0 = std::time::Instant::now();
+            while !engine.is_closing() && t0.elapsed() < Duration::from_secs(30) {
                 std::thread::yield_now();
             }
             script3.closing_seen.store(true, Ordering::SeqCst);

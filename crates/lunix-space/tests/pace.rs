@@ -547,6 +547,51 @@ fn under_on_full_error_a_paced_request_that_stops_fitting_is_refused_at_once() {
     ));
 }
 
+#[test]
+fn an_overdue_newcomer_behind_a_space_waiter_is_refused_and_latches_nothing() {
+    // Re-review N1: H (fits, paced) is the head, X waits for space behind it
+    // with most of its full_timeout left, and B, whose own full_timeout ran
+    // out in its queue, reaches the gate. B never waited in the gate: it is
+    // refused on contact, nothing latches, X keeps its own deadline.
+    let ck = clock();
+    ck.advance(Duration::from_secs(100));
+    let c = cfg(Some(Duration::from_secs(60)), |c| {
+        c.throttle = c.throttle.with_gc_rate(0);
+        c.throttle.min_rate = 64 * KIB;
+    });
+    let g = at_headroom(4 * MIB, c, &ck);
+    for _ in 0..4 {
+        reserved(g.reserve(K, 256 * KIB, None).unwrap());
+    }
+    let h = paced(g.reserve(K, 256 * KIB, None).unwrap());
+    let x = parked(g.reserve(K, 100 * MIB, None).unwrap());
+    ck.advance(Duration::from_millis(5));
+    let b = g
+        .reserve_since(K, 4 * KIB, None, Duration::ZERO, ReserveClass::Bulk)
+        .unwrap();
+    assert!(matches!(b, ReserveOutcome::NoSpace), "{b:?}");
+    assert!(!g.is_full(), "an overdue newcomer latched the volume");
+    assert_eq!(g.fulls(), 0);
+    assert_eq!(x.state(), WaiterState::Pending);
+    assert_eq!(h.state(), WaiterState::Pending, "H is not due");
+    // The timer finds nothing to expire a moment later, and X lives to its
+    // own deadline (160 s) and no longer.
+    ck.advance(Duration::from_secs(1));
+    assert_eq!(g.tick(), 0);
+    assert_eq!(x.state(), WaiterState::Pending);
+    assert_eq!(g.fulls(), 0);
+    ck.advance(Duration::from_secs(10));
+    g.tick();
+    assert_eq!(h.state(), WaiterState::Granted, "H goes at its cap");
+    ck.advance(Duration::from_millis(48_900));
+    assert_eq!(g.tick(), 0);
+    assert_eq!(x.state(), WaiterState::Pending);
+    ck.advance(Duration::from_millis(100));
+    assert_eq!(g.tick(), 1, "X's own deadline");
+    assert_eq!(x.state(), WaiterState::TimedOut);
+    assert!(g.is_full(), "a space waiter that expired does latch");
+}
+
 mod model {
     //! The property test of the note's §9.1 with the band on: random
     //! reservations (bulk and sync), releases, hole charges, policy changes
@@ -786,6 +831,146 @@ mod model {
             prop_assert_eq!(granted, offered);
             prop_assert_eq!(g.fulls(), 0);
             prop_assert_eq!(g.snapshot().throttle.enospc, 0);
+        }
+    }
+
+    struct Entry {
+        w: Waiter,
+        bytes: u64,
+        arrived: Duration,
+        parked_at: Duration,
+        oversized: bool,
+        /// A request that waits for space stood before it when it parked:
+        /// the pace is not what holds it.
+        blocked: bool,
+        seen_granted: bool,
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 1500, ..ProptestConfig::default() })]
+
+        /// Mixed fitting and non-fitting requests, any arrival, both
+        /// `on_full` policies: grants are first in, first out; a request that
+        /// fits and is not held up by a request waiting for space is granted
+        /// within its cap (the smaller of the cap and `full_timeout`, from
+        /// its arrival) and one step; `error` never latches and never refuses
+        /// a request that fits; a latch (`wait`) only ever follows a request
+        /// that waited for space past its own deadline.
+        #[test]
+        fn mixed_requests_keep_fifo_and_the_cap(
+            reqs in proptest::collection::vec((1u64..64, 0u64..40_000, 0u8..10), 1..50),
+            timeout_s in 1u64..15,
+            cap_s in 1u64..15,
+            error in any::<bool>(),
+            steps in proptest::collection::vec(1u64..2500, 1..40),
+        ) {
+            let ck = clock();
+            let timeout = Duration::from_secs(timeout_s);
+            let cap_eff = Duration::from_secs(cap_s.min(timeout_s));
+            let mut c = cfg(Some(timeout), |c| {
+                c.throttle = c.throttle.with_gc_rate(0);
+                c.throttle.min_rate = 64 * KIB;
+                c.throttle.max_delay = Duration::from_secs(cap_s);
+            });
+            if error {
+                c.settings.on_full = OnFull::Error;
+            }
+            let g = at_headroom(8 * MIB, c, &ck);
+            ck.advance(Duration::from_secs(40));
+            let mut entries: Vec<Entry> = Vec::new();
+            let mut ops = reqs.into_iter();
+            let mut fulls_seen = 0u64;
+            let mut offered_fitting = 0usize;
+            let mut resolved_fitting = 0usize;
+            let mut step_iter = steps.into_iter();
+            loop {
+                let step = step_iter.next();
+                for (kib, age_ms, kind) in ops.by_ref().take(3) {
+                    let now = ck_now(&ck);
+                    let arrived = now.saturating_sub(Duration::from_millis(age_ms));
+                    let oversized = kind == 0;
+                    let bytes = if oversized { 9 * MIB } else { kib * KIB };
+                    let class = if kind == 1 && bytes <= 256 * KIB { ReserveClass::Sync } else { ReserveClass::Bulk };
+                    let blocked = entries.iter().any(|e| e.oversized && e.w.state() == WaiterState::Pending);
+                    if !oversized { offered_fitting += 1; }
+                    match g.reserve_since(K, bytes, None, arrived, class).unwrap() {
+                        ReserveOutcome::Reserved => {
+                            prop_assert!(!oversized);
+                            resolved_fitting += 1;
+                            g.release(K, bytes);
+                        }
+                        ReserveOutcome::Paced(w) | ReserveOutcome::Parked(w) => entries.push(Entry {
+                            w, bytes, arrived: arrived.min(now), parked_at: now, oversized, blocked,
+                            seen_granted: false,
+                        }),
+                        ReserveOutcome::NoSpace => {
+                            if !oversized {
+                                prop_assert!(!error, "a request that fits was refused under error");
+                                // Overdue on contact behind a request that waits for
+                                // space, or the volume is latched.
+                                prop_assert!(blocked || g.fulls() > 0, "refused with no latch");
+                                resolved_fitting += 1;
+                            }
+                        }
+                    }
+                }
+                let Some(step) = step else { break };
+                ck.advance(Duration::from_millis(step));
+                g.tick();
+                let now = ck_now(&ck);
+                let mut saw_pending = false;
+                for e in &mut entries {
+                    match e.w.state() {
+                        WaiterState::Pending => saw_pending = true,
+                        WaiterState::Granted => {
+                            prop_assert!(!saw_pending, "granted out of order");
+                            if !e.seen_granted {
+                                e.seen_granted = true;
+                                g.release(K, e.bytes);
+                                if !e.oversized && !e.blocked {
+                                    let due = e.parked_at.max(e.arrived + cap_eff);
+                                    prop_assert!(
+                                        now <= due + Duration::from_millis(step),
+                                        "granted at {:?}, due {:?}", now, due
+                                    );
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let fulls = g.fulls();
+                if error {
+                    prop_assert_eq!(fulls, 0, "`error` latched");
+                } else if fulls > fulls_seen {
+                    // Only a request that waited for space (one that does
+                    // not fit, or stands behind one) past its own deadline
+                    // can have done it.
+                    prop_assert!(
+                        entries.iter().any(|e| (e.oversized || e.blocked) && e.arrived + timeout <= now),
+                        "latched with no space waiter past its deadline"
+                    );
+                }
+                fulls_seen = fulls;
+            }
+            // Everything ends.
+            ck.advance(Duration::from_secs(300));
+            g.tick();
+            for e in &entries {
+                prop_assert!(e.w.state() != WaiterState::Pending, "still pending");
+                if e.w.state() == WaiterState::Granted && !e.seen_granted {
+                    g.release(K, e.bytes);
+                }
+                if !e.oversized {
+                    resolved_fitting += 1;
+                    if error || g.fulls() == 0 {
+                        prop_assert!(e.w.state() == WaiterState::Granted,
+                            "a request that fits ended {:?}", e.w.state());
+                    }
+                }
+            }
+            let _ = (offered_fitting, resolved_fitting);
+            prop_assert_eq!(g.snapshot().waiters, 0);
         }
     }
 }

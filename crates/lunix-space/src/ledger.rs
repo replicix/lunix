@@ -264,6 +264,12 @@ impl Ledger {
     /// also needs its bytes from the bucket, or to have waited the delay cap
     /// (then the bucket carries the debt).
     pub fn grant_waiters(&mut self, now: Duration) {
+        self.grant_inner(now, self.policy.on_full == OnFull::Error);
+    }
+
+    /// [`grant_waiters`](Self::grant_waiters); `refuse_unfit` refuses a head
+    /// that does not fit at once (`on_full = error`) instead of stopping.
+    fn grant_inner(&mut self, now: Duration, refuse_unfit: bool) {
         self.update_latch();
         loop {
             self.prune_front();
@@ -273,7 +279,7 @@ impl Ledger {
             let bytes = front.bytes;
             let arrived = front.arrived;
             if !self.fits(bytes) {
-                if self.policy.on_full == OnFull::Error && self.band_rate().is_some() {
+                if refuse_unfit {
                     // `error` refuses a request that does not fit at once:
                     // one that was paced while it fitted does not wait for
                     // space, and nothing latches (review M3).
@@ -319,9 +325,12 @@ impl Ledger {
     /// before the due request, is admitted with it (the bucket takes the
     /// debt): a request that fits is never failed for the pace (review M1).
     fn due_behind(&self, now: Duration) -> bool {
+        // The scan stops at a request that does not fit: nothing behind it
+        // can follow the head.
         self.waiters
             .iter()
             .skip(1)
+            .take_while(|p| self.fits(p.bytes))
             .any(|p| p.waiter.state() == WaiterState::Pending && now >= self.cap_at(p.arrived))
     }
 
@@ -416,7 +425,10 @@ impl Ledger {
         for p in &mut self.waiters {
             p.deadline = p.arrived.saturating_add(t);
         }
-        self.grant_waiters(now);
+        // The model of `on_full = error`: grant what fits, then refuse
+        // (the grant loop itself would refuse a head that does not fit and
+        // go on to grant what stands behind it).
+        self.grant_inner(now, false);
         if self.closing {
             self.fail_waiters(now, true)
         } else if self.policy.on_full == OnFull::Error {
@@ -562,8 +574,19 @@ impl Ledger {
                 return ReserveOutcome::NoSpace;
             }
             // A request that fits is only waiting for its pace: it is due,
-            // so it is admitted with what stands before it (review M1).
+            // so it is admitted with what stands before it (review M1). If
+            // that is not so (a request that waits for space stands before
+            // it), it never waited in the gate: refused now, without the
+            // latch, and what stands before it keeps its own deadline
+            // (re-review N1).
             self.grant_waiters(now);
+            if waiter.state() == WaiterState::Pending {
+                // Still ours, still at the back.
+                self.waiters.pop_back();
+                self.counters.enospc += 1;
+                self.note_state(now);
+                return ReserveOutcome::NoSpace;
+            }
         }
         self.note_state(now);
         if fits {

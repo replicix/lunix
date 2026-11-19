@@ -189,21 +189,42 @@ pub fn the_class_and_a_paced_wait_charge_like_a_plain_reservation<
     g.release(K, 30);
     assert_eq!(w.state(), WaiterState::Granted);
     assert_eq!(used(&*g), 80);
-    // A bulk request that fits is a plain reservation, or a paced wait that
-    // is granted and charged like one.
-    match g
-        .reserve_since(K, 10, None, now, ReserveClass::Bulk)
-        .expect("reserve")
-    {
-        ReserveOutcome::Reserved => assert_eq!(used(&*g), 90),
-        ReserveOutcome::Paced(w) => {
-            assert_eq!(used(&*g), 80);
-            clock.advance(Duration::from_secs(120));
-            g.tick();
-            assert_eq!(w.state(), WaiterState::Granted);
-            assert_eq!(used(&*g), 90);
+    // Inside a band (a gate that has one: 8 MiB of headroom under a soft
+    // mark of 32 MiB): a bulk request that fits is a plain reservation, or a
+    // paced wait that is granted and charged like one. The first megabyte
+    // goes through the bucket; the next is paced by a gate that paces.
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let g = make(SpaceSetup::new(64 << 20, 0, OnFull::Wait), clock.clone());
+    g.charge(K, 56 << 20).expect("charge");
+    let base = used(&*g);
+    let now = clock.monotonic();
+    let mut paced = None;
+    for i in 0..3u64 {
+        match g
+            .reserve_since(K, 1 << 20, None, now, ReserveClass::Bulk)
+            .expect("reserve")
+        {
+            ReserveOutcome::Reserved => assert_eq!(used(&*g), base + (i + 1) * (1 << 20)),
+            ReserveOutcome::Paced(w) => {
+                paced = Some((w, i));
+                break;
+            }
+            other => panic!("{other:?}"),
         }
-        other => panic!("{other:?}"),
+    }
+    if let Some((w, i)) = paced {
+        assert_eq!(w.state(), WaiterState::Pending);
+        assert_eq!(
+            used(&*g),
+            base + i * (1 << 20),
+            "not charged before the grant"
+        );
+        assert_eq!(g.snapshot().waiters, 1);
+        clock.advance(Duration::from_secs(120));
+        g.tick();
+        assert_eq!(w.state(), WaiterState::Granted);
+        assert_eq!(used(&*g), base + (i + 1) * (1 << 20));
+        assert_eq!(g.snapshot().waiters, 0);
     }
 }
 

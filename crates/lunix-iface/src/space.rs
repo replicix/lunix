@@ -210,8 +210,9 @@ pub enum ReserveOutcome {
     /// A judgment at reserve time: the request can become a space waiter
     /// later (a commit's charge or a FUA write took the room) and the caller
     /// is not told; it reads [`ThrottleFigures::space_waiters`] for that.
-    /// Under `on_full = error` such a request is refused at once, never
-    /// latched. A gate that does not pace never returns it.
+    /// Under `on_full = error` such a request is refused, never latched, at
+    /// the gate's next grant pass (a release, a transfer or its timer: within
+    /// a second), not at the instant it stops fitting. A gate that does not pace never returns it.
     Paced(Waiter),
     /// Refused (`on_full = error`, or the wait would exceed `full_timeout`
     /// at once): nothing charged.

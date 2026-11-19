@@ -317,7 +317,11 @@ impl Queue {
                 // queue that wait in the gate for their pace or for space:
                 // two requests in flight have no order, and the gate admits
                 // it at once inside the band (ADR-32; review M2). Not past a
-                // write that waits for the journal ring.
+                // write that waits for the journal ring. An overtaker that
+                // has to park itself (the ring is full, or the gate is in
+                // `stop`) sits behind the front request in `parked`, and
+                // `retry_parked` looks only at the front: it waits out that
+                // request's pace, at most its delay cap (re-review m2-a).
                 let overtakes = !behind.is_empty()
                     && record == RecordKind::Write
                     && req.fua
