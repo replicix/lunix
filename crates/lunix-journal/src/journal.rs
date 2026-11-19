@@ -91,6 +91,8 @@ impl FileJournal {
             fail_any: AtomicBool::new(false),
             fail_sync: AtomicBool::new(false),
             fail_write: AtomicBool::new(false),
+            wakes: (0..lanes).map(|_| Mutex::new(None)).collect(),
+            reclaim_hook: Mutex::new(None),
         });
         let worker = Arc::clone(&sh);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -159,6 +161,15 @@ impl FileJournal {
     #[doc(hidden)]
     pub fn fail_next_sync(&self) {
         self.sh.fail_sync.store(true, Ordering::SeqCst);
+    }
+
+    /// Test hook: `f(lane, freed)` is called by `reclaim` after each queue
+    /// file it freed (and signalled its lane for), with the number of files
+    /// that reclaim has freed so far; it may block there, while the other
+    /// files are still pending.
+    #[doc(hidden)]
+    pub fn set_reclaim_hook(&self, f: Option<std::sync::Arc<dyn Fn(u16, u32) + Send + Sync>>) {
+        *lock(&self.sh.reclaim_hook) = f;
     }
 
     /// The counters of the resident window (ADR-33): bytes resident, hits,
@@ -344,7 +355,8 @@ impl Journal for FileJournal {
         if st.lane_open[usize::from(lane.0)] {
             return Err(Error::invalid("lane already open"));
         }
-        let l = FileLane::new(Arc::clone(&self.sh), lane.0, wake)?;
+        let l = FileLane::new(Arc::clone(&self.sh), lane.0, wake.clone())?;
+        *lock(&self.sh.wakes[usize::from(lane.0)]) = Some(wake);
         st.lane_open[usize::from(lane.0)] = true;
         Ok(Box::new(l))
     }
@@ -545,6 +557,14 @@ impl Journal for FileJournal {
                         if ring.kind == RingKind::Queue {
                             report.files += 1;
                             report.bytes += job.bytes;
+                            // ADR-33: the lane is woken as soon as this file
+                            // is free (zero rewrite done), not after the
+                            // files of every lane.
+                            self.sh.wake_lane(ring.lane);
+                            let hook = lock(&self.sh.reclaim_hook).clone();
+                            if let Some(h) = hook {
+                                h(ring.lane, report.files);
+                            }
                         } else {
                             freed_mark_file = true;
                         }
@@ -567,6 +587,29 @@ impl Journal for FileJournal {
             self.sh.coord.cv.notify_all();
         }
         Ok(report)
+    }
+
+    fn cut_freeing_file(&self) -> Option<WriteSeq> {
+        // (free files, highest seq of the oldest sealed file) per lane that
+        // has a sealed file; the fewest free files, then the lowest seq.
+        self.sh
+            .rings
+            .lanes
+            .iter()
+            .filter_map(|ring| {
+                let inner = lock(&ring.inner);
+                let oldest = inner
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.role == Role::Used)
+                    .min_by_key(|(_, s)| s.ordinal)?
+                    .0;
+                let seq = ring.files[oldest].max_seq.load(Ordering::Acquire);
+                Some((inner.free.len(), seq))
+            })
+            .min()
+            .map(|(_, seq)| WriteSeq(seq))
     }
 
     fn fill(&self) -> JournalFill {

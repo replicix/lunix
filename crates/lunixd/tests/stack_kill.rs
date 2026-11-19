@@ -32,6 +32,12 @@
 //!   --test stack_kill -- --nocapture
 //! ```
 //!
+//! `LUNIX_KILL_CUT_MS` (unset by default) runs the same loops with every cut
+//! bounded by journal bytes at that cut target in milliseconds (ADR-33 T3;
+//! `1` gives cuts of a few records once the first cuts have set the drain
+//! rate): the child's commits are `Engine::commit_bounded` and its ticks cut
+//! the same bound, and every kill lands inside a bounded cut.
+//!
 //! `LUNIX_KILL_HITS` is `all` (first, middle and last hit: the gate) or
 //! `first` (the default, one kill per point); `LUNIX_KILL_MIB` (default 160)
 //! is the data the run child writes; `LUNIX_KILL_POINTS` (comma separated
@@ -76,6 +82,11 @@ const GC_ONLY: [&str; 4] = [
     "store.segment_delete.",
 ];
 const CHILD_ENV: &str = "LUNIX_KILL_CHILD";
+
+/// The cut target of a bounded run (`LUNIX_KILL_CUT_MS`), if any.
+fn cut_ms() -> Option<u64> {
+    std::env::var("LUNIX_KILL_CUT_MS").ok()?.parse().ok()
+}
 
 fn env_or(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -313,6 +324,9 @@ fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
             t(c);
         }
         gc_tune(c);
+        if let Some(ms) = cut_ms() {
+            c.cut_target = Duration::from_millis(ms);
+        }
     }));
     b
 }
@@ -368,7 +382,12 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 progress(prog, n, &d);
             }
             Step::Commit { force } => {
-                let out = stack.engine.commit_now(force).expect("child commit");
+                let out = if cut_ms().is_some() {
+                    stack.engine.commit_bounded(force)
+                } else {
+                    stack.engine.commit_now(force)
+                }
+                .expect("child commit");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
                     progress(prog, base + k, &d);

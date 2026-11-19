@@ -40,6 +40,7 @@ mod points;
 mod cache;
 mod config;
 mod coord;
+mod cut;
 mod deps;
 mod destage;
 mod engine;
@@ -54,6 +55,7 @@ mod recover;
 mod stats;
 
 pub use config::{EngineConfig, OnJournalDamage};
+pub use cut::CutStats;
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
 #[cfg(feature = "testsupport")]

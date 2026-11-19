@@ -273,6 +273,44 @@ impl JournalCharges {
         }
     }
 
+    /// The cut `c'` in `(last cut, c]` that a cut bounded by journal bytes
+    /// takes (ADR-33): the `write_seq` of the first record, in `write_seq`
+    /// order, at which the charges since the last cut reach `budget` and
+    /// `write_seq >= floor`; `c` when they do not reach it by `c`. Every
+    /// record at or below the answer is in the cut, whichever lane holds it.
+    /// Reads only: the charges go at C9 (`take_upto`).
+    pub(crate) fn cut_for(&self, budget: u64, floor: u64, c: u64) -> u64 {
+        // The coordinator holds every stream at once, in a fixed order; a
+        // queue thread holds one lane's at a time, so this cannot deadlock.
+        let guards: Vec<_> = self
+            .lanes
+            .iter()
+            .chain(std::iter::once(&self.recovered))
+            .map(lock)
+            .collect();
+        let mut at = vec![0usize; guards.len()];
+        let mut sum = 0u64;
+        loop {
+            let next = guards
+                .iter()
+                .zip(&at)
+                .enumerate()
+                .filter_map(|(k, (g, &i))| g.get(i).map(|e| (e.0, k)))
+                .min();
+            let Some((seq, k)) = next else {
+                return c;
+            };
+            if seq > c {
+                return c;
+            }
+            sum = sum.saturating_add(guards[k][at[k]].1);
+            at[k] += 1;
+            if sum >= budget && seq >= floor {
+                return seq;
+            }
+        }
+    }
+
     /// Takes the charges of every record at or below `cut`; returns their
     /// sum.
     pub(crate) fn take_upto(&self, cut: u64) -> u64 {
@@ -413,6 +451,24 @@ impl Inner {
                 q.signal();
             }
         }
+    }
+
+    /// A write has waited `waited` for a free ring file so far (ADR-33).
+    pub(crate) fn note_ring_wait(&self, waited: Duration) {
+        crate::stats::max(
+            &self.cuts.ring_wait_max_ms,
+            u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
+        );
+    }
+
+    /// A write that waited for the ring since `since` is no longer waiting:
+    /// it was admitted, failed or its queue went away.
+    pub(crate) fn end_ring_wait(&self, since: Duration) {
+        self.note_ring_wait(self.clock.monotonic().saturating_sub(since));
+        let _ = self
+            .cuts
+            .ring_waiters
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
     }
 
     /// A write was admitted (reserved or granted). A load on the hot path.

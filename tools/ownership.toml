@@ -366,10 +366,35 @@ paths = [
   "crates/lunixd/src/config.rs",
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/src/stack/mod.rs",
-  "crates/lunixd/tests/stack_window.rs",
+  "crates/lunixd/tests/status_lockfree.rs",
   "crates/lunix-iface/src/journal.rs",
   "docs/explanation/DESIGN.md",
   "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
+# jcut: ADR-33 T3 and T4 (bounded cuts, wake per freed ring file, write-path counters).
+[jcut]
+paths = [
+  "crates/lunix-engine/src/**",
+  "crates/lunix-engine/tests/**",
+  "crates/lunix-iface/src/journal.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-iface/tests/trivial/journal.rs",
+  "crates/lunix-journal/src/journal.rs",
+  "crates/lunix-journal/src/shared.rs",
+  "crates/lunix-journal/tests/reclaim.rs",
+  "crates/lunix-testkit/src/journal.rs",
+  "crates/lunix-cli/src/fsck.rs",
+  "crates/lunix-cli/tests/common/mod.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_kill.rs",
+  "crates/lunixd/tests/status_lockfree.rs",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-jcut.md",
   "tools/ownership.toml",
 ]
 

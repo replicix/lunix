@@ -72,6 +72,11 @@ pub struct TestHooks {
     /// A point to park at, once: the engine thread sends on `reached`, then
     /// waits for `release` (see `park_at`).
     pub parked: Mutex<Option<Park>>,
+    /// A point at which the manual clock moves, and by how much, every time
+    /// the engine passes it (a cut that takes time, for the bound of a cut).
+    pub advance: Mutex<Option<(&'static str, Duration)>>,
+    /// The clock `advance` moves.
+    pub clock: Mutex<Option<Arc<ManualClock>>>,
 }
 
 /// The two ends of a parked crash point, the engine side.
@@ -124,6 +129,12 @@ impl TestHooks {
 
 impl EngineHooks for TestHooks {
     fn crash_at(&self, point: &'static str) -> bool {
+        let by = lock(&self.advance)
+            .filter(|(p, _)| *p == point)
+            .map(|a| a.1);
+        if let (Some(by), Some(clock)) = (by, lock(&self.clock).as_ref()) {
+            clock.advance(by);
+        }
         let park = {
             let mut p = lock(&self.parked);
             if p.as_ref().is_some_and(|k| k.point == point) {
@@ -465,6 +476,9 @@ impl Journal for GJournal {
     fn fill(&self) -> JournalFill {
         self.inner.fill()
     }
+    fn cut_freeing_file(&self) -> Option<WriteSeq> {
+        self.inner.cut_freeing_file()
+    }
 }
 
 fn take_one(a: &AtomicU64) -> bool {
@@ -791,8 +805,12 @@ impl Vol {
                 ..MemFloor::default()
             }),
             checks,
-            clock,
-            hooks: Arc::new(TestHooks::default()),
+            clock: Arc::clone(&clock),
+            hooks: {
+                let h = TestHooks::default();
+                *lock(&h.clock) = Some(Arc::clone(&clock));
+                Arc::new(h)
+            },
             space_capacity: 1 << 40,
             dirty_cap: None,
             tweak: default_tweak,

@@ -833,6 +833,30 @@ pub struct RollbackFloorView {
     pub tip_hash: String,
 }
 
+/// The write path's counters in `volume_status` (ADR-33). All start at the
+/// attach; the waits and the window's bytes are read without the
+/// coordinator's mutex, so they answer while a commit runs. All 0 when the
+/// volume is not attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WritePathStatus {
+    /// Writes parked now because the journal ring has no free file.
+    pub ring_waiters: u64,
+    /// The longest a write has waited for the ring (one still waiting
+    /// included), milliseconds.
+    pub ring_wait_longest_ms: u64,
+    /// Bytes of the resident journal window now (what the journal keeps in
+    /// memory of what it wrote until the ring file is reclaimed).
+    pub window_resident_bytes: u64,
+    /// Journal reads served from the window.
+    pub window_hits: u64,
+    /// Journal reads that were not (served from the file).
+    pub window_misses: u64,
+    /// The journal bytes of the last cut.
+    pub last_cut_bytes: u64,
+    /// How long the last cut took, C1 to C9, milliseconds.
+    pub last_cut_ms: u64,
+}
+
 /// `volume_status`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeStatusBody {
@@ -868,6 +892,9 @@ pub struct VolumeStatusBody {
     /// Watermarks the full mark ring could not take a mark for since the
     /// attach (until a cut frees a mark file).
     pub journal_marks_skipped: u64,
+    /// The write path's counters (ADR-33): the ring waits, the resident
+    /// journal window and the last cut.
+    pub write_path: WritePathStatus,
     /// Bytes this volume holds locked (DESIGN §3, W7): its queues' I/O
     /// buffers and thread stacks and its journal's buffers and flush thread
     /// stack. 0 when detached.

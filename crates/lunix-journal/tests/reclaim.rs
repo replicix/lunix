@@ -291,3 +291,150 @@ fn a_lane_can_be_reopened_and_continues_after_its_last_record() {
     let r = recover_all(&j);
     assert_eq!(seqs(&r), (1..=6).collect::<Vec<_>>());
 }
+
+/// Writes to `lane` until the ring refuses (`Full`); returns the last `write_seq`.
+fn fill_lane(lane: &mut dyn lunix_iface::journal::JournalLane) -> u64 {
+    let mut last = 0;
+    loop {
+        match lane.try_reserve(RecordKind::Write, BIG).expect("reserve") {
+            SlotOutcome::Reserved(s) => {
+                last = s.write_seq.0;
+                lane.append(s, 0, &pattern(last, BIG)).expect("append");
+                complete_appends(lane, 1);
+            }
+            SlotOutcome::Full => return last,
+            SlotOutcome::NoSpace => panic!("unexpected NoSpace"),
+        }
+        assert!(last < 400, "never full");
+    }
+}
+
+#[test]
+fn a_lane_is_woken_as_soon_as_one_of_its_files_is_free() {
+    // ADR-33 T4: two lanes with a full ring each; one reclaim frees a file of
+    // each. Parked inside the reclaim, after the first file was freed and
+    // before the second lane's, the first lane has been signalled and takes a
+    // reservation, and the other lane has not been signalled and is still full.
+    use lunix_iface::wake::WakeFd;
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 2, 2);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let wakes = [
+        WakeFd::new().expect("eventfd"),
+        WakeFd::new().expect("eventfd"),
+    ];
+    let mut ls: Vec<_> = (0..2u16)
+        .map(|i| {
+            j.open_lane(LaneId(i), wakes[usize::from(i)].clone())
+                .expect("open lane")
+        })
+        .collect();
+    let a = fill_lane(&mut *ls[0]);
+    let b = fill_lane(&mut *ls[1]);
+    let last = a.max(b);
+    group_flush(&j);
+    for w in &wakes {
+        w.drain();
+    }
+    let tail = j.tail_after(WriteSeq(last)).expect("tail");
+
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let go_rx = std::sync::Mutex::new(go_rx);
+    j.set_reclaim_hook(Some(std::sync::Arc::new(move |lane, freed| {
+        let _ = reached_tx.send((lane, freed));
+        if freed == 1 {
+            let _ = go_rx.lock().expect("gate").recv_timeout(T);
+        }
+    })));
+    std::thread::scope(|s| {
+        let h = s.spawn(|| j.reclaim(&tail).expect("reclaim"));
+        let (first, freed) = reached_rx.recv_timeout(T).expect("a file was freed");
+        assert_eq!(freed, 1, "parked after the first file");
+        let (this, other) = (usize::from(first), usize::from(1 - first));
+        assert!(
+            wakes[this].drain() > 0,
+            "the lane whose file is free is signalled while the reclaim goes on"
+        );
+        assert_eq!(
+            wakes[other].drain(),
+            0,
+            "the other lane's file is not free yet"
+        );
+        match ls[other]
+            .try_reserve(RecordKind::Write, BIG)
+            .expect("reserve")
+        {
+            SlotOutcome::Full => {}
+            o => panic!("the other lane is still full, got {o:?}"),
+        }
+        match ls[this]
+            .try_reserve(RecordKind::Write, BIG)
+            .expect("reserve")
+        {
+            SlotOutcome::Reserved(slot) => {
+                let seq = slot.write_seq.0;
+                ls[this]
+                    .append(slot, 0, &pattern(seq, BIG))
+                    .expect("append");
+                complete_appends(&mut *ls[this], 1);
+            }
+            o => panic!("the woken lane takes a reservation, got {o:?}"),
+        }
+        go_tx.send(()).expect("release");
+        let rep = h.join().expect("reclaim thread");
+        assert_eq!(rep.files, 2);
+        assert!(
+            wakes[other].drain() > 0,
+            "the other lane is signalled when its file is free"
+        );
+    });
+}
+
+#[test]
+fn the_cut_that_frees_a_file_is_the_last_record_of_the_oldest_sealed_file() {
+    // ADR-33 `cut_freeing_file`: none before any file is sealed; then the
+    // highest `write_seq` of the fullest lane's oldest sealed file; one below
+    // it frees nothing, it frees that file.
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 2, 4);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l0 = open_lane(&j, 0);
+    let mut l1 = open_lane(&j, 1);
+    assert_eq!(j.cut_freeing_file(), None, "nothing sealed yet");
+    let mut w0 = Vec::new();
+    let mut w1 = Vec::new();
+    // Lane 0 seals two files, lane 1 one.
+    for i in 0..70u64 {
+        w0.push(write_rec(&mut *l0, i, BIG));
+        complete_appends(&mut *l0, 1);
+        if i < 40 {
+            w1.push(write_rec(&mut *l1, i, BIG));
+            complete_appends(&mut *l1, 1);
+        }
+    }
+    group_flush(&j);
+    let ord0: Vec<u32> = {
+        let mut o: Vec<u32> = w0.iter().map(|w| w.ordinal).collect();
+        o.dedup();
+        o
+    };
+    assert!(ord0.len() >= 3, "{ord0:?}");
+    let first0 = w0
+        .iter()
+        .filter(|w| w.ordinal == ord0[0])
+        .map(|w| w.seq)
+        .max()
+        .expect("records");
+    // Lane 0 holds more files than lane 1: it is the fullest lane.
+    let c = j.cut_freeing_file().expect("a sealed file");
+    assert_eq!(c, WriteSeq(first0));
+    let below = j.tail_after(WriteSeq(c.0 - 1)).expect("tail");
+    assert_eq!(j.reclaim(&below).expect("reclaim").files, 0);
+    let at = j.tail_after(c).expect("tail");
+    assert!(j.reclaim(&at).expect("reclaim").files >= 1);
+    // Reclaiming did not touch what the next answer needs.
+    assert!(j.cut_freeing_file().is_some_and(|n| n > c));
+}

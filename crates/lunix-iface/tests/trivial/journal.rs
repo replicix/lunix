@@ -349,6 +349,10 @@ impl Journal for TJournal {
             capacity_bytes: 1 << 30,
         }
     }
+
+    fn cut_freeing_file(&self) -> Option<WriteSeq> {
+        None
+    }
 }
 
 pub struct JFix {

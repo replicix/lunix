@@ -23,6 +23,7 @@
 //! | `detach_busy_retry_ms` | 3000 | how long a detach retries `TRY_STOP_DEV` (udev's probe) |
 //! | `journal_max` | `volume.json` default | `journal_max` of new volumes |
 //! | `journal_resident_max` | the volume's `journal_max` | cap on the resident journal window per attached volume (ADR-33): the bytes the journal keeps in memory of what it wrote until the ring file is reclaimed; plaintext, not locked memory; at least 2097152, a larger value than the volume's `journal_max` counts as `journal_max` |
+//! | `cut_target_ms` | 1000 | the longest a commit's cut should take (ADR-33): the coordinator cuts at most this long at the drain rate of its last cuts, in journal bytes, never less than what frees a ring file of the fullest lane and never more than half the ring; 10 ..= 60000 |
 //! | `commit_interval_ms` | `volume.json` default | commit interval `T` of new volumes |
 //! | `argon2_m_kib`, `argon2_t` | 65536, 3 | Argon2id cost of new passphrase slots |
 //! | `dev_dir` | `/dev/lunix` | where the `<name>` symlinks go |
@@ -51,6 +52,11 @@ use lunix_engine::OnJournalDamage;
 
 /// Smallest `journal_resident_max`: two maximal journal batches.
 pub const MIN_RESIDENT_MAX: u64 = 2 << 20;
+
+/// The range of `cut_target_ms`, milliseconds.
+pub const MIN_CUT_TARGET_MS: u64 = 10;
+/// See [`MIN_CUT_TARGET_MS`].
+pub const MAX_CUT_TARGET_MS: u64 = 60_000;
 
 /// Default config path.
 pub const DEFAULT_CONFIG: &str = "/etc/lunix/lunixd.toml";
@@ -99,6 +105,8 @@ pub struct DaemonConfig {
     /// Cap on the resident journal window of an attached volume (`None`: its
     /// `journal_max`).
     pub journal_resident_max: Option<u64>,
+    /// The cut target of the attached volumes (ADR-33).
+    pub cut_target: Duration,
     /// Commit interval of new volumes.
     pub commit_interval_ms: Option<u64>,
     /// Argon2id memory of new passphrase slots (KiB).
@@ -144,6 +152,7 @@ impl Default for DaemonConfig {
             detach_busy_retry: Duration::from_secs(3),
             journal_max: None,
             journal_resident_max: None,
+            cut_target: Duration::from_secs(1),
             commit_interval_ms: None,
             argon2_m_kib: 65_536,
             argon2_t: 3,
@@ -343,6 +352,15 @@ impl DaemonConfig {
                 }
                 self.journal_resident_max = Some(m);
             }
+            "cut_target_ms" => {
+                let t = n(v)?;
+                if !(MIN_CUT_TARGET_MS..=MAX_CUT_TARGET_MS).contains(&t) {
+                    return Err(format!(
+                        "cut_target_ms must be {MIN_CUT_TARGET_MS} to {MAX_CUT_TARGET_MS}"
+                    ));
+                }
+                self.cut_target = Duration::from_millis(t);
+            }
             "commit_interval_ms" => self.commit_interval_ms = Some(n(v)?),
             "argon2_m_kib" => {
                 self.argon2_m_kib = u32::try_from(n(v)?).map_err(|_| "too large".to_string())?;
@@ -470,6 +488,19 @@ mod tests {
     }
 
     #[test]
+    fn cut_target_ms_is_validated() {
+        assert_eq!(DaemonConfig::default().cut_target, Duration::from_secs(1));
+        let c = DaemonConfig::parse("cut_target_ms = 250").unwrap();
+        assert_eq!(c.cut_target, Duration::from_millis(250));
+        assert!(DaemonConfig::parse("cut_target_ms = 10").is_ok());
+        assert!(DaemonConfig::parse("cut_target_ms = 60000").is_ok());
+        assert!(DaemonConfig::parse("cut_target_ms = 9").is_err());
+        assert!(DaemonConfig::parse("cut_target_ms = 60001").is_err());
+        assert!(DaemonConfig::parse("cut_target_ms = 0").is_err());
+        assert!(DaemonConfig::parse("cut_target_ms = \"1s\"").is_err());
+    }
+
+    #[test]
     fn a_full_file_parses() {
         let c = DaemonConfig::parse(
             r#"
@@ -485,6 +516,7 @@ queues = 4
 call_timeout_ms = 1_000
 journal_max = 268435456
 journal_resident_max = 4194304
+cut_target_ms = 500
 volume_roots = "/a, /b"
 "#,
         )
@@ -499,6 +531,7 @@ volume_roots = "/a, /b"
         assert_eq!(c.call_timeout, Duration::from_secs(1));
         assert_eq!(c.journal_max, Some(256 << 20));
         assert_eq!(c.journal_resident_max, Some(4 << 20));
+        assert_eq!(c.cut_target, Duration::from_millis(500));
         assert_eq!(
             c.volume_roots,
             vec![PathBuf::from("/a"), PathBuf::from("/b")]

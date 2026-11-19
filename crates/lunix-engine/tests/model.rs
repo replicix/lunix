@@ -50,6 +50,21 @@ struct Model {
     min_n: usize,
     initial: u64,
     crashed: Vec<&'static str>,
+    /// Cuts are bounded by journal bytes at one record or so (ADR-33): the
+    /// cut of every commit and tick is a prefix, and a durable tip covers the
+    /// log up to its `cut_seq`, not all of it.
+    bounded: bool,
+    /// `(write_seq, log length after it)` of every sequenced request, in
+    /// `write_seq` order: what a `cut_seq` covers.
+    seqs: Vec<(u64, usize)>,
+    /// Commits and ticks whose cut left logged requests uncut.
+    partial_cuts: u64,
+}
+
+/// Cuts of one record: a 1 ms target at the drain rate of cuts that each take
+/// a second of the manual clock (`Vol::hooks.advance`).
+fn one_record_cuts(c: &mut lunix_engine::EngineConfig) {
+    c.cut_target = Duration::from_millis(1);
 }
 
 fn fail(msg: String) -> TestCaseError {
@@ -57,12 +72,16 @@ fn fail(msg: String) -> TestCaseError {
 }
 
 impl Model {
-    fn new(cs: u32, seed: u64) -> Self {
+    fn new(cs: u32, seed: u64, bounded: bool) -> Self {
         let chunks = 8;
         let mut vol = Vol::create(cs, chunks, 2, JournalMode::Mixed(seed));
         // Half the workloads run with journal marks: write_seq numbers the
         // engine never issued, interleaved with its own.
         vol.marks = seed % 2 == 1;
+        if bounded {
+            vol.tweak = one_record_cuts;
+            *lock(&vol.hooks.advance) = Some(("engine.c3.destaged", Duration::from_secs(1)));
+        }
         let run = vol.open().map_err(|e| e.0).expect("open");
         let size = chunks * u64::from(cs);
         Self {
@@ -76,6 +95,27 @@ impl Model {
             min_n: 0,
             initial: size,
             crashed: Vec::new(),
+            bounded,
+            seqs: Vec::new(),
+            partial_cuts: 0,
+        }
+    }
+
+    /// The log length a cut at `cut` covers: the requests sequenced at or
+    /// below it.
+    fn covered(&self, cut: u64) -> usize {
+        let k = self.seqs.partition_point(|(s, _)| *s <= cut);
+        k.checked_sub(1).map_or(0, |i| self.seqs[i].1)
+    }
+
+    /// A bounded or an explicit commit, as the model runs.
+    fn commit(&mut self, force: bool) -> lunix_iface::Result<CommitOutcome> {
+        let bounded = self.bounded;
+        let e = &self.r().engine;
+        if bounded {
+            e.commit_bounded(force)
+        } else {
+            e.commit_now(force)
         }
     }
 
@@ -114,6 +154,7 @@ impl Model {
                 .get(&tag)
                 .ok_or_else(|| fail(format!("sequenced unknown tag {tag:?}")))?;
             let n = self.record(&io);
+            self.seqs.push((seq.0, n));
             at.insert(tag, n);
         }
         Ok(())
@@ -213,8 +254,14 @@ impl Model {
     }
 
     fn committed(&mut self, out: CommitOutcome) {
-        if let CommitOutcome::Committed { .. } = out {
-            self.min_n = self.log.len();
+        if let CommitOutcome::Committed { cut_seq, .. } = out {
+            self.min_n = if self.bounded {
+                let covered = self.covered(cut_seq.0);
+                self.partial_cuts += u64::from(covered < self.log.len());
+                self.min_n.max(covered)
+            } else {
+                self.log.len()
+            };
         }
     }
 
@@ -227,6 +274,11 @@ impl Model {
             Ok(r) => r,
             Err((e, _)) => return Err(fail(format!("reopen failed: {e}"))),
         };
+        if self.bounded {
+            // The durable tip covers the log up to its cut (a crash at or
+            // after C6 of a bounded cut included).
+            self.min_n = self.min_n.max(self.covered(r.engine.tip().1 .0));
+        }
         let actual = r.read_all();
         let Some(n) = self.log.first_match(&actual, self.min_n) else {
             return Err(fail(format!(
@@ -236,6 +288,7 @@ impl Model {
             )));
         };
         self.ops.truncate(n);
+        self.seqs.retain(|(_, len)| *len <= n);
         self.log = OracleLog::new(self.initial);
         let mut cur = DeviceOracle::new(self.initial);
         for op in &self.ops {
@@ -261,7 +314,7 @@ impl Model {
 
     fn crash_in_commit(&mut self, point: &'static str, seed: u64) -> Result<(), TestCaseError> {
         self.vol.hooks.arm(point, 1);
-        let res = self.r().engine.commit_now(true);
+        let res = self.commit(true);
         self.vol.hooks.disarm();
         if res.is_ok() || self.vol.hooks.crashed() != Some(point) {
             return Err(fail(format!("commit did not stop at {point}: {res:?}")));
@@ -269,7 +322,7 @@ impl Model {
         self.crashed.push(point);
         // From C6 on the commit is durable and covers every logged write.
         let durable = ["engine.c6", "engine.c7", "engine.c8", "engine.c9"];
-        if durable.iter().any(|p| point.starts_with(p)) {
+        if !self.bounded && durable.iter().any(|p| point.starts_with(p)) {
             self.min_n = self.log.len();
         }
         self.reopen(seed)
@@ -312,9 +365,7 @@ impl Model {
             55..=79 => self.read(raw)?,
             80..=83 => {
                 let out = self
-                    .r()
-                    .engine
-                    .commit_now(true)
+                    .commit(true)
                     .map_err(|e| fail(format!("commit: {e}")))?;
                 self.committed(out);
             }
@@ -372,7 +423,7 @@ impl Model {
     }
 }
 
-fn run_model(cs: u32) {
+fn run_model(cs: u32, bounded: bool) {
     let cases = env_or("LUNIX_MODEL_CASES", 100);
     let ops = env_or("LUNIX_MODEL_OPS", 2000);
     let mut runner = TestRunner::new(Config {
@@ -386,9 +437,10 @@ fn run_model(cs: u32) {
         proptest::collection::vec((any::<u8>(), any::<u64>(), any::<u64>(), any::<u64>()), ops),
     );
     let coverage: Mutex<BTreeMap<&'static str, u64>> = Mutex::new(BTreeMap::new());
+    let partial = std::sync::atomic::AtomicU64::new(0);
     runner
         .run(&strat, |(seed, raws)| {
-            let mut m = Model::new(cs, seed);
+            let mut m = Model::new(cs, seed, bounded);
             let mut i = 0;
             while i < raws.len() {
                 i += m.step(raws[i], &raws[i + 1..])?;
@@ -398,6 +450,7 @@ fn run_model(cs: u32) {
             if !v.is_empty() {
                 return Err(fail(format!("durable-order violations: {v:?}")));
             }
+            partial.fetch_add(m.partial_cuts, std::sync::atomic::Ordering::Relaxed);
             let mut cov = coverage.lock().unwrap_or_else(|p| p.into_inner());
             let mut seen = m.crashed.clone();
             seen.sort_unstable();
@@ -408,6 +461,11 @@ fn run_model(cs: u32) {
             Ok(())
         })
         .unwrap_or_else(|e| panic!("model test (chunk size {cs}): {e}"));
+    if bounded {
+        // The bound is really in play: cuts that left requests behind.
+        let n = partial.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(n >= cases as u64, "only {n} partial cuts in {cases} cases");
+    }
     let cov = coverage.into_inner().unwrap_or_else(|p| p.into_inner());
     let need = if cases >= 100 {
         5
@@ -426,12 +484,25 @@ fn run_model(cs: u32) {
 
 #[test]
 fn model_16k() {
-    run_model(16 << 10);
+    run_model(16 << 10, false);
 }
 
 #[test]
 fn model_64k() {
-    run_model(64 << 10);
+    run_model(64 << 10, false);
+}
+
+/// The same model with every cut of a commit or tick bounded to about one
+/// record (ADR-33 T3): each crash point is hit inside a bounded cut and the
+/// recovered device is a prefix covering at least the durable tip's `cut_seq`.
+#[test]
+fn model_16k_one_record_cuts() {
+    run_model(16 << 10, true);
+}
+
+#[test]
+fn model_64k_one_record_cuts() {
+    run_model(64 << 10, true);
 }
 
 /// Deterministic case (review major 5): writes still in flight when a cut

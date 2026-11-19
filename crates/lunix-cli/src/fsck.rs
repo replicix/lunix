@@ -390,6 +390,7 @@ pub(crate) fn status_for_test(
         journal_capacity: 1 << 30,
         journal_marks_written: 0,
         journal_marks_skipped: 0,
+        write_path: Default::default(),
         locked_bytes: 0,
         last_commit_seq: 1,
         last_commit_ms: None,

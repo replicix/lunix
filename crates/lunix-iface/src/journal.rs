@@ -537,6 +537,21 @@ pub trait Journal: Send + Sync {
 
     /// The ring's fill. Non-blocking.
     fn fill(&self) -> JournalFill;
+
+    /// The lowest cut `c` for which [`tail_after`](Self::tail_after)`(c)` and
+    /// [`reclaim`](Self::reclaim) free at least one ring file of the fullest
+    /// lane (ADR-33, bounded cuts): the lane with the fewest free files among
+    /// those that hold a sealed file with records, and in it the oldest such
+    /// file; the answer is the highest `write_seq` that file holds. A tie
+    /// between lanes takes the lower answer. The coordinator raises a bounded
+    /// cut to it, so a cut under pressure always frees something.
+    ///
+    /// `None` when no lane has such a file (every file is free or is the
+    /// lane's current one): no cut frees anything. The answer may lie at or
+    /// below an earlier cut (a file whose reclaim has not happened yet); a
+    /// caller takes the larger of it and its own lower bound. Read-only and
+    /// non-blocking; the answer is a snapshot.
+    fn cut_freeing_file(&self) -> Option<WriteSeq>;
 }
 
 impl fmt::Display for LaneId {

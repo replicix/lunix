@@ -1022,6 +1022,20 @@ impl Journal for MemJournal {
             capacity_bytes: u64::from(st.cfg.max_files) * st.cfg.file_bytes,
         }
     }
+    fn cut_freeing_file(&self) -> Option<WriteSeq> {
+        let st = lock(&self.inner.state);
+        // The files share one pool here: the fullest lane is the one that
+        // holds the most; its oldest sealed file (below the current one).
+        st.lanes
+            .iter()
+            .filter_map(|l| {
+                let (_, f) = l.files.range(..l.cur).next()?;
+                let seq = f.recs.values().filter(|r| !r.torn).map(|r| r.seq).max()?;
+                Some((l.files.len(), seq))
+            })
+            .min_by_key(|&(files, seq)| (std::cmp::Reverse(files), seq))
+            .map(|(_, seq)| WriteSeq(seq))
+    }
 }
 
 struct MemLane {

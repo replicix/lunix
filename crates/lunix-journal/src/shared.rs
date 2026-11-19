@@ -6,6 +6,7 @@ use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
 use lunix_iface::journal::FlushDone;
+use lunix_iface::wake::WakeFd;
 use lunix_iface::Error;
 
 use crate::aligned::AlignedBuf;
@@ -141,7 +142,17 @@ pub(crate) struct Shared {
     pub fail_sync: AtomicBool,
     /// The next batch write completes as failed (test hook).
     pub fail_write: AtomicBool,
+    /// Each lane's wake fd, kept from `open_lane`: reclaim signals a lane as
+    /// soon as one of its files is free (ADR-33), not at the end of the
+    /// whole reclaim.
+    pub wakes: Vec<Mutex<Option<WakeFd>>>,
+    /// Called after each queue file reclaim freed, with the lane and the
+    /// number of files freed so far by that reclaim (test hook).
+    pub reclaim_hook: Mutex<Option<ReclaimHook>>,
 }
+
+/// A test hook of reclaim: see [`Shared::reclaim_hook`].
+pub(crate) type ReclaimHook = std::sync::Arc<dyn Fn(u16, u32) + Send + Sync>;
 
 impl Shared {
     pub(crate) fn poisoned_at(&self) -> Option<u64> {
@@ -154,6 +165,16 @@ impl Shared {
     pub(crate) fn poison(&self, seq: u64) {
         self.poison_at.fetch_min(seq, Ordering::SeqCst);
         self.coord.notify();
+    }
+
+    /// Signals lane `lane`'s queue: a ring file of it is free, so a write
+    /// parked for the ring may fit now.
+    pub(crate) fn wake_lane(&self, lane: u16) {
+        if let Some(w) = self.wakes.get(usize::from(lane)) {
+            if let Some(w) = lock(w).as_ref() {
+                w.signal();
+            }
+        }
     }
 
     pub(crate) fn poisoned_error() -> Error {
