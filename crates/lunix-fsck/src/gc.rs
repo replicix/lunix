@@ -295,6 +295,7 @@ impl SpaceGate for OfflineSpace {
         _bytes: u64,
         _wake: Option<&WakeFd>,
         _arrived: std::time::Duration,
+        _class: lunix_iface::space::ReserveClass,
     ) -> Result<ReserveOutcome> {
         Ok(ReserveOutcome::Reserved)
     }

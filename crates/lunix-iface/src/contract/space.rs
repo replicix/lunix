@@ -9,7 +9,8 @@ use super::wait_until;
 use crate::clock::{Clock, ManualClock};
 use crate::error::ErrorKind;
 use crate::space::{
-    Freed, LadderStep, LadderStepKind, ReserveOutcome, SpaceGate, SpaceKind, Urgency, WaiterState,
+    Freed, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceGate, SpaceKind, Urgency,
+    WaiterState,
 };
 
 /// How to build the gate under test.
@@ -155,6 +156,78 @@ pub fn wait_mode_parks_and_grants_fifo<
     assert_eq!(g.snapshot().waiters, 0);
 }
 
+/// The class of a reservation (ADR-32): a gate that paces may admit a
+/// `Sync` one at once, and may answer a request that fits with `Paced`
+/// instead of `Reserved`; a gate that does not pace ignores the class. Either
+/// way a `Paced` handle behaves like a `Parked` one: pending until granted,
+/// charged when granted, never charged before, in FIFO order.
+pub fn the_class_and_a_paced_wait_charge_like_a_plain_reservation<
+    G: SpaceGate,
+    M: Fn(SpaceSetup, Arc<ManualClock>) -> Arc<G>,
+>(
+    make: &M,
+) {
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let g = make(SpaceSetup::new(100, 0, OnFull::Wait), clock.clone());
+    let now = clock.monotonic();
+    reserved(
+        g.reserve_since(K, 30, None, now, ReserveClass::Sync)
+            .expect("reserve"),
+    );
+    assert_eq!(used(&*g), 30);
+    // One that does not fit waits (a gate that paces says `Parked` for it
+    // too), and is charged only when it is granted.
+    let w = match g
+        .reserve_since(K, 80, None, now, ReserveClass::Sync)
+        .expect("reserve")
+    {
+        ReserveOutcome::Parked(w) | ReserveOutcome::Paced(w) => w,
+        other => panic!("expected a wait, got {other:?}"),
+    };
+    assert_eq!(w.state(), WaiterState::Pending);
+    assert_eq!(used(&*g), 30, "nothing charged before the grant");
+    g.release(K, 30);
+    assert_eq!(w.state(), WaiterState::Granted);
+    assert_eq!(used(&*g), 80);
+    // Inside a band (a gate that has one: 8 MiB of headroom under a soft
+    // mark of 32 MiB): a bulk request that fits is a plain reservation, or a
+    // paced wait that is granted and charged like one. The first megabyte
+    // goes through the bucket; the next is paced by a gate that paces.
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let g = make(SpaceSetup::new(64 << 20, 0, OnFull::Wait), clock.clone());
+    g.charge(K, 56 << 20).expect("charge");
+    let base = used(&*g);
+    let now = clock.monotonic();
+    let mut paced = None;
+    for i in 0..3u64 {
+        match g
+            .reserve_since(K, 1 << 20, None, now, ReserveClass::Bulk)
+            .expect("reserve")
+        {
+            ReserveOutcome::Reserved => assert_eq!(used(&*g), base + (i + 1) * (1 << 20)),
+            ReserveOutcome::Paced(w) => {
+                paced = Some((w, i));
+                break;
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    if let Some((w, i)) = paced {
+        assert_eq!(w.state(), WaiterState::Pending);
+        assert_eq!(
+            used(&*g),
+            base + i * (1 << 20),
+            "not charged before the grant"
+        );
+        assert_eq!(g.snapshot().waiters, 1);
+        clock.advance(Duration::from_secs(120));
+        g.tick();
+        assert_eq!(w.state(), WaiterState::Granted);
+        assert_eq!(used(&*g), base + (i + 1) * (1 << 20));
+        assert_eq!(g.snapshot().waiters, 0);
+    }
+}
+
 /// A parked request expires on the gate's clock and charges nothing.
 pub fn timeout_expires_waiters_on_the_clock<
     G: SpaceGate,
@@ -194,7 +267,10 @@ pub fn a_wait_counts_from_the_arrival<
     reserved(g.reserve(K, 100, None).expect("reserve"));
     let arrived = clock.monotonic();
     clock.advance(Duration::from_millis(600));
-    let ReserveOutcome::Parked(w) = g.reserve_since(K, 10, None, arrived).expect("reserve") else {
+    let ReserveOutcome::Parked(w) = g
+        .reserve_since(K, 10, None, arrived, ReserveClass::Bulk)
+        .expect("reserve")
+    else {
         panic!("expected a parked request");
     };
     clock.advance(Duration::from_millis(450));
@@ -211,7 +287,8 @@ pub fn a_wait_counts_from_the_arrival<
     clock.advance(Duration::from_secs(2));
     assert!(!g.snapshot().full);
     assert!(matches!(
-        g.reserve_since(K, 10, None, arrived).expect("reserve"),
+        g.reserve_since(K, 10, None, arrived, ReserveClass::Bulk)
+            .expect("reserve"),
         ReserveOutcome::NoSpace
     ));
     let snap = g.snapshot();

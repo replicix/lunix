@@ -97,7 +97,13 @@ impl SpaceGate for TSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
-        self.reserve_since(kind, bytes, wake, self.clock.monotonic())
+        self.reserve_since(
+            kind,
+            bytes,
+            wake,
+            self.clock.monotonic(),
+            ReserveClass::Bulk,
+        )
     }
 
     fn reserve_since(
@@ -106,6 +112,7 @@ impl SpaceGate for TSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: std::time::Duration,
+        _class: ReserveClass,
     ) -> Result<ReserveOutcome> {
         let mut st = lock(&self.st);
         if st.read_only {
@@ -204,6 +211,7 @@ impl SpaceGate for TSpace {
                 .count() as u64,
             read_only: st.read_only,
             full: false,
+            throttle: lunix_iface::space::ThrottleFigures::default(),
         }
     }
 

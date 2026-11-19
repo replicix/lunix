@@ -1,6 +1,6 @@
 //! The engine: shared state, `BlockEngine`, the control-plane entry points.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -145,6 +145,13 @@ pub(crate) struct Inner {
     /// (not idle, not in its grace): the background thread ticks again after
     /// [`GC_BUSY_PERIOD`] instead of its period.
     pub(crate) gc_busy: AtomicBool,
+    /// The collector's pressure (ADR-32): from the gate's state at each
+    /// tick, with the hold. The level is mirrored in `pressure_level` for
+    /// the collector calls.
+    pub(crate) pressure: Mutex<crate::pressure::PressureTracker>,
+    pub(crate) pressure_level: AtomicU8,
+    /// The throttle's log lines (ADR-32).
+    pub(crate) throttle_watch: Mutex<crate::pressure::ThrottleWatch>,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
     /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
@@ -329,6 +336,9 @@ impl Engine {
             gc_wake: (Mutex::new(()), Condvar::new()),
             gc_requests: AtomicU64::new(0),
             gc_busy: AtomicBool::new(false),
+            pressure: Mutex::new(crate::pressure::PressureTracker::default()),
+            pressure_level: AtomicU8::new(0),
+            throttle_watch: Mutex::new(crate::pressure::ThrottleWatch::default()),
             resize_hook: Mutex::new(None),
             report: rec.report,
             full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
@@ -430,6 +440,19 @@ impl Engine {
     /// failure inside a cut made it give up.
     pub fn is_stopped(&self) -> bool {
         self.inner.is_failed()
+    }
+
+    /// True once a quiesce began (`BlockEngine::quiesce` was called): no
+    /// collector call starts any more.
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::Acquire)
+    }
+
+    /// What the collector is getting (ADR-32): normal, raised while writes
+    /// are slowed, urgent while they wait or fail for space. Updated at each
+    /// tick from the gate's state.
+    pub fn gc_pressure(&self) -> crate::pressure::Pressure {
+        self.inner.pressure_now()
     }
 
     /// The collector's status, readable after the engine is gone (see

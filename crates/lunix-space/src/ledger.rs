@@ -6,11 +6,15 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use lunix_format::local::OnFull;
-use lunix_iface::space::{SpaceKind, SpaceSnapshot, Waiter, WaiterState};
+use lunix_iface::space::{
+    ReserveClass, ReserveOutcome, SpaceKind, SpaceSnapshot, ThrottleState, Waiter, WaiterState,
+};
+use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
 
 use crate::policy::Policy;
 use crate::probe::FsStat;
+use crate::throttle::{Bucket, Counters, Meter, StateClock, ThrottleConfig};
 
 const HEADROOM: usize = SpaceKind::Headroom as usize;
 
@@ -23,6 +27,8 @@ pub(crate) struct Parked {
     pub bytes: u64,
     pub arrived: Duration,
     pub deadline: Duration,
+    /// When the gate parked it (the gate's own wait is measured from here).
+    pub parked_at: Duration,
 }
 
 /// The last file-system reading and the ledger level it was taken at.
@@ -51,10 +57,16 @@ pub(crate) struct Ledger {
     pub closing: bool,
     /// Times the volume latched full since the gate was built.
     pub fulls: u64,
+    /// The paced band's settings (ADR-32).
+    pub throttle: ThrottleConfig,
+    pub bucket: Bucket,
+    pub counters: Counters,
+    pub state: StateClock,
+    meter: Meter,
 }
 
 impl Ledger {
-    pub fn new(policy: Policy, segment_size: u64) -> Self {
+    pub fn new(policy: Policy, segment_size: u64, throttle: ThrottleConfig, now: Duration) -> Self {
         Self {
             held: [0; 7],
             waiters: VecDeque::new(),
@@ -65,6 +77,11 @@ impl Ledger {
             full: false,
             closing: false,
             fulls: 0,
+            throttle,
+            bucket: Bucket::new(),
+            counters: Counters::default(),
+            state: StateClock::new(now),
+            meter: Meter::default(),
         }
     }
 
@@ -178,28 +195,143 @@ impl Ledger {
             })
     }
 
-    /// Grants parked requests that now fit, strictly first in, first out.
-    /// A granted request is charged before it is told.
-    pub fn grant_waiters(&mut self) {
+    /// The soft mark now (0 with the band off).
+    pub fn soft(&self) -> u64 {
+        self.throttle.soft_mark(self.limit())
+    }
+
+    /// The band's rate now, bytes per second: `None` above the soft mark,
+    /// with the band off, or once a quiesce began (it admits everything that
+    /// fits).
+    pub fn band_rate(&self) -> Option<u64> {
+        if self.closing {
+            return None;
+        }
+        self.throttle.rate(self.headroom(), self.soft())
+    }
+
+    /// The first request still waiting.
+    fn head(&self) -> Option<&Parked> {
+        self.waiters
+            .iter()
+            .find(|p| p.waiter.state() == WaiterState::Pending)
+    }
+
+    /// The gate's state from the ledger.
+    pub fn throttle_state(&self) -> ThrottleState {
+        if self.full {
+            ThrottleState::Full
+        } else if self.head().is_some_and(|p| !self.fits(p.bytes)) {
+            ThrottleState::Stop
+        } else if self.band_rate().is_some() {
+            ThrottleState::Slowdown
+        } else {
+            ThrottleState::Open
+        }
+    }
+
+    /// Records the state at `now` (and the rate meter); drops the bucket when
+    /// the band is left. Returns true when the state changed.
+    pub fn note_state(&mut self, now: Duration) -> bool {
+        let to = self.throttle_state();
+        if self.band_rate().is_none() {
+            self.bucket.deactivate();
+        }
+        self.meter.sample(now, &self.counters);
+        self.state.enter(to, now, &mut self.counters)
+    }
+
+    /// A request that waited in the gate was admitted.
+    fn note_delay(&mut self, p: &Parked, now: Duration, granted: bool) {
+        let ms = u64::try_from(now.saturating_sub(p.parked_at).as_millis()).unwrap_or(u64::MAX);
+        self.counters.delay_max_ms = self.counters.delay_max_ms.max(ms);
+        if granted {
+            self.counters.delayed_writes += 1;
+            self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
+            self.counters.admitted = self.counters.admitted.saturating_add(p.bytes);
+        }
+    }
+
+    /// The time at which the delay cap admits a request that arrived at
+    /// `arrived`: the cap, or the volume's `full_timeout` if that is shorter
+    /// (a paced request is never failed for the pace).
+    fn cap_at(&self, arrived: Duration) -> Duration {
+        arrived.saturating_add(self.throttle.max_delay.min(self.policy.full_timeout))
+    }
+
+    /// Grants parked requests that now fit, strictly first in, first out. A
+    /// granted request is charged before it is told. Inside the band the head
+    /// also needs its bytes from the bucket, or to have waited the delay cap
+    /// (then the bucket carries the debt).
+    pub fn grant_waiters(&mut self, now: Duration) {
+        self.grant_inner(now, self.policy.on_full == OnFull::Error);
+    }
+
+    /// [`grant_waiters`](Self::grant_waiters); `refuse_unfit` refuses a head
+    /// that does not fit at once (`on_full = error`) instead of stopping.
+    fn grant_inner(&mut self, now: Duration, refuse_unfit: bool) {
         self.update_latch();
         loop {
             self.prune_front();
             let Some(front) = self.waiters.front() else {
-                return;
+                break;
             };
-            if !self.fits(front.bytes) {
-                return;
+            let bytes = front.bytes;
+            let arrived = front.arrived;
+            if !self.fits(bytes) {
+                if refuse_unfit {
+                    // `error` refuses a request that does not fit at once:
+                    // one that was paced while it fitted does not wait for
+                    // space, and nothing latches (review M3).
+                    if let Some(p) = self.waiters.pop_front() {
+                        if p.waiter.expire() {
+                            self.note_delay(&p, now, false);
+                            self.counters.enospc += 1;
+                        }
+                    }
+                    continue;
+                }
+                break;
+            }
+            if let Some(rate) = self.band_rate() {
+                self.bucket.refill(now, rate);
+                if self.bucket.has(bytes) {
+                    self.bucket.take(bytes);
+                } else if now >= self.cap_at(arrived) || self.due_behind(now) {
+                    self.bucket.overdraw(bytes, rate);
+                    self.counters.delay_capped += 1;
+                } else {
+                    break;
+                }
             }
             let Some(p) = self.waiters.pop_front() else {
-                return;
+                break;
             };
             self.charge_raw(p.kind, p.bytes);
-            if !p.waiter.grant() {
+            if p.waiter.grant() {
+                self.note_delay(&p, now, true);
+            } else {
                 // Cancelled between the check and the grant: undo.
                 let h = &mut self.held[p.kind.index()];
                 *h = h.saturating_sub(p.bytes);
             }
         }
+        self.note_state(now);
+    }
+
+    /// True when a request behind the head has waited its delay cap: the
+    /// gate's queue is in order of `reserve` calls, not of arrival, so an old
+    /// request can stand behind a young head. The head, and what stands
+    /// before the due request, is admitted with it (the bucket takes the
+    /// debt): a request that fits is never failed for the pace (review M1).
+    fn due_behind(&self, now: Duration) -> bool {
+        // The scan stops at a request that does not fit: nothing behind it
+        // can follow the head.
+        self.waiters
+            .iter()
+            .skip(1)
+            .take_while(|p| self.fits(p.bytes))
+            .any(|p| p.waiter.state() == WaiterState::Pending && now >= self.cap_at(p.arrived))
     }
 
     /// Expires waiters whose deadline is at or before `now`. The first expiry
@@ -207,6 +339,16 @@ impl Ledger {
     /// space with it (ADR-32). Returns how many this call failed, then lets
     /// what fits be granted (none is left unless the latch opened).
     pub fn expire(&mut self, now: Duration) -> usize {
+        // A paced request that fits is admitted by its cap before its
+        // deadline can latch the volume.
+        self.grant_waiters(now);
+        // Under `error` nothing waits for space and nothing latches.
+        if self.policy.on_full == OnFull::Error {
+            return 0;
+        }
+        // What is left after the grants is a request that does not fit, or
+        // stands behind one (the cap is never later than the deadline): the
+        // wait is for space.
         let due = self
             .waiters
             .iter()
@@ -214,17 +356,30 @@ impl Ledger {
         if !due {
             return 0;
         }
-        let n = self.fail_waiters();
+        let n = self.fail_waiters(now, true);
         self.full = true;
         self.fulls += 1;
-        self.grant_waiters();
+        self.grant_waiters(now);
         n
     }
 
     /// Fails every pending request with `TimedOut` (the queue answers
-    /// `ENOSPC`); returns how many.
-    pub fn fail_waiters(&mut self) -> usize {
-        self.waiters.drain(..).filter(|p| p.waiter.expire()).count()
+    /// `ENOSPC`, or `EIO` on a read-only volume); returns how many.
+    /// `enospc` counts them as failed for space.
+    pub fn fail_waiters(&mut self, now: Duration, enospc: bool) -> usize {
+        let all: Vec<Parked> = self.waiters.drain(..).collect();
+        let mut n = 0;
+        for p in all {
+            if p.waiter.expire() {
+                self.note_delay(&p, now, false);
+                n += 1;
+            }
+        }
+        if enospc {
+            self.counters.enospc += n as u64;
+        }
+        self.note_state(now);
+        n
     }
 
     /// The earliest deadline of a pending request.
@@ -234,6 +389,26 @@ impl Ledger {
             .filter(|p| p.waiter.state() == WaiterState::Pending)
             .map(|p| p.deadline)
             .min()
+    }
+
+    /// When the timer thread must look again: the earliest deadline, and for
+    /// a paced head the moment its tokens are there or the delay cap passes.
+    pub fn next_wake(&self, now: Duration) -> Option<Duration> {
+        let deadline = self.next_deadline();
+        let paced = self.head().and_then(|p| {
+            let rate = self.band_rate()?;
+            if !self.fits(p.bytes) {
+                return None;
+            }
+            let mut b = self.bucket;
+            b.refill(now, rate);
+            let tokens = now.saturating_add(b.wait_for(p.bytes, rate));
+            Some(tokens.min(self.cap_at(p.arrived)))
+        });
+        match (deadline, paced) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// Re-judges every parked request under the current policy (after
@@ -250,17 +425,175 @@ impl Ledger {
         for p in &mut self.waiters {
             p.deadline = p.arrived.saturating_add(t);
         }
-        self.grant_waiters();
-        if self.policy.on_full == OnFull::Error || self.closing {
-            self.fail_waiters()
+        // The model of `on_full = error`: grant what fits, then refuse
+        // (the grant loop itself would refuse a head that does not fit and
+        // go on to grant what stands behind it).
+        self.grant_inner(now, false);
+        if self.closing {
+            self.fail_waiters(now, true)
+        } else if self.policy.on_full == OnFull::Error {
+            self.fail_unfit(now)
         } else {
             self.expire(now)
         }
     }
 
+    /// Fails the pending requests (`on_full = error`), except those inside
+    /// the band that fit: they wait for their pace, not for space, and pacing
+    /// is not a refusal (ADR-32). Returns how many failed.
+    pub fn fail_unfit(&mut self, now: Duration) -> usize {
+        let all: Vec<Parked> = self.waiters.drain(..).collect();
+        let paced = self.band_rate().is_some();
+        let mut n = 0;
+        for p in all {
+            if p.waiter.state() != WaiterState::Pending {
+                continue;
+            }
+            if paced && self.fits(p.bytes) {
+                self.waiters.push_back(p);
+            } else if p.waiter.expire() {
+                self.note_delay(&p, now, false);
+                n += 1;
+            }
+        }
+        self.counters.enospc += n as u64;
+        self.note_state(now);
+        n
+    }
+
     /// Expires every parked request (the volume went read-only).
-    pub fn expire_all(&mut self) {
-        self.fail_waiters();
+    pub fn expire_all(&mut self, now: Duration) {
+        self.fail_waiters(now, false);
+    }
+
+    /// Decides a reservation (ADR-32): charges it, parks it behind the head
+    /// (for space, or for the band's pace) or refuses it. `arrived` is when
+    /// the request reached its queue.
+    pub fn reserve(
+        &mut self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: Duration,
+        class: ReserveClass,
+        now: Duration,
+    ) -> ReserveOutcome {
+        self.update_latch();
+        if self.full {
+            // Latched full: fail at once until the headroom recovers.
+            self.counters.enospc += 1;
+            self.note_state(now);
+            return ReserveOutcome::NoSpace;
+        }
+        self.prune_front();
+        let no_wait = self.policy.on_full == OnFull::Error || self.closing;
+        if !self.fits(bytes) {
+            if no_wait {
+                self.counters.enospc += 1;
+                return ReserveOutcome::NoSpace;
+            }
+            return self.park(kind, bytes, wake, arrived, now, false);
+        }
+        let head_fits = self.head().is_none_or(|p| self.fits(p.bytes));
+        let ahead = self.head().is_some();
+        let Some(rate) = self.band_rate() else {
+            if !ahead || no_wait {
+                self.admit(kind, bytes);
+                return ReserveOutcome::Reserved;
+            }
+            return self.park(kind, bytes, wake, arrived, now, false);
+        };
+        // Inside the band.
+        self.bucket.refill(now, rate);
+        if class == ReserveClass::Sync && head_fits {
+            // The write an fsync waits on: at once, charged to the bucket.
+            self.bucket.overdraw(bytes, rate);
+            self.counters.bypassed_fua += 1;
+            self.admit(kind, bytes);
+            self.note_state(now);
+            return ReserveOutcome::Reserved;
+        }
+        if !ahead {
+            if self.bucket.has(bytes) {
+                self.bucket.take(bytes);
+                self.admit(kind, bytes);
+                self.note_state(now);
+                return ReserveOutcome::Reserved;
+            }
+            if now >= self.cap_at(arrived) {
+                // It waited its cap already (in its queue): admitted, the
+                // bucket carries the debt.
+                self.bucket.overdraw(bytes, rate);
+                self.counters.delay_capped += 1;
+                self.admit(kind, bytes);
+                self.note_state(now);
+                return ReserveOutcome::Reserved;
+            }
+        }
+        self.park(kind, bytes, wake, arrived, now, head_fits)
+    }
+
+    /// Charges an admitted reservation.
+    fn admit(&mut self, kind: SpaceKind, bytes: u64) {
+        self.charge_raw(kind, bytes);
+        self.counters.admitted = self.counters.admitted.saturating_add(bytes);
+    }
+
+    /// Parks a request behind the queue. `fits` says the request itself fits
+    /// (it waits for its turn or for tokens): `Paced`; else it waits for
+    /// space: `Parked`.
+    fn park(
+        &mut self,
+        kind: SpaceKind,
+        bytes: u64,
+        wake: Option<&WakeFd>,
+        arrived: Duration,
+        now: Duration,
+        fits: bool,
+    ) -> ReserveOutcome {
+        let waiter = Waiter::new(wake.cloned());
+        let arrived = arrived.min(now);
+        let deadline = arrived.saturating_add(self.policy.full_timeout);
+        self.waiters.push_back(Parked {
+            waiter: waiter.clone(),
+            kind,
+            bytes,
+            arrived,
+            deadline,
+            parked_at: now,
+        });
+        let fits = fits && self.fits(bytes);
+        if deadline <= now {
+            if !fits {
+                // It waited its full_timeout already, in its queue or for
+                // the journal ring (the wait counts from the arrival):
+                // refused now, without parking and without the latch, since
+                // it never waited in the gate (review m1).
+                self.waiters.pop_back();
+                self.counters.enospc += 1;
+                return ReserveOutcome::NoSpace;
+            }
+            // A request that fits is only waiting for its pace: it is due,
+            // so it is admitted with what stands before it (review M1). If
+            // that is not so (a request that waits for space stands before
+            // it), it never waited in the gate: refused now, without the
+            // latch, and what stands before it keeps its own deadline
+            // (re-review N1).
+            self.grant_waiters(now);
+            if waiter.state() == WaiterState::Pending {
+                // Still ours, still at the back.
+                self.waiters.pop_back();
+                self.counters.enospc += 1;
+                self.note_state(now);
+                return ReserveOutcome::NoSpace;
+            }
+        }
+        self.note_state(now);
+        if fits {
+            ReserveOutcome::Paced(waiter)
+        } else {
+            ReserveOutcome::Parked(waiter)
+        }
     }
 
     /// `reserve_headroom`: bounded by the whole store (limit plus reserve),
@@ -283,14 +616,17 @@ impl Ledger {
         Ok(())
     }
 
-    pub fn release(&mut self, kind: SpaceKind, bytes: u64) {
+    pub fn release(&mut self, kind: SpaceKind, bytes: u64, now: Duration) {
         debug_assert!(
             self.held[kind.index()] >= bytes,
             "released more than {kind:?} holds"
         );
         let h = &mut self.held[kind.index()];
         *h = h.saturating_sub(bytes);
-        self.grant_waiters();
+        if !matches!(kind, SpaceKind::JournalReserved | SpaceKind::Headroom) {
+            self.counters.freed = self.counters.freed.saturating_add(bytes);
+        }
+        self.grant_waiters(now);
     }
 
     pub fn transfer(
@@ -299,25 +635,44 @@ impl Ledger {
         to_kind: SpaceKind,
         from_bytes: u64,
         to_bytes: u64,
+        now: Duration,
     ) -> Result<()> {
         if self.held[from_kind.index()] < from_bytes {
             return Err(Error::invalid("transfer exceeds what the kind holds"));
         }
         self.held[from_kind.index()] -= from_bytes;
         self.charge_raw(to_kind, to_bytes);
-        self.grant_waiters();
+        self.grant_waiters(now);
         Ok(())
     }
 
-    pub fn snapshot(&self) -> SpaceSnapshot {
+    /// The ledger as a snapshot at `now`.
+    pub fn snapshot(&mut self, now: Duration) -> SpaceSnapshot {
+        self.note_state(now);
+        let pending = self.pending_waiters();
+        let head_fits = self.head().is_some_and(|p| self.fits(p.bytes));
+        let (paced, space) = if head_fits {
+            (pending, 0)
+        } else {
+            (0, pending)
+        };
+        let mut t =
+            crate::throttle::figures(&self.counters, &self.state, &self.meter, now, self.fulls);
+        t.headroom = self.headroom();
+        t.soft = self.soft();
+        t.resume = self.resume_mark();
+        t.rate = self.band_rate();
+        t.paced_waiters = paced;
+        t.space_waiters = space;
         SpaceSnapshot {
             by_kind: self.held,
             limit: self.limit(),
             fs_free: self.fs.stat.free,
             headroom_total: self.reserve_region(),
-            waiters: self.pending_waiters(),
+            waiters: pending,
             read_only: self.read_only,
             full: self.full,
+            throttle: t,
         }
     }
 }

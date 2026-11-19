@@ -67,6 +67,28 @@
 //! `lunixd` registers no-ops for three of the four in phase 1 and GC's urgent
 //! pass as compact.
 //!
+//! # The paced band (ADR-32)
+//!
+//! With the headroom `H = limit - used` below the soft mark (15 % of the
+//! limit, at least 1 GiB, at most 64 GiB, at most half the limit) a request
+//! that fits is admitted by a token bucket at
+//! `max(r_min, r_mid * x / (1 - x))`, `x = H / soft`, `r_mid = max(gc_rate,
+//! 16 MiB/s)`, `r_min` 4 MiB/s ([`ThrottleConfig`]). A request that has to
+//! wait parks FIFO behind the same queue as the requests waiting for space,
+//! as [`ReserveOutcome::Paced`](lunix_iface::space::ReserveOutcome::Paced),
+//! and the timer thread grants it when the bucket holds its bytes. One
+//! request is delayed at most `throttle_max_delay_ms` from its arrival (or
+//! its `full_timeout`, if shorter): then it is admitted if it fits and the
+//! bucket goes into debt, at most one second of the rate. A
+//! [`ReserveClass::Sync`](lunix_iface::space::ReserveClass::Sync) request (a
+//! FUA write of at most 256 KiB) is admitted at once and charged to the
+//! bucket; at the hard mark it waits like any write. Hole records are
+//! charged with `charge` and never paced. Pacing is not a refusal: it never
+//! latches the volume, `on_full = error` keeps a paced request that fits,
+//! and a quiesce admits it. The gate's state (`open`, `slowdown`, `stop`,
+//! `full`), its counters and the 10 s ingest and reclaim averages are in
+//! [`SpaceSnapshot::throttle`](lunix_iface::space::SpaceSnapshot::throttle).
+//!
 //! # The bounded stop (ADR-32)
 //!
 //! Every parked request has a deadline: its arrival plus `full_timeout`
@@ -95,6 +117,8 @@ mod gate;
 mod ledger;
 mod policy;
 mod probe;
+mod throttle;
 
 pub use gate::{LunixSpace, SpaceConfig, DEFAULT_FULL_TIMEOUT, REFRESH_INTERVAL};
 pub use probe::{FsProbe, FsStat, ManualFs, SimFs, StatvfsProbe};
+pub use throttle::{ThrottleConfig, MID_RATE_FLOOR};

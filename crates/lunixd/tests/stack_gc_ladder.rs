@@ -128,16 +128,20 @@ fn run_ladder(stack: &VolumeStack) {
 
 #[test]
 fn the_ladder_compact_step_runs_the_urgent_pass_and_frees_condemned_segments() {
-    ladder_compact_step("m12c-ladder", fast_gc);
+    ladder_compact_step("m12c-ladder", fast_gc, false);
 }
 
 /// The same on the daemon's pipelined schedule.
 #[test]
 fn the_ladder_compact_step_on_the_daemon_schedule() {
-    ladder_compact_step("gcrate-ladder", daemon_gc);
+    ladder_compact_step("gcrate-ladder", daemon_gc, true);
 }
 
-fn ladder_compact_step(tag: &str, gc: fn(&mut OpenParams)) {
+/// `scheduled`: the collector runs the daemon's pipelined schedule, so a pass
+/// the commits start finishes without the grace: the test asserts that one
+/// ran before any ladder run (gcrate final review F-5). The whole-sequence
+/// schedule waits out its grace first and cannot.
+fn ladder_compact_step(tag: &str, gc: fn(&mut OpenParams), scheduled: bool) {
     let t = Scratch::new(tag);
     let cs = 64u32 << 10;
     let region = 8u64 << 20;
@@ -169,6 +173,23 @@ fn ladder_compact_step(tag: &str, gc: fn(&mut OpenParams)) {
         }
         assert!(d.flush(0).is_ok());
         stack.engine.commit_now(false).expect("commit");
+    }
+
+    if scheduled {
+        // No ladder run yet, so the passes counted are the scheduled ones:
+        // a schedule that never started a pass would pass this test on the
+        // urgent passes alone.
+        let start = Instant::now();
+        while stack.engine.status().stats.passes == 0 {
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "no scheduled pipelined pass finished: {:?}",
+                stack.engine.status()
+            );
+            std::thread::sleep(Duration::from_millis(250));
+            stack.engine.tick().expect("tick");
+        }
+        assert_eq!(stack.compact_runs.load(Ordering::Acquire), 0);
     }
 
     // A first ladder run: its urgent pass condemns the dead rounds (a pass
