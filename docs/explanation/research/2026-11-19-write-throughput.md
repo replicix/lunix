@@ -2,7 +2,7 @@
 
 Date: 2026-11-19. Status: design note for
 [ADR-33](../DECISIONS.md#adr-33-write-throughput-a-resident-journal-window-and-bounded-cuts)
-(proposed). It carries the root-cause analysis, the options, their effect on
+(accepted 2026-11-19; W6 and W9 as the ADR records them, not as recommended here). It carries the root-cause analysis, the options, their effect on
 the guarantees, a recommendation and a throughput model.
 
 Method and limits. The code claims come from reading `main` at `cda79fb`
