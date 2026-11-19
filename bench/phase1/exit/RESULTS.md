@@ -1,8 +1,7 @@
 # M15 results: phase 1 exit tests (DRAFT, 2026-11-18)
 
-Status: the fio-verify rows are **pending** (they need the GC schedule fix of `p1/gcrate`, see "fio verify"), the GC-dependent
-cells need a rerun after M12c (the first crash-point and xfstests runs used a build without the collector), and the xfstests
-comparison has open questions. Everything else below was measured. Raw results (results.jsonl, results.md, stall tables,
+Status: fio verify and ratios are measured on the merged build (`03b858e`); the crash-point reruns and the 4096-byte-sector xfstests references are still running and
+are marked pending below. Everything else below was measured. Raw results (results.jsonl, results.md, stall tables,
 xfstests logs and the comparison, ratio JSON) are under `raw/`; the scripts are `tests/exit/*.sh`, the fio job files
 `bench/phase1/exit/fio/*.fio`, the tables are made by `summarize.py` and `xfstests-compare.py`.
 
