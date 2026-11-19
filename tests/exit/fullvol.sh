@@ -30,7 +30,7 @@ fill_job() { # label size_gib runtime_s : incompressible sequential write that c
 # ---- 1, 2
 fill_job fill1 "$WS_GIB" 300; frc=$?
 J="$D/fio-fill1.json"
-errs=$(sed -n '/"fio version"/,$p' "$J" | jq -r '[.jobs[]|(.total_err // 0)]|add' 2>/dev/null); mlat=$(sed -n '/"fio version"/,$p' "$J" | jq -r '[.jobs[]|.write.lat_ns.max]|max/1000000|floor' 2>/dev/null)
+errs=$(fio_json "$J" | jq -r '[.jobs[]|(if (.error // 0) != 0 then 1 else 0 end) + (.total_err // 0)]|add' 2>/dev/null); mlat=$(fio_json "$J" | jq -r '[.jobs[]|.write.lat_ns.max]|max/1000000|floor' 2>/dev/null)
 say "- fill: fio rc $frc, errors $errs, longest write completion ${mlat} ms"
 [ "${errs:-0}" -gt 0 ]; expect "fio saw write errors (ENOSPC) once the cap was reached" $? || true
 [ "${mlat:-999999}" -le $((FULL_TIMEOUT_S * 1000 + 5000)) ]; expect "no write completed later than full_timeout + 5 s (${mlat} ms)" $? || true
@@ -51,10 +51,12 @@ say "- writes after the discard: ok=$((1 - ok)) after $((SECONDS - t0)) s"
 [ "$ok" = 0 ]; expect "writes came back within 90 s of the discard ($((SECONDS - t0)) s)" $? || true
 # ---- 4: SIGTERM with writes parked (long full_timeout so that they park)
 lx space "$VOL" --full-timeout 120s --json > "$D/space-long.json" 2>&1
-fill_job fill2 "$WS_GIB" 40 &
+fill_job fill2 "$WS_GIB" 300 &
 FP=$!
-sleep 25
+# wait (up to 150 s) until writes are parked: the working set is written again from the start, so the cap is reached after a few seconds
+for i in $(seq 1 75); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
 say "- state with writes parked: $(gate_state), waiters $(lx space "$VOL" --json | jq -r '.figures.waiters')"
+[ "$(lx space "$VOL" --json | jq -r '.figures.waiters')" -gt 0 ]; expect "writes are parked at the cap" $? || true
 T0=$SECONDS; kill -TERM "$DPID"
 for i in $(seq 1 400); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.1; done
 exit_s=$((SECONDS - T0))
@@ -65,9 +67,9 @@ wait "$DPID" 2>/dev/null; DPID=""
 start_lunixd || wedged "restart after SIGTERM failed"
 wait "$FP" 2>/dev/null
 lx space "$VOL" --full-timeout 120s --json >/dev/null 2>&1
-fill_job fill3 "$WS_GIB" 120 &
+fill_job fill3 "$WS_GIB" 300 &
 FP=$!
-sleep 25
+for i in $(seq 1 75); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
 kill -KILL "$DPID"; wait "$DPID" 2>/dev/null; DPID=""
 # ---- 5: on_full = error in volume.json, restart
 VJ="$(vol_dir "$VOL" 2>/dev/null)"
