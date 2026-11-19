@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Barrier;
 
 use common::*;
@@ -277,33 +277,47 @@ fn a_location_reclaimed_while_it_is_read_never_returns_stale_bytes() {
     let cut = in_first.last().expect("rec").seq;
     let (j, l) = restart(&cfg, (j, l));
     let stop = AtomicBool::new(false);
+    let reads = AtomicU64::new(0);
+    let gone = AtomicBool::new(false);
     std::thread::scope(|s| {
         for t in 0..4usize {
-            let (j, ws, stop) = (&j, &in_first, &stop);
+            let (j, ws, stop, reads, gone) = (&j, &in_first, &stop, &reads, &gone);
             s.spawn(move || {
                 let mut i = t;
                 while !stop.load(Ordering::Relaxed) {
                     let w = &ws[i % ws.len()];
                     let mut b = vec![0u8; w.blocks as usize * 4096];
+                    // Read the flag first: a read that began after the
+                    // reclaim returned must fail.
+                    let after = gone.load(Ordering::SeqCst);
                     match j.read_at(loc_of(w), &mut b) {
-                        Ok(()) => assert_eq!(b, pattern(w.seq, w.blocks)),
-                        Err(e) => assert!(
-                            matches!(e.kind(), ErrorKind::NotFound | ErrorKind::Corrupt),
-                            "{e}"
-                        ),
+                        Ok(()) => {
+                            assert!(!after, "a reclaimed location was served");
+                            assert_eq!(b, pattern(w.seq, w.blocks));
+                        }
+                        Err(e) => assert_eq!(e.kind(), ErrorKind::NotFound, "{e}"),
                     }
+                    reads.fetch_add(1, Ordering::SeqCst);
                     i += 4;
                 }
             });
         }
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        // Readers are running; reclaim; readers keep reading after it.
+        wait_until("reads before the reclaim", || {
+            reads.load(Ordering::SeqCst) >= 20
+        });
         let tail = j.tail_after(WriteSeq(cut)).expect("tail");
         assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        gone.store(true, Ordering::SeqCst);
+        let mark = reads.load(Ordering::SeqCst);
+        wait_until("reads after the reclaim", || {
+            reads.load(Ordering::SeqCst) >= mark + 40
+        });
         stop.store(true, Ordering::Relaxed);
     });
     // Nothing of the recycled file stays resident or readable.
     assert_eq!(j.window_stats().resident_bytes, 0);
+    assert_eq!(j.window_stats().check_failures, 0);
     for w in &in_first {
         let e = j.read_at(loc_of(w), &mut [0u8; 8]).expect_err("gone");
         assert_eq!(e.kind(), ErrorKind::NotFound);
@@ -319,27 +333,24 @@ fn readers_see_exact_bytes_during_appends_and_reclaim() {
     let (tx, rx) = std::sync::mpsc::channel::<Written>();
     let rx = std::sync::Mutex::new(rx);
     let stop = AtomicBool::new(false);
+    let done = AtomicU64::new(0);
     std::thread::scope(|s| {
         for _ in 0..3 {
-            let (j, rx, stop) = (&j, &rx, &stop);
+            let (j, rx, stop, done) = (&j, &rx, &stop, &done);
             s.spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
-                    let w = match rx
+                    let got = rx
                         .lock()
                         .expect("rx")
-                        .recv_timeout(std::time::Duration::from_millis(5))
-                    {
-                        Ok(w) => w,
-                        Err(_) => continue,
-                    };
+                        .recv_timeout(std::time::Duration::from_millis(5));
+                    let Ok(w) = got else { continue };
                     let mut b = vec![0u8; w.blocks as usize * 4096];
                     match j.read_at(loc_of(&w), &mut b) {
                         Ok(()) => assert_eq!(b, pattern(w.seq, w.blocks)),
-                        Err(e) => assert!(
-                            matches!(e.kind(), ErrorKind::NotFound | ErrorKind::Corrupt),
-                            "{e}"
-                        ),
+                        // Only a reclaimed location may fail.
+                        Err(e) => assert_eq!(e.kind(), ErrorKind::NotFound, "{e}"),
                     }
+                    done.fetch_add(1, Ordering::SeqCst);
                 }
             });
         }
@@ -355,11 +366,14 @@ fn readers_see_exact_bytes_during_appends_and_reclaim() {
                 j.reclaim(&tail).expect("reclaim");
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        wait_until("every sent record was read", || {
+            done.load(Ordering::SeqCst) == 150
+        });
         stop.store(true, Ordering::Relaxed);
     });
     let s = j.window_stats();
     assert!(s.resident_bytes <= s.cap_bytes);
+    assert_eq!(s.check_failures, 0);
 }
 
 #[test]
@@ -496,36 +510,148 @@ fn a_record_that_runs_a_few_bytes_past_the_edge_needs_the_completing_read() {
     drop(l);
 }
 
-fn arb_plan() -> impl Strategy<Value = (Vec<u32>, Vec<(usize, u16, u16)>, bool)> {
+#[test]
+fn a_failed_batch_write_gives_its_reservation_back() {
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    let (j, mut l) = fresh(&cfg);
+    let ok = write_rec(&mut *l, 0, 4);
+    complete_appends(&mut *l, 1);
+    let resident = j.window_stats().resident_bytes;
+    assert_eq!(resident, enc(&ok));
+    j.fail_next_batch_write();
+    write_rec(&mut *l, 1, 4);
+    let mut out = Vec::new();
+    wait_until("the failed completion", || {
+        l.poll(&mut out);
+        !out.is_empty()
+    });
+    match &out[0] {
+        JournalCompletion::Append { status, .. } => assert!(!status.is_ok()),
+        other => panic!("{other:?}"),
+    }
+    // Only the first record's bytes stay reserved.
+    assert_eq!(j.window_stats().resident_bytes, resident);
+}
+
+#[test]
+fn a_lane_dropped_with_writes_in_flight_indexes_them_all() {
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    let (j, mut l) = fresh(&cfg);
+    for i in 0..4 {
+        write_rec(&mut *l, i, 4);
+    }
+    // Dropping the lane waits for its writes and completes them.
+    drop(l);
+    let expect: u64 = 4 * record_bytes(RecordKind::Write, 4);
+    assert_eq!(j.window_stats().resident_bytes, expect);
+}
+
+#[test]
+fn records_beyond_the_stop_point_read_before_the_wipe_never_come_back() {
+    let dir = scratch();
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.resident_max = Some(BATCH_CAP);
+    let (j, mut l) = fresh(&cfg);
+    let ws = fill(&mut *l, &j, 6, 16);
+    drop((j, l));
+    // Damage the third record: recovery stops after the second, the later
+    // records are valid but beyond the stop point and will be zeroed.
+    flip_byte(&path_of(&cfg, 0, ws[2].ordinal), ws[2].start + 64 + 5);
+    let j = open_journal(&cfg);
+    let r = recover_all(&j);
+    assert_eq!(seqs(&r), vec![1, 2]);
+    // A read-around before the first lane open sees the stale records.
+    assert_eq!(read(&j, &ws[0]), pattern(ws[0].seq, 16));
+    let mut b = vec![0u8; 16 * 4096];
+    assert!(j.read_at(loc_of(&ws[4]), &mut b).is_ok());
+    let mut l = open_lane(&j, 0);
+    assert_eq!(j.window_stats().resident_bytes, 0, "the wipe cleared it");
+    // New writes land where the stale records were, under a cap that will
+    // not admit most of them; every one reads back as written.
+    let mut new = Vec::new();
+    for i in 0..8u64 {
+        new.push(write_rec(&mut *l, 100 + i, 16));
+        complete_appends(&mut *l, 1);
+    }
+    group_flush(&j);
+    for w in &new {
+        assert_eq!(read(&j, w), pattern(w.seq, w.blocks));
+    }
+}
+
+#[test]
+fn many_threads_past_the_cap_read_exact_bytes() {
+    let dir = scratch();
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.resident_max = Some(BATCH_CAP);
+    let (j, mut l) = fresh(&cfg);
+    let ws = fill(&mut *l, &j, 24, 16);
+    let (j, l) = restart(&cfg, (j, l));
+    let bar = Barrier::new(6);
+    std::thread::scope(|s| {
+        for t in 0..6usize {
+            let (j, ws, bar) = (&j, &ws, &bar);
+            s.spawn(move || {
+                bar.wait();
+                for w in ws.iter().skip(t).step_by(6) {
+                    assert_eq!(read(j, w), pattern(w.seq, w.blocks));
+                }
+            });
+        }
+    });
+    let s = j.window_stats();
+    assert!(s.resident_bytes <= s.cap_bytes, "{s:?}");
+    assert_eq!(s.check_failures, 0);
+    drop(l);
+}
+
+fn arb_plan() -> impl Strategy<Value = (Vec<u32>, Vec<(usize, u16, u16)>, bool, bool)> {
     (
         proptest::collection::vec(1u32..=24, 4..28),
         proptest::collection::vec((any::<usize>(), any::<u16>(), any::<u16>()), 1..40),
         any::<bool>(),
+        any::<bool>(),
     )
 }
 
+struct Rig {
+    j: FileJournal,
+    lanes: Vec<Box<dyn JournalLane>>,
+}
+
+fn open_rig(cfg: &JournalConfig) -> Rig {
+    let j = open_journal(cfg);
+    recover_all(&j);
+    let lanes = (0..cfg.lanes).map(|i| open_lane(&j, i)).collect();
+    Rig { j, lanes }
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 12, .. ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 64, .. ProptestConfig::default() })]
 
     /// The window and the file always return the same bytes: live (resident
-    /// or past a small cap), and after a restart (the read-around), for
-    /// random records and sub-ranges, and they are the bytes that were
-    /// written.
+    /// or past a small cap), and after a restart (the read-around), over one
+    /// or two lanes, for random records and sub-ranges, and they are the
+    /// bytes that were written.
     #[test]
     fn the_window_and_the_file_return_the_same_bytes(plan in arb_plan()) {
-        let (sizes, reads, capped) = plan;
+        let (sizes, reads, capped, two) = plan;
         let dir = scratch();
-        let mut cfg = small_cfg(dir.path().join("journal"), 1, 4);
+        let lanes = if two { 2 } else { 1 };
+        let mut cfg = small_cfg(dir.path().join("journal"), lanes, 4);
         if capped {
             cfg.resident_max = Some(BATCH_CAP);
         }
-        let (mut j, mut l) = fresh(&cfg);
+        let mut rig = open_rig(&cfg);
         let mut ws = Vec::new();
         for (i, &b) in sizes.iter().enumerate() {
-            ws.push(write_rec(&mut *l, i as u64, b));
-            complete_appends(&mut *l, 1);
+            let l = i % usize::from(lanes);
+            ws.push(write_rec(&mut *rig.lanes[l], i as u64, b));
+            complete_appends(&mut *rig.lanes[l], 1);
         }
-        group_flush(&j);
+        group_flush(&rig.j);
         for phase in 0..2 {
             for &(wi, a, z) in &reads {
                 let w = &ws[wi % ws.len()];
@@ -534,15 +660,16 @@ proptest! {
                 let (from, to) = (x.min(y), x.max(y) + 1);
                 let loc = loc_of(w).advance((from * 4096) as u64).expect("advance");
                 let mut got = vec![0u8; (to - from) * 4096];
-                j.read_at(loc, &mut got).expect("read_at");
-                let on_disk = read_at_path(&path_of(&cfg, 0, w.ordinal), loc.offset, got.len());
+                rig.j.read_at(loc, &mut got).expect("read_at");
+                let on_disk = read_at_path(&path_of(&cfg, w.lane, w.ordinal), loc.offset, got.len());
                 prop_assert_eq!(&got, &on_disk);
                 prop_assert_eq!(&got[..], &pattern(w.seq, w.blocks)[from * 4096..to * 4096]);
             }
             if phase == 0 {
-                let s = j.window_stats();
+                let s = rig.j.window_stats();
                 prop_assert!(s.resident_bytes <= s.cap_bytes);
-                (j, l) = restart(&cfg, (j, l));
+                drop(rig);
+                rig = open_rig(&cfg);
             }
         }
     }

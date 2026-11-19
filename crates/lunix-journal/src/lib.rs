@@ -11,7 +11,10 @@
 //! The journal also keeps what it wrote in memory until the ring file is
 //! reclaimed (the *resident window*, ADR-33), serves reads from it, and on a
 //! miss reads and checks a whole 1 MiB window of the file; see the `window`
-//! module's documentation and [`FileJournal::window_stats`].
+//! module's documentation and [`FileJournal::window_stats`]. Two limits are
+//! deliberate (ADR-33): a guest read that misses the window is not checked,
+//! and with a `resident_max` below the backlog a cut reads, each miss costs a
+//! 1 MiB read and check.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 

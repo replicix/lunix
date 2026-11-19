@@ -16,15 +16,43 @@
 //! - **Read-around (T2).** A miss in `read_at` (after a restart, past the
 //!   cap) reads the 1 MiB-aligned window of the ring file around the
 //!   location, once per window however many threads miss in it, and parses it
-//!   with the recovery reader's rules: a record is accepted only if its
-//!   header carries the file's generation and its own offset, and its crc32c
-//!   over header and data verifies. Only accepted records become resident
+//!   with the recovery reader's record checks: a record is accepted only if
+//!   its header carries the file's generation and its own offset and its
+//!   crc32c over header and data verifies, and a lost record is
+//!   resynchronised past 8 bytes at a time. It does **not** apply the
+//!   reader's `write_seq` order or its stop at a zero block, so it also
+//!   accepts valid records beyond a recovery stop point that the wipe will
+//!   zero (see "Wipes"). Only accepted records become resident
 //!   (within the cap) or are served; a damaged record fails the read with
 //!   [`Error::Corrupt`] and nothing of it is copied. A record cut by the edge
 //!   of the window is completed with one more read (forward for a record that
 //!   starts inside the window, backward for one that starts before it).
 //!
 //! Nothing is read ahead of need and nothing is read back after a write.
+//!
+//! # What is not checked, and what a small cap costs
+//!
+//! A guest read (`submit_read`) that misses the window is the single
+//! asynchronous read of its piece, **without** a checksum: ADR-33 adds no read
+//! anywhere else, and the bytes of a guest read never reach a chunk. Only
+//! `read_at` (destage, recovery replay) checks.
+//!
+//! Past the cap every `read_at` miss in a window that was not made resident
+//! reads and checks the whole 1 MiB again (the threads that miss at the same
+//! moment share one read). For small records that is up to 256 times the
+//! bytes the old per-piece read took: a `journal_resident_max` below the
+//! backlog a cut reads can make destage slower than before the window. The
+//! default (`journal_max`) never binds.
+//!
+//! # Wipes
+//!
+//! Recovery plans a wipe of what lies beyond its stop point, and the first
+//! lane open runs it. [`Window::clear`] drops every entry and bumps an epoch
+//! that a read-around captures before it reads: its records are offered to the
+//! window only under that epoch, so nothing read before the wipe is indexed
+//! after it. Independently, a batch whose write completes evicts every entry
+//! it overlaps even when the cap did not admit its copy, so no entry ever
+//! overlaps bytes written later.
 //!
 //! # Memory
 //!
@@ -96,6 +124,9 @@ pub struct WindowStats {
 pub(crate) struct Window {
     cap: u64,
     resident: AtomicU64,
+    /// Bumped by [`Window::clear`]: a read-around that began before it may
+    /// not insert after it.
+    epoch: AtomicU64,
     lanes: Vec<Mutex<Lane>>,
     flights: Mutex<HashMap<FlightKey, Arc<Flight>>>,
     hits: AtomicU64,
@@ -113,6 +144,8 @@ struct Cx<'a> {
     file: &'a RingFile,
     gen: u64,
     loc: JournalLoc,
+    /// The wipe epoch when the read began.
+    epoch: u64,
 }
 
 /// One read-around in progress; the result is `Some(None)` when it failed.
@@ -169,6 +202,8 @@ enum Claim<'a> {
 
 /// What one window read yielded.
 struct Parsed {
+    /// The wipe epoch when this window was read.
+    epoch: u64,
     /// File offset of `raw[0]`.
     base: u64,
     raw: AlignedBuf,
@@ -286,6 +321,7 @@ impl Window {
         Self {
             cap,
             resident: AtomicU64::new(0),
+            epoch: AtomicU64::new(0),
             lanes: (0..lanes).map(|_| Mutex::new(BTreeMap::new())).collect(),
             flights: Mutex::new(HashMap::new()),
             hits: AtomicU64::new(0),
@@ -341,39 +377,83 @@ impl Window {
         self.release(n);
     }
 
+    /// Removes every entry that overlaps `[start, end)` of one file and
+    /// returns them, to be dropped by the caller outside the lane's lock. The
+    /// bytes are released here.
+    fn remove_overlaps(
+        &self,
+        map: &mut Lane,
+        ordinal: u32,
+        start: u64,
+        end: u64,
+    ) -> Vec<Arc<[u8]>> {
+        let lo = match map.range(..(ordinal, start)).next_back() {
+            Some((&(o, s), b)) if o == ordinal && s + b.len() as u64 > start => (o, s),
+            _ => (ordinal, start),
+        };
+        let keys: Vec<(u32, u64)> = map.range(lo..(ordinal, end)).map(|(k, _)| *k).collect();
+        let mut out = Vec::with_capacity(keys.len());
+        for k in keys {
+            if let Some(b) = map.remove(&k) {
+                self.release(b.len() as u64);
+                out.push(b);
+            }
+        }
+        out
+    }
+
     /// Indexes the copy of a batch whose write completed. Any entry it
     /// overlaps (a record a read-around made resident while the write was in
-    /// flight) is replaced.
+    /// flight, or before a wipe) is replaced.
     pub(crate) fn insert_batch(&self, lane: u16, ordinal: u32, start: u64, bytes: Arc<[u8]>) {
         let Some(m) = self.lanes.get(usize::from(lane)) else {
             self.release(bytes.len() as u64);
             return;
         };
         let end = start + bytes.len() as u64;
-        let mut map = lock(m);
-        let lo = match map.range(..(ordinal, start)).next_back() {
-            Some((&(o, s), b)) if o == ordinal && s + b.len() as u64 > start => (o, s),
-            _ => (ordinal, start),
+        let dropped = {
+            let mut map = lock(m);
+            let d = self.remove_overlaps(&mut map, ordinal, start, end);
+            map.insert((ordinal, start), bytes);
+            d
         };
-        let keys: Vec<(u32, u64)> = map.range(lo..(ordinal, end)).map(|(k, _)| *k).collect();
-        for k in keys {
-            if let Some(b) = map.remove(&k) {
-                self.release(b.len() as u64);
-            }
-        }
-        map.insert((ordinal, start), bytes);
+        drop(dropped);
+    }
+
+    /// A batch that was not admitted still invalidates what it overwrote: no
+    /// entry may overlap bytes written later, whatever the cap.
+    pub(crate) fn evict_range(&self, lane: u16, ordinal: u32, start: u64, end: u64) {
+        let Some(m) = self.lanes.get(usize::from(lane)) else {
+            return;
+        };
+        let dropped = self.remove_overlaps(&mut lock(m), ordinal, start, end);
+        drop(dropped);
     }
 
     /// Makes one verified record resident when it fits the cap, does not
-    /// overlap an entry and its file is still the one it was read from.
-    fn insert_record(
+    /// overlap an entry, its file is still the one it was read from and no
+    /// wipe happened since `epoch`.
+    fn insert_record(&self, cx: &Cx<'_>, start: u64, b: Arc<[u8]>) {
+        let (rings, lane, ordinal, gen) = (cx.rings, cx.loc.lane.0, cx.loc.ordinal, cx.gen);
+        // Under the lane's lock: reclaim takes the file out of use before it
+        // releases the file's entries (which needs this lock), so an entry
+        // inserted here is released by it.
+        let in_use = || {
+            rings
+                .find_in_use_gen(lane, ordinal)
+                .is_some_and(|(_, g)| g == gen)
+        };
+        self.insert_checked(lane, ordinal, start, b, cx.epoch, in_use);
+    }
+
+    fn insert_checked(
         &self,
-        rings: &Rings,
         lane: u16,
         ordinal: u32,
-        gen: u64,
         start: u64,
         b: Arc<[u8]>,
+        epoch: u64,
+        in_use: impl FnOnce() -> bool,
     ) {
         let Some(m) = self.lanes.get(usize::from(lane)) else {
             return;
@@ -381,6 +461,9 @@ impl Window {
         let n = b.len() as u64;
         let end = start + n;
         let mut map = lock(m);
+        if self.epoch.load(Ordering::Acquire) != epoch {
+            return;
+        }
         let before = map
             .range(..=(ordinal, start))
             .next_back()
@@ -388,13 +471,7 @@ impl Window {
         if before || map.range((ordinal, start)..(ordinal, end)).next().is_some() {
             return;
         }
-        // Under the lane's lock: reclaim takes the file out of use before it
-        // releases the file's entries (which needs this lock), so an entry
-        // inserted here is released by it.
-        if rings
-            .find_in_use_gen(lane, ordinal)
-            .is_none_or(|(_, g)| g != gen)
-        {
+        if !in_use() {
             return;
         }
         if self.try_reserve(n) {
@@ -407,30 +484,23 @@ impl Window {
         let Some(m) = self.lanes.get(usize::from(lane)) else {
             return;
         };
-        let mut map = lock(m);
-        let keys: Vec<(u32, u64)> = map
-            .range((ordinal, 0)..=(ordinal, u64::MAX))
-            .map(|(k, _)| *k)
-            .collect();
-        let mut freed = 0u64;
-        for k in keys {
-            if let Some(b) = map.remove(&k) {
-                freed += b.len() as u64;
-            }
-        }
-        drop(map);
-        self.release(freed);
+        let dropped = self.remove_overlaps(&mut lock(m), ordinal, 0, u64::MAX);
+        drop(dropped);
     }
 
-    /// Drops everything (recovery and the wipe re-establish the files).
+    /// Drops everything (recovery and the wipe re-establish the files) and
+    /// invalidates every read-around that began before.
     pub(crate) fn clear(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
         let mut freed = 0u64;
+        let mut dropped = Vec::new();
         for m in &self.lanes {
             let mut map = lock(m);
             freed += map.values().map(|b| b.len() as u64).sum::<u64>();
-            map.clear();
+            dropped.push(std::mem::take(&mut *map));
         }
         self.release(freed);
+        drop(dropped);
     }
 
     fn find(&self, loc: JournalLoc, len: usize) -> Option<(Arc<[u8]>, usize)> {
@@ -496,20 +566,51 @@ impl Window {
         loc: JournalLoc,
         buf: &mut [u8],
     ) -> Result<()> {
-        let key = (loc.lane.0, loc.ordinal, loc.offset / READ_AROUND);
         let cx = Cx {
             rings,
             file,
             gen,
             loc,
+            epoch: self.epoch.load(Ordering::Acquire),
         };
+        match self.read_around_inner(&cx, buf) {
+            Err(e) if matches!(e, Error::Corrupt { .. }) => {
+                // A location whose file was recycled meanwhile reads zeros or
+                // the next incarnation: not damage.
+                if rings
+                    .find_in_use_gen(loc.lane.0, loc.ordinal)
+                    .is_none_or(|(_, g)| g != gen)
+                {
+                    return Err(Error::not_found("journal data"));
+                }
+                self.check_failures.fetch_add(1, Ordering::Relaxed);
+                Err(e)
+            }
+            r => r,
+        }
+    }
+
+    fn read_around_inner(&self, cx: &Cx<'_>, buf: &mut [u8]) -> Result<()> {
+        let loc = cx.loc;
+        let key = (loc.lane.0, loc.ordinal, loc.offset / READ_AROUND);
         loop {
             match self.claim(key) {
                 Claim::Follow(f) => {
-                    if let Some(p) = f.wait() {
-                        return self.resolve(&cx, &p, buf);
-                    }
-                    // The leader failed: try again, possibly as the leader.
+                    let Some(p) = f.wait() else {
+                        // The leader failed: try again, possibly as the leader.
+                        continue;
+                    };
+                    return match self.resolve(cx, &p, buf) {
+                        // The leader's snapshot may predate the target (a
+                        // batch that was not admitted is written after any
+                        // read of its window): report damage only from a
+                        // read of our own.
+                        Err(Error::Corrupt { .. }) => {
+                            let own = self.fill(cx)?;
+                            self.resolve(cx, &own, buf)
+                        }
+                        r => r,
+                    };
                 }
                 Claim::Lead(mut lead) => {
                     // The window may have become resident since the caller
@@ -517,9 +618,9 @@ impl Window {
                     if self.copy_hit(loc, buf) {
                         return Ok(());
                     }
-                    let parsed = Arc::new(self.fill(&cx)?);
+                    let parsed = Arc::new(self.fill(cx)?);
                     lead.end(Some(Arc::clone(&parsed)));
-                    return self.resolve(&cx, &parsed, buf);
+                    return self.resolve(cx, &parsed, buf);
                 }
             }
         }
@@ -533,6 +634,7 @@ impl Window {
             file,
             gen,
             loc,
+            epoch,
         } = *cx;
         let w0 = loc.offset / READ_AROUND * READ_AROUND;
         let w1 = (w0 + READ_AROUND).min(rings.file_len);
@@ -546,7 +648,7 @@ impl Window {
         for &(q, enc) in &scan.recs {
             let at = (q - w0) as usize;
             let bytes: Arc<[u8]> = Arc::from(&raw.as_slice()[at..at + enc]);
-            self.insert_record(rings, loc.lane.0, loc.ordinal, gen, q, Arc::clone(&bytes));
+            self.insert_record(cx, q, Arc::clone(&bytes));
             recs.push((q, bytes));
         }
         // A record the edge of the window cuts is completed now, with one
@@ -561,6 +663,7 @@ impl Window {
             }
         }
         Ok(Parsed {
+            epoch,
             base: w0,
             raw,
             recs,
@@ -572,6 +675,12 @@ impl Window {
     /// Finds the verified record that holds `loc..loc + buf.len()`, completing
     /// a cut record when the target needs it, and copies the bytes out.
     fn resolve(&self, cx: &Cx<'_>, p: &Parsed, buf: &mut [u8]) -> Result<()> {
+        // What `p` yields may only be offered to the window under the epoch
+        // `p` was read in.
+        let cx = &Cx {
+            epoch: p.epoch,
+            ..*cx
+        };
         let loc = cx.loc;
         let (t, end) = (loc.offset, loc.offset + buf.len() as u64);
         if let Some((s, b)) = p.find(t, end) {
@@ -580,18 +689,20 @@ impl Window {
             return Ok(());
         }
         if p.bad_covers(t, end) {
-            return Err(self.fail("record checksum mismatch"));
+            return Err(corrupt("record checksum mismatch"));
         }
         let have_end = p.base + p.raw.len() as u64;
         if let Some(q) = p.tail.filter(|&q| q < t) {
             let head = &p.raw.as_slice()[(q - p.base) as usize..];
-            let rec = self
-                .complete(cx, have_end, head, q)
-                .inspect_err(|e| self.note(e))?;
-            if covers(q, rec.len() as u64, t, end) {
-                let i = (t - q) as usize;
-                buf.copy_from_slice(&rec[i..i + buf.len()]);
-                return Ok(());
+            match self.complete(cx, have_end, head, q) {
+                Ok(rec) if covers(q, rec.len() as u64, t, end) => {
+                    let i = (t - q) as usize;
+                    buf.copy_from_slice(&rec[i..i + buf.len()]);
+                    return Ok(());
+                }
+                Err(e) if !matches!(e, Error::Corrupt { .. }) => return Err(e),
+                // A tail that is no record: look before the window.
+                _ => {}
             }
         }
         self.resolve_before(cx, p, buf)
@@ -601,15 +712,12 @@ impl Window {
     /// find its start (a record is at most `MAX_ENC` long) and scan again.
     fn resolve_before(&self, cx: &Cx<'_>, p: &Parsed, buf: &mut [u8]) -> Result<()> {
         let Cx {
-            rings,
-            file,
-            gen,
-            loc,
+            file, gen, loc, ..
         } = *cx;
         let (t, end) = (loc.offset, loc.offset + buf.len() as u64);
         let a = sys::floor4k(end.saturating_sub(MAX_ENC)).max(B);
         if a >= p.base {
-            return Err(self.fail("no valid record covers the location"));
+            return Err(corrupt("no valid record covers the location"));
         }
         let back = sys::read_aligned(&file.file, a, (p.base - a) as usize).map_err(io_err)?;
         self.completing_reads.fetch_add(1, Ordering::Relaxed);
@@ -626,24 +734,22 @@ impl Window {
             let bytes: Arc<[u8]> = Arc::from(&comb[at..at + enc]);
             let i = (t - q) as usize;
             buf.copy_from_slice(&bytes[i..i + buf.len()]);
-            self.insert_record(rings, loc.lane.0, loc.ordinal, gen, q, bytes);
+            self.insert_record(cx, q, bytes);
             return Ok(());
         }
         if scan.bad.iter().any(|&(q, enc)| q < t && end <= q + enc) {
-            return Err(self.fail("record checksum mismatch"));
+            return Err(corrupt("record checksum mismatch"));
         }
         if let Some(q) = scan.tail.filter(|&q| q < t) {
             let head = &comb[(q - a) as usize..];
-            let rec = self
-                .complete(cx, a + comb.len() as u64, head, q)
-                .inspect_err(|e| self.note(e))?;
+            let rec = self.complete(cx, a + comb.len() as u64, head, q)?;
             if covers(q, rec.len() as u64, t, end) {
                 let i = (t - q) as usize;
                 buf.copy_from_slice(&rec[i..i + buf.len()]);
                 return Ok(());
             }
         }
-        Err(self.fail("no valid record covers the location"))
+        Err(corrupt("no valid record covers the location"))
     }
 
     /// Completes the record that starts at `q` and runs past `have_end`, with
@@ -651,10 +757,7 @@ impl Window {
     /// bytes from `q` to `have_end`.
     fn complete(&self, cx: &Cx<'_>, have_end: u64, head: &[u8], q: u64) -> Result<Arc<[u8]>> {
         let Cx {
-            rings,
-            file,
-            gen,
-            loc,
+            rings, file, gen, ..
         } = *cx;
         let file_len = rings.file_len;
         let mut have = head.to_vec();
@@ -687,20 +790,8 @@ impl Window {
         }
         have.truncate(enc);
         let bytes: Arc<[u8]> = Arc::from(have);
-        self.insert_record(rings, loc.lane.0, loc.ordinal, gen, q, Arc::clone(&bytes));
+        self.insert_record(cx, q, Arc::clone(&bytes));
         Ok(bytes)
-    }
-
-    /// Counts a failed target read (a record that does not verify).
-    fn note(&self, e: &Error) {
-        if matches!(e, Error::Corrupt { .. }) {
-            self.check_failures.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    fn fail(&self, detail: &'static str) -> Error {
-        self.check_failures.fetch_add(1, Ordering::Relaxed);
-        corrupt(detail)
     }
 }
 
@@ -774,6 +865,90 @@ mod tests {
         let s = scan_records(&buf, 0, gen, B);
         assert!(s.recs.is_empty());
         assert_eq!(s.tail, Some(4096));
+    }
+
+    fn rec(n: usize) -> Arc<[u8]> {
+        Arc::from(vec![1u8; n])
+    }
+
+    fn loc(ordinal: u32, offset: u64) -> JournalLoc {
+        JournalLoc {
+            lane: lunix_iface::journal::LaneId(0),
+            ordinal,
+            offset,
+        }
+    }
+
+    #[test]
+    fn a_read_that_began_before_a_clear_cannot_insert_after_it() {
+        let w = Window::new(1, 1 << 20);
+        let epoch = w.epoch.load(Ordering::Acquire);
+        w.clear();
+        w.insert_checked(0, 1, 4096, rec(4160), epoch, || true);
+        assert_eq!(w.stats().resident_bytes, 0);
+        assert!(w.find(loc(1, 4096), 8).is_none());
+        // Under the new epoch the same insert is accepted.
+        let epoch = w.epoch.load(Ordering::Acquire);
+        w.insert_checked(0, 1, 4096, rec(4160), epoch, || true);
+        assert_eq!(w.stats().resident_bytes, 4160);
+        assert!(w.find(loc(1, 4096), 8).is_some());
+    }
+
+    #[test]
+    fn a_batch_that_is_not_admitted_still_evicts_what_it_overlaps() {
+        let w = Window::new(1, 1 << 20);
+        let e = w.epoch.load(Ordering::Acquire);
+        w.insert_checked(0, 1, 4096, rec(4160), e, || true);
+        w.insert_checked(0, 1, 12288, rec(4160), e, || true);
+        w.insert_checked(0, 1, 20480, rec(4160), e, || true);
+        // A write over [9000, 16384) (not admitted) takes the middle one only.
+        w.evict_range(0, 1, 9000, 16384);
+        assert!(w.find(loc(1, 4096), 8).is_some());
+        assert!(w.find(loc(1, 12288), 8).is_none());
+        assert!(w.find(loc(1, 20480), 8).is_some());
+        assert_eq!(w.stats().resident_bytes, 2 * 4160);
+        // An entry that starts before the range and runs into it goes too.
+        w.evict_range(0, 1, 6000, 6001);
+        assert!(w.find(loc(1, 4096), 8).is_none());
+        assert_eq!(w.stats().resident_bytes, 4160);
+    }
+
+    #[test]
+    fn a_completed_batch_replaces_the_read_around_entries_it_overlaps() {
+        let w = Window::new(1, 1 << 20);
+        let e = w.epoch.load(Ordering::Acquire);
+        w.insert_checked(0, 1, 4096, rec(4160), e, || true);
+        w.insert_checked(0, 1, 8256, rec(4160), e, || true);
+        w.insert_checked(0, 2, 4096, rec(100), e, || true);
+        assert!(w.reserve_batch(9000));
+        let batch: Arc<[u8]> = Arc::from(vec![2u8; 9000]);
+        w.insert_batch(0, 1, 4096, batch);
+        let (b, i) = w.find(loc(1, 8256), 8).expect("hit");
+        assert_eq!((b.len(), i, b[i]), (9000, 4160, 2));
+        // The other ordinal is untouched; the replaced entries' bytes went.
+        assert!(w.find(loc(2, 4096), 8).is_some());
+        assert_eq!(w.stats().resident_bytes, 9000 + 100);
+    }
+
+    #[test]
+    fn a_record_is_not_inserted_over_an_entry_or_for_a_recycled_file() {
+        let w = Window::new(1, 1 << 20);
+        let e = w.epoch.load(Ordering::Acquire);
+        w.insert_checked(0, 1, 4096, rec(4160), e, || true);
+        w.insert_checked(0, 1, 6000, rec(100), e, || true);
+        w.insert_checked(0, 3, 4096, rec(100), e, || false);
+        assert_eq!(w.stats().resident_bytes, 4160);
+    }
+
+    #[test]
+    fn scan_reports_a_header_cut_by_the_end_of_the_buffer() {
+        let gen = 3;
+        let mut buf = vec![0u8; 2 * BLOCK];
+        let r = encode(1, 4096 + 4096 - 8, gen, 1, 1);
+        buf[2 * BLOCK - 8..].copy_from_slice(&r[..8]);
+        let s = scan_records(&buf, 4096, gen, 4096);
+        assert!(s.recs.is_empty() && s.bad.is_empty());
+        assert_eq!(s.tail, Some(4096 + 2 * 4096 - 8));
     }
 
     #[test]

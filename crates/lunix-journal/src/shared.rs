@@ -139,6 +139,8 @@ pub(crate) struct Shared {
     pub fail_any: AtomicBool,
     /// The next group's `fdatasync` fails (test hook).
     pub fail_sync: AtomicBool,
+    /// The next batch write completes as failed (test hook).
+    pub fail_write: AtomicBool,
 }
 
 impl Shared {

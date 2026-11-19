@@ -50,6 +50,32 @@ Not changed: the acknowledgement, the group flush, FUA, C6, recovery and every o
 9. **Memory:** an entry per batch (written) or per record (read-around) is an `Arc<[u8]>`; a batch copy is `memcpy` of the packed bytes (no padding).
    Not locked.
 
+## Review fixes (4b5301e: MERGE AFTER FIXES)
+
+- **M1 (stale entry after the wipe).** Both fixes: a batch the cap did not admit evicts every entry it overlaps when its write completes
+  (`Window::evict_range`), and `Window::clear` bumps a wipe epoch that a read-around captures before it reads and that `insert_record` checks
+  under the lane lock (a follower's resolve uses the epoch of the window it resolves from). Tests: unit tests of both (`a_read_that_began_before_a_clear_...`,
+  `a_batch_that_is_not_admitted_still_evicts_...`, `a_completed_batch_replaces_the_read_around_entries_...`) on a small cap, and
+  `records_beyond_the_stop_point_read_before_the_wipe_never_come_back` (records beyond the stop point, a read before `open_lane`, new writes under a one-batch cap).
+- **M2 (destage-level damaged record).** `lunixd/tests/stack_window.rs`: a plain volume, one-batch cap, 24 records of 64 KiB, a byte of a non-resident one
+  flipped on disk, `commit_now` fails with `Corrupt`; the tip is unchanged, the engine is stopped and a second commit fails, no file outside the journal
+  holds any of the written bytes (the segments of the failed cut are deleted), a resident record still reads. The rule that follows is the engine's for
+  a Permanent failure (`coord.rs` `destage_failed`): no more commits in this process, writes fail, reads continue; the next start finds the damage with
+  the recovery scan. Documented in the test's module comment.
+- m1: a follower whose target is not found in the leader's window retries with a read of its own before reporting damage. m3: a `Corrupt` result for a
+  location whose file is no longer the one that was read is `NotFound` and counts nothing; `Journal::read_at` documents `Corrupt` (the one doc line in
+  `lunix-iface/src/journal.rs`, added to `[jwin]`). m4: a tail that is no record falls through to the backward read. m5: a lane dropped with
+  writes that never completed returns their reservations. m6: evicted entries are dropped outside the lane lock. m7: one wake signal per poll for
+  hits. m11: `resident_cap` is `#[must_use]`.
+- m2, m8, m9: the crate docs, the config field docs, DESIGN §4.1 and the `window` module say that the scan does not apply the reader's `write_seq`
+  order or its zero-block stop, that a small cap costs a 1 MiB read and check per window that was not made resident (a T6 cell should measure it), and that
+  a guest read miss is unchecked, as ADR-33 allows (no read is added anywhere else; those bytes never reach a chunk).
+- Tests: the data pattern is now a hash of (seq, byte index), so a shifted sub-range differs; the property test runs 64 cases over one or two lanes; the race
+  tests have no sleeps (they count reads before and after the reclaim) and accept only `NotFound`, and check that nothing was counted as damage; new:
+  a failed batch write gives its reservation back (`FileJournal::fail_next_batch_write`, a hidden test hook), a lane dropped with writes in flight, many
+  threads past the cap, a header cut by the end of a buffer (scanner).
+- Not done (optional): m4's `fill` still spends one completing read on a false tail; m6 only for the evictions in the window module; m10, m11's `as usize` casts.
+
 ## rust-skills conflicts
 
 None.

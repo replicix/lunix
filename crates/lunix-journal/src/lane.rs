@@ -477,14 +477,29 @@ impl FileLane {
         };
         self.batch_free.push(id);
         self.inflight_writes -= 1;
+        let res = if self.sh.fail_write.swap(false, Ordering::AcqRel) {
+            -libc::EIO
+        } else {
+            res
+        };
         let written = usize::try_from(res).is_ok_and(|n| n == batch.len);
         if written {
             // Indexed while the file still has a write in flight (reclaim
-            // takes a file only without one), before any completion.
-            if let Some(c) = &batch.copy {
-                self.sh
-                    .window
-                    .insert_batch(self.id, batch.ordinal, batch.start, Arc::clone(c));
+            // takes a file only without one), before any completion. A batch
+            // the cap did not admit still evicts what it overwrote.
+            match &batch.copy {
+                Some(c) => self.sh.window.insert_batch(
+                    self.id,
+                    batch.ordinal,
+                    batch.start,
+                    Arc::clone(c),
+                ),
+                None => self.sh.window.evict_range(
+                    self.id,
+                    batch.ordinal,
+                    batch.start,
+                    batch.start + batch.len as u64,
+                ),
             }
         }
         batch.file.inflight.fetch_sub(1, Ordering::AcqRel);
@@ -738,12 +753,17 @@ impl JournalLane for FileLane {
         let hit = self.sh.window.copy_hit(loc, &mut buf);
         self.sh.window.count(hit);
         if hit {
+            // One signal per poll is enough: an earlier ready completion
+            // already raised it.
+            let first = self.out.is_empty();
             self.out.push(JournalCompletion::Read {
                 token,
                 status: IoStatus::ok(buf.len() as u32),
                 buf,
             });
-            self.wake.signal();
+            if first {
+                self.wake.signal();
+            }
             return Ok(());
         }
         let a0 = crate::sys::floor4k(loc.offset);
@@ -823,6 +843,13 @@ impl Drop for FileLane {
                 break;
             }
             self.reap();
+        }
+        // A write that never completed (a failed wait above) leaves its
+        // copy's reservation behind: give it back.
+        for b in self.batches.drain(..).flatten() {
+            if let Some(c) = &b.copy {
+                self.sh.window.drop_reservation(c.len() as u64);
+            }
         }
         let ring = &self.sh.rings.lanes[usize::from(self.id)];
         if let Some(a) = &self.active {

@@ -377,8 +377,14 @@ journal):
   - **A miss reads 1 MiB around it.** `read_at` on a location that is not
     resident (after a restart, past the cap) reads the 1 MiB-aligned window
     of the ring file around it, once however many workers miss in it, and
-    parses whole records with the recovery reader's rules (magic, `gen`, own
-    `off`) and each record's crc32c **before any of its bytes is used**. Only
+    parses whole records with the recovery reader's record checks (magic,
+    `gen`, own `off`, resync in 8-byte steps) and each record's crc32c
+    **before any of its bytes is used**. It does not apply the reader's
+    `write_seq` order or its stop at a zero block, so it can accept valid
+    records beyond a recovery stop point; the window is cleared when the
+    wipe runs, a read that began before the wipe cannot index after it, and a
+    batch whose write completes evicts every entry it overlaps even when the
+    cap did not admit it. Only
     verified records are served or made resident (within the cap). A record
     cut by the edge of the window is completed with one more read. A record
     that fails its checksum (or has no valid header at its place) fails the
@@ -386,7 +392,14 @@ journal):
     no chunk ever holds the damaged bytes. Nothing is read ahead of need and
     nothing is read back after a write.
   - `submit_read` (guest reads) uses the window for hits only; a miss is the
-    single asynchronous read of the piece it was.
+    single asynchronous read of the piece it was, **unchecked** (after a
+    restart or past the cap a guest read can still return damaged ring bytes
+    to the guest). ADR-33 adds no read anywhere else and these bytes never
+    reach a chunk.
+  - Past `journal_resident_max` every `read_at` miss in a window that was not
+    made resident reads and checks 1 MiB again (concurrent misses share one
+    read): with a small cap destage can be slower than before the window. The
+    default, `journal_max`, never binds.
   - Counters (`FileJournal::window_stats`): resident bytes and cap, hits,
     misses, batches not admitted, window reads, completing reads, checksum
     failures.

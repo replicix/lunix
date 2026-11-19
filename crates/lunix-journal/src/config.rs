@@ -124,7 +124,10 @@ pub struct JournalConfig {
     /// keeps in memory of what it wrote, until the ring file is reclaimed,
     /// plus the records a read-around made resident. `None` is
     /// `journal_max`; a larger value is clamped to it. The memory is not
-    /// locked. At least one maximal batch.
+    /// locked. At least one maximal batch. Below the backlog a cut reads, a
+    /// miss costs a 1 MiB read and check per window that was not made
+    /// resident (see the `window` module): leave it at the default unless
+    /// memory is tight.
     pub resident_max: Option<u64>,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
@@ -162,6 +165,7 @@ impl JournalConfig {
 
     /// The effective cap of the resident window: `resident_max` (default
     /// `journal_max`), never above `journal_max`.
+    #[must_use]
     pub fn resident_cap(&self) -> u64 {
         self.resident_max
             .unwrap_or(self.journal_max)

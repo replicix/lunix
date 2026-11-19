@@ -90,6 +90,7 @@ impl FileJournal {
             fail_next: Mutex::new(BTreeSet::new()),
             fail_any: AtomicBool::new(false),
             fail_sync: AtomicBool::new(false),
+            fail_write: AtomicBool::new(false),
         });
         let worker = Arc::clone(&sh);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -124,6 +125,13 @@ impl FileJournal {
     pub fn fail_next_append(&self, lane: LaneId) {
         lock(&self.sh.fail_next).insert(lane.0);
         self.sh.fail_any.store(true, Ordering::Relaxed);
+    }
+
+    /// Test hook: the next batch write completes as a failed one (`EIO`), as
+    /// a device error would; the journal is poisoned at its first record.
+    #[doc(hidden)]
+    pub fn fail_next_batch_write(&self) {
+        self.sh.fail_write.store(true, Ordering::SeqCst);
     }
 
     /// Test hook: the next group flush that has files to sync reports a failed
