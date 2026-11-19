@@ -38,7 +38,21 @@ struct Script {
     busy: AtomicBool,
     /// Move chunk 0 to a new segment at the next step.
     move_next: AtomicBool,
+    /// After this many steps (0: never) the collector reports no work left.
+    idle_after: AtomicU64,
+    /// At this step (0: never) the test's other thread is told to quiesce
+    /// the engine, and the step waits until it did.
+    quiesce_at: AtomicU64,
+    /// Set by the step that asks for the quiesce.
+    quiesce_now: AtomicBool,
+    /// Set by the test's other thread once the engine reports it is closing.
+    closing_seen: AtomicBool,
 }
+
+/// No test of this file takes more steps than this: a runaway share (a
+/// clock that stands still with no stall counter) fails here instead of
+/// hanging the run (final review of gcrate, F-4).
+const STEP_LIMIT: u64 = 1000;
 
 struct Scripted {
     script: Arc<Script>,
@@ -48,7 +62,24 @@ struct Scripted {
 impl Collector for Scripted {
     fn step(&mut self, view: &GcView<'_>, _b: GcBudget) -> Result<GcProgress> {
         let s = &self.script;
-        s.steps.fetch_add(1, Ordering::SeqCst);
+        let n = s.steps.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(n < STEP_LIMIT, "runaway share: {n} collector steps");
+        if n == s.quiesce_at.load(Ordering::SeqCst) {
+            s.quiesce_now.store(true, Ordering::SeqCst);
+            // The quiesce sets the engine's `closing` flag before it waits
+            // for the coordinator: go on only once that is seen.
+            let t0 = std::time::Instant::now();
+            while !s.closing_seen.load(Ordering::SeqCst) {
+                assert!(
+                    t0.elapsed() < Duration::from_secs(30),
+                    "the quiesce never set `closing`"
+                );
+                std::thread::yield_now();
+            }
+        }
+        if n == s.idle_after.load(Ordering::SeqCst) {
+            s.busy.store(false, Ordering::SeqCst);
+        }
         let once = s.next_ms.swap(0, Ordering::SeqCst);
         let ms = if once > 0 {
             once
@@ -143,6 +174,12 @@ fn setup() -> (Vol, Running, Arc<Script>) {
 /// `cut_ms` (the first step, the cut's own C10 step, moves the clock) and
 /// every later step `step_ms`.
 fn share_steps(cut_ms: u64, step_ms: u64, busy: bool) -> u64 {
+    share_steps_with(cut_ms, step_ms, busy, 0)
+}
+
+/// [`share_steps`], the collector reporting no work after `idle_after` steps
+/// (0: never).
+fn share_steps_with(cut_ms: u64, step_ms: u64, busy: bool, idle_after: u64) -> u64 {
     let (v, mut r, script) = setup();
     assert!(r
         .write(0, u64::from(CS), &pattern(2, CS as usize), false)
@@ -155,6 +192,11 @@ fn share_steps(cut_ms: u64, step_ms: u64, busy: bool) -> u64 {
     script.next_ms.store(cut_ms, Ordering::SeqCst);
     script.each_ms.store(step_ms, Ordering::SeqCst);
     let before = script.steps.load(Ordering::SeqCst);
+    if idle_after > 0 {
+        script
+            .idle_after
+            .store(before + idle_after, Ordering::SeqCst);
+    }
     assert!(matches!(
         r.engine.tick().expect("tick"),
         CommitOutcome::Committed { .. }
@@ -187,6 +229,61 @@ fn a_clock_that_stands_still_ends_the_share() {
     assert!(
         (1..=8).contains(&n),
         "{n} steps with a clock standing still"
+    );
+}
+
+#[test]
+fn a_collector_that_goes_idle_in_the_middle_of_a_share_ends_it() {
+    // A 3 s cut would give 1 s of 100 ms steps (10); the collector has no
+    // work after its 4th step (the cut's own is the first): 3 share steps.
+    assert_eq!(share_steps_with(3000, 100, true, 4), 3);
+    // The same share without the idle report runs to its bound.
+    assert!(share_steps_with(3000, 100, true, 0) >= 9);
+}
+
+#[test]
+fn a_quiesce_ends_the_share_and_no_collector_step_follows() {
+    use lunix_iface::block::BlockEngine;
+    let (v, mut r, script) = setup();
+    assert!(r
+        .write(0, u64::from(CS), &pattern(2, CS as usize), false)
+        .is_ok());
+    assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    v.clock.advance(Duration::from_secs(31));
+    script.busy.store(true, Ordering::SeqCst);
+    script.next_ms.store(3000, Ordering::SeqCst);
+    script.each_ms.store(100, Ordering::SeqCst);
+    let before = script.steps.load(Ordering::SeqCst);
+    // The cut's step is the first, the 4th step asks for the quiesce.
+    script.quiesce_at.store(before + 4, Ordering::SeqCst);
+    let engine = &r.engine;
+    let script2 = Arc::clone(&script);
+    let script3 = Arc::clone(&script);
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            let t0 = std::time::Instant::now();
+            while !script2.quiesce_now.load(Ordering::SeqCst) {
+                if t0.elapsed() > Duration::from_secs(30) {
+                    return;
+                }
+                std::thread::yield_now();
+            }
+            // Sets `closing`, then waits for the coordinator mutex.
+            let _ = engine.quiesce();
+        });
+        s.spawn(move || {
+            let t0 = std::time::Instant::now();
+            while !engine.is_closing() && t0.elapsed() < Duration::from_secs(30) {
+                std::thread::yield_now();
+            }
+            script3.closing_seen.store(true, Ordering::SeqCst);
+        });
+        let _ = engine.tick();
+    });
+    assert_eq!(
+        script.steps.load(Ordering::SeqCst) - before,
+        4,
+        "no step after the one that saw the quiesce, in the share or the final commit"
     );
 }
 

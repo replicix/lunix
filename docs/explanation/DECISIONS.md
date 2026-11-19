@@ -2357,8 +2357,9 @@ is not an anchor.
 ## ADR-32: Write back-pressure: a paced admission band below the limit, and a bounded full volume
 
 **Status: accepted (2026-11-18, the maintainer, every recommended option
-M1-M9).** Not implemented yet: T1/T2 (bounded stop, discard path) land on
-`main` first, the paced band after `p1/gcrate`. It amends ADR-14 (the ladder's order and
+M1-M9; the cap percentage in `volume.json`, FREEZE rule change F2,
+2026-11-18).** Implemented: T1, T2 and T6 (`p1/bstop`, `p1/bstop-fu`), T3 to
+T5 (`p1/pace`, 2026-11-19). Open: T7, the M15 and M16 harness changes. It amends ADR-14 (the ladder's order and
 `on_full`) and DESIGN §2, §4.3, §19 and §20. The evidence, the analysis, the
 prior art, the alternatives in full, the test list and the implementation
 sketch are in

@@ -196,6 +196,54 @@ fn figures() -> impl Strategy<Value = SpaceFigures> {
     })
 }
 
+fn throttle() -> impl Strategy<Value = ThrottleStatus> {
+    use lunix_iface::space::ThrottleState as S;
+    (
+        proptest::collection::vec(any::<u64>(), 20),
+        prop_oneof![
+            Just(S::Open),
+            Just(S::Slowdown),
+            Just(S::Stop),
+            Just(S::Full)
+        ],
+        prop_oneof![
+            Just(GcPressure::Normal),
+            Just(GcPressure::Raised),
+            Just(GcPressure::Urgent)
+        ],
+        proptest::option::of(any::<u64>()),
+        ratio(),
+    )
+        .prop_map(
+            |(v, state, gc_pressure, rate, amplification)| ThrottleStatus {
+                state,
+                state_since_ms: v[0],
+                state_for_ms: v[1],
+                headroom: v[2],
+                soft: v[3],
+                resume: v[4],
+                limit: v[5],
+                rate,
+                paced_waiters: v[6],
+                space_waiters: v[7],
+                delayed_writes: v[8],
+                delayed_ms: v[9],
+                delay_max_ms: v[10],
+                delay_capped: v[11],
+                bypassed_fua: v[12],
+                holes_admitted: v[13],
+                enospc: v[14],
+                stops: v[15],
+                fulls: v[16],
+                throttled_ms: v[17],
+                ingest_rate: v[18],
+                reclaim_rate: v[19],
+                gc_pressure,
+                amplification,
+            },
+        )
+}
+
 fn summary() -> impl Strategy<Value = GcPassSummary> {
     (proptest::collection::vec(any::<u64>(), 9), any::<bool>()).prop_map(|(v, dry_run)| {
         GcPassSummary {
@@ -282,6 +330,7 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
             proptest::option::of(any::<u64>()),
             ratio(),
             ratio(),
+            throttle(),
         ),
     )
         .prop_map(
@@ -297,6 +346,7 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                     last_commit_ms,
                     dedup_ratio,
                     compression_ratio,
+                    throttle,
                 ),
             )| {
                 VolumeStatusBody {
@@ -309,6 +359,7 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                     device,
                     stats,
                     space,
+                    throttle,
                     journal_used,
                     journal_capacity,
                     journal_marks_written: journal_used % 7,

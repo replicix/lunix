@@ -47,6 +47,7 @@ mod error;
 mod flush;
 mod full;
 mod gc;
+mod pressure;
 mod queue;
 mod read;
 mod recover;
@@ -57,6 +58,7 @@ pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
 pub use engine::{CommitOutcome, Engine, GcStatusHandle};
 pub use error::OpenError;
+pub use pressure::{Pressure, PressureTracker};
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;
 

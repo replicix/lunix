@@ -685,6 +685,118 @@ impl From<&SpaceSnapshot> for SpaceFigures {
     }
 }
 
+/// What the collector is getting (ADR-32): the engine's pressure from the
+/// gate's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GcPressure {
+    /// The configured budget, rate and grace.
+    #[default]
+    Normal,
+    /// Writes are paced: more budget, rate and the floor grace.
+    Raised,
+    /// Writes wait or fail for space: as raised, the rate uncapped.
+    Urgent,
+}
+
+/// The write throttle as `volume_status` reports it (ADR-32; the research
+/// note section 7). The counters start at the attach.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct ThrottleStatus {
+    /// `open`, `slowdown`, `stop` or `full`.
+    pub state: crate::space::ThrottleState,
+    /// Milliseconds of the gate's clock when the state was entered.
+    pub state_since_ms: u64,
+    /// Milliseconds since the state was entered.
+    pub state_for_ms: u64,
+    /// `limit - used`, bytes.
+    pub headroom: u64,
+    /// The soft mark (pacing starts below this headroom); 0 with the band off.
+    pub soft: u64,
+    /// The latch's resume mark.
+    pub resume: u64,
+    /// The limit.
+    pub limit: u64,
+    /// The bucket's rate now, bytes per second; absent when open.
+    #[serde(default)]
+    pub rate: Option<u64>,
+    /// Requests waiting for tokens.
+    pub paced_waiters: u64,
+    /// Requests waiting for space.
+    pub space_waiters: u64,
+    /// Writes that waited in the gate and were admitted.
+    pub delayed_writes: u64,
+    /// Their summed wait, milliseconds.
+    pub delayed_ms: u64,
+    /// The longest wait of one request, milliseconds.
+    pub delay_max_ms: u64,
+    /// Requests admitted by the delay cap.
+    pub delay_capped: u64,
+    /// FUA writes admitted at once inside the band.
+    pub bypassed_fua: u64,
+    /// Discards and write-zeroes admitted from the reserved region.
+    pub holes_admitted: u64,
+    /// Requests failed for space.
+    pub enospc: u64,
+    /// Times the gate entered `stop`.
+    pub stops: u64,
+    /// Times the volume latched full.
+    pub fulls: u64,
+    /// Milliseconds spent outside `open`.
+    pub throttled_ms: u64,
+    /// Bytes admitted per second, a 10 s average (not a control input).
+    pub ingest_rate: u64,
+    /// Bytes of store freed per second, a 10 s average (not a control input).
+    pub reclaim_rate: u64,
+    /// What the collector is getting.
+    pub gc_pressure: GcPressure,
+    /// Store bytes over the live bytes of the last mark; absent before the
+    /// first mark.
+    #[serde(default)]
+    pub amplification: Option<f64>,
+}
+
+impl ThrottleStatus {
+    /// From the gate's snapshot at `now_ms` (its clock), plus what only the
+    /// engine and the collector know.
+    pub fn from_snapshot(
+        s: &SpaceSnapshot,
+        now_ms: u64,
+        gc_pressure: GcPressure,
+        holes_admitted: u64,
+        live_bytes: u64,
+    ) -> Self {
+        let t = &s.throttle;
+        let amplification = (live_bytes > 0).then(|| s.used() as f64 / live_bytes as f64);
+        Self {
+            state: t.state,
+            state_since_ms: t.state_since_ms,
+            state_for_ms: now_ms.saturating_sub(t.state_since_ms),
+            headroom: t.headroom,
+            soft: t.soft,
+            resume: t.resume,
+            limit: s.limit,
+            rate: t.rate,
+            paced_waiters: t.paced_waiters,
+            space_waiters: t.space_waiters,
+            delayed_writes: t.delayed_writes,
+            delayed_ms: t.delayed_ms,
+            delay_max_ms: t.delay_max_ms,
+            delay_capped: t.delay_capped,
+            bypassed_fua: t.bypassed_fua,
+            holes_admitted,
+            enospc: t.enospc,
+            stops: t.stops,
+            fulls: t.fulls,
+            throttled_ms: t.throttled_ms,
+            ingest_rate: t.ingest_rate,
+            reclaim_rate: t.reclaim_rate,
+            gc_pressure,
+            amplification,
+        }
+    }
+}
+
 /// `space` response: the policy and the figures.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpaceBody {
@@ -744,6 +856,8 @@ pub struct VolumeStatusBody {
     pub stats: EngineStats,
     /// The ledger.
     pub space: SpaceFigures,
+    /// The write throttle (ADR-32).
+    pub throttle: ThrottleStatus,
     /// Journal bytes in use.
     pub journal_used: u64,
     /// Journal capacity.

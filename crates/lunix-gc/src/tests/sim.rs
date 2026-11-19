@@ -80,12 +80,18 @@ impl SimCfg {
 
 pub(crate) const GRACE: Duration = Duration::from_secs(60);
 
+/// The view's clock and the moves per point of [`Hooks`].
+type Advance = (Option<Arc<ManualClock>>, BTreeMap<&'static str, Duration>);
+
 /// Crash-at hooks.
 #[derive(Debug, Default)]
 pub(crate) struct Hooks {
     target: Mutex<Option<(&'static str, u64)>>,
     hits: Mutex<BTreeMap<&'static str, u64>>,
     crashed: Mutex<Option<&'static str>>,
+    /// The view's clock and how far each point moves it when hit (a unit
+    /// that takes time on the view's clock: gcrate final review F-1).
+    advance: Mutex<Advance>,
 }
 
 impl Hooks {
@@ -99,6 +105,10 @@ impl Hooks {
             .unwrap_or(0);
         *self.target.lock().expect("hooks") = Some((point, base + nth.max(1)));
     }
+    /// Hitting `point` moves the clock by `by` (0 clears it).
+    pub(crate) fn advance_at(&self, point: &'static str, by: Duration) {
+        self.advance.lock().expect("hooks").1.insert(point, by);
+    }
     pub(crate) fn crashed(&self) -> Option<&'static str> {
         *self.crashed.lock().expect("hooks")
     }
@@ -106,6 +116,12 @@ impl Hooks {
 
 impl GcHooks for Hooks {
     fn crash_at(&self, point: &'static str) -> bool {
+        {
+            let a = self.advance.lock().expect("hooks");
+            if let (Some(clock), Some(by)) = (&a.0, a.1.get(point)) {
+                clock.advance(*by);
+            }
+        }
         let n = {
             let mut h = self.hits.lock().expect("hooks");
             let c = h.entry(point).or_insert(0);
@@ -157,6 +173,9 @@ pub(crate) struct Sim {
     pub model: BTreeMap<u64, BTreeMap<u64, u64>>,
     pub raise_floor: bool,
     pub pins: Vec<PinRoot>,
+    /// The grace the view hands the collector (the engine changes it under
+    /// write pressure).
+    pub grace: Duration,
 }
 
 fn new_codec(cfg: &SimCfg) -> Arc<dyn ExtentCodec> {
@@ -271,6 +290,7 @@ impl Sim {
                 tip_hash: sealed.hash,
             })
             .expect("floor");
+        hooks.advance.lock().expect("hooks").0 = Some(clock.clone());
         let gc = Gc::with_hooks(Arc::new(store.clone()), cfg.gc, hooks.clone());
         let mut model = BTreeMap::new();
         model.insert(0, BTreeMap::new());
@@ -296,13 +316,14 @@ impl Sim {
             model,
             raise_floor: true,
             pins: Vec::new(),
+            grace: GRACE,
         }
     }
 
     pub(crate) fn params(&self) -> GcParams {
         GcParams {
             retain_last: self.retain_last,
-            grace: GRACE,
+            grace: self.grace,
             read_timeout: Duration::from_secs(10),
             rate_bytes_per_s: 64 << 20,
             live_threshold: 0.5,

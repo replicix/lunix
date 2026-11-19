@@ -154,6 +154,12 @@ pub(crate) struct Compactor {
     footers: FooterCache,
     pub(crate) started: Duration,
     pub(crate) bytes_read: u64,
+    /// The rate cap's window: the rate it counts under (`None` before the
+    /// first check), when it began and the bytes read by then. A change of
+    /// the rate (write pressure comes and goes) starts a new window, so
+    /// bytes read while the rate was higher are not charged to the lower
+    /// one afterwards.
+    pub(crate) window: Option<(u64, Duration, u64)>,
     pub(crate) bytes_written: u64,
     raw: Vec<u8>,
     stored: Vec<u8>,
@@ -191,6 +197,7 @@ impl Compactor {
             footers: FooterCache::new(8),
             started,
             bytes_read: 0,
+            window: None,
             bytes_written: 0,
             raw: Vec::new(),
             stored: Vec::new(),
@@ -427,4 +434,66 @@ pub(crate) fn tip_segments(view: &GcView<'_>) -> BTreeSet<SegId> {
         })
         .flatten()
         .collect()
+}
+
+/// The compaction rate cap: bytes read in the current window may not run
+/// ahead of `rate` by more than one step's worth (`step_max`). The window
+/// is `(rate, start, bytes read at its start)`; the first check opens it at
+/// the run's `started`, and a different `rate` (write pressure came or went)
+/// opens a new one now, so bytes read while the rate was higher are not
+/// charged to a lower one. Returns the window and whether the run is over
+/// its cap.
+pub(crate) fn rate_cap(
+    window: Option<(u64, Duration, u64)>,
+    rate: u64,
+    now: Duration,
+    started: Duration,
+    bytes_read: u64,
+    step_max: u64,
+) -> ((u64, Duration, u64), bool) {
+    let w = match window {
+        Some(w) if w.0 == rate => w,
+        Some(_) => (rate, now, bytes_read),
+        None => (rate, started, 0),
+    };
+    let elapsed_ms = now.saturating_sub(w.1).as_millis();
+    let allowed = u128::from(rate)
+        .saturating_mul(elapsed_ms)
+        .checked_div(1000)
+        .unwrap_or(0)
+        .saturating_add(u128::from(step_max));
+    (w, u128::from(bytes_read.saturating_sub(w.2)) >= allowed)
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+
+    const S: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn the_cap_counts_from_the_start_at_a_steady_rate() {
+        let (w, over) = rate_cap(None, 1000, S, Duration::ZERO, 0, 100);
+        assert!(!over);
+        // 1 s at 1000 B/s plus a step of 100: 1100 allowed.
+        assert!(!rate_cap(Some(w), 1000, S, Duration::ZERO, 1099, 100).1);
+        assert!(rate_cap(Some(w), 1000, S, Duration::ZERO, 1100, 100).1);
+        assert_eq!(w.1, Duration::ZERO, "the first window starts with the run");
+    }
+
+    #[test]
+    fn bytes_read_at_a_higher_rate_are_not_charged_to_a_lower_one() {
+        // Urgent pressure: an uncapped rate, a long read-ahead.
+        let (w, over) = rate_cap(None, u64::MAX, S, Duration::ZERO, 50_000, 100);
+        assert!(!over);
+        // Pressure ends at 2 s: the rate is 1000 B/s again. The old
+        // accounting would see 50 000 read against 2 100 allowed and sit at
+        // the cap for 48 s; the new window starts at the change.
+        let (w2, over) = rate_cap(Some(w), 1000, 2 * S, Duration::ZERO, 50_000, 100);
+        assert!(!over, "the run stalled after the pressure ended");
+        assert_eq!(w2, (1000, 2 * S, 50_000));
+        // And the new rate holds from there.
+        assert!(rate_cap(Some(w2), 1000, 3 * S, Duration::ZERO, 51_100, 100).1);
+        assert!(!rate_cap(Some(w2), 1000, 3 * S, Duration::ZERO, 51_099, 100).1);
+    }
 }

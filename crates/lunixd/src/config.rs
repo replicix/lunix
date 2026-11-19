@@ -32,7 +32,18 @@
 //! | `destage_workers` | `max(2, cpus / 2)` | destage pool worker threads (hash, dedup, compress, seal) per attached volume; 1 to 64, 0 is refused |
 //! | `full_timeout_ms` | 60000 | the wait at the limit of a volume whose `space.full_timeout_ms` is null (ADR-32); 1000 ..= 3600000, a warning above 100000 (the kernel's hung-task threshold is 120 s) |
 //! | `store_max_percent` | 200 | `space.cache_max_percent` of new volumes (ADR-32 M2, FREEZE F2); 0 writes no cap, else 100 ..= 10000 |
-
+//! | `throttle` | `true` | the paced admission band below the limit (ADR-32 T3); `false` turns it off, the bounded stop and the latch stay |
+//! | `throttle_soft_percent` | 15 | the soft mark, percent of a volume's limit; 1 ..= 50 |
+//! | `throttle_soft_min_bytes` | 1073741824 | lower clamp of the soft mark (it stays at most half the limit); at least 67108864 |
+//! | `throttle_soft_max_bytes` | 68719476736 | upper clamp of the soft mark; at least `throttle_soft_min_bytes` |
+//! | `throttle_min_rate` | 4194304 | `r_min`: the slowest admission rate inside the band, bytes per second per volume; at least 65536 |
+//! | `throttle_max_delay_ms` | 10000 | the longest one request is delayed by pacing; 10 ..= `full_timeout_ms` |
+//! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
+//!
+//! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
+//! (`volume.json`), not a daemon key. The per-volume policy keys
+//! (`space.cache_max`, `on_full`, `full_timeout_ms`, `gc_rate`) stay in
+//! `volume.json`; see `docs/reference/gc.md` and DESIGN section 2.
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -105,6 +116,11 @@ pub struct DaemonConfig {
     pub full_timeout: Duration,
     /// `space.cache_max_percent` of new volumes (0: no cap).
     pub store_max_percent: u32,
+    /// The paced band (ADR-32); `mid_rate` is set per volume from its
+    /// `gc_rate`.
+    pub throttle: lunix_space::ThrottleConfig,
+    /// The compaction rate's multiple while writes are slowed.
+    pub gc_pressure_rate_factor: u64,
 }
 
 /// Most destage worker threads the config accepts.
@@ -138,6 +154,8 @@ impl Default for DaemonConfig {
             destage_workers: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             store_max_percent: 200,
+            throttle: lunix_space::ThrottleConfig::default(),
+            gc_pressure_rate_factor: 4,
         }
     }
 }
@@ -216,6 +234,7 @@ impl DaemonConfig {
     /// [`ConfigError`] for any line that is not a known `key = value`.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let mut c = Self::default();
+        let mut delay_set = false;
         for (i, line) in text.lines().enumerate() {
             let line_no = i + 1;
             let err = |why: String| ConfigError { line: line_no, why };
@@ -230,10 +249,27 @@ impl DaemonConfig {
                 .split_once('=')
                 .ok_or_else(|| err("expected key = value".into()))?;
             let key = k.trim();
+            delay_set |= key == "throttle_max_delay_ms";
             let val = parse_value(v).map_err(err)?;
             c.set(key, val).map_err(err)?;
         }
+        c.check(delay_set)
+            .map_err(|why| ConfigError { line: 0, why })?;
         Ok(c)
+    }
+
+    /// The rules that span keys.
+    fn check(&self, delay_set: bool) -> Result<(), String> {
+        let t = &self.throttle;
+        if t.soft_max < t.soft_min {
+            return Err("throttle_soft_max_bytes is below throttle_soft_min_bytes".into());
+        }
+        // The default delay cap yields to a shorter full timeout (the gate
+        // takes the smaller); one that is set must fit under it.
+        if delay_set && t.max_delay > self.full_timeout {
+            return Err("throttle_max_delay_ms is above full_timeout_ms".into());
+        }
+        Ok(())
     }
 
     fn set(&mut self, key: &str, v: Value) -> Result<(), String> {
@@ -343,6 +379,44 @@ impl DaemonConfig {
                 }
                 self.store_max_percent = u32::try_from(p).map_err(|_| "too large".to_string())?;
             }
+            "throttle" => self.throttle.enabled = b(v)?,
+            "throttle_soft_percent" => {
+                let p = n(v)?;
+                if !(1..=50).contains(&p) {
+                    return Err("throttle_soft_percent must be 1 to 50".into());
+                }
+                self.throttle.soft_percent =
+                    u8::try_from(p).map_err(|_| "too large".to_string())?;
+            }
+            "throttle_soft_min_bytes" => {
+                let m = n(v)?;
+                if m < 64 << 20 {
+                    return Err("throttle_soft_min_bytes must be at least 67108864".into());
+                }
+                self.throttle.soft_min = m;
+            }
+            "throttle_soft_max_bytes" => self.throttle.soft_max = n(v)?,
+            "throttle_min_rate" => {
+                let r = n(v)?;
+                if r < 65_536 {
+                    return Err("throttle_min_rate must be at least 65536".into());
+                }
+                self.throttle.min_rate = r;
+            }
+            "throttle_max_delay_ms" => {
+                let t = n(v)?;
+                if t < 10 {
+                    return Err("throttle_max_delay_ms must be at least 10".into());
+                }
+                self.throttle.max_delay = Duration::from_millis(t);
+            }
+            "gc_pressure_rate_factor" => {
+                let f = n(v)?;
+                if !(1..=64).contains(&f) {
+                    return Err("gc_pressure_rate_factor must be 1 to 64".into());
+                }
+                self.gc_pressure_rate_factor = f;
+            }
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())
@@ -451,6 +525,52 @@ volume_roots = "/a, /b"
         ] {
             assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_throttle_keys_parse_and_are_validated() {
+        let d = DaemonConfig::default();
+        assert!(d.throttle.enabled);
+        assert_eq!(d.throttle.soft_percent, 15);
+        assert_eq!(d.throttle.soft_min, 1 << 30);
+        assert_eq!(d.throttle.soft_max, 64 << 30);
+        assert_eq!(d.throttle.min_rate, 4 << 20);
+        assert_eq!(d.throttle.max_delay, Duration::from_secs(10));
+        assert_eq!(d.gc_pressure_rate_factor, 4);
+        let c = DaemonConfig::parse(
+            "throttle = false\nthrottle_soft_percent = 30\nthrottle_soft_min_bytes = 134217728\n\
+             throttle_soft_max_bytes = 1073741824\nthrottle_min_rate = 1_000_000\n\
+             throttle_max_delay_ms = 500\ngc_pressure_rate_factor = 8\n",
+        )
+        .unwrap();
+        assert!(!c.throttle.enabled);
+        assert_eq!(c.throttle.soft_percent, 30);
+        assert_eq!(c.throttle.soft_min, 128 << 20);
+        assert_eq!(c.throttle.soft_max, 1 << 30);
+        assert_eq!(c.throttle.min_rate, 1_000_000);
+        assert_eq!(c.throttle.max_delay, Duration::from_millis(500));
+        assert_eq!(c.gc_pressure_rate_factor, 8);
+        for bad in [
+            "throttle_soft_percent = 0",
+            "throttle_soft_percent = 51",
+            "throttle_soft_min_bytes = 1000",
+            "throttle_soft_max_bytes = 1000\n",
+            "throttle_min_rate = 65535",
+            "throttle_max_delay_ms = 9",
+            "throttle_max_delay_ms = 61000",
+            "throttle_max_delay_ms = 6000\nfull_timeout_ms = 5000",
+            "gc_pressure_rate_factor = 0",
+            "gc_pressure_rate_factor = 65",
+            "throttle = 1",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
+        // The default delay cap yields to a shorter full timeout.
+        assert!(DaemonConfig::parse("full_timeout_ms = 5000").is_ok());
+        // The delay cap follows a longer full timeout; order does not matter.
+        assert!(
+            DaemonConfig::parse("throttle_max_delay_ms = 61000\nfull_timeout_ms = 120000").is_ok()
+        );
     }
 
     #[test]

@@ -266,6 +266,8 @@ impl Inner {
     /// The trigger check (plan M11 step 5): `T`, `B`, journal fill, a full
     /// ring, pending `moved` records. An idle volume cuts nothing.
     pub(crate) fn tick(&self) -> Result<CommitOutcome> {
+        // ADR-32 T4: the collector's pressure follows the gate's state.
+        self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
         let wanted = self.wanted(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
@@ -929,7 +931,7 @@ impl Inner {
     }
 
     fn gc_step(&self, co: &mut Coord) {
-        let Some(budget) = self.cfg.gc_budget else {
+        let Some(budget) = self.gc_budget_now() else {
             return;
         };
         // No collector call starts once a quiesce began (the engine is

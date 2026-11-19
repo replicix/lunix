@@ -140,10 +140,15 @@ mean exactly this in [DESIGN.md](DESIGN.md) and
 - **write_ack / flush:** the two durability settings behind the modes
   (ADR-27). Each is `local` or `s3`, and says where data must be before
   a write or a FLUSH completes.
-- **Space ladder:** what happens as local space runs out: evict clean →
-  compact (real in phase 1 for local-only volumes) → throttle → `on_full`
-  (`wait` for at most `full_timeout`, 60 s by default, then ENOSPC and the
-  full latch; or `error` = ENOSPC at once). ADR-32.
+- **Space ladder:** what happens as local space runs out: pace (below the
+  limit, continuously) → evict clean → compact (real in phase 1 for
+  local-only volumes) → `on_full` (`wait` for at most `full_timeout`, 60 s
+  by default, then ENOSPC and the full latch; or `error` = ENOSPC at
+  once). ADR-32.
+- **Soft band (paced band):** the headroom below the soft mark (15 % of the
+  limit, 1 to 64 GiB, at most half the limit). A token bucket paces the
+  admission of journal reservations there; the rate falls from unbounded at
+  the mark to `throttle_min_rate` near the limit. Not a refusal. ADR-32.
 - **Heat map:** a `heat/<seq>` object of hot ranges and first-touch
   order, used to warm a new owner's cache.
 - **Authority transfer:** moving the arbiter role from one backend to

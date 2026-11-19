@@ -89,7 +89,7 @@ impl Inner {
         co: &mut Coord,
         f: impl FnOnce(&mut dyn Collector, &GcView<'_>) -> Result<R>,
     ) -> Result<R> {
-        let Some(params) = self.cfg.gc_params else {
+        let Some(params) = self.gc_params_now() else {
             return Err(no_collector());
         };
         if !self.map_at_tip(co) {

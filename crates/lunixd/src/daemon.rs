@@ -13,19 +13,20 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use lunix_crypto::{Argon2Cost, AttachError};
-use lunix_engine::{GcStatusHandle, OnJournalDamage};
+use lunix_engine::{GcStatusHandle, OnJournalDamage, Pressure};
 use lunix_format::commit::Commit;
 use lunix_format::local::{DeviceRecord, RegistryEntry, RollbackFloor, VolumeJson};
 use lunix_format::paths::local as lpath;
 use lunix_format::volume::{CodecPolicy, VolumeDescriptor};
 use lunix_format::{CommitSeq, CryptoMode, IdLen};
 use lunix_iface::block::BlockEngine;
+use lunix_iface::clock::{Clock, SystemClock};
 use lunix_iface::crypto::CommitCodec;
 use lunix_iface::ctl::{
-    Attach, Attached, Compress, CtlError, ErrorCode, GcRequest, JournalDamagePolicy, NameParam,
-    Request, Resize, Response, RollbackFloorView, SpaceBody, SpaceFigures, SpaceRequest,
-    VolumeCreate, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody, VolumeSummary,
-    PROTOCOL_VERSION,
+    Attach, Attached, Compress, CtlError, ErrorCode, GcPressure, GcRequest, JournalDamagePolicy,
+    NameParam, Request, Resize, Response, RollbackFloorView, SpaceBody, SpaceFigures, SpaceRequest,
+    ThrottleStatus, VolumeCreate, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody,
+    VolumeSummary, PROTOCOL_VERSION,
 };
 use lunix_iface::gc::GcControl;
 use lunix_iface::space::{SpaceEvents, SpaceGate};
@@ -674,6 +675,18 @@ impl Daemon {
                 let (tip, _) = s.engine.tip();
                 let read_only = s.space.is_read_only() || s.engine.is_stopped();
                 let written = stats.chunks_total.saturating_sub(stats.chunks_zero);
+                let snap = s.space.snapshot();
+                let throttle = ThrottleStatus::from_snapshot(
+                    &snap,
+                    u64::try_from(SystemClock.monotonic().as_millis()).unwrap_or(u64::MAX),
+                    match s.engine.gc_pressure() {
+                        Pressure::Normal => GcPressure::Normal,
+                        Pressure::Raised => GcPressure::Raised,
+                        Pressure::Urgent => GcPressure::Urgent,
+                    },
+                    stats.ops_discard.saturating_add(stats.ops_write_zeroes),
+                    s.engine.gc_status_handle().get().stats.live_bytes,
+                );
                 VolumeStatusBody {
                     name: p.name.clone(),
                     uuid: e.uuid,
@@ -686,7 +699,8 @@ impl Daemon {
                     chunk_size: s.desc.chunk_size,
                     mode: s.desc.crypto_mode.into(),
                     device: self.device_path(&p.name, l),
-                    space: SpaceFigures::from(&s.space.snapshot()),
+                    space: SpaceFigures::from(&snap),
+                    throttle,
                     journal_used: fill.used_bytes,
                     journal_capacity: fill.capacity_bytes,
                     journal_marks_written: s.journal.marks_written(),
@@ -726,6 +740,7 @@ impl Daemon {
                     device: orphan.map(|id| format!("/dev/ublkb{id}")),
                     stats: Default::default(),
                     space: SpaceFigures::default(),
+                    throttle: ThrottleStatus::default(),
                     journal_used: 0,
                     journal_capacity: 0,
                     journal_marks_written: 0,
@@ -898,6 +913,8 @@ impl Daemon {
         op.destage_workers = self.cfg.destage_workers;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
         op.full_timeout = self.cfg.full_timeout;
+        op.throttle = self.cfg.throttle;
+        op.gc_pressure_rate_factor = self.cfg.gc_pressure_rate_factor;
         if o.allow_unverifiable_fork {
             tracing::warn!(
                 volume = name,
