@@ -38,11 +38,14 @@ use crate::stats::Counters;
 
 /// The published tip (see `Inner::tip_view`): all three figures come from one
 /// commit, so a reader never sees a mix of two.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TipView {
-    pub(crate) commit_seq: CommitSeq,
-    pub(crate) cut_seq: WriteSeq,
-    pub(crate) created_at: lunix_format::TimeMs,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TipView {
+    /// The tip's `commit_seq`.
+    pub commit_seq: CommitSeq,
+    /// The tip's cut: every write at or below it is in the commit.
+    pub cut_seq: WriteSeq,
+    /// The tip's `created_at` (the writer clamp of D17).
+    pub created_at: lunix_format::TimeMs,
 }
 
 impl TipView {
@@ -57,7 +60,9 @@ impl TipView {
 
 impl Inner {
     /// Publishes the tip the coordinator just installed. Called with the
-    /// coordinator mutex held, right after `co.tip` changes.
+    /// coordinator mutex held, after `co.tip` changed and after
+    /// `FullState::note_cut` (`window_turn_left` pairs the published tip with
+    /// `hole_commit`, so a reader between the two must see the old tip).
     pub(crate) fn publish_tip(&self, co: &Coord) {
         *self.tip_view.write().unwrap_or_else(|p| p.into_inner()) = TipView::of(&co.tip);
     }
@@ -69,8 +74,8 @@ impl Inner {
 }
 
 /// Test hook: holds the coordinator mutex, as a commit does, until dropped.
-#[doc(hidden)]
-pub struct CoordHold<'a>(#[allow(dead_code)] MutexGuard<'a, Coord>);
+#[cfg(feature = "testsupport")]
+pub struct CoordHold<'a>(#[expect(dead_code, reason = "held for its drop")] MutexGuard<'a, Coord>);
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -466,8 +471,11 @@ impl Engine {
         self.inner.tick()
     }
 
-    /// The verified tip: `commit_seq`, its cut and the rollback floor the
-    /// engine last wrote.
+    /// The last durable tip as the coordinator published it: `commit_seq`
+    /// and its cut. Never waits for a commit, so it can show a commit that
+    /// is between C6 (durable) and C10 (done): its size, rollback floor,
+    /// counters and journal reclaim may not have caught up yet. Do not read
+    /// "the tip advanced" as "the commit call returned".
     pub fn tip(&self) -> (CommitSeq, WriteSeq) {
         let v = self.inner.tip_view();
         (v.commit_seq, v.cut_seq)
@@ -478,9 +486,15 @@ impl Engine {
         self.inner.tip_view().created_at
     }
 
+    /// The whole published tip, from one commit (what status shows); the
+    /// same caveat as [`Engine::tip`].
+    pub fn tip_view(&self) -> TipView {
+        self.inner.tip_view()
+    }
+
     /// Test hook: holds the coordinator mutex until the guard drops, as a
-    /// long commit would.
-    #[doc(hidden)]
+    /// long commit would. Test builds only (`testsupport`).
+    #[cfg(feature = "testsupport")]
     pub fn hold_coordinator(&self) -> CoordHold<'_> {
         CoordHold(lock(&self.inner.coord))
     }

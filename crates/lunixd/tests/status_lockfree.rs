@@ -2,6 +2,8 @@
 //! engine's coordinator mutex. In-process: a test hook holds the mutex, as a
 //! long commit does, and the calls must still return.
 
+#![cfg(feature = "testsupport")]
+
 mod common;
 
 use std::sync::{mpsc, Arc};
@@ -68,7 +70,7 @@ fn status_and_gc_status_return_while_the_coordinator_mutex_is_held() {
 
     let engine = d.engine_of(n).expect("attached");
     engine.commit_now(true).expect("commit");
-    let want = engine.tip().0 .0;
+    let want = engine.tip_view();
 
     let hold = engine.hold_coordinator();
     let (tx, rx) = mpsc::channel();
@@ -87,8 +89,8 @@ fn status_and_gc_status_return_while_the_coordinator_mutex_is_held() {
     match st.expect("status") {
         Response::VolumeStatus(s) => {
             assert_eq!(s.state, VolumeState::Attached);
-            assert_eq!(s.last_commit_seq, want);
-            assert!(s.last_commit_ms.is_some());
+            assert_eq!(s.last_commit_seq, want.commit_seq.0);
+            assert_eq!(s.last_commit_ms, Some(want.created_at.0));
         }
         r => panic!("{r:?}"),
     }

@@ -672,7 +672,7 @@ impl Daemon {
                 let s = &l.stack;
                 let stats = s.engine.stats();
                 let fill = lunix_iface::journal::Journal::fill(&*s.journal);
-                let (tip, _) = s.engine.tip();
+                let tip = s.engine.tip_view();
                 let read_only = s.space.is_read_only() || s.engine.is_stopped();
                 let written = stats.chunks_total.saturating_sub(stats.chunks_zero);
                 let snap = s.space.snapshot();
@@ -706,8 +706,8 @@ impl Daemon {
                     journal_marks_written: s.journal.marks_written(),
                     journal_marks_skipped: s.journal.marks_skipped(),
                     locked_bytes: l.device.locked_bytes() + s.journal.locked_bytes(),
-                    last_commit_seq: tip.0,
-                    last_commit_ms: Some(s.engine.tip_created_at().0),
+                    last_commit_seq: tip.commit_seq.0,
+                    last_commit_ms: Some(tip.created_at.0),
                     dedup_ratio: ratio(written, written.saturating_sub(stats.dedup_hits)),
                     compression_ratio: ratio(stats.stored_ulen, stats.stored_clen),
                     stats,
@@ -1573,7 +1573,7 @@ impl Daemon {
 
     /// Test hook: the engine of an attached volume (a test holds its
     /// coordinator mutex to show that status does not wait for it).
-    #[doc(hidden)]
+    #[cfg(feature = "testsupport")]
     pub fn engine_of(&self, name: &str) -> Option<Arc<lunix_engine::Engine>> {
         let slot = self.slot(name);
         let g = lock(&slot);

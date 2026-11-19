@@ -13,8 +13,11 @@ Branch `p1/tipstat`, cut from `origin/main` 57deabf.
   so no dependency change is needed or asked.
 - `window_turn_left` computes the debt from the published `commit_seq` (`turn_owed` now takes a
   `CommitSeq`, not the `Coord`); the coordinator's own callers pass `co.tip.common.commit_seq`.
-- Test hook `Engine::hold_coordinator` (`#[doc(hidden)]`, `CoordHold`) and
-  `Daemon::engine_of` (`#[doc(hidden)]`), used only by the tests.
+- Review fixes: the test hooks `Engine::hold_coordinator`/`CoordHold` and `Daemon::engine_of` exist only
+  with the new `testsupport` feature (lunixd's `testsupport` enables lunix-engine's); the publish follows
+  `note_cut`; `Engine::tip_view` returns the whole view and status reads it once; `Engine::tip` documents
+  that it can show a commit between C6 and C10. `status_lockfree` joins the stack-test list in `tools/ci.sh`
+  (it is compiled out without `testsupport`).
 
 ## Audit of the `status` / `gc --status` paths
 
@@ -37,9 +40,10 @@ Checked and left:
 
 ## Tests
 
-- `lunix-engine/tests/tip_view.rs`: the getters return while `hold_coordinator` holds the mutex (10 s
-  `recv_timeout`, so a regression fails instead of hanging); the published tip and `created_at` equal the
-  store's committed tip after open, six `commit_now`, a forced FULL and a `tick` commit; the same across a
+- `lunix-engine/tests/tip_view.rs`: a commit parked (test hook) at C5 and at C6, inside the mutex: the
+  getters return, showing the old tip at C5 and the new one at C6; a commit failing before C6 leaves the
+  view unchanged; the published tip and `created_at` equal the
+  store's committed tip (including `cut_seq`) after open, six `commit_now`, a forced FULL and a `tick` commit; the same across a
   crash after C6 (hook `engine.c7.checkpoint`, store and journal crashed) and reopen, and a commit after it.
 - `lunixd/tests/status_lockfree.rs`: an in-process daemon (null device) attaches a volume; with the
   coordinator held, `VolumeStatus` and `GcStatus` answer (51 us measured) with the right
