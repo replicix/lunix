@@ -82,7 +82,7 @@ None.
 
 ## Gate
 
-`tools/ci.sh` on the host (CPUs 8-15, `-j 4`), rebased on `origin/main` 57deabf: green, ownership included. 2 036 tests passed, 0 failed, 28 ignored
+`tools/ci.sh` on the host (CPUs 8-15, `-j 4`), rebased on `origin/main` 57deabf (first round; the review round was rebased on 62d4d59 and re-run, see below): green, ownership included. 2 036 tests passed, 0 failed, 28 ignored
 (the ignored are the existing by-hand cells). New: 15 tests in `lunix-journal/tests/window.rs` (one of them the 12-case property test),
 4 unit tests in `window.rs`, 1 in `lunixd/src/config.rs`. The existing journal, recovery, kill, crash-point and stack suites pass unchanged.
 
@@ -90,4 +90,4 @@ None.
 
 One commit on `p1/jwin`, `journal: resident window and checked read-around (ADR-33 T1, T2)` (signed); its hash is in the lead's message.
 
-Remote disk use: about 22 GiB at the end of the gate (debug and release targets of the whole workspace plus the source copy), above the 10 GiB budget; the directory was deleted afterwards.
+Remote disk use (review round: see the end of this file; first round): about 22 GiB at the end of the gate (debug and release targets of the whole workspace plus the source copy), above the 10 GiB budget; the directory was deleted afterwards.
