@@ -115,6 +115,12 @@ run_cell() { # target chunk mode
       i=$((i + 1))
     done
     [ "$tgt" = raw ] || { umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after verify_only" $? || bad=1; }
+    # the store bound of the gate holds after a final pass and its grace: one explicit pass, FINAL_SETTLE seconds (default 120, past the
+    # 60 s grace), then the collector state, the space ledger and the store size of the settled volume
+    lx gc "$vol" --json > "$d/gc-final-pass.json" 2>&1
+    sleep "${FINAL_SETTLE:-120}"
+    lx gc "$vol" --status --json > "$d/gc-status-final.json" 2>&1
+    sbs=$(store_bytes "$vol")
     status_json "$vol" > "$d/status-2.json" 2>/dev/null
     detach_vol "$vol"; expect "$cell: detach" $? || bad=1
     lunix_fsck "$vol" "$(basename "$d")-2"; expect "$cell: lunix fsck --deep clean (exit $FSCK_RC)" $? || bad=1
@@ -122,7 +128,7 @@ run_cell() { # target chunk mode
   local sb2; sb2=$(store_bytes "$vol")
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
-      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" notes="$notes"
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" notes="$notes"
   [ "$bad" = 0 ] || FAIL=1
 }
 

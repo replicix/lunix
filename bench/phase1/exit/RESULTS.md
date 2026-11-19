@@ -19,7 +19,7 @@ for the runs below; `6d16fbf` for the rerun). Exact fio job files: `bench/phase1
 | 1 fio verify | 12 cells on `03b858e` | **PASS** (zero errors, fsck clean, peak store 64 GiB); settled store bound not shown by these cells |
 | 2 xfstests | all six runs complete; comparison below | ext4: no Lunix-only failure but the reference fails 244 of 684 for an environment reason (needs a fix before it means anything); xfs: 3 Lunix-only (xfs/129, 234, 253), one reference hang excluded (xfs/118) |
 | 3a kill -9 loops | ext4 100 cycles, xfs 50 cycles | **PASS** |
-| 3b crash points | 66 points x 3 hits, six slices (79 points in the merged build, 13 not run yet) | 170 PASS, 13 FAIL (all explained below, none a Lunix defect so far), 25 UNREACHED; to be rerun on the fixed harness |
+| 3b crash points | 79 points, 3 hits each (rerun on `03b858e`) | 211 PASS, 0 FAIL; 69 of 79 points reached and clean; 10 points never executed by the workload (listed), tamper step missing |
 | 3c QUIESCE handover x20 (SIGUSR2) | 20 cycles | **PASS** |
 | negative controls | M10 noreissue and fault, corrupted block, inflated fsyncer ack, dropped writes | **PASS** (all five tripped) |
 | 4 ratios | both chunk sizes | **PASS** (table below) |
@@ -78,65 +78,71 @@ passes done) and the store is the live data plus the 0.5 GiB journal ring (for e
 c64 c90 d90: segments 43 MiB, store 565 MiB; the same figures before and after the settle), i.e. 1.0 x live, inside the 1.3 x bound.
 The ratio table above is from `ratios2` as well (both chunk sizes, same figures as the first run to the third digit).
 
-## 2 xfstests (`-g quick -x dangerous`, 16 GiB TEST and SCRATCH, reference = loop devices over files on the same disk)
+## 2 xfstests (`-g quick -x dangerous`, 16 GiB TEST and SCRATCH; references = loop devices with 4096-byte sectors, `losetup --sector-size 4096`)
 
-| run | fs | reference ran / failed | Lunix ran / failed | both pass | both fail | Lunix only | passes on reference, not on Lunix |
-|---|---|---|---|---|---|---|---|
-| 64 KiB | ext4 | 684 / 244 | 684 / 241 | 440 | 241 | 0 | 0 |
-| 16 KiB | ext4 | 684 / 244 | 684 / 241 | 440 | 241 | 0 | 0 |
-| 64 KiB | xfs | 1023 / 27 | 1023 / 30 | 993 | 27 | 3 | 0 |
-| 16 KiB | xfs | 1023 / 27 | 1023 / 30 | 993 | 27 | 3 | 0 |
+Details and per-test reasons: `xfstests-compare.md`; raw `raw/m15-xt2-*`, `raw/m15-xt3-*`. GNU coreutils go first in PATH (the host's
+Rust coreutils break the tests); xfs/118 hung on the reference and is excluded on both sides.
 
-Full lists with the reference's failing reason: `raw/xfstests-compare.md`.
+| run | reference ran / failed | Lunix ran / failed | both pass | both fail | Lunix only | passes on reference, not on Lunix |
+|---|---|---|---|---|---|---|
+| ext4 64 KiB | 404 / 14 | 404 / 14 | 390 | 14 | **0** | 0 |
+| ext4 16 KiB | 404 / 14 | 404 / 14 | 390 | 14 | **0** | 0 |
+| xfs 64 KiB, 16 KiB | 751 / 23 | rerun with GNU PATH in progress (`xt4-*`) | | | | |
 
-- **ext4 reference is not a usable baseline yet.** 244 of 684 tests fail on the loop reference, almost all with the line
-  `error: error: invalid value for one of the arguments` (388 times in the output) in front of otherwise correct output. The same
-  line appears on Lunix, so it cancels in the comparison, but it hides every ext4 result behind it: the cause is in the test
-  environment (not found yet; xfs does not show it). To fix before the ext4 gate means anything: find the command that prints it
-  (run `./check ext4/005` with `-d` as root on the loop reference) and rerun both ext4 sides.
-- **xfs, Lunix only: xfs/129, xfs/234, xfs/253.** All three die in `xfs_mdrestore: Invalid superblock disk address/length` followed
-  by "can't read superblock" on the test's own loop device. They restore a metadump of a file system made on the Lunix SCRATCH
-  device (4096-byte logical sectors, the loop reference has 512). That points to a sector-size interaction in the tool, not to
-  data on Lunix, but the gate says Lunix-only failures are defects until shown otherwise: confirm with a reference loop device
-  created with `losetup --sector-size 4096` (not done: no root runs until told).
-- xfs/118 hung for 4 h on the plain loop reference (it never finished; cause not determined) and is excluded from reference and
-  Lunix alike (`tests/exit/xfstests/exclude.xfs`); a per-test stall watchdog was added (not triggered since).
-- `STALL_S`, the exclude list and `xt-ref-xfs2` (the xfs reference rerun) are described in the report.
+- **ext4: gate met.** Against the 4096-byte-sector reference, every test passes on Lunix that passes on the reference, the 14 failures are
+  the same 14 on both sides (host environment: quota tools on tmpfs, no `newring`, statfs permission, stripe geometry, ...; and ext4/054,
+  which fails on the reference too once the sector size is 4096: `mkfs.ext4 -b 1024` needs a 512-byte device), and the 7 tests that did
+  not run on Lunix against the 512-byte reference (1 KiB blocks, 512-byte alignment) do not run on the 4096-byte reference either.
+  The uutils error is absent. 16 KiB and 64 KiB chunks give the same result.
+- **xfs/129, 234, 253** fail on the 4096-byte-sector reference exactly as on Lunix (`xfs_mdrestore` on a 4096-byte-sector device): explained,
+  not Lunix defects. The 26 xfs tests that do not run on Lunix against the 512-byte reference (`block size 1024 cannot be smaller than sector
+  size 4096`, ...) also do not run on the 4096-byte one (751 ran on both).
+- **xfs, Lunix-only against the 4096-byte reference (first comparison, before the rerun): generic/294, 321, 634, 635, xfs/103, 132, 148.**
+  These are an environment mismatch of the comparison, not yet findings: the Lunix xfs runs of that comparison were made *before* the GNU
+  coreutils PATH fix (generic/294, 634, 635 print Rust-coreutils errors: `mknod: File exists (os error 17)`, `touch: Unable to parse date`), the
+  4096-byte reference after it. The two Lunix xfs runs are being repeated with the fix (`xt4-l64-xfs`, `xt4-l16-xfs`); whatever still differs then is a
+  Lunix-only failure to classify (xfs/132 printed `Structure needs cleaning` and xfs/148 is a metadata-corruption test, both worth a close look
+  if they persist).
 
-## 3b crash points
+## 3b crash points (rerun `cp2`, binaries of main `03b858e`, before pace, jwin and tipstat)
 
-The crashpoints build lists 66 points on the first run (79 after the merge of M12c); each run: churn workload with fio verify,
-two fsyncers, `lunix gc` every 15 s, `commit_interval_ms` 2000, the daemon kills itself at hit 1, the middle hit or the late hit
-of the point, a supervisor restarts it in recovery mode, 30 s more load, then fio zero errors, guest fsck, fsyncers, detach and
-`lunix fsck --deep`. Hit counts from a 120 s counting run (`lunixd` now writes `LUNIX_CRASH_COUNT` on its quiesce exit).
+The merged build lists **79 crash points**. A 120 s counting run (the daemon writes `LUNIX_CRASH_COUNT` on its quiesce exit) gives the
+executions per point; each reached point is run at hit 1, the middle hit and 80 % of the count (60 % if that is not reached), on ext4,
+and on xfs for the `engine.c*` points (3 hits each). Every run: churn workload (fio verify with backlog, two fsyncers, `lunix gc` every
+15 s, `commit_interval_ms` 2000), the daemon kills itself at the hit, a supervisor restarts it in recovery mode, 30 s more load, then
+fio zero errors (data byte-exact: crc32c verify of everything it wrote), guest fsck, fsyncers (every acknowledged write present),
+detach and `lunix fsck --deep` (this verifies every extent's tag or AEAD and every chain link). Table per point:
+`crashpoints-table.md`; raw results `raw/m15-cp2-*`.
 
-| slice | PASS | FAIL | UNREACHED |
-|---|---|---|---|
-| cp-s1 | 47 | 3 | 18 |
-| cp-s2 | 35 | 1 | 3 |
-| cp-s3 | 30 | 3 | 0 |
-| cp-s4 | 15 | 6 | 7 |
-| cp-s5 | 22 | 0 | 4 |
-| cp-s6 | 21 | 0 | 4 |
-| total | 170 | 13 | 25 |
+| result | runs |
+|---|---|
+| PASS (crash happened, every check clean) | 211 (181 ext4, 30 xfs) |
+| FAIL | **0** (no recovery failure, no fsck finding, no fio or fsyncer error) |
+| UNREACHED | 15 (5 are variants of reached points, 10 are points the workload never executes) |
 
-Recovery stall after a crash (daemon exec to recovered), cp-s3: p50 385 ms, max 1262 ms, no hung-task or I/O error in dmesg.
+Recovery stall after a crash (daemon exec to recovered): p50 395 ms, p99 1801 ms, max 2303 ms (197 runs).
+**Every point that the workload reaches (69 of 79) crashed and recovered clean at least once, and at every reached hit that fired.**
 
-The 13 FAIL cells, none a Lunix defect so far, all explained:
-- 6 (`store.delete.*` first and mid, cp-s4), `fio rc 124 errors 0`, every fsck clean: not yet explained individually; cp-s4 ran before
-  the detach-crash fix. To rerun.
-- 4 cells `fio rc 124` with a blank or 999 error count (c3/xfs, c4/xfs, journal.before_reclaim_delete, journal.mark.after_sync,
-  store.checkpoint.after_dirsync): the fio report was complete and valid with errors 0; a TERM-stopped fio glues a message in front of the
-  JSON brace and the parser failed. Fixed in the harness.
-- engine.c8.index/last-73: the crash landed during the detach; the retry reported "not attached" and counted as failure. Fixed.
-- engine.c6.committed/last-73/ext4: `lunix fsck` exit 1 with the single warning `index_missing` (1233 chunks without index
-  entry, "mount's catch-up restores them"), no `index_lost`, fio and fsyncer clean; the crash landed in the final commit. A harness
-  strictness issue; later runs accept it only if one attach/detach leaves the second deep fsck clean.
-- `store.checkpoint.after_dirsync/last-0`: hit 0 from 80 % of a count of 1; fixed.
+**Not reached, and why (10 points, count 0 in the counting run):**
 
-Coverage gaps (25 UNREACHED, 16 points with no late variant that passed, listed in `rerun-points.txt`) come from run-to-run
-variance of the hit counts; since cp-s3 the late hit is 80 % of the count with a 60 % fallback. All gaps, the 13 failed
-cells and the 13 points the merged build adds are to be rerun with the merged build (they also exercise the `gc.*` points).
+| points | why the churn workload never executes them | what would reach them |
+|---|---|---|
+| `gc.urgent.after_mark` | the urgent GC pass runs only when the space ladder meets NoSpace; the volume never fills | a volume sized to fill, `on_full = wait`, and a writer |
+| `store.leftover.before_unlink`, `.after_unlink` | removal of a leftover temporary file at open | a kill that leaves a `.tmp` or `.open` file, then a restart |
+| `store.segment_delete.before_unlink`, `.after_unlink`, `.after_dirsync` | deletion of an orphan segment by the open-time sweep or by fsck repair, not by GC (GC uses `store.delete.*`, which are reached) | a crash after a sealed, never-named segment, then a restart; or `lunix fsck --repair --delete-orphans` under the crashpoints build |
+| `store.set_aside.before_rename`, `.after_rename`, `.after_dirsync` | moving a damaged tip aside, an offline `fsck --repair --truncate-tip` | a damaged tip and a crashpoints build of `lunix-fsck` |
+| `ublk.after_update_size` | the online resize path | `lunix resize` under load |
+
+These ten need dedicated scenarios (a resize under load, a full volume, an fsck repair of a damaged copy); they are **not covered** by
+this run and are listed as open for the final report. The 5 unreached variants (`destage.after_segment_append` last, `engine.c1.waited`
+last, `engine.c7.floor` last, `index.before_manifest_swap` last, `store.pack.after_dirsync` mid) are reached points whose other hits passed: the count of
+one run was not repeated in the crash run (variance of 10-20 %).
+
+**The bar** the lead set (data byte-exact, tampering detected in integrity mode): byte-exactness is what fio verify and the fsyncers check
+in every cell. Tamper detection is *not* exercised by the crash cells: `lunix fsck --deep` verifies tags (so a damaged copy would show),
+and the negative control N2 shows that a corrupted block is caught on a live volume, but no crash cell flips a byte of a segment after
+the crash and expects `NeedCredential`/`BadMac`-style refusal. That is a gap against the stated bar, to be covered by a tamper step in
+the cp cells (flip one byte of a named segment after the daemon died, expect fsck error and an attach refusal), not yet written.
 
 ## 1 fio verify (rerun on the merged build): PASS in all 12 cells
 

@@ -1,0 +1,10 @@
+store.pack.after_rename
+store.pack.before_fdatasync
+store.segment.after_dirsync
+store.segment.after_fdatasync
+store.segment.after_rename
+store.segment.before_fdatasync
+store.segment_delete.after_dirsync
+store.segment_delete.after_unlink
+store.segment_delete.before_unlink
+store.set_aside.after_dirsync

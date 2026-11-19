@@ -1,0 +1,10 @@
+gc.compact.after_segment_seal
+gc.condemn.after_list_write
+gc.delete.after_dirsync
+gc.delete.after_unlink
+gc.delete.before_unlink
+gc.evidence.after_put
+gc.mark.end
+gc.urgent.after_mark
+index.after_condemn_flag
+index.after_manifest_swap

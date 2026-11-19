@@ -1,0 +1,4 @@
+registered (this run): /dev/loop8
+registered (this run): /dev/loop9
+note: module ublk_drv loaded
+ublk-leftovers: clean
