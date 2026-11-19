@@ -102,7 +102,10 @@ None.
 
 ## Gate
 
-GATE_PLACEHOLDER
+`tools/ci.sh` on the host (CPUs 8-15, `-j 4`) on `de3b611` plus the ownership commit that follows it (`tools/ci.sh` added to `[jwin]`), on the tree
+of main 62d4d59 merged in: green, ownership included. 2 061 tests passed, 0 failed, 27 ignored (the existing by-hand cells). The run used
+`CARGO_PROFILE_{DEV,TEST,RELEASE}_DEBUG=0` to stay under the disk budget; the remote directory was 7.4 GiB at its largest sample (budget 10 GiB) and was
+deleted afterwards. The commit after the gate changes only this report.
 
 ## Commits
 
