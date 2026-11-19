@@ -48,6 +48,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use lunix_format::CommitSeq;
 use lunix_iface::{ErrorKind, Result};
 
 use crate::coord::Coord;
@@ -343,7 +344,8 @@ impl Inner {
     /// ledger is within 1 MiB of the limit.
     pub(crate) fn space_refusing(&self) -> bool {
         let snap = self.space.snapshot();
-        snap.waiters > 0
+        // Requests parked for pacing are not refused (ADR-32).
+        snap.waiters > snap.throttle.paced_waiters
             || snap.full
             || (self.full.blocked.load(Ordering::Relaxed)
                 && snap.used().saturating_add(NEAR_LIMIT) > snap.limit)
@@ -351,11 +353,8 @@ impl Inner {
 
     /// FULLs the window turn owes: `retain_last + 1` less the commits that
     /// followed the last one that took a hole record.
-    fn turn_owed(&self, co: &Coord) -> u64 {
-        let since = co
-            .tip
-            .common
-            .commit_seq
+    fn turn_owed(&self, tip: CommitSeq) -> u64 {
+        let since = tip
             .0
             .saturating_sub(self.full.hole_commit.load(Ordering::Acquire));
         u64::from(self.cfg.retain_last)
@@ -365,9 +364,9 @@ impl Inner {
 
     /// FULLs the window turn owes while the volume refuses writes (0
     /// otherwise).
-    pub(crate) fn window_turn_left(&self, co: &Coord) -> u64 {
+    pub(crate) fn window_turn_left(&self, tip: CommitSeq) -> u64 {
         if self.space_refusing() {
-            self.turn_owed(co)
+            self.turn_owed(tip)
         } else {
             0
         }
@@ -388,7 +387,7 @@ impl Inner {
         if self.full.last_hole.load(Ordering::Acquire) > co.tip.cut_seq.0 {
             return Some(false);
         }
-        (self.turn_owed(co) > 0).then_some(true)
+        (self.turn_owed(co.tip.common.commit_seq) > 0).then_some(true)
     }
 
     /// After a tick's forced FULL of the window turn: one log line.
@@ -401,7 +400,7 @@ impl Inner {
         if wanted == Some(true) && matches!(res, Ok(CommitOutcome::Committed { .. })) {
             tracing::info!(
                 commit = co.tip.common.commit_seq.0,
-                owed = self.turn_owed(co),
+                owed = self.turn_owed(co.tip.common.commit_seq),
                 "volume full: an empty FULL turns the retained window after a discard"
             );
         }

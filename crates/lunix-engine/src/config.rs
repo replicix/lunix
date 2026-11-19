@@ -66,6 +66,9 @@ pub struct EngineConfig {
     pub gc_budget: Option<GcBudget>,
     /// GC settings handed to the collector.
     pub gc_params: Option<lunix_iface::gc::GcParams>,
+    /// The compaction rate's multiple while writes are slowed (ADR-32,
+    /// `gc_pressure_rate_factor`; 4 by default). Held by `Pressure::params`.
+    pub gc_pressure_rate_factor: u64,
     /// Operator override (ADR-31, decision of 2026-11-13): open although the
     /// chain from the tip back to the rollback floor cannot be walked
     /// (`OpenError::ForkUnverifiable`). The caller audits it.
@@ -108,6 +111,7 @@ impl EngineConfig {
             inflight_timeout: Duration::from_secs(60),
             gc_budget: None,
             gc_params: None,
+            gc_pressure_rate_factor: 4,
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
         }

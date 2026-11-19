@@ -1,7 +1,7 @@
 //! The engine: shared state, `BlockEngine`, the control-plane entry points.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,47 @@ use crate::queue::{Queue, QueueShared};
 use crate::read::{ExtentReader, ReadCtx, ReadPool};
 use crate::recover::{recover, RecoveryReport};
 use crate::stats::Counters;
+
+/// The published tip (see `Inner::tip_view`): all three figures come from one
+/// commit, so a reader never sees a mix of two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TipView {
+    /// The tip's `commit_seq`.
+    pub commit_seq: CommitSeq,
+    /// The tip's cut: every write at or below it is in the commit.
+    pub cut_seq: WriteSeq,
+    /// The tip's `created_at` (the writer clamp of D17).
+    pub created_at: lunix_format::TimeMs,
+}
+
+impl TipView {
+    pub(crate) fn of(tip: &lunix_format::commit::Full) -> Self {
+        Self {
+            commit_seq: tip.common.commit_seq,
+            cut_seq: tip.cut_seq,
+            created_at: tip.common.created_at,
+        }
+    }
+}
+
+impl Inner {
+    /// Publishes the tip the coordinator just installed. Called with the
+    /// coordinator mutex held, after `co.tip` changed and after
+    /// `FullState::note_cut` (`window_turn_left` pairs the published tip with
+    /// `hole_commit`, so a reader between the two must see the old tip).
+    pub(crate) fn publish_tip(&self, co: &Coord) {
+        *self.tip_view.write().unwrap_or_else(|p| p.into_inner()) = TipView::of(&co.tip);
+    }
+
+    /// The published tip, without the coordinator mutex.
+    pub(crate) fn tip_view(&self) -> TipView {
+        *self.tip_view.read().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// Test hook: holds the coordinator mutex, as a commit does, until dropped.
+#[cfg(feature = "testsupport")]
+pub struct CoordHold<'a>(#[expect(dead_code, reason = "held for its drop")] MutexGuard<'a, Coord>);
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -125,6 +166,11 @@ pub(crate) struct Inner {
     /// yet at or below a durable cut (C9 releases per cut, `jcharges`).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
+    /// The tip's figures as the coordinator last published them (ADR-33 T5):
+    /// `tip`, `tip_created_at` and `window_turn_left` read this and never the
+    /// coordinator mutex, which a commit holds for its whole length. The
+    /// write lock is held for one `Copy` store, never across I/O.
+    pub(crate) tip_view: RwLock<TipView>,
     /// The collector's status after its last call (`GcControl::status` and
     /// [`GcStatusHandle`] read it without the coordinator mutex).
     pub(crate) gc_status: Arc<Mutex<GcStatusSnapshot>>,
@@ -145,6 +191,13 @@ pub(crate) struct Inner {
     /// (not idle, not in its grace): the background thread ticks again after
     /// [`GC_BUSY_PERIOD`] instead of its period.
     pub(crate) gc_busy: AtomicBool,
+    /// The collector's pressure (ADR-32): from the gate's state at each
+    /// tick, with the hold. The level is mirrored in `pressure_level` for
+    /// the collector calls.
+    pub(crate) pressure: Mutex<crate::pressure::PressureTracker>,
+    pub(crate) pressure_level: AtomicU8,
+    /// The throttle's log lines (ADR-32).
+    pub(crate) throttle_watch: Mutex<crate::pressure::ThrottleWatch>,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
     pub(crate) report: RecoveryReport,
     /// The bounded full volume (ADR-32): ring-full deadlines, the discard cut.
@@ -323,12 +376,16 @@ impl Engine {
             journal_full: AtomicBool::new(false),
             durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
+            tip_view: RwLock::new(TipView::of(&coord.tip)),
             coord: Mutex::new(coord),
             gc_status: Arc::new(Mutex::new(gc_status)),
             closing: AtomicBool::new(false),
             gc_wake: (Mutex::new(()), Condvar::new()),
             gc_requests: AtomicU64::new(0),
             gc_busy: AtomicBool::new(false),
+            pressure: Mutex::new(crate::pressure::PressureTracker::default()),
+            pressure_level: AtomicU8::new(0),
+            throttle_watch: Mutex::new(crate::pressure::ThrottleWatch::default()),
             resize_hook: Mutex::new(None),
             report: rec.report,
             full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
@@ -414,22 +471,51 @@ impl Engine {
         self.inner.tick()
     }
 
-    /// The verified tip: `commit_seq`, its cut and the rollback floor the
-    /// engine last wrote.
+    /// The last durable tip as the coordinator published it: `commit_seq`
+    /// and its cut. Never waits for a commit, so it can show a commit that
+    /// is between C6 (durable) and C10 (done): its size, rollback floor,
+    /// counters and journal reclaim may not have caught up yet. Do not read
+    /// "the tip advanced" as "the commit call returned".
     pub fn tip(&self) -> (CommitSeq, WriteSeq) {
-        let co = lock(&self.inner.coord);
-        (co.tip.common.commit_seq, co.tip.cut_seq)
+        let v = self.inner.tip_view();
+        (v.commit_seq, v.cut_seq)
     }
 
     /// The tip's `created_at` (the writer clamp of D17), for status displays.
     pub fn tip_created_at(&self) -> lunix_format::TimeMs {
-        lock(&self.inner.coord).tip.common.created_at
+        self.inner.tip_view().created_at
+    }
+
+    /// The whole published tip, from one commit (what status shows); the
+    /// same caveat as [`Engine::tip`].
+    pub fn tip_view(&self) -> TipView {
+        self.inner.tip_view()
+    }
+
+    /// Test hook: holds the coordinator mutex until the guard drops, as a
+    /// long commit would. Test builds only (`testsupport`).
+    #[cfg(feature = "testsupport")]
+    pub fn hold_coordinator(&self) -> CoordHold<'_> {
+        CoordHold(lock(&self.inner.coord))
     }
 
     /// True once a test hook stopped the engine at a crash point, or a
     /// failure inside a cut made it give up.
     pub fn is_stopped(&self) -> bool {
         self.inner.is_failed()
+    }
+
+    /// True once a quiesce began (`BlockEngine::quiesce` was called): no
+    /// collector call starts any more.
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::Acquire)
+    }
+
+    /// What the collector is getting (ADR-32): normal, raised while writes
+    /// are slowed, urgent while they wait or fail for space. Updated at each
+    /// tick from the gate's state.
+    pub fn gc_pressure(&self) -> crate::pressure::Pressure {
+        self.inner.pressure_now()
     }
 
     /// The collector's status, readable after the engine is gone (see
@@ -448,8 +534,8 @@ impl Engine {
     /// decision M6) while writes are refused or parked for space; 0 when
     /// they are not.
     pub fn window_turn_left(&self) -> u64 {
-        let co = lock(&self.inner.coord);
-        self.inner.window_turn_left(&co)
+        self.inner
+            .window_turn_left(self.inner.tip_view().commit_seq)
     }
 
     /// The volume is about to quiesce (ADR-32 review M3, beside

@@ -47,6 +47,7 @@ mod error;
 mod flush;
 mod full;
 mod gc;
+mod pressure;
 mod queue;
 mod read;
 mod recover;
@@ -55,8 +56,11 @@ mod stats;
 pub use config::{EngineConfig, OnJournalDamage};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
-pub use engine::{CommitOutcome, Engine, GcStatusHandle};
+#[cfg(feature = "testsupport")]
+pub use engine::CoordHold;
+pub use engine::{CommitOutcome, Engine, GcStatusHandle, TipView};
 pub use error::OpenError;
+pub use pressure::{Pressure, PressureTracker};
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;
 

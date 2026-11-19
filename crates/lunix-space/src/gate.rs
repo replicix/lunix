@@ -6,18 +6,19 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use lunix_format::local::{OnFull, SpaceSettings};
+use lunix_format::local::SpaceSettings;
 use lunix_iface::clock::Clock;
 use lunix_iface::space::{
-    Ladder, LadderStep, LadderStepKind, ReserveOutcome, SpaceEvents, SpaceGate, SpaceKind,
-    SpaceSnapshot, Urgency, Waiter,
+    Ladder, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceEvents, SpaceGate,
+    SpaceKind, SpaceSnapshot, Urgency,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
 
-use crate::ledger::{FsView, Ledger, Parked};
+use crate::ledger::{FsView, Ledger};
 use crate::policy::Policy;
 use crate::probe::FsProbe;
+use crate::throttle::ThrottleConfig;
 
 /// How often the timer thread re-reads the file system.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -50,6 +51,9 @@ pub struct SpaceConfig {
     /// The wait at the limit when `settings.full_timeout_ms` is null (the
     /// daemon's `full_timeout_ms`; [`DEFAULT_FULL_TIMEOUT`] by default).
     pub full_timeout: Duration,
+    /// The paced band below the limit (ADR-32); the daemon's `throttle*`
+    /// keys and the volume's `gc_rate`.
+    pub throttle: ThrottleConfig,
 }
 
 impl SpaceConfig {
@@ -61,6 +65,7 @@ impl SpaceConfig {
             segment_size: 16 << 20,
             background_timers: true,
             full_timeout: DEFAULT_FULL_TIMEOUT,
+            throttle: ThrottleConfig::default(),
         }
     }
 }
@@ -130,7 +135,8 @@ impl Shared {
                 stat,
                 used_mark: mark,
             };
-            st.ledger.grant_waiters();
+            let t = self.clock.monotonic();
+            st.ledger.grant_waiters(t);
         }
         if err.is_some_and(|e| e.raw_os_error() == Some(5)) {
             self.fatal(&mut st);
@@ -139,7 +145,8 @@ impl Shared {
 
     fn fatal(&self, st: &mut State) {
         st.ledger.read_only = true;
-        st.ledger.expire_all();
+        let now = self.clock.monotonic();
+        st.ledger.expire_all(now);
     }
 
     fn kick_ladder(&self, st: &mut State, want: u64) {
@@ -239,7 +246,7 @@ impl Shared {
                 continue;
             }
             let mut sleep = due - now;
-            if let Some(d) = st.ledger.next_deadline() {
+            if let Some(d) = st.ledger.next_wake(now) {
                 sleep = sleep.min(d.saturating_sub(now));
             }
             sleep = sleep.max(Duration::from_millis(1));
@@ -282,9 +289,9 @@ impl LunixSpace {
         }
         let policy = Policy::from_settings(&config.settings, config.full_timeout)?;
         let stat = probe.stat()?;
-        let mut ledger = Ledger::new(policy, config.segment_size);
-        ledger.fs = FsView { stat, used_mark: 0 };
         let last_refresh = clock.monotonic();
+        let mut ledger = Ledger::new(policy, config.segment_size, config.throttle, last_refresh);
+        ledger.fs = FsView { stat, used_mark: 0 };
         let sh = Arc::new(Shared {
             clock,
             probe,
@@ -344,10 +351,17 @@ impl LunixSpace {
     /// fit fail at once, so the queues can drain. One-way: the gate of a
     /// quiesced volume is not reopened.
     pub fn begin_close(&self) {
+        let now = self.sh.clock.monotonic();
         let mut st = lock(&self.sh.st);
         st.ledger.closing = true;
-        st.ledger.grant_waiters();
-        st.ledger.fail_waiters();
+        st.ledger.grant_waiters(now);
+        st.ledger.fail_waiters(now, true);
+    }
+
+    /// The soft mark of the band now, bytes of headroom (0 with the band
+    /// off).
+    pub fn soft_mark(&self) -> u64 {
+        lock(&self.sh.st).ledger.soft()
     }
 
     /// True while the volume is latched full: writes fail at once until the
@@ -433,7 +447,13 @@ impl SpaceGate for LunixSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
-        self.reserve_since(kind, bytes, wake, self.sh.clock.monotonic())
+        self.reserve_since(
+            kind,
+            bytes,
+            wake,
+            self.sh.clock.monotonic(),
+            ReserveClass::Bulk,
+        )
     }
 
     fn reserve_since(
@@ -442,6 +462,7 @@ impl SpaceGate for LunixSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: Duration,
+        class: ReserveClass,
     ) -> Result<ReserveOutcome> {
         if kind == SpaceKind::Headroom {
             return Err(Error::invalid(
@@ -464,55 +485,35 @@ impl SpaceGate for LunixSpace {
                 return Err(Error::ReadOnly);
             }
         }
-        st.ledger.update_latch();
-        if st.ledger.full {
-            // Latched full: fail at once until the headroom recovers.
-            let want = st.ledger.ladder_want();
-            self.sh.kick_ladder(&mut st, want);
-            return Ok(ReserveOutcome::NoSpace);
-        }
-        st.ledger.prune_front();
-        let no_wait = st.ledger.policy.on_full == OnFull::Error || st.ledger.closing;
-        let queue_free = st.ledger.waiters.is_empty() || no_wait;
-        if queue_free && st.ledger.fits(bytes) {
-            st.ledger.charge_raw(kind, bytes);
-            return Ok(ReserveOutcome::Reserved);
-        }
-        let want = st
-            .ledger
-            .used()
-            .saturating_add(bytes)
-            .saturating_sub(st.ledger.limit());
-        if no_wait {
-            self.sh.kick_ladder(&mut st, want);
-            return Ok(ReserveOutcome::NoSpace);
-        }
-        let waiter = Waiter::new(wake.cloned());
         let now = self.sh.clock.monotonic();
-        let arrived = arrived.min(now);
-        let deadline = arrived.saturating_add(st.ledger.policy.full_timeout);
-        st.ledger.waiters.push_back(Parked {
-            waiter: waiter.clone(),
-            kind,
-            bytes,
-            arrived,
-            deadline,
-        });
-        if deadline <= now {
-            // It waited its full_timeout already, in its queue or for the
-            // journal ring (the wait counts from the arrival): refused now,
-            // without parking and without the latch, since it never waited
-            // in the gate (review m1).
-            st.ledger.waiters.pop_back();
-            let want = st.ledger.ladder_want();
-            self.sh.kick_ladder(&mut st, want);
-            return Ok(ReserveOutcome::NoSpace);
+        let out = st.ledger.reserve(kind, bytes, wake, arrived, class, now);
+        match &out {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(_) => {
+                // A new wake time: the timer thread recomputes its sleep.
+                self.sh.cv.notify_all();
+            }
+            ReserveOutcome::Parked(_) => {
+                let want = st.ledger.ladder_want();
+                self.sh.kick_ladder(&mut st, want);
+                self.sh.cv.notify_all();
+            }
+            ReserveOutcome::NoSpace => {
+                // Latched: the ladder frees up to the resume mark. A plain
+                // refusal (`on_full = error`): what this request is short.
+                let want = if st.ledger.full {
+                    st.ledger.ladder_want()
+                } else {
+                    st.ledger
+                        .used()
+                        .saturating_add(bytes)
+                        .saturating_sub(st.ledger.limit())
+                };
+                self.sh.kick_ladder(&mut st, want);
+                self.sh.cv.notify_all();
+            }
         }
-        let want = st.ledger.ladder_want();
-        self.sh.kick_ladder(&mut st, want);
-        // A new deadline: the timer thread recomputes its sleep.
-        self.sh.cv.notify_all();
-        Ok(ReserveOutcome::Parked(waiter))
+        Ok(out)
     }
 
     fn reserve_headroom(&self, kind: SpaceKind, bytes: u64) -> Result<()> {
@@ -520,7 +521,12 @@ impl SpaceGate for LunixSpace {
     }
 
     fn release(&self, kind: SpaceKind, bytes: u64) {
-        lock(&self.sh.st).ledger.release(kind, bytes);
+        let now = self.sh.clock.monotonic();
+        let mut st = lock(&self.sh.st);
+        st.ledger.release(kind, bytes, now);
+        if !st.ledger.waiters.is_empty() {
+            self.sh.cv.notify_all();
+        }
     }
 
     fn transfer(
@@ -530,9 +536,15 @@ impl SpaceGate for LunixSpace {
         from_bytes: u64,
         to_bytes: u64,
     ) -> Result<()> {
-        lock(&self.sh.st)
+        let now = self.sh.clock.monotonic();
+        let mut st = lock(&self.sh.st);
+        let r = st
             .ledger
-            .transfer(from_kind, to_kind, from_bytes, to_bytes)
+            .transfer(from_kind, to_kind, from_bytes, to_bytes, now);
+        if !st.ledger.waiters.is_empty() {
+            self.sh.cv.notify_all();
+        }
+        r
     }
 
     fn tick(&self) -> usize {
@@ -541,9 +553,10 @@ impl SpaceGate for LunixSpace {
     }
 
     fn snapshot(&self) -> SpaceSnapshot {
+        let now = self.sh.clock.monotonic();
         let mut st = lock(&self.sh.st);
         st.ledger.update_latch();
-        st.ledger.snapshot()
+        st.ledger.snapshot(now)
     }
 
     /// Re-judges every parked request under the new policy (ADR-32):

@@ -125,6 +125,17 @@ impl Queue {
     }
 
     fn submit(&mut self, op: IoOp, offset_bytes: u64, len: u32, data: &[u8]) -> Tag {
+        self.submit_with(op, false, offset_bytes, len, data)
+    }
+
+    fn submit_with(
+        &mut self,
+        op: IoOp,
+        fua: bool,
+        offset_bytes: u64,
+        len: u32,
+        data: &[u8],
+    ) -> Tag {
         let tag = Tag(self.next);
         self.next = (self.next + 1) % 128;
         assert!(!self.outstanding.contains(&tag), "tag {tag:?} reused");
@@ -133,7 +144,7 @@ impl Queue {
             IoRequest {
                 tag,
                 op,
-                fua: false,
+                fua,
                 offset_bytes,
                 len,
             },
@@ -266,7 +277,7 @@ fn fill_until_parked(q: &mut Queue, stack: &VolumeStack) -> (u64, Tag) {
                 assert!(s.is_ok(), "a fill write failed: {s:?}");
                 break;
             }
-            if start.elapsed() > PARKED && stack.space.snapshot().waiters > 0 {
+            if start.elapsed() > PARKED && stack.space.snapshot().throttle.space_waiters > 0 {
                 return (off, t);
             }
             assert!(
@@ -521,4 +532,420 @@ fn a_percentage_cap_is_resolved_at_every_open() {
         assert_eq!(stack.space.snapshot().limit, 128 << 20, "{open}");
         close(stack).expect("close");
     }
+}
+
+// ---------------------------------------------------------------- ADR-32 T3, T4
+
+/// A 128 MiB volume capped at 64 MiB: the soft mark is half the limit
+/// (32 MiB), `gc_rate` 1 MiB/s so that `r_mid` is its floor of 16 MiB/s.
+fn band_volume(t: &Scratch) -> TestVolume {
+    let mut b = VolumeBuilder::new(t.path())
+        .mode(CryptoMode::Integrity)
+        .chunk_size(CS)
+        .size_bytes(SIZE);
+    b.engine = Some(Arc::new(gc_tune));
+    b.json = Some(Box::new(|j: &mut VolumeJson| {
+        j.space.cache_max = Some(CAP);
+        j.space.on_full = OnFull::Wait;
+        j.space.full_timeout_ms = Some(FULL_TIMEOUT_MS);
+        j.commit.interval_ms = 1000;
+        j.max_io_buf_bytes = IO;
+        j.gc_rate = 1 << 20;
+    }));
+    b.create().expect("create")
+}
+
+#[test]
+fn a_volume_entering_the_band_is_paced_and_not_refused() {
+    let t = Scratch::new("pace-band");
+    let vol = band_volume(&t);
+    let stack = vol.open_with(daemon_gc).expect("open");
+    // 15 % of 64 MiB is under the 1 GiB floor of the mark: half the limit.
+    assert_eq!(stack.space.soft_mark(), CAP / 2);
+    let mut q = Queue::new(&stack);
+    let mut off = 0u64;
+    let mut seed = 1u64;
+    let mut states = std::collections::BTreeSet::new();
+    let mut raised = false;
+    let mut inflight: Vec<Tag> = Vec::new();
+    // Fresh blocks only: no garbage, nothing for GC to free. Write until
+    // the headroom is under 8 MiB.
+    let start = Instant::now();
+    loop {
+        while inflight.len() < 16 {
+            inflight.push(q.write(off, seed));
+            off += u64::from(IO);
+            seed += 1;
+        }
+        q.poll();
+        let mut i = 0;
+        while i < inflight.len() {
+            match q.take(inflight[i]) {
+                Some(s) => {
+                    assert!(s.is_ok(), "a write was refused inside the band: {s:?}");
+                    inflight.swap_remove(i);
+                }
+                None => i += 1,
+            }
+        }
+        let snap = stack.space.snapshot();
+        states.insert(snap.throttle.state.name());
+        raised |= stack.engine.gc_pressure() != lunix_engine::Pressure::Normal;
+        if snap.throttle.headroom < 8 << 20 {
+            break;
+        }
+        assert!(off + 16 * u64::from(IO) < SIZE, "never got near the limit");
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "too slow: {snap:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    q.wait_all(Duration::from_secs(20))
+        .iter()
+        .for_each(|s| assert!(s.is_ok(), "{s:?}"));
+    let written = off;
+    // Deep in the band: a few more bulk blocks, then a FLUSH and a small
+    // FUA write. Neither waits for the bulk writes' pace.
+    let head = stack.space.snapshot().throttle.headroom;
+    let n = ((head.saturating_sub(3 << 20)) / u64::from(IO)).min(8);
+    let bulk: Vec<Tag> = (0..n)
+        .map(|i| {
+            let t = q.write(off, seed + i);
+            off += u64::from(IO);
+            t
+        })
+        .collect();
+    let fua_data = payload(77, 4096);
+    let t0 = Instant::now();
+    let fua = q.submit_with(IoOp::Write, true, 3 * u64::from(CS) + 4096, 4096, &fua_data);
+    let flush = q.submit(IoOp::Flush, 0, 0, &[]);
+    assert!(q.wait(fua, SLACK).is_ok());
+    assert!(q.wait(flush, SLACK).is_ok());
+    assert!(
+        t0.elapsed() < SLACK,
+        "a FUA write and a FLUSH waited {:?}",
+        t0.elapsed()
+    );
+    for t in bulk {
+        assert!(q.wait(t, Duration::from_secs(30)).is_ok());
+    }
+    let snap = stack.space.snapshot();
+    let t = snap.throttle;
+    eprintln!("band: {states:?}, {t:?}, written {} MiB", written >> 20);
+    assert!(
+        states.contains("slowdown"),
+        "the gate never paced: {states:?}"
+    );
+    assert!(!states.contains("full"), "{states:?}");
+    assert!(t.delayed_writes > 0 && t.delayed_ms > 0, "{t:?}");
+    assert!(t.delay_max_ms <= 10_000 + 2_000, "the cap is 10 s: {t:?}");
+    assert_eq!((t.enospc, t.fulls), (0, 0), "{t:?}");
+    assert!(t.bypassed_fua >= 1, "the FUA write was paced: {t:?}");
+    assert!(raised, "GC was never given more");
+    assert!(snap.used() <= snap.limit + snap.headroom_total);
+    assert!(t.throttled_ms > 0);
+    assert!(!stack.space.is_full());
+    // What was written reads back, the FUA write included.
+    for b in 0..written / u64::from(IO) {
+        let mut want = payload((b + 1) << 2, IO as usize);
+        if b * u64::from(IO) <= 3 * u64::from(CS) + 4096
+            && 3 * u64::from(CS) + 4096 < (b + 1) * u64::from(IO)
+        {
+            let o = (3 * u64::from(CS) + 4096 - b * u64::from(IO)) as usize;
+            want[o..o + 4096].copy_from_slice(&fua_data);
+        }
+        assert_eq!(q.read(b * u64::from(IO)), want, "block {b}");
+    }
+    drop(q);
+    close(stack).expect("close");
+    if let Some(f) = fsck(&vol) {
+        assert!(f.no_errors(), "lunix-fsck:\n{}", f.text);
+    }
+}
+
+/// GC settings of the slow-GC test: a configured grace of 60 s, which is
+/// more than the test runs; only the floor grace (10 s with `read_timeout`
+/// 0) under pressure can delete anything in time.
+fn gc_grace_60(c: &mut EngineConfig) {
+    if let Some(p) = &mut c.gc_params {
+        p.read_timeout = Duration::ZERO;
+        p.grace = Duration::from_secs(60);
+    }
+}
+
+/// A 256 MiB volume capped at 128 MiB: the soft mark is half the limit
+/// (64 MiB). A 16 MiB working set is rewritten over and over.
+fn slow_gc_volume(t: &Scratch) -> TestVolume {
+    let mut b = VolumeBuilder::new(t.path())
+        .mode(CryptoMode::Integrity)
+        .chunk_size(CS)
+        .size_bytes(256 << 20);
+    b.engine = Some(Arc::new(gc_grace_60));
+    b.json = Some(Box::new(|j: &mut VolumeJson| {
+        j.space.cache_max = Some(128 << 20);
+        j.space.on_full = OnFull::Wait;
+        j.space.full_timeout_ms = Some(30_000);
+        j.commit.interval_ms = 1000;
+        j.max_io_buf_bytes = IO;
+        j.gc_rate = 1 << 20;
+    }));
+    b.create().expect("create")
+}
+
+/// GC pressure (T4) and the slow-GC cell of the note's §9.3: rewriting a
+/// working set far faster than a grace of 60 s lets GC free garbage, on a
+/// capped volume. The gate paces the writer instead of refusing it; while it
+/// does, the collector runs with the floor grace (10 s), so garbage is
+/// deleted well before the configured 60 s; the store stays inside the cap;
+/// when the writer stops the gate opens again and the collector returns to
+/// its normal figures; every block reads back and `lunix-fsck` is clean.
+#[test]
+fn gc_pressure_raises_gc_budget_and_rate_and_the_slow_gc_cell_is_paced_not_refused() {
+    use lunix_engine::Pressure;
+    use lunix_iface::space::ThrottleState;
+    let t = Scratch::new("pace-slowgc");
+    let vol = slow_gc_volume(&t);
+    let stack = vol.open_with(daemon_gc).expect("open");
+    let mut q = Queue::new(&stack);
+    let blocks = (16u64 << 20) / u64::from(IO);
+    let mut last = vec![0u64; blocks as usize];
+    let mut inflight: Vec<(Tag, u64, u64)> = Vec::new();
+    let mut states = std::collections::BTreeSet::new();
+    let mut raised_in_slowdown = false;
+    let mut peak = 0u64;
+    let mut freed_at = None;
+    let mut n = 0u64;
+    let start = Instant::now();
+    let run = Duration::from_secs(40);
+    let mut next_sample = Instant::now();
+    while start.elapsed() < run {
+        while inflight.len() < 16 {
+            let blk = n % blocks;
+            n += 1;
+            inflight.push((q.write(blk * u64::from(IO), n), blk, n));
+        }
+        q.poll();
+        let mut i = 0;
+        while i < inflight.len() {
+            match q.take(inflight[i].0) {
+                Some(s) => {
+                    assert!(s.is_ok(), "a write failed in the slow-GC cell: {s:?}");
+                    last[inflight[i].1 as usize] = inflight[i].2;
+                    inflight.swap_remove(i);
+                }
+                None => i += 1,
+            }
+        }
+        if Instant::now() >= next_sample {
+            next_sample += Duration::from_millis(250);
+            let snap = stack.space.snapshot();
+            peak = peak.max(snap.used());
+            assert!(
+                snap.used() <= snap.limit + snap.headroom_total,
+                "the store left its cap: {snap:?}"
+            );
+            states.insert(snap.throttle.state.name());
+            if snap.throttle.state == ThrottleState::Slowdown
+                && stack.engine.gc_pressure() == Pressure::Raised
+            {
+                raised_in_slowdown = true;
+            }
+            if freed_at.is_none() && stack.engine.status().stats.bytes_freed > 0 {
+                freed_at = Some((start.elapsed(), snap.throttle.state));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for (tag, blk, seed) in inflight.drain(..) {
+        let s = q.wait(tag, Duration::from_secs(40));
+        assert!(s.is_ok(), "{s:?}");
+        last[blk as usize] = seed;
+    }
+    let snap = stack.space.snapshot();
+    let th = snap.throttle;
+    eprintln!(
+        "slow gc: {n} writes in {:?}, peak {} MiB of {} MiB, states {states:?}, {th:?}, first delete {freed_at:?}, gc {:?}",
+        start.elapsed(),
+        peak >> 20,
+        snap.limit >> 20,
+        stack.engine.status().stats
+    );
+    assert!(
+        states.contains("slowdown"),
+        "the gate never paced: {states:?}"
+    );
+    assert!(th.delayed_writes > 0 && th.delayed_ms > 0, "{th:?}");
+    assert!(
+        th.delay_max_ms <= 10_000 + 2_000,
+        "the delay cap is 10 s: {th:?}"
+    );
+    assert_eq!(
+        (th.enospc, th.fulls),
+        (0, 0),
+        "no write was refused: {th:?}"
+    );
+    assert!(raised_in_slowdown, "GC was not raised while the gate paced");
+    // Only the floor grace can delete inside the run: the configured one is
+    // 60 s.
+    let (at, during) = freed_at.expect("GC deleted nothing in the run");
+    assert!(at < run, "{at:?}");
+    assert!(
+        during != ThrottleState::Open,
+        "the first delete came with the gate open at {at:?}; nothing shows the floor grace"
+    );
+    // The writer stopped: the garbage goes, the gate opens, and the
+    // collector goes back to its normal figures 5 s later.
+    let wait = Instant::now();
+    loop {
+        let s = stack.space.snapshot().throttle.state;
+        if s == ThrottleState::Open && stack.engine.gc_pressure() == Pressure::Normal {
+            break;
+        }
+        assert!(
+            wait.elapsed() < Duration::from_secs(90),
+            "no recovery: {:?}, pressure {:?}",
+            stack.space.snapshot(),
+            stack.engine.gc_pressure()
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    for (b, seed) in last.iter().enumerate() {
+        assert_eq!(
+            q.read(b as u64 * u64::from(IO)),
+            payload(seed << 2, IO as usize),
+            "block {b}"
+        );
+    }
+    drop(q);
+    close(stack).expect("close");
+    if let Some(f) = fsck(&vol) {
+        assert!(f.no_errors(), "lunix-fsck:\n{}", f.text);
+    }
+}
+
+/// Review M2 (the FUA bypass on its own queue) and the `throttle = false`
+/// switch (m11).
+fn slow_band(o: &mut OpenParams) {
+    daemon_gc(o);
+    // A band slow enough to hold a 256 KiB write for seconds on a small
+    // volume: `r_min` at its lowest, `r_mid` the same.
+    o.throttle.min_rate = 65_536;
+    o.throttle_mid_rate = Some(65_536);
+}
+
+#[test]
+fn a_fua_write_overtakes_the_paced_writes_of_its_own_queue() {
+    let t = Scratch::new("pace-fua-queue");
+    let vol = band_volume(&t);
+    let stack = vol.open_with(slow_band).expect("open");
+    let mut q = Queue::new(&stack);
+    // 20 MiB of fresh data goes in at full speed (the soft mark is 32 MiB).
+    let mut off = 0u64;
+    let mut seed = 1u64;
+    let mut inflight: Vec<Tag> = Vec::new();
+    while off < 20 << 20 {
+        while inflight.len() < 16 && off < 20 << 20 {
+            inflight.push(q.write(off, seed));
+            off += u64::from(IO);
+            seed += 1;
+        }
+        q.poll();
+        inflight.retain(|t| match q.take(*t) {
+            Some(s) => {
+                assert!(s.is_ok(), "{s:?}");
+                false
+            }
+            None => true,
+        });
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    q.wait_all(Duration::from_secs(20));
+    // Cut and commit, so that the journal's bytes are not counted twice.
+    stack.engine.commit_now(false).expect("commit");
+    // The operator tightens the cap to 3 MiB of headroom: deep in the band,
+    // at 64 KiB/s a 256 KiB write takes 4 s (its delay cap is 10 s).
+    let mut s = lunixd::stack::effective_space(
+        &stack.json,
+        lunix_iface::block::BlockEngine::size_bytes(&*stack.engine),
+    );
+    s.cache_max = Some(stack.space.snapshot().used() + (3 << 20));
+    stack.space.reconfigure(&s).expect("reconfigure");
+    let snap = stack.space.snapshot();
+    assert!(snap.throttle.rate.is_some(), "not in the band: {snap:?}");
+    // Eight bulk writes queue up behind each other (one reserve at a time per
+    // queue), then a small FUA write on the same queue.
+    let bulk: Vec<Tag> = (0..8)
+        .map(|i| {
+            let t = q.write(off, seed + i);
+            off += u64::from(IO);
+            t
+        })
+        .collect();
+    for _ in 0..50 {
+        q.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // The bucket's first megabyte goes through; the rest wait for the pace.
+    assert!(
+        q.done.completed.len() < bulk.len(),
+        "the bulk writes are paced and wait: {:?}",
+        q.done.completed
+    );
+    let t0 = Instant::now();
+    let fua = q.submit_with(IoOp::Write, true, 0, 4096, &payload(99, 4096));
+    let st = q.wait(fua, Duration::from_secs(20));
+    let took = t0.elapsed();
+    assert!(st.is_ok(), "{st:?}");
+    assert!(
+        took < Duration::from_secs(2),
+        "the FUA write waited {took:?} behind the paced writes of its queue"
+    );
+    assert!(stack.space.snapshot().throttle.bypassed_fua >= 1);
+    for t in bulk {
+        assert!(q.wait(t, Duration::from_secs(60)).is_ok());
+    }
+    drop(q);
+    close(stack).expect("close");
+}
+
+#[test]
+fn with_the_band_off_the_volume_is_never_paced() {
+    let t = Scratch::new("pace-off");
+    let vol = band_volume(&t);
+    let stack = vol
+        .open_with(|o: &mut OpenParams| {
+            daemon_gc(o);
+            o.throttle.enabled = false;
+        })
+        .expect("open");
+    assert_eq!(stack.space.soft_mark(), 0);
+    let mut q = Queue::new(&stack);
+    let mut off = 0u64;
+    let mut seed = 1u64;
+    let mut inflight: Vec<Tag> = Vec::new();
+    // 44 MiB of the 64 MiB cap: well inside what would be the band.
+    while off < 44 << 20 {
+        while inflight.len() < 16 && off < 44 << 20 {
+            inflight.push(q.write(off, seed));
+            off += u64::from(IO);
+            seed += 1;
+        }
+        q.poll();
+        inflight.retain(|t| match q.take(*t) {
+            Some(s) => {
+                assert!(s.is_ok(), "{s:?}");
+                false
+            }
+            None => true,
+        });
+        let th = stack.space.snapshot().throttle;
+        assert_eq!(th.state, lunix_iface::space::ThrottleState::Open, "{th:?}");
+        assert_eq!((th.delayed_writes, th.rate), (0, None), "{th:?}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    q.wait_all(Duration::from_secs(20));
+    assert_eq!(stack.engine.gc_pressure(), lunix_engine::Pressure::Normal);
+    drop(q);
+    close(stack).expect("close");
 }

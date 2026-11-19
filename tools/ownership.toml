@@ -264,6 +264,7 @@ paths = [
   "crates/lunix-format/tests/golden/14-volume.json",
   "crates/lunix-format/FREEZE.md",
   "crates/lunix-cli/src/render.rs",
+  "crates/lunix-cli/src/fsck.rs",
   "crates/lunix-space/src/gate.rs",
   "crates/lunix-space/src/ledger.rs",
   "crates/lunix-space/src/lib.rs",
@@ -283,6 +284,7 @@ paths = [
   "crates/lunix-engine/tests/common/mod.rs",
   "crates/lunix-iface/src/space.rs",
   "crates/lunix-iface/src/journal.rs",
+  "tools/ci.sh",
   "crates/lunix-iface/src/contract/space.rs",
   "crates/lunix-iface/src/contract/mod.rs",
   "crates/lunix-iface/tests/trivial/space.rs",
@@ -316,6 +318,61 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# pace: ADR-32 T3, T4 and T5 (the paced admission band, GC pressure from the
+# engine tick, the throttle status and log lines) and the gcrate final review's
+# test follow-ups.
+[pace]
+paths = [
+  "crates/lunix-space/src/**",
+  "crates/lunix-space/tests/**",
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-iface/src/contract/space.rs",
+  "crates/lunix-iface/src/contract/mod.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/trivial/space.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-testkit/src/space.rs",
+  "crates/lunix-fsck/src/gc.rs",
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/gc.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/src/pressure.rs",
+  "crates/lunix-engine/src/queue.rs",
+  "crates/lunix-engine/tests/**",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/compact.rs",
+  "crates/lunix-gc/src/tests/**",
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-cli/src/fsck.rs",
+  "crates/lunix-cli/tests/**",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/**",
+  "docs/explanation/DESIGN.md",
+  "docs/explanation/GLOSSARY.md",
+  "docs/reference/gc.md",
+  "docs/plans/v1/reports/p1-pace.md",
+  "tools/ownership.toml",
+]
+
+# jwin: ADR-33 T1 and T2 (the resident journal window and the read-around).
+[jwin]
+paths = [
+  "crates/lunix-journal/**",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_window.rs",
+  "crates/lunix-iface/src/journal.rs",
+  "docs/explanation/DESIGN.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 # crates/lunixd/src/main.rs: dump_counts on exit (crashpoints build); crates/lunix-ublk/src/queue.rs: the lost-write fault hook (lead, 2026-11-17)
 paths = ["tests/exit/**", "bench/phase1/exit/**", "crates/lunixd/src/main.rs", "crates/lunix-ublk/src/queue.rs"]
@@ -330,4 +387,27 @@ paths = [
   "bench/dict-study/constellation-arm/**",
   "docs/explanation/research/*zstd-dictionaries-on-block-devices*",
   "docs/explanation/research/figures/dict-study/**",
+]
+
+# gcflake: the stack_gc compaction_then_truncate failure when the whole test
+# binary runs (root cause and fix).
+[gcflake]
+paths = ["crates/lunixd/tests/stack_gc.rs", "tools/ownership.toml"]
+
+# tipstat: ADR-33 T5, the status path reads a published tip and takes no
+# coordinator mutex.
+[tipstat]
+paths = [
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/Cargo.toml",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/tip_view.rs",
+  "crates/lunixd/Cargo.toml",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/tests/status_lockfree.rs",
+  "tools/ci.sh",
+  "tools/ownership.toml",
 ]

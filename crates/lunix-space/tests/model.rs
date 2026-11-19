@@ -139,6 +139,9 @@ impl Model {
     /// The first expiry fails every waiter and latches the volume full.
     fn tick(&mut self) -> usize {
         let now = self.now;
+        // A tick grants what fits first (ADR-32: the timer thread does the
+        // grants, with or without the band), then expires.
+        self.grant();
         if !self
             .q
             .iter()

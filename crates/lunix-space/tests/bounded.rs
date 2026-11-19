@@ -16,8 +16,8 @@ use lunix_format::local::OnFull;
 use lunix_iface::clock::SystemClock;
 use lunix_iface::contract::wait_until;
 use lunix_iface::space::{
-    Freed, Ladder, LadderStep, LadderStepKind, ReserveOutcome, SpaceGate, SpaceKind, Urgency,
-    Waiter, WaiterState,
+    Freed, Ladder, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceGate, SpaceKind,
+    Urgency, Waiter, WaiterState,
 };
 use lunix_space::{LunixSpace, DEFAULT_FULL_TIMEOUT};
 
@@ -340,7 +340,7 @@ fn a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival() {
     ck.advance(Duration::from_secs(10));
     // Arrived at 7 s, reaches the gate at 10 s: due at 12 s.
     let w = parked(
-        g.reserve_since(K, 10, None, Duration::from_secs(7))
+        g.reserve_since(K, 10, None, Duration::from_secs(7), ReserveClass::Bulk)
             .unwrap(),
     );
     ck.advance(Duration::from_millis(1999));
@@ -359,7 +359,7 @@ fn a_request_that_waited_in_its_queue_counts_its_wait_from_its_arrival() {
     reserved(g.reserve(K, 995, None).unwrap());
     assert!(!g.is_full());
     let late = g
-        .reserve_since(K, 200, None, Duration::from_secs(1))
+        .reserve_since(K, 200, None, Duration::from_secs(1), ReserveClass::Bulk)
         .unwrap();
     refused(late);
     assert!(!g.is_full());

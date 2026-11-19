@@ -246,6 +246,7 @@ macro_rules! contract_space_suite {
                     wait_mode_parks_and_grants_fifo,
                     timeout_expires_waiters_on_the_clock,
                     a_wait_counts_from_the_arrival,
+                    the_class_and_a_paced_wait_charge_like_a_plain_reservation,
                     headroom_is_not_for_writes,
                     fatal_io_makes_the_volume_read_only,
                     ladder_frees_space_for_a_parked_write,

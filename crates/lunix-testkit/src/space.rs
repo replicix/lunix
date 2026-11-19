@@ -14,8 +14,8 @@ use std::time::Duration;
 use lunix_format::local::{OnFull, SpaceSettings};
 use lunix_iface::clock::Clock;
 use lunix_iface::space::{
-    Ladder, LadderStep, LadderStepKind, ReserveOutcome, SpaceEvents, SpaceGate, SpaceKind,
-    SpaceSnapshot, Urgency, Waiter, WaiterState,
+    Ladder, LadderStep, LadderStepKind, ReserveClass, ReserveOutcome, SpaceEvents, SpaceGate,
+    SpaceKind, SpaceSnapshot, ThrottleFigures, ThrottleState, Urgency, Waiter, WaiterState,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
@@ -89,6 +89,13 @@ struct State {
     waiters: VecDeque<Parked>,
     read_only: bool,
     full: bool,
+    /// What the snapshot reports as the throttle state (a test script).
+    throttle: ThrottleState,
+    /// No writer: the snapshot reports no bytes admitted lately.
+    idle: bool,
+    /// Scripted pacing: a bulk request that fits waits (`Paced`) until the
+    /// script ends it; a `Sync` one that fits is admitted at once.
+    pacing: bool,
 }
 
 impl State {
@@ -108,6 +115,17 @@ impl State {
         self.used().saturating_add(bytes) <= self.limit()
     }
 
+    /// Drops waiters that are no longer pending from the front.
+    fn prune(&mut self) {
+        while self
+            .waiters
+            .front()
+            .is_some_and(|p| p.waiter.state() != WaiterState::Pending)
+        {
+            self.waiters.pop_front();
+        }
+    }
+
     /// Opens the latch once the headroom reached the resume mark.
     fn update_latch(&mut self) {
         if let Some(resume) = self.cfg.latch {
@@ -120,6 +138,9 @@ impl State {
     /// Grants parked requests that now fit, strictly first in first out.
     fn grant_waiters(&mut self) {
         self.update_latch();
+        if self.pacing {
+            return;
+        }
         while let Some(front) = self.waiters.front() {
             if front.waiter.state() != WaiterState::Pending {
                 self.waiters.pop_front();
@@ -160,9 +181,35 @@ impl MemSpace {
                 waiters: VecDeque::new(),
                 read_only: false,
                 full: false,
+                throttle: ThrottleState::Open,
+                idle: false,
+                pacing: false,
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// Scripts the throttle state the snapshot reports (the latch, when set,
+    /// reports `Full` on its own). This gate paces nothing; engine tests use
+    /// it to put the collector under pressure.
+    pub fn set_throttle_state(&self, state: ThrottleState) {
+        lock(&self.st).throttle = state;
+    }
+
+    /// Scripts whether a writer is active (bytes admitted in the last 10 s):
+    /// the default is that one is.
+    pub fn set_throttle_idle(&self, idle: bool) {
+        lock(&self.st).idle = idle;
+    }
+
+    /// Scripts the band's pacing: while it is on, a bulk reservation that
+    /// fits is parked as [`ReserveOutcome::Paced`] and granted only when it
+    /// is turned off; a `Sync` one that fits (the head fits) is admitted at
+    /// once, as the real gate does. Nothing here keeps a rate.
+    pub fn set_pacing(&self, on: bool) {
+        let mut st = lock(&self.st);
+        st.pacing = on;
+        st.grant_waiters();
     }
 
     /// Runs the registered steps, in ladder order, until one frees something.
@@ -203,7 +250,13 @@ impl SpaceGate for MemSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
     ) -> Result<ReserveOutcome> {
-        self.reserve_since(kind, bytes, wake, self.clock.monotonic())
+        self.reserve_since(
+            kind,
+            bytes,
+            wake,
+            self.clock.monotonic(),
+            ReserveClass::Bulk,
+        )
     }
 
     /// The wait of a parked request counts from `arrived` (ADR-32).
@@ -213,6 +266,7 @@ impl SpaceGate for MemSpace {
         bytes: u64,
         wake: Option<&WakeFd>,
         arrived: Duration,
+        class: ReserveClass,
     ) -> Result<ReserveOutcome> {
         let mut st = lock(&self.st);
         if st.read_only {
@@ -221,6 +275,22 @@ impl SpaceGate for MemSpace {
         st.update_latch();
         if st.full {
             return Ok(ReserveOutcome::NoSpace);
+        }
+        if st.pacing && st.fits(bytes) {
+            st.prune();
+            let head_fits = st.waiters.front().is_none_or(|p| st.fits(p.bytes));
+            if class == ReserveClass::Sync && head_fits {
+                st.held[kind.index()] += bytes;
+                return Ok(ReserveOutcome::Reserved);
+            }
+            let waiter = Waiter::new(wake.cloned());
+            st.waiters.push_back(Parked {
+                waiter: waiter.clone(),
+                kind,
+                bytes,
+                deadline: None,
+            });
+            return Ok(ReserveOutcome::Paced(waiter));
         }
         if st.waiters.is_empty() && st.fits(bytes) {
             st.held[kind.index()] += bytes;
@@ -327,6 +397,15 @@ impl SpaceGate for MemSpace {
                 .count() as u64,
             read_only: st.read_only,
             full: st.full,
+            throttle: ThrottleFigures {
+                state: if st.full {
+                    ThrottleState::Full
+                } else {
+                    st.throttle
+                },
+                ingest_rate: u64::from(!st.idle),
+                ..ThrottleFigures::default()
+            },
         }
     }
 

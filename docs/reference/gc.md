@@ -122,6 +122,38 @@ calling thread runs the collector under the coordinator mutex):
   and the rest wait; moves that wait for want of room trigger a cut on their
   own only once per commit interval.
 
+## GC under write pressure (ADR-32)
+
+The engine reads the space gate's state at every coordinator tick and hands
+the collector more while writes are slowed or held. No collector interface
+changes: `GcBudget` and `GcParams` are built per step.
+
+| gate state | step budget | compaction rate | grace | passes |
+|---|---|---|---|---|
+| `open` | `gc_step_budget_ms` (50 ms), `gc_rate` bytes | `gc_rate` | `gc_grace_ms` (60 s) | the pipelined schedule |
+| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms` | the same, always busy |
+| `stop`, `full` | as `slowdown` | uncapped | the floor | and the ladder's urgent pass, with its back-off |
+
+- The pressure rises at once and ends with a hold: the engine returns to the
+  normal figures after the gate has been `open` for 5 s (`lunix status` shows
+  `gc_pressure`: `normal`, `raised`, `urgent`).
+- The floor grace is the urgent pass's rule, argued safe below ("Why a stale
+  mark is safe"): the recheck's roots are pinned after the flag and the
+  grace, and the floor covers in-flight cuts, destage and reads. The
+  pipelined pass compares the grace it is handed at verdict time with the same
+  monotonic clock that stamped the condemn, so a grace shortened between the
+  two only moves the delete earlier by what the floor allows. The default
+  `gc_grace_ms` (60 s) is not changed.
+- A cut may wait one unit past a 200 ms step instead of a 50 ms one: writes
+  are being delayed already, and this is the trade the urgent pass makes for a
+  whole mark.
+- `gc_pressure_rate_factor` (1 ..= 64) is a `lunixd.toml` key. The budget's
+  multiple is fixed at 4.
+- Tests: `lunix-engine/tests/pressure.rs` (the exact figures per state and the
+  5 s hold), `lunixd/tests/stack_throttle.rs` (the slow-GC cell: garbage is
+  deleted inside a run shorter than the configured grace, only possible with
+  the floor grace).
+
 ## What is kept
 
 **Roots** are pinned when a mark starts:

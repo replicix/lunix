@@ -69,12 +69,44 @@ pub struct TestHooks {
     pub hits: Mutex<BTreeMap<&'static str, u64>>,
     pub crashed_at: Mutex<Option<&'static str>>,
     pub seqs: Mutex<Vec<(QueueId, Tag, WriteSeq)>>,
+    /// A point to park at, once: the engine thread sends on `reached`, then
+    /// waits for `release` (see `park_at`).
+    pub parked: Mutex<Option<Park>>,
+}
+
+/// The two ends of a parked crash point, the engine side.
+pub struct Park {
+    point: &'static str,
+    reached: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+/// The test side of a parked crash point.
+pub struct ParkHandle {
+    pub reached: std::sync::mpsc::Receiver<()>,
+    pub release: std::sync::mpsc::Sender<()>,
 }
 
 impl TestHooks {
     pub fn arm(&self, point: &str, nth: u64) {
         *lock(&self.target) = Some((point.to_owned(), nth.max(1)));
         *lock(&self.crashed_at) = None;
+    }
+
+    /// Parks the engine thread the next time it passes `point` (inside
+    /// whatever lock it holds there), until the handle's `release` fires.
+    pub fn park_at(&self, point: &'static str) -> ParkHandle {
+        let (reached, reached_rx) = std::sync::mpsc::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        *lock(&self.parked) = Some(Park {
+            point,
+            reached,
+            release,
+        });
+        ParkHandle {
+            reached: reached_rx,
+            release: release_tx,
+        }
     }
 
     pub fn disarm(&self) {
@@ -92,6 +124,18 @@ impl TestHooks {
 
 impl EngineHooks for TestHooks {
     fn crash_at(&self, point: &'static str) -> bool {
+        let park = {
+            let mut p = lock(&self.parked);
+            if p.as_ref().is_some_and(|k| k.point == point) {
+                p.take()
+            } else {
+                None
+            }
+        };
+        if let Some(k) = park {
+            let _ = k.reached.send(());
+            let _ = k.release.recv();
+        }
         *lock(&self.hits).entry(point).or_insert(0) += 1;
         let mut t = lock(&self.target);
         if let Some((name, nth)) = t.as_mut() {
