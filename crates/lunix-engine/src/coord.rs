@@ -653,6 +653,7 @@ impl Inner {
         co.tip = full;
         co.tip_hash = sealed.hash;
         self.full.note_cut(prev, c, commit_seq.0);
+        self.publish_tip(co);
         co.retained.push(commit);
         co.retained.retain(|r| r.common().commit_seq >= chain_floor);
         co.last_commit_at = self.clock.monotonic();
