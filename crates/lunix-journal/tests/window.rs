@@ -607,7 +607,10 @@ fn many_threads_past_the_cap_read_exact_bytes() {
     drop(l);
 }
 
-fn arb_plan() -> impl Strategy<Value = (Vec<u32>, Vec<(usize, u16, u16)>, bool, bool)> {
+/// Record sizes, reads (record, from, to), capped, two lanes.
+type Plan = (Vec<u32>, Vec<(usize, u16, u16)>, bool, bool);
+
+fn arb_plan() -> impl Strategy<Value = Plan> {
     (
         proptest::collection::vec(1u32..=24, 4..28),
         proptest::collection::vec((any::<usize>(), any::<u16>(), any::<u16>()), 1..40),
