@@ -22,7 +22,8 @@ use crate::lane::FileLane;
 use crate::ring::{io_err, lock, open_rings, LaneRing, Reinit, RingKind, Role};
 use crate::scan::{self, LanePlan, Plan};
 use crate::shared::{Coord, LaneFlight, MarkDue, Shared, State, NOT_POISONED};
-use crate::sys::{self, round4k, B, ZERO_LEN};
+use crate::sys::{self, B, ZERO_LEN};
+use crate::window::{Window, WindowStats};
 
 /// The journal of one volume: lanes over preallocated `O_DIRECT` ring files,
 /// a flush coordinator thread, recovery and reclaim.
@@ -60,6 +61,7 @@ impl FileJournal {
         };
         let rings = open_rings(&cfg, &zero)?;
         let lanes = usize::from(cfg.lanes);
+        let window = Window::new(lanes, cfg.resident_cap());
         let sh = Arc::new(Shared {
             cfg,
             rings,
@@ -84,6 +86,7 @@ impl FileJournal {
             closed: AtomicBool::new(false),
             max_cut_asked: AtomicU64::new(0),
             zero,
+            window,
             fail_next: Mutex::new(BTreeSet::new()),
             fail_any: AtomicBool::new(false),
             fail_sync: AtomicBool::new(false),
@@ -128,6 +131,12 @@ impl FileJournal {
     #[doc(hidden)]
     pub fn fail_next_sync(&self) {
         self.sh.fail_sync.store(true, Ordering::SeqCst);
+    }
+
+    /// The counters of the resident window (ADR-33): bytes resident, hits,
+    /// misses, read-arounds.
+    pub fn window_stats(&self) -> WindowStats {
+        self.sh.window.stats()
     }
 
     /// Marks written since `open`: witnesses of the flushed watermark the
@@ -256,6 +265,8 @@ impl FileJournal {
                 self.sh.coord.cv.notify_all();
             }
         }
+        // The wipe may have zeroed bytes a read-around made resident.
+        self.sh.window.clear();
         st.prepared = true;
         Ok(())
     }
@@ -349,18 +360,19 @@ impl Journal for FileJournal {
         if loc.offset < B || end > rings.file_len {
             return Err(Error::invalid("journal location outside the ring file"));
         }
-        let file = rings
-            .find_in_use(loc.lane.0, loc.ordinal)
+        let (file, gen) = rings
+            .find_in_use_gen(loc.lane.0, loc.ordinal)
             .ok_or(Error::not_found("journal data"))?;
         if buf.is_empty() {
             return Ok(());
         }
-        let a0 = sys::floor4k(loc.offset);
-        let a1 = round4k(end);
-        let abuf = sys::read_aligned(&file.file, a0, (a1 - a0) as usize).map_err(io_err)?;
-        let delta = (loc.offset - a0) as usize;
-        buf.copy_from_slice(&abuf.as_slice()[delta..delta + buf.len()]);
-        Ok(())
+        let win = &self.sh.window;
+        if win.copy_hit(loc, buf) {
+            win.count(true);
+            return Ok(());
+        }
+        win.count(false);
+        win.read_around(rings, &file, gen, loc, buf)
     }
 
     fn recover(&self, hint: Option<&CheckpointSlot>, floor: WriteSeq) -> Result<Recovered> {
@@ -369,6 +381,7 @@ impl Journal for FileJournal {
             return Err(Error::invalid("recover after a lane was opened"));
         }
         let (rec, plan) = scan::recover(&self.sh.rings, hint, floor)?;
+        self.sh.window.clear();
         self.apply_plan(&plan);
         self.sh.counter.store(rec.next_seq.0 - 1, Ordering::SeqCst);
         // Until prepare syncs the recovered records, only the floor (covered
@@ -464,6 +477,13 @@ impl Journal for FileJournal {
                         hi: f.hi_off.load(Ordering::Acquire),
                         bytes: f.rec_bytes.load(Ordering::Acquire),
                     });
+                }
+            }
+            if ring.kind == RingKind::Queue {
+                // Out of use (`Recycling`) before its entries go, so a
+                // read-around cannot make any resident again.
+                for job in &jobs {
+                    self.sh.window.release_file(ring.lane, job.old);
                 }
             }
             for job in jobs {

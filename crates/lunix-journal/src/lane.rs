@@ -84,6 +84,12 @@ struct Batch {
     slot: usize,
     file: Arc<RingFile>,
     seqs: Vec<(u64, u32)>,
+    /// The ring file's ordinal and the batch's file offset.
+    ordinal: u32,
+    start: u64,
+    /// The record bytes as written, copied at the seal when the resident
+    /// window admitted them (ADR-33); indexed when the write completes.
+    copy: Option<Arc<[u8]>>,
 }
 
 struct ReadReq {
@@ -97,7 +103,7 @@ pub(crate) struct FileLane {
     sh: Arc<Shared>,
     id: u16,
     ring: IoUring,
-    _wake: WakeFd,
+    wake: WakeFd,
     pool: Vec<AlignedBuf>,
     free_bufs: Vec<usize>,
     fixed: bool,
@@ -197,7 +203,7 @@ impl FileLane {
             sh,
             id,
             ring,
-            _wake: wake,
+            wake,
             pool,
             free_bufs,
             fixed,
@@ -369,11 +375,23 @@ impl FileLane {
         }
         let len = round4k(open.len as u64) as usize;
         self.pool[open.buf].as_mut_slice()[open.len..len].fill(0);
-        let (slot, file, fd) = {
+        let (slot, ordinal, file, fd) = {
             let a = self.active.as_mut().unwrap_or_else(|| unreachable!());
             a.next_off = open.file_off + len as u64;
-            (a.slot, Arc::clone(&a.file), a.file.file.as_raw_fd())
+            (
+                a.slot,
+                a.ordinal,
+                Arc::clone(&a.file),
+                a.file.file.as_raw_fd(),
+            )
         };
+        // The resident window's copy of the records, made before the buffer
+        // can be reused; visible once the write completed.
+        let copy: Option<Arc<[u8]>> = self
+            .sh
+            .window
+            .reserve_batch(open.len as u64)
+            .then(|| Arc::from(&self.pool[open.buf].as_slice()[..open.len]));
         let ptr = self.pool[open.buf].as_ptr();
         let id = match self.batch_free.pop() {
             Some(i) => i,
@@ -398,6 +416,9 @@ impl FileLane {
             slot,
             file,
             seqs: open.seqs,
+            ordinal,
+            start: open.file_off,
+            copy,
         };
         self.sh.cfg.emit(|| TraceEvent::Write {
             lane: self.id,
@@ -426,6 +447,9 @@ impl FileLane {
     /// A batch whose write failed or could not be queued: poison at its
     /// lowest `write_seq`, complete its records with an error.
     fn fail_batch(&mut self, batch: Batch, errno: i32, recycle: bool) {
+        if let Some(c) = &batch.copy {
+            self.sh.window.drop_reservation(c.len() as u64);
+        }
         let first = batch.seqs.first().map_or(0, |s| s.0);
         self.sh.poison(first);
         {
@@ -453,8 +477,18 @@ impl FileLane {
         };
         self.batch_free.push(id);
         self.inflight_writes -= 1;
+        let written = usize::try_from(res).is_ok_and(|n| n == batch.len);
+        if written {
+            // Indexed while the file still has a write in flight (reclaim
+            // takes a file only without one), before any completion.
+            if let Some(c) = &batch.copy {
+                self.sh
+                    .window
+                    .insert_batch(self.id, batch.ordinal, batch.start, Arc::clone(c));
+            }
+        }
         batch.file.inflight.fetch_sub(1, Ordering::AcqRel);
-        if usize::try_from(res).is_ok_and(|n| n == batch.len) {
+        if written {
             {
                 let mut fl = lock(&self.sh.flights[usize::from(self.id)]);
                 for &(seq, _) in &batch.seqs {
@@ -665,7 +699,7 @@ impl JournalLane for FileLane {
         })
     }
 
-    fn submit_read(&mut self, loc: JournalLoc, buf: Vec<u8>, token: Token) -> Result<()> {
+    fn submit_read(&mut self, loc: JournalLoc, mut buf: Vec<u8>, token: Token) -> Result<()> {
         let rings = &self.sh.rings;
         if rings.lanes.get(usize::from(loc.lane.0)).is_none() {
             return Err(Error::invalid(
@@ -687,6 +721,7 @@ impl JournalLane for FileLane {
                 status: IoStatus::err(libc::ENOENT),
                 buf,
             });
+            self.wake.signal();
             return Ok(());
         };
         if buf.is_empty() {
@@ -695,6 +730,20 @@ impl JournalLane for FileLane {
                 status: IoStatus::ok(0),
                 buf,
             });
+            self.wake.signal();
+            return Ok(());
+        }
+        // The resident window first (ADR-33): the bytes as written, no I/O.
+        // The completion is ready at once; the wake makes the queue poll.
+        let hit = self.sh.window.copy_hit(loc, &mut buf);
+        self.sh.window.count(hit);
+        if hit {
+            self.out.push(JournalCompletion::Read {
+                token,
+                status: IoStatus::ok(buf.len() as u32),
+                buf,
+            });
+            self.wake.signal();
             return Ok(());
         }
         let a0 = crate::sys::floor4k(loc.offset);

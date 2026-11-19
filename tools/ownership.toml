@@ -358,6 +358,17 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# jwin: ADR-33 T1 and T2 (the resident journal window and the read-around).
+[jwin]
+paths = [
+  "crates/lunix-journal/**",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "docs/explanation/DESIGN.md",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 

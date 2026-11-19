@@ -12,6 +12,7 @@ use crate::aligned::AlignedBuf;
 use crate::config::JournalConfig;
 use crate::ring::{lock, Rings};
 use crate::scan::Plan;
+use crate::window::Window;
 
 /// `poison_at` value meaning "not poisoned".
 pub(crate) const NOT_POISONED: u64 = u64::MAX;
@@ -131,6 +132,8 @@ pub(crate) struct Shared {
     /// The highest cut a caller asked a tail for (initially the floor).
     pub max_cut_asked: AtomicU64,
     pub zero: AlignedBuf,
+    /// The resident journal window (ADR-33).
+    pub window: Window,
     /// Lanes whose next append fails (test hook).
     pub fail_next: Mutex<BTreeSet<u16>>,
     pub fail_any: AtomicBool,

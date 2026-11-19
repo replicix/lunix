@@ -1,0 +1,67 @@
+# Report p1-jwin: ADR-33 T1 and T2 (the resident journal window and the read-around)
+
+Branch `p1/jwin` from `origin/main` 49c6606. Spec: ADR-33 (accepted 2026-11-19, W2 and W6 as the maintainer chose) and the
+note `docs/explanation/research/2026-11-19-write-throughput.md` (§4.1, §7). Builds and tests ran only on the remote test host
+(kernel 7.0.0) through `tools/remote.sh`, CPUs 8-15, `-j 4`. No root run, no on-disk format change.
+
+## What was built
+
+| item | what | where | tests |
+|---|---|---|---|
+| T1 copy and index | a lane copies each batch's record bytes at the seal (`submit_open`), when the cap admits them (the bytes are reserved then), and indexes the copy per lane by `(ordinal, batch offset)` when the write completes, before the `Append` completions and while the file still counts a write in flight | `lunix-journal/src/{lane,window}.rs` | `what_was_written_is_served_from_memory_not_from_the_file` (the file is damaged on disk, the read still returns the written bytes) |
+| T1 hits | `Journal::read_at` and `JournalLane::submit_read` look in the window after the file-in-use check (a reclaimed location is still `NotFound` / `ENOENT`); a `submit_read` hit completes at once and signals the lane's wake fd so the queue polls | `journal.rs`, `lane.rs` | same test, `a_lane_read_that_misses_still_reads_the_file` |
+| T1 release | `reclaim` releases a file's entries once the file is `Recycling`, before the zero rewrite; `recover` and the first `prepare` clear the window | `journal.rs` | `reclaim_releases_exactly_the_entries_of_the_recycled_files` |
+| T1 cap | `JournalConfig::resident_max` (`None`: `journal_max`, never above it; at least one maximal batch). A batch past the cap is not admitted, the oldest stay | `config.rs`, `window.rs` | `past_the_cap_a_batch_is_not_admitted_and_the_oldest_records_stay`, `a_cap_above_the_ring_is_the_ring_and_a_cap_below_a_batch_is_refused` |
+| T1 counters | `FileJournal::window_stats()` -> `WindowStats` (resident bytes, cap, hits, misses, batches not admitted, window reads, completing reads, checksum failures) | `window.rs`, `journal.rs` | asserted in the tests |
+| T2 read-around | a `read_at` miss reads the 1 MiB-aligned window around the location once (single flight per `(lane, ordinal, window)`; the other misses wait and use the leader's result), scans it with the recovery reader's rules (magic, file `gen`, the record's own offset, crc32c, 8-byte resync), makes the verified records resident within the cap and serves the target out of its verified record | `window.rs` | `concurrent_misses_in_one_window_read_it_once`, `the_first_cut_after_a_restart_reads_a_window_per_megabyte` |
+| T2 CRC (W6) | only verified records are served or made resident; a record that fails its checksum, or has no valid header where the location says, fails the read with `Corrupt` and `buf` is not written. A sub-range read of a damaged record fails too | `window.rs` | `a_record_damaged_on_disk_after_the_write_fails_the_read_and_is_never_served`, `a_damaged_header_fails_the_read_too`, unit tests of the scanner |
+| T2 cut records | a record cut by the window's end is completed with one more read (forward; done by the leader, so the walk through the file does not read the window again for it); a record that starts before the window and holds the target is found with one backward read of at most 1 MiB | `window.rs` | `a_record_cut_by_the_window_edge_is_completed_with_one_read` (both directions, exactly one window read and one completing read), `a_record_that_runs_a_few_bytes_past_the_edge_needs_the_completing_read` |
+| T2 file ends, reclaim | the last window is clamped to the file length; a location reclaimed meanwhile gives `NotFound` or `Corrupt`, never other bytes, and leaves nothing resident | `window.rs` | `files_that_are_not_a_megabyte_multiple_end_in_a_short_window`, `a_location_reclaimed_while_it_is_read_never_returns_stale_bytes`, `readers_see_exact_bytes_during_appends_and_reclaim` |
+| property | window and file return the same bytes (live, with and without a one-batch cap, and after a restart), for random records and sub-ranges, and they equal the written pattern | `tests/window.rs` | `the_window_and_the_file_return_the_same_bytes` (12 cases) |
+| config | `lunixd.toml` key `journal_resident_max` (at least 2097152, default the volume's `journal_max`), in the reference table of `lunixd/src/config.rs`, wired through `OpenParams::journal_resident_max` to `JournalConfig::resident_max` | `lunixd/src/{config,daemon}.rs`, `stack/mod.rs` | `journal_resident_max_is_validated`, the full-file parse test |
+| docs | DESIGN §4.1 (resident window, read-around, reclaim) and §5 step 1; the lunix-journal crate docs (`lib.rs`, `window.rs`; the README is over the 40-line limit the ownership check allows to change) | | |
+
+Not changed: the acknowledgement, the group flush, FUA, C6, recovery and every on-disk byte. `coord.rs` cut sizing is untouched.
+
+## Deviations and choices
+
+1. **Ownership.** `[jwin]` also lists `crates/lunixd/src/{config,daemon}.rs`, `crates/lunixd/src/stack/mod.rs` and
+   `docs/explanation/DESIGN.md`: the `lunixd.toml` key lives in lunixd, the DESIGN notes in the spec. These paths overlap the entries of other
+   milestones (`pace`, `gcrate`, `bstop`); the edits are small and local, a merge conflict is possible only in `stack/mod.rs` and `daemon.rs`.
+2. **The leader completes the cut record eagerly.** The ADR says a record cut by the window edge is completed with one more read; I do it when the
+   window is read, whether or not the triggering location is in that record. Without it, the walk through the file read the same window again
+   when it reached the cut record (the first version of the first-cut test showed 3 window reads for 2 windows). A record that cannot be
+   completed or verified is left for the read that needs it. The cost is one read of at most the rest of one record per window with a cut.
+3. **Past the cap a window is shared only among the threads that miss in it at that moment** (the leader's parsed window is handed to the waiting
+   followers). A later miss in the same window reads it again. With the default cap (`journal_max`) the cap does not bind, since the resident
+   bytes are a subset of the ring's record bytes; a smaller `journal_resident_max` makes this the "used once and dropped" path of the note.
+4. **`submit_read` misses stay a single asynchronous read of the piece** with no checksum, as before (the guest read path, not a chunk). Only
+   `read_at` (destage, recovery replay) has the read-around, as W3 and W6 say. Its two early completions (a reclaimed location, an empty read)
+   now signal the wake fd too, since a completion that is ready at once is otherwise polled only at the next unrelated wake.
+5. **Destage failing the cut** is shown at the journal's interface: the damaged record is `Corrupt` (`EIO`), the buffer is untouched, and the
+   destage assembly propagates a `read_at` error with `?` (`assemble.rs`). There is no new destage- or stack-level test that corrupts a ring
+   block under a real cut; the existing stack and kill suites pass unchanged.
+6. **A header cut by the window's end** (a record start within 56 bytes of the edge) is handled (the completing read fetches one more block) but
+   cannot happen with this writer, which starts every record at a multiple of 64; that branch has no test.
+7. **A forged record inside the payload of a record cut at the head of a window** could be taken as a record by the resync (the same acceptance as
+   the recovery reader's: it needs the file's 64-bit `gen`, its own offset and a valid crc32c, which no guest write can see). The scan jumps over
+   every verified record, so this concerns only the unsynchronised start of a window.
+8. **`DECISIONS.md` is not edited** (not in this milestone's paths): ADR-33's "Not implemented yet" is stale for T1 and T2.
+9. **Memory:** an entry per batch (written) or per record (read-around) is an `Arc<[u8]>`; a batch copy is `memcpy` of the packed bytes (no padding).
+   Not locked.
+
+## rust-skills conflicts
+
+None.
+
+## Gate
+
+`tools/ci.sh` on the host (CPUs 8-15, `-j 4`), rebased on `origin/main` 57deabf: green, ownership included. 2 036 tests passed, 0 failed, 28 ignored
+(the ignored are the existing by-hand cells). New: 15 tests in `lunix-journal/tests/window.rs` (one of them the 12-case property test),
+4 unit tests in `window.rs`, 1 in `lunixd/src/config.rs`. The existing journal, recovery, kill, crash-point and stack suites pass unchanged.
+
+## Commits
+
+One commit on `p1/jwin`, `journal: resident window and checked read-around (ADR-33 T1, T2)` (signed); its hash is in the lead's message.
+
+Remote disk use: about 22 GiB at the end of the gate (debug and release targets of the whole workspace plus the source copy), above the 10 GiB budget; the directory was deleted afterwards.

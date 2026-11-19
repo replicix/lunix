@@ -120,6 +120,12 @@ pub struct JournalConfig {
     /// and its mark buffer. A failed lock fails `open` or `open_lane`. The
     /// daemon sets it; tests under a small `RLIMIT_MEMLOCK` leave it off.
     pub lock_memory: bool,
+    /// Cap on the resident journal window (ADR-33): the bytes the journal
+    /// keeps in memory of what it wrote, until the ring file is reclaimed,
+    /// plus the records a read-around made resident. `None` is
+    /// `journal_max`; a larger value is clamped to it. The memory is not
+    /// locked. At least one maximal batch.
+    pub resident_max: Option<u64>,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
 }
@@ -140,6 +146,7 @@ impl JournalConfig {
             fixed_buffers: None,
             mark_idle: Some(DEFAULT_MARK_IDLE),
             lock_memory: false,
+            resident_max: None,
             trace: None,
         }
     }
@@ -151,6 +158,14 @@ impl JournalConfig {
         usize::try_from(per_lane / self.file_len.max(1))
             .unwrap_or(usize::MAX)
             .max(2)
+    }
+
+    /// The effective cap of the resident window: `resident_max` (default
+    /// `journal_max`), never above `journal_max`.
+    pub fn resident_cap(&self) -> u64 {
+        self.resident_max
+            .unwrap_or(self.journal_max)
+            .min(self.journal_max)
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
@@ -178,6 +193,11 @@ impl JournalConfig {
         if self.max_inflight == 0 {
             return Err(Error::invalid("max_inflight must be at least 1"));
         }
+        if self.resident_max.is_some_and(|m| m < BATCH_CAP as u64) {
+            return Err(Error::invalid(
+                "resident_max is below one maximal batch (1 MiB + 4 KiB)",
+            ));
+        }
         Ok(())
     }
 
@@ -200,6 +220,7 @@ impl std::fmt::Debug for JournalConfig {
             .field("direct", &self.direct)
             .field("mark_idle", &self.mark_idle)
             .field("lock_memory", &self.lock_memory)
+            .field("resident_max", &self.resident_max)
             .finish_non_exhaustive()
     }
 }

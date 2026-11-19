@@ -358,9 +358,42 @@ journal):
     most the tip's `commit_seq`. A checkpoint from beyond the tip (after
     `fsck --repair --truncate-tip`, §4.4) says that records up to the old
     tip's cut may be skipped, and they must not be.
+- **Resident window (ADR-33).** The journal keeps what it wrote in memory
+  until the ring file is reclaimed. A lane copies each batch's record bytes
+  when it seals the batch and indexes the copy, per lane, by `(ordinal, file
+  offset)` once the batch write has completed, before the `Append`
+  completions are delivered. `read_at` and `submit_read` serve a location
+  from it and fall back to the file.
+  - It is a cache of bytes already in the ring: the acknowledgement, the
+    group flush, FUA, the C6 point and recovery do not change, a crash loses
+    it, and no on-disk format changes. The bytes served are the bytes
+    handed to the write, so chunks stay byte-exact; a ring block damaged
+    after the write no longer reaches a chunk through it.
+  - Memory: at most the record bytes of the un-reclaimed ring files, capped
+    by `journal_resident_max` of `lunixd.toml` (default: the volume's
+    `journal_max`). Past the cap a new batch is not admitted (the oldest
+    records, which the next cut needs, stay). The window is plaintext, like
+    the batch buffers and the read cache, and is not locked memory.
+  - **A miss reads 1 MiB around it.** `read_at` on a location that is not
+    resident (after a restart, past the cap) reads the 1 MiB-aligned window
+    of the ring file around it, once however many workers miss in it, and
+    parses whole records with the recovery reader's rules (magic, `gen`, own
+    `off`) and each record's crc32c **before any of its bytes is used**. Only
+    verified records are served or made resident (within the cap). A record
+    cut by the edge of the window is completed with one more read. A record
+    that fails its checksum (or has no valid header at its place) fails the
+    read as `Corrupt`, so destage fails the cut like for any read error and
+    no chunk ever holds the damaged bytes. Nothing is read ahead of need and
+    nothing is read back after a write.
+  - `submit_read` (guest reads) uses the window for hits only; a miss is the
+    single asynchronous read of the piece it was.
+  - Counters (`FileJournal::window_stats`): resident bytes and cap, hits,
+    misses, batches not admitted, window reads, completing reads, checksum
+    failures.
 - **Reclaim:** journal space is freed once every record in a file has
   been destaged into a segment whose `fdatasync` is done, *and* the
-  commit that names the owning map change is durable (§8.2).
+  commit that names the owning map change is durable (§8.2). The file's
+  resident entries are released as reclaim takes the file out of use.
 - **Retention after destage:** in async and sync modes, records also wait
   until the containing cut is committed to the authority. A DELTA commit
   can then be rebuilt from the journal.
@@ -513,6 +546,10 @@ extents grouped by chunk; it prefers chunks whose newest record is older
 than the async interval, so overwrites are absorbed.
 
 1. **Assemble the chunk.**
+   - A piece whose source is the journal is read with `Journal::read_at`:
+     from the resident window when the bytes are in it, else through the
+     1 MiB read-around, which checks each record's crc32c (§4.1, ADR-33). A
+     read error, a damaged record included, fails the cut.
    - If the chunk is fully covered by the overlay, use that data.
    - If it is partially covered, read the base chunk (local store or
      backend) and patch it. A cold RMW is counted in metrics; the base
