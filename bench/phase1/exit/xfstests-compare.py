@@ -25,7 +25,9 @@ def parse(d):
     out = open(os.path.join(d, "check.stdout"), errors="replace").read()
     cfg = open(os.path.join(d, "local.config"), errors="replace").read()
     fs = re.search(r"FSTYP=(\S+)", cfg).group(1)
-    ran, notrun, bad = summary_line(out, "Ran"), summary_line(out, "Not run"), summary_line(out, "Failures")
+    notrun, bad = summary_line(out, "Not run"), summary_line(out, "Failures")
+    # check's "Ran:" lists every test it started, the not-run ones included: a test that was not run is neither a pass nor a fail
+    ran = [t for t in summary_line(out, "Ran") if t not in set(notrun)]
     res = os.path.join(d, "results")
     reasons = {}
     for t in bad:

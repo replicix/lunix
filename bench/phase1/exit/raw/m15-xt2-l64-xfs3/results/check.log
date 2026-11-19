@@ -1,0 +1,6 @@
+
+Kernel version: 7.0.0
+Wed Nov 18 23:09:01 UTC 2026
+Ran: xfs/129 xfs/234 xfs/253
+Failures: xfs/129 xfs/234 xfs/253
+Failed 3 of 3 tests
