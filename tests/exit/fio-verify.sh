@@ -23,7 +23,7 @@
 here="$(cd "$(dirname "$0")" && pwd)"
 : "${CHUNKS:=16384 65536}" "${MODES:=integrity encrypted}" "${TARGETS:=raw ext4 xfs}"
 : "${PROFILES:=1:1 32:1 128:1 1:8 32:8 128:8}" "${RUNTIME:=600}" "${VOL_GIB:=32}" "${PER_PROFILE_MIB:=4096}"
-: "${TRIM_MIB:=256}" "${ZERO_MIB:=1024}" "${VERIFY_GRACE:=900}"
+: "${CACHE_MAX:=48G}" "${SAMPLE_S:=10}" "${TRIM_MIB:=256}" "${ZERO_MIB:=1024}" "${VERIFY_GRACE:=900}"
 read -ra _c <<< "$CHUNKS"; read -ra _m <<< "$MODES"; read -ra _t <<< "$TARGETS"; read -ra PROF <<< "$PROFILES"
 NCELLS=$((${#_c[@]} * ${#_m[@]} * ${#_t[@]}))
 CELL_SECS=$((${#PROF[@]} * (RUNTIME + VERIFY_GRACE) + 3600))
@@ -59,6 +59,18 @@ run_cell() { # target chunk mode
   local d; d=$(cell_dir "$cell"); local t0=$SECONDS bad=0 notes=""
   say ""; say "## cell $cell"
   cell_begin "$vol" "$VOL_GIB" "$chunk" "$mode"
+  # ADR-32 (research note 2026-11-18, section 9.4): the cell runs with `cache_max` set (default 48G, 150 % of the 32 GiB exit volume;
+  # run the 4 GiB-profile raw cell also with CACHE_MAX=24G so that the band is exercised). The store directory is sampled every
+  # SAMPLE_S seconds and must stay under cache_max + the headroom reserve + the journal ring + the dirty commit bytes; no write may
+  # return ENOSPC; fio's longest completion must be under full_timeout; the kernel log must have no hung-task line.
+  lx space "$vol" --cache-max "$CACHE_MAX" --json > "$d/space-set.json" 2>&1
+  local cmax hdr fto vdir; cmax=$(jq -r '.settings.cache_max // empty' "$d/space-set.json" 2>/dev/null); hdr=$(jq -r '.settings.headroom // 268435456' "$d/space-set.json" 2>/dev/null)
+  fto=$(jq -r '.settings.full_timeout_ms // 30000' "$d/space-set.json" 2>/dev/null); vdir=$(vol_dir "$vol")
+  [ -n "$cmax" ] || cmax=$(numfmt --from=iec "$CACHE_MAX")
+  local hung0; hung0=$(dmesg | grep -ciE 'hung task|blocked for more than')
+  : > "$d/store-samples.txt"
+  ( while :; do du -s --block-size=1 "$vdir" 2>/dev/null | cut -f1 >> "$d/store-samples.txt"; sleep "$SAMPLE_S"; done ) </dev/null >/dev/null 2>&1 &
+  SAMPLER_PID=$!
   if [ "$tgt" != raw ]; then
     mkfs_fs "$tgt" "$CUR_DEV" || { fail "$cell: mkfs"; rec "$cell" fail why=mkfs; return; }
     mount_fs "$tgt" "$CUR_DEV" "$MNT" || { fail "$cell: mount"; rec "$cell" fail why=mount; return; }
@@ -126,9 +138,28 @@ run_cell() { # target chunk mode
     lunix_fsck "$vol" "$(basename "$d")-2"; expect "$cell: lunix fsck --deep clean (exit $FSCK_RC)" $? || bad=1
   fi
   local sb2; sb2=$(store_bytes "$vol")
+  kill "$SAMPLER_PID" 2>/dev/null; wait "$SAMPLER_PID" 2>/dev/null
+  local smax bound lat_ms hung1 enospc
+  smax=$(sort -n "$d/store-samples.txt" | tail -1); smax=${smax:-0}
+  # the dirty commit bytes are not in the status; the commit interval's worth of map dirt is small, 1 GiB is allowed for it and the journal ring
+  bound=$((cmax + hdr + JOURNAL_MAX + (1 << 30)))
+  [ "$smax" -le "$bound" ]; expect "$cell: the store directory stayed under cache_max + reserve + journal ring + 1 GiB ($((smax >> 20)) MiB of $((bound >> 20)) MiB)" $? || bad=1
+  lat_ms=$(cat "$OUT"/raw/fio-"${cell//\//_}"-p*.json 2>/dev/null | sed -n '/"fio version"/,$p' | jq -s '[.[]|.jobs[]|(.read.lat_ns.max // 0), (.write.lat_ns.max // 0)] | max / 1000000 | floor' 2>/dev/null)
+  lat_ms=${lat_ms:-0}
+  [ "$lat_ms" -lt "$fto" ]; expect "$cell: fio's longest completion $lat_ms ms is under full_timeout ($fto ms)" $? || bad=1
+  enospc=$(grep -l 'No space left' "$OUT"/raw/fio-"${cell//\//_}"-*.stdout "$OUT"/raw/fio-"${cell//\//_}"-*.json 2>/dev/null | wc -l)
+  [ "$enospc" = 0 ]; expect "$cell: no write returned ENOSPC" $? || bad=1
+  hung1=$(dmesg | grep -ciE 'hung task|blocked for more than')
+  [ "$hung1" = "$hung0" ]; expect "$cell: no hung-task line in the kernel log" $? || bad=1
+  local thr dly dmx
+  thr=$(jq -r '[.. | .delayed_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null); dly=$(jq -r '[.. | .delayed_writes? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
+  dmx=$(jq -r '[.. | .delay_max_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
+  local ens; ens=$(jq -r '[.. | .enospc? // empty] | first // 0' "$d/status-2.json" 2>/dev/null)
+  [ "${ens:-0}" = 0 ]; expect "$cell: the gate refused no reservation for space (enospc counter $ens)" $? || bad=1
+  say "- $cell: throttled (delayed_ms) $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
-      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" notes="$notes"
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" notes="$notes"
   [ "$bad" = 0 ] || FAIL=1
 }
 

@@ -40,12 +40,16 @@ say "# M15 crash points ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $
 # restart after an exit (the crash is a SIGKILL from inside, status 137) is a plain recovery start without the setting. The
 # script itself never has to notice a crash to keep going: a mkfs, umount or detach that blocks while the daemon is down is
 # released by the supervisor. Exits are logged in sup-exits.log (epoch seconds, status, the daemon's log).
-SUPGEN=0; SUPPID=""; SUP_ENV=""; CRASHED=0; CRASH_T=""; RUN_EPOCH0=0
+SUPGEN=0; SUPPID=""; SUP_ENV=""; SUP_ENV2=""; CRASHED=0; CRASH_T=""; RUN_EPOCH0=0
 sup_loop() {
   local first=1 n=0 dl
   while :; do
     n=$((n + 1)); dl="$OUT/lunixd.s$SUPGEN.$n.log"
-    if [ "$first" = 1 ]; then
+    if [ "$n" = 2 ] && [ -n "$SUP_ENV2" ]; then
+      # scenario runs: the first restart (the recovery after the preparing crash) carries a second crash setting
+      # shellcheck disable=SC2086
+      env -u LUNIX_CRASH_AT -u LUNIX_CRASH_COUNT $SUP_ENV2 taskset -c "$DAEMON_CPUS" "$LUNIXD_CP" --config "$ST/lunixd.toml" > "$dl" 2>&1 &
+    elif [ "$first" = 1 ]; then
       # shellcheck disable=SC2086  # SUP_ENV is a list of VAR=value words
       env -u LUNIX_CRASH_AT -u LUNIX_CRASH_COUNT $SUP_ENV taskset -c "$DAEMON_CPUS" "$LUNIXD_CP" --config "$ST/lunixd.toml" > "$dl" 2>&1 &
     else
@@ -62,7 +66,7 @@ daemon_alive() { [ -s "$ST/daemon.pid" ] && kill -0 "$(cat "$ST/daemon.pid")" 2>
 wait_ping() { local i; for i in $(seq 1 $(($1 * 10))); do "$LUNIXD" ctl --socket "$SOCK" '{"method":"ping"}' >/dev/null 2>&1 && return 0; sleep 0.1; done; return 1; }
 start_lunixd() {
   rm -f "$ST/sup.stop" "$ST/daemon.pid" "$ST/daemon.log.path"; : > "$OUT/sup-exits.log"
-  SUP_ENV=$CRASH_ENV; SUPGEN=$((SUPGEN + 1))
+  SUP_ENV=$CRASH_ENV; SUP_ENV2=${SCEN_ENV2:-}; SUPGEN=$((SUPGEN + 1))
   sup_loop & SUPPID=$!
   wait_ping 90 || wedged "no daemon answered within 90 s of the supervisor start"
   DLOG=$(cat "$ST/daemon.log.path"); DPID=$(cat "$ST/daemon.pid"); register_all
@@ -116,7 +120,13 @@ one_run() {
   mkfs_fs "$fs" "$CUR_DEV" || { RUN_STATUS=fail; RUN_NOTES="setup: mkfs"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
   mount_fs "$fs" "$CUR_DEV" "$MNT" || { RUN_STATUS=fail; RUN_NOTES="setup: mount"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
   local rt=$((WL_SECS + POST_SECS + 120))
+  case "${SCEN:-}" in
+    full) lx space "$vol" --cache-max "${SCEN_CAP:-1536M}" --on-full wait --full-timeout 600s --json > "$OUT/raw/space-$label.json" 2>&1 ;;
+  esac
   wl_start "$label" "$fs" "$rt" 268435456 4
+  case "${SCEN:-}" in
+    resize) ( sleep 10; timeout -k 5 120 "$LUNIX" --socket "$SOCK" resize "$vol" "$((VOL_GIB + 8))G" > "$OUT/raw/resize-$label.txt" 2>&1 ) </dev/null >/dev/null 2>&1 & ;;
+  esac
   ( while :; do sleep "$GC_EVERY_S"; timeout -k 5 120 "$LUNIX" --socket "$SOCK" gc "$vol" >/dev/null 2>&1; done ) </dev/null >/dev/null 2>&1 &
   GC_PID=$!
   # run until the crash (then POST_SECS more), or WL_SECS without a crash, or the run cap
@@ -151,6 +161,8 @@ one_run() {
   fi
   crash_seen
   [ "$CRASHED" = 0 ] && RUN_STATUS=unreached
+  local n137; n137=$(awk '$2 == 137 {c++} END {print c + 0}' "$OUT/sup-exits.log")
+  [ "$n137" -ge "${SCEN_NEED:-1}" ] || RUN_STATUS=unreached
   { wl_ok && [ "$drc" = 0 ] && [ "$frc" = 0 ]; } || RUN_STATUS=fail
   WL_STOPPED=0
   RUN_SECS=$((SECONDS - RUN_T0))
@@ -168,6 +180,32 @@ report_run() { # CELL POINT KIND HIT FS
   esac
 }
 budget_left() { [ $((SECONDS - T0 + RUN_CAP_S + 300)) -lt "$BUDGET_S" ]; }
+
+# ---- scenarios: points the churn workload cannot reach by itself (they run only in a recovery, on a full volume, in a resize or in an offline
+# repair). SCENARIO=prep|resize|full, TARGETS="point ...", PREP="point:hit" (prep only: the preparing crash). Each target is run once on ext4.
+#   prep    the preparing crash (e.g. destage.after_segment_seal leaves a sealed segment no commit names, destage.after_segment_append leaves
+#           an .open file) is followed by a recovery start that carries LUNIX_CRASH_AT=<target>:1: the sweep and the leftover removal of the open
+#           crash again there, and a third start recovers for good
+#   resize  `lunix resize` 10 s into the load, the daemon crashes at <target>:1 (ublk.after_update_size)
+#   full    the cap (SCEN_CAP, 1536M) is below the working set plus its garbage, `on_full = wait`: the urgent pass of the collector runs when a
+#           write meets NoSpace and the daemon crashes at <target>:1 (gc.urgent.after_mark)
+if [ -n "${SCENARIO:-}" ]; then
+  say ""; say "## scenario $SCENARIO: ${TARGETS:?TARGETS is not set}"
+  for tgt in $TARGETS; do
+    SCEN=$SCENARIO; SCEN_ENV2=""; SCEN_NEED=1; WL_SECS=${WL_SECS:-120}
+    case "$SCENARIO" in
+      prep) SCEN_ENV2="LUNIX_CRASH_AT=$tgt:1"; SCEN_NEED=2; run_env="LUNIX_CRASH_AT=${PREP:?PREP (point:hit) is not set}" ;;
+      *) run_env="LUNIX_CRASH_AT=$tgt:1" ;;
+    esac
+    cell="scenario/$SCENARIO/$tgt"; say ""; say "## $cell"
+    one_run "$(echo "$SCENARIO-$tgt" | tr '.' '_')" ext4 "$run_env"
+    report_run "$cell" "$tgt" "$SCENARIO" 1 ext4
+    SCEN=""; SCEN_ENV2=""; SCEN_NEED=1
+    [ -e "$OUT/WEDGED" ] && break
+  done
+  say ""; say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
+  exit "$FAIL"
+fi
 
 # ---- counting run: the same workload with the daemon counting every point, clean exit ---------------------------
 COUNTS="${COUNTS:-$OUT/counts.txt}"
