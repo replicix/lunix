@@ -369,6 +369,7 @@ paths = [
   "crates/lunixd/tests/stack_window.rs",
   "crates/lunix-iface/src/journal.rs",
   "docs/explanation/DESIGN.md",
+  "tools/ci.sh",
   "tools/ownership.toml",
 ]
 
