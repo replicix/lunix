@@ -49,6 +49,36 @@ Branch `p1/pace` from `origin/main` 03b858e. Spec: ADR-32 (accepted 2026-11-18, 
    waiting for space. The `lunix-space` tests other than `pace.rs` build their gates with the band off (`common::config`).
 9. **DECISIONS.md is not edited** (not in this milestone's paths): ADR-32's "Not implemented yet" status line is stale.
 
+## Review response (01-p1-pace-review.md, verdict "merge after fixes")
+
+The second commit carries these fixes.
+
+| finding | fix | test |
+|---|---|---|
+| **M1** a paced request that fits got ENOSPC and could latch the volume | the gate's queue is in order of `reserve` calls, not of arrival, so a request behind the head can be due: the grant loop admits the head (and what stands before the due request) when any waiter behind it has waited its cap (`due_behind`; the bucket takes the debt); `park` refuses a due request only when it does not fit, otherwise it is admitted with what stands before it; `expire` is reached only by requests that wait for space (the cap is never later than the deadline) | `an_old_request_behind_a_young_head_admits_both_and_latches_nothing`, `a_request_that_fits_and_is_past_its_deadline_on_first_contact_is_admitted` (old `arrived`, two queues' order, `full_timeout` 3 s under a 10 s cap); the new property test `requests_that_fit_are_never_refused_whatever_their_arrival` (arrivals up to 40 s in the past, `full_timeout` and cap drawn 1 to 14 s, FUA and bulk: no `NoSpace`, `fulls` 0, `enospc` 0, all granted) |
+| **M2** a FUA write waited behind the paced writes of its queue | `handle` lets a `Sync` write (FUA, at most 256 KiB) go to the gate while its queue has writes parked, unless one waits for the journal ring (two requests in flight have no order, the note's own argument for holes) | stack `a_fua_write_overtakes_the_paced_writes_of_its_own_queue`: eight 256 KiB writes at 64 KiB/s (the bucket's first megabyte goes through, the rest are paced), the FUA write on the same queue completes inside 2 s (it waited until the bulk writes were through before the fix) |
+| **M3** `on_full = error`: a paced request that stopped fitting waited out `full_timeout` and latched | the grant loop refuses a head that does not fit at once under `error` while the band is on (the band-off case is `rejudge`'s `fail_unfit`, as before); `expire` never latches under `error` | `under_on_full_error_a_paced_request_that_stops_fitting_is_refused_at_once` |
+| m1 debt | `Bucket::refill` clamps the debt to one second of the current rate | `the_debt_is_bounded_by_one_second_of_the_rate` (a rate that fell) |
+| m2 FUA-only writer | documented here: an O_DSYNC workload of small writes is never paced (ADR), goes from full speed to the hard mark and keeps the bucket at its debt floor, so bulk writes then pass by their cap | |
+| m3 compaction rate cap across a pressure change | the cap counts in a window that restarts when the rate changes (`compact::rate_cap`) | `rate_tests::bytes_read_at_a_higher_rate_are_not_charged_to_a_lower_one` |
+| m4 pressure never ends on a resting volume | a `slowdown` with no writer (nothing admitted in 10 s, nothing waiting) counts as open: the pressure ends after the hold, and the 30 s line stops; `stop` and `full` stay urgent | `a_volume_resting_in_the_band_with_no_writer_loses_its_pressure` (engine), `a_volume_resting_inside_the_band_has_no_pressure_after_the_hold`, `a_resting_band_volume_logs_no_status_line` |
+| m5 the `volume full` ERROR line | a latch is logged when the gate's `fulls` counter moves, whatever the 5 s window and whatever state is seen next | `the_error_line_of_a_latch_is_never_merged_away` |
+| m6 `gc_rate = 0` under urgent | stays 0 (no compaction) | `a_rate_of_zero_stays_zero_under_every_pressure` |
+| m7 interface | `Paced` doc says it is a judgment at reserve time, that `error` refuses it at once when it stops fitting and that a gate without a band never returns it; a contract case for the class and `Paced` (granted and charged like `Parked`) runs against every gate | `the_class_and_a_paced_wait_charge_like_a_plain_reservation` |
+| m10 tests | the directed grace test starts its second mark at 45 s (between the floor, 31 s, and the configured grace, 61 s) and asserts it is before 61 s; the F-4 quiesce test no longer sleeps: a second thread reports `Engine::is_closing()` (new accessor) and the step waits for it | both |
+| m11 | a stack test with `throttle = false` (`with_the_band_off_the_volume_is_never_paced`) | |
+
+Left, as the review allows:
+
+- **m8**: cross-key config errors are reported at line 0 (as for every whole-file rule of `config.rs`).
+- **m9**: every `release` and `transfer` wakes the timer while anything waits (one wake-up per journal release under pacing); cheap, not measured.
+- **m10, stack level**: the slow-GC cell proves the floor with `read_timeout` 0 (a 10 s floor); the production floor of 30 s is exercised only at engine and collector level. The shortened grace of the directed test is set before the pass, not between its mark and its deletes (the unit test of `Pressure::params` and the verdict's mark-start rule cover that case).
+- **m11**: every stack test still drives one queue, except that M2's test is the same-queue case; the M1 cases are gate-level because the queue hands the gate at most one request at a time.
+- **deviation 9**: ADR-32's status line is the lead's to fix at merge.
+
+Gate after the fixes: full `tools/ci.sh` on the host, `ci: all green`, **2012 passed, 0 failed, 29 ignored** (summed `test result`
+lines), `check-ownership: pace ok (45 changed paths)`. The remote target was deleted afterwards.
+
 ## For the maintainer
 
 - The band is `r_mid = max(gc_rate, 16 MiB/s)` of the volume at open; `lunix` has no live `gc_rate` change, so the gate never needs a new `r_mid`.

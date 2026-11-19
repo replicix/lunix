@@ -1659,13 +1659,16 @@ impl Gc {
         }
         // Rate cap: bytes read so far may not run ahead of `gc_rate` by more
         // than one step's worth; a step moves at most `max_bytes`.
-        let elapsed_ms = view.clock.monotonic().saturating_sub(c.started).as_millis();
-        let allowed = u128::from(view.params.rate_bytes_per_s)
-            .saturating_mul(elapsed_ms)
-            .checked_div(1000)
-            .unwrap_or(0)
-            .saturating_add(u128::from(budget.max_bytes));
-        if u128::from(c.bytes_read) >= allowed || *step_bytes >= budget.max_bytes {
+        let (window, over) = compact::rate_cap(
+            c.window,
+            view.params.rate_bytes_per_s,
+            view.clock.monotonic(),
+            c.started,
+            c.bytes_read,
+            budget.max_bytes,
+        );
+        c.window = Some(window);
+        if over || *step_bytes >= budget.max_bytes {
             self.phase = Phase::Compacting(Some(c));
             return Flow::Yield;
         }

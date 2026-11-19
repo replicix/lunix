@@ -442,6 +442,12 @@ impl Engine {
         self.inner.is_failed()
     }
 
+    /// True once a quiesce began (`BlockEngine::quiesce` was called): no
+    /// collector call starts any more.
+    pub fn is_closing(&self) -> bool {
+        self.inner.closing.load(Ordering::Acquire)
+    }
+
     /// What the collector is getting (ADR-32): normal, raised while writes
     /// are slowed, urgent while they wait or fail for space. Updated at each
     /// tick from the gate's state.

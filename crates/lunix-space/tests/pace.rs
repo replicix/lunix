@@ -440,6 +440,113 @@ fn the_ingest_and_reclaim_rates_average_ten_seconds() {
     assert_eq!(t.ingest_rate, 0, "no write in the last 10 s: {t:?}");
 }
 
+/// A gate with the 3 s full_timeout, a 10 s cap (longer than it), the minimum
+/// rate at 64 KiB/s and the bucket drained by four 256 KiB writes.
+fn drained(ck: &Arc<ManualClock>) -> Arc<LunixSpace> {
+    let c = cfg(Some(Duration::from_secs(3)), |c| {
+        c.throttle = c.throttle.with_gc_rate(0);
+        c.throttle.min_rate = 64 * KIB;
+    });
+    let g = at_headroom(4 * MIB, c, ck);
+    for _ in 0..4 {
+        reserved(g.reserve(K, 256 * KIB, None).unwrap());
+    }
+    g
+}
+
+#[test]
+fn an_old_request_behind_a_young_head_admits_both_and_latches_nothing() {
+    // Review M1: the gate's queue is in order of reserve calls, not of
+    // arrival. H arrives at 2.9 s from one queue, B (arrived at 0) reaches
+    // the gate behind it from another.
+    let ck = clock();
+    let g = drained(&ck);
+    ck.advance(Duration::from_millis(2900));
+    let h = paced(g.reserve(K, 256 * KIB, None).unwrap());
+    let b = paced(
+        g.reserve_since(K, 256 * KIB, None, Duration::ZERO, ReserveClass::Bulk)
+            .unwrap(),
+    );
+    ck.advance(Duration::from_millis(99));
+    g.tick();
+    assert_eq!(h.state(), WaiterState::Pending);
+    assert_eq!(b.state(), WaiterState::Pending);
+    ck.advance(Duration::from_millis(1));
+    g.tick();
+    // B's deadline: H goes with it (it stands before B), nobody fails.
+    assert_eq!(b.state(), WaiterState::Granted);
+    assert_eq!(h.state(), WaiterState::Granted);
+    assert!(!g.is_full());
+    let t = g.snapshot().throttle;
+    assert_eq!((t.enospc, t.fulls), (0, 0), "{t:?}");
+}
+
+#[test]
+fn a_request_that_fits_and_is_past_its_deadline_on_first_contact_is_admitted() {
+    // Review M1, the variant: it reaches the gate after its full_timeout
+    // (a ring wait, or a stop episode that just ended).
+    let ck = clock();
+    let g = drained(&ck);
+    ck.advance(Duration::from_millis(2900));
+    let young = paced(g.reserve(K, 256 * KIB, None).unwrap());
+    ck.advance(Duration::from_secs(1));
+    for _ in 0..3 {
+        // Admitted at once: `Reserved`, or a handle that is already granted.
+        match g
+            .reserve_since(K, 128 * KIB, None, Duration::ZERO, ReserveClass::Bulk)
+            .unwrap()
+        {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => {
+                assert_eq!(w.state(), WaiterState::Granted, "refused or left waiting");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(young.state(), WaiterState::Granted, "it stood before them");
+    assert!(!g.is_full());
+    assert_eq!(g.snapshot().throttle.enospc, 0);
+    // A request that does not fit is still refused without a latch.
+    let late = g
+        .reserve_since(K, 100 * MIB, None, Duration::ZERO, ReserveClass::Bulk)
+        .unwrap();
+    assert!(matches!(late, ReserveOutcome::NoSpace), "{late:?}");
+    assert!(!g.is_full());
+}
+
+#[test]
+fn under_on_full_error_a_paced_request_that_stops_fitting_is_refused_at_once() {
+    // Review M3: a FUA write overtakes the paced request and takes its room.
+    let ck = clock();
+    let mut c = cfg(None, |c| {
+        c.throttle = c.throttle.with_gc_rate(0);
+        c.throttle.min_rate = 64 * KIB;
+    });
+    c.settings.on_full = OnFull::Error;
+    let g = at_headroom(3 * MIB, c, &ck);
+    for _ in 0..4 {
+        reserved(g.reserve(K, 256 * KIB, None).unwrap());
+    }
+    let big = paced(g.reserve(K, MIB, None).unwrap());
+    reserved(
+        g.reserve_since(K, 1536 * KIB, None, ck_now(&ck), ReserveClass::Sync)
+            .unwrap(),
+    );
+    ck.advance(Duration::from_millis(1));
+    assert_eq!(g.tick(), 0);
+    assert_eq!(big.state(), WaiterState::TimedOut, "refused at once");
+    assert!(!g.is_full(), "`error` never latches");
+    assert_eq!(g.fulls(), 0);
+    let t = g.snapshot().throttle;
+    assert_eq!(t.enospc, 1, "{t:?}");
+    // Nothing waits for `full_timeout` and a request that fits goes on.
+    assert_eq!(g.snapshot().waiters, 0);
+    assert!(!matches!(
+        g.reserve(K, 4 * KIB, None).unwrap(),
+        ReserveOutcome::NoSpace
+    ));
+}
+
 mod model {
     //! The property test of the note's §9.1 with the band on: random
     //! reservations (bulk and sync), releases, hole charges, policy changes
@@ -591,6 +698,94 @@ mod model {
             let want_journal: u64 = held.iter().sum::<u64>() + holes;
             prop_assert_eq!(snap.by_kind[K.index()], want_journal);
             prop_assert_eq!(snap.by_kind[SEG.index()], limit - start_headroom_mib * MIB - freed);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+
+        /// Review M1: every request fits (a few KiB of reservations released
+        /// at once against 4 MiB of headroom), whatever the arrival times
+        /// (any time in the past, so the gate's queue is out of order), the
+        /// `full_timeout` (shorter or longer than the delay cap) and the
+        /// pace: none is refused, nothing latches, and all are granted.
+        #[test]
+        fn requests_that_fit_are_never_refused_whatever_their_arrival(
+            reqs in proptest::collection::vec((1u64..64, 0u64..40_000, any::<bool>()), 1..60),
+            timeout_s in 1u64..15,
+            cap_s in 1u64..15,
+            steps in proptest::collection::vec(1u64..2500, 1..40),
+        ) {
+            let ck = clock();
+            let c = cfg(Some(Duration::from_secs(timeout_s)), |c| {
+                c.throttle = c.throttle.with_gc_rate(0);
+                c.throttle.min_rate = 64 * KIB;
+                c.throttle.max_delay = Duration::from_secs(cap_s);
+            });
+            let g = at_headroom(4 * MIB, c, &ck);
+            // The clock starts 40 s in, so arrivals can lie in the past.
+            ck.advance(Duration::from_secs(40));
+            let mut live: Vec<(Waiter, u64)> = Vec::new();
+            let mut offered = 0usize;
+            let mut granted = 0usize;
+            let mut ops = reqs.into_iter();
+            for step in steps {
+                for (kib, age_ms, sync) in ops.by_ref().take(3) {
+                    let now = ck_now(&ck);
+                    let arrived = now.saturating_sub(Duration::from_millis(age_ms));
+                    let class = if sync && kib <= 64 { ReserveClass::Sync } else { ReserveClass::Bulk };
+                    offered += 1;
+                    match g.reserve_since(K, kib * KIB, None, arrived, class).unwrap() {
+                        ReserveOutcome::Reserved => {
+                            granted += 1;
+                            g.release(K, kib * KIB);
+                        }
+                        ReserveOutcome::Paced(w) | ReserveOutcome::Parked(w) => live.push((w, kib * KIB)),
+                        ReserveOutcome::NoSpace => prop_assert!(false, "a request that fits was refused"),
+                    }
+                }
+                ck.advance(Duration::from_millis(step));
+                g.tick();
+                let mut still = Vec::new();
+                for (w, b) in live.drain(..) {
+                    match w.state() {
+                        WaiterState::Granted => { granted += 1; g.release(K, b); }
+                        WaiterState::Pending => still.push((w, b)),
+                        other => prop_assert!(false, "a request that fits ended {:?}", other),
+                    }
+                }
+                live = still;
+                prop_assert!(!g.is_full());
+                prop_assert_eq!(g.snapshot().throttle.enospc, 0);
+            }
+            // The rest, then everything drains.
+            for (kib, age_ms, _) in ops {
+                let now = ck_now(&ck);
+                let arrived = now.saturating_sub(Duration::from_millis(age_ms));
+                offered += 1;
+                match g.reserve_since(K, kib * KIB, None, arrived, ReserveClass::Bulk).unwrap() {
+                    ReserveOutcome::Reserved => { granted += 1; g.release(K, kib * KIB); }
+                    ReserveOutcome::Paced(w) | ReserveOutcome::Parked(w) => live.push((w, kib * KIB)),
+                    ReserveOutcome::NoSpace => prop_assert!(false, "a request that fits was refused"),
+                }
+            }
+            for _ in 0..60 {
+                ck.advance(Duration::from_secs(1));
+                g.tick();
+                let mut still = Vec::new();
+                for (w, b) in live.drain(..) {
+                    match w.state() {
+                        WaiterState::Granted => { granted += 1; g.release(K, b); }
+                        WaiterState::Pending => still.push((w, b)),
+                        other => prop_assert!(false, "a request that fits ended {:?}", other),
+                    }
+                }
+                live = still;
+            }
+            prop_assert_eq!(live.len(), 0, "requests still pending");
+            prop_assert_eq!(granted, offered);
+            prop_assert_eq!(g.fulls(), 0);
+            prop_assert_eq!(g.snapshot().throttle.enospc, 0);
         }
     }
 }

@@ -82,7 +82,11 @@ impl Pressure {
         let floor = Duration::from_secs(10).saturating_add(base.read_timeout.saturating_mul(2));
         GcParams {
             grace: base.grace.min(floor),
-            rate_bytes_per_s: if self == Self::Urgent {
+            // A rate of 0 means "no compaction" and stays 0 (the volume's
+            // choice outranks the pressure).
+            rate_bytes_per_s: if base.rate_bytes_per_s == 0 {
+                0
+            } else if self == Self::Urgent {
                 u64::MAX
             } else {
                 base.rate_bytes_per_s.saturating_mul(rate_factor.max(1))
@@ -101,10 +105,15 @@ pub struct PressureTracker {
 
 impl PressureTracker {
     /// The pressure at `now` given the gate's `state`: it rises at once and
-    /// falls to `Normal` once the gate has been open for [`HOLD`].
-    pub fn observe(&mut self, state: ThrottleState, now: Duration) -> Pressure {
+    /// falls to `Normal` once the gate has been open for [`HOLD`]. A volume
+    /// that rests inside the band with no writer (`active` false: nothing
+    /// admitted in the last 10 s, nothing waiting) counts as open, so the
+    /// pressure ends there too (review m4); `stop` and `full` stay urgent,
+    /// since writers are waiting or failing.
+    pub fn observe(&mut self, state: ThrottleState, active: bool, now: Duration) -> Pressure {
         let want = match state {
             ThrottleState::Open => Pressure::Normal,
+            ThrottleState::Slowdown if !active => Pressure::Normal,
             ThrottleState::Slowdown => Pressure::Raised,
             ThrottleState::Stop | ThrottleState::Full => Pressure::Urgent,
         };
@@ -167,6 +176,12 @@ pub enum LogLine {
     },
 }
 
+/// True while writers are active: bytes admitted in the last 10 s, or
+/// requests waiting.
+pub(crate) fn active(snap: &SpaceSnapshot) -> bool {
+    snap.throttle.ingest_rate > 0 || snap.waiters > 0
+}
+
 /// Decides which lines a sequence of snapshots owes: one per state change,
 /// changes closer than [`LOG_COALESCE`] to the last line merged into the
 /// next one that is due, and a status line every [`LOG_PERIOD`] outside
@@ -179,6 +194,8 @@ pub struct ThrottleWatch {
     last_periodic: Option<Duration>,
     /// When the volume was last seen latched full, for `full_ms`.
     full_since: Option<Duration>,
+    /// Latches already written a line for (the gate's `fulls`).
+    fulls_logged: u64,
 }
 
 impl ThrottleWatch {
@@ -192,6 +209,23 @@ impl ThrottleWatch {
         let t = &snap.throttle;
         let to = t.state;
         let mut out = Vec::new();
+        // The error line of a latch is never merged away: not by a line
+        // written a moment before, nor by a latch that closes again before
+        // the next transition line is due (review m5).
+        if t.fulls > self.fulls_logged {
+            self.fulls_logged = t.fulls;
+            out.push(LogLine::Full {
+                used: snap.used(),
+                limit: snap.limit,
+            });
+            self.full_since = Some(now);
+            self.logged = ThrottleState::Full;
+            self.last_line = Some(now);
+            self.last_periodic = Some(now);
+            if to == ThrottleState::Full {
+                return out;
+            }
+        }
         if to == ThrottleState::Full && self.full_since.is_none() {
             self.full_since = Some(now);
         }
@@ -241,6 +275,7 @@ impl ThrottleWatch {
             self.last_line = Some(now);
             self.last_periodic = Some(now);
         } else if to != ThrottleState::Open
+            && !(to == ThrottleState::Slowdown && !active(snap))
             && to == self.logged
             && self
                 .last_periodic
@@ -314,7 +349,7 @@ impl Inner {
     pub(crate) fn update_pressure(&self) {
         let snap = self.space.snapshot();
         let now = self.clock.monotonic();
-        let level = lock(&self.pressure).observe(snap.throttle.state, now);
+        let level = lock(&self.pressure).observe(snap.throttle.state, active(&snap), now);
         self.pressure_level.store(level.code(), Ordering::Release);
         let lines = lock(&self.throttle_watch).observe(&snap, level, now);
         for l in lines {
@@ -416,6 +451,7 @@ mod tests {
             throttle: ThrottleFigures {
                 state,
                 rate: Some(5),
+                ingest_rate: 1,
                 ..ThrottleFigures::default()
             },
             ..SpaceSnapshot::default()
@@ -437,34 +473,64 @@ mod tests {
     #[test]
     fn pressure_rises_at_once_and_falls_after_the_hold() {
         let mut t = PressureTracker::default();
-        assert_eq!(t.observe(ThrottleState::Open, secs(0)), Pressure::Normal);
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, secs(1)),
+            t.observe(ThrottleState::Open, true, secs(0)),
+            Pressure::Normal
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, true, secs(1)),
             Pressure::Raised
         );
-        assert_eq!(t.observe(ThrottleState::Stop, secs(2)), Pressure::Urgent);
-        assert_eq!(t.observe(ThrottleState::Full, secs(3)), Pressure::Urgent);
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, secs(4)),
+            t.observe(ThrottleState::Stop, true, secs(2)),
+            Pressure::Urgent
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Full, true, secs(3)),
+            Pressure::Urgent
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, true, secs(4)),
             Pressure::Raised
         );
         // Open, but the hold has not run.
-        assert_eq!(t.observe(ThrottleState::Open, secs(5)), Pressure::Raised);
-        assert_eq!(t.observe(ThrottleState::Open, secs(9)), Pressure::Raised);
-        assert_eq!(t.observe(ThrottleState::Open, secs(10)), Pressure::Normal);
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(5)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(9)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(10)),
+            Pressure::Normal
+        );
         // A slowdown inside the hold restarts it.
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, secs(11)),
+            t.observe(ThrottleState::Slowdown, true, secs(11)),
             Pressure::Raised
         );
-        assert_eq!(t.observe(ThrottleState::Open, secs(12)), Pressure::Raised);
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, secs(15)),
+            t.observe(ThrottleState::Open, true, secs(12)),
             Pressure::Raised
         );
-        assert_eq!(t.observe(ThrottleState::Open, secs(16)), Pressure::Raised);
-        assert_eq!(t.observe(ThrottleState::Open, secs(20)), Pressure::Raised);
-        assert_eq!(t.observe(ThrottleState::Open, secs(21)), Pressure::Normal);
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, true, secs(15)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(16)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(20)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, secs(21)),
+            Pressure::Normal
+        );
     }
 
     #[test]
@@ -559,5 +625,92 @@ mod tests {
         assert_eq!(lines(ThrottleState::Slowdown, 10).len(), 1);
         assert!(lines(ThrottleState::Open, 11).is_empty());
         assert!(lines(ThrottleState::Slowdown, 17).is_empty());
+    }
+
+    #[test]
+    fn a_rate_of_zero_stays_zero_under_every_pressure() {
+        let off = GcParams {
+            rate_bytes_per_s: 0,
+            ..params()
+        };
+        for p in [Pressure::Raised, Pressure::Urgent] {
+            assert_eq!(p.params(off, 4).rate_bytes_per_s, 0, "{p:?}");
+            assert_eq!(p.params(off, 4).grace, secs(30));
+        }
+    }
+
+    #[test]
+    fn a_volume_resting_inside_the_band_has_no_pressure_after_the_hold() {
+        let mut t = PressureTracker::default();
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, true, secs(0)),
+            Pressure::Raised
+        );
+        // The writer stops; the headroom stays under the soft mark.
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, false, secs(10)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, false, secs(14)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, false, secs(15)),
+            Pressure::Normal
+        );
+        // A writer again: raised at once. Stop and full never decay.
+        assert_eq!(
+            t.observe(ThrottleState::Slowdown, true, secs(16)),
+            Pressure::Raised
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Stop, false, secs(100)),
+            Pressure::Urgent
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Full, false, secs(200)),
+            Pressure::Urgent
+        );
+    }
+
+    #[test]
+    fn a_resting_band_volume_logs_no_status_line() {
+        let mut w = ThrottleWatch::default();
+        let mut idle = snap(ThrottleState::Slowdown);
+        idle.throttle.ingest_rate = 0;
+        assert_eq!(w.observe(&idle, Pressure::Normal, secs(1)).len(), 1);
+        assert!(w.observe(&idle, Pressure::Normal, secs(100)).is_empty());
+        assert!(w.observe(&idle, Pressure::Normal, secs(1000)).is_empty());
+    }
+
+    #[test]
+    fn the_error_line_of_a_latch_is_never_merged_away() {
+        let mut w = ThrottleWatch::default();
+        let mut s = snap(ThrottleState::Slowdown);
+        assert_eq!(w.observe(&s, Pressure::Raised, secs(10)).len(), 1);
+        // A latch inside the 5 s window of that line: its line is written.
+        s.throttle.state = ThrottleState::Full;
+        s.throttle.fulls = 1;
+        let l = w.observe(&s, Pressure::Urgent, secs(11));
+        assert!(matches!(l.as_slice(), [LogLine::Full { .. }]), "{l:?}");
+        // The latch closes at once, in the same window: the lines that
+        // would follow wait, the latch's own line is out.
+        s.throttle.state = ThrottleState::Slowdown;
+        assert!(w.observe(&s, Pressure::Urgent, secs(12)).is_empty());
+        // A second latch before they were due is written too.
+        s.throttle.state = ThrottleState::Full;
+        s.throttle.fulls = 2;
+        let l = w.observe(&s, Pressure::Urgent, secs(13));
+        assert!(matches!(l.as_slice(), [LogLine::Full { .. }]), "{l:?}");
+        // A latch that opened and closed between two observations is seen
+        // through the counter.
+        s.throttle.state = ThrottleState::Slowdown;
+        s.throttle.fulls = 3;
+        let l = w.observe(&s, Pressure::Urgent, secs(14));
+        assert!(matches!(l.as_slice(), [LogLine::Full { .. }]), "{l:?}");
+        // The way out is written once it is due.
+        let l = w.observe(&s, Pressure::Urgent, secs(20));
+        assert!(matches!(l.as_slice(), [LogLine::NotFull { .. }]), "{l:?}");
     }
 }

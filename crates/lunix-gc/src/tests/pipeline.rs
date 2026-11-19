@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use lunix_format::{ExtentKind, IdLen, SegId};
+use lunix_iface::clock::Clock;
 use lunix_iface::gc::{Collector, GcState};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::map::{entry_hint, ChunkNo};
@@ -533,16 +534,23 @@ fn a_grace_shortened_between_condemn_and_verdict_deletes_nothing_early() {
     }
     assert_eq!(s.gc.stats().bytes_freed, 0);
     s.check_roots().unwrap();
-    // The next mark (after the duty gap, three times the 12 s mark) begins
-    // after the shortened grace: the objects go, a pass that began at 31 s
-    // or later instead of 61 s.
-    s.clock.advance(Duration::from_secs(40));
+    // The next mark begins at about 45 s: after the shortened grace (31 s)
+    // and before the configured one (61 s), so only the floor can have
+    // deleted. The duty gap of the 12 s mark is cleared by hand so that the
+    // pass is due.
+    s.gc.last_mark = Duration::ZERO;
+    let now = s.clock.monotonic();
+    assert!(now >= Duration::from_secs(41), "{now:?}");
+    s.clock.advance(Duration::from_secs(45).saturating_sub(now));
     churn(&mut s, 1, 2000);
     pass_now(&mut s);
     for o in &condemned {
         assert!(!s.gc.condemned().contains(o), "{o} is still listed");
     }
     assert!(s.gc.stats().bytes_freed > 0);
+    // Not later than the configured grace would have allowed: nothing else
+    // than the floor deleted these.
+    assert!(s.clock.monotonic() < Duration::from_secs(61));
     s.check_roots().unwrap();
     s.check_ledger().unwrap();
 }

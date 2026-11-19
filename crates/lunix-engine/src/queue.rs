@@ -313,7 +313,22 @@ impl Queue {
                 } else {
                     &self.parked
                 };
-                let step = if behind.is_empty() {
+                // The write an fsync waits on overtakes the writes of its own
+                // queue that wait in the gate for their pace or for space:
+                // two requests in flight have no order, and the gate admits
+                // it at once inside the band (ADR-32; review M2). Not past a
+                // write that waits for the journal ring.
+                let overtakes = !behind.is_empty()
+                    && record == RecordKind::Write
+                    && req.fua
+                    && u64::from(req.len) <= SYNC_MAX_BYTES
+                    && !self.ring_wait_parked();
+                let behind = if is_hole {
+                    &self.parked_holes
+                } else {
+                    &self.parked
+                };
+                let step = if behind.is_empty() || overtakes {
                     self.advance(req.tag, Some(&*buf), done)
                 } else {
                     Step::Parked
@@ -336,6 +351,13 @@ impl Queue {
                 }
             }
         }
+    }
+
+    /// True when a parked request waits for the journal ring.
+    fn ring_wait_parked(&self) -> bool {
+        self.parked.iter().chain(self.parked_holes.iter()).any(
+            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_wait),
+        )
     }
 
     fn fail(&mut self, tag: Tag, errno: i32, done: &mut dyn Completer) {

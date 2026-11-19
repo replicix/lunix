@@ -147,7 +147,13 @@ impl Bucket {
         let dt = now.saturating_sub(self.last);
         let add = u128::from(rate) * dt.as_nanos() / 1_000_000_000;
         let add = signed(u64::try_from(add).unwrap_or(u64::MAX));
-        self.tokens = self.tokens.saturating_add(add).min(cap);
+        // The debt is at most one second of the rate now, not of the rate
+        // it was taken at (review m1).
+        self.tokens = self
+            .tokens
+            .saturating_add(add)
+            .min(cap)
+            .max(signed(rate).saturating_neg());
         self.last = now;
     }
 
@@ -420,6 +426,20 @@ mod tests {
         b.refill(Duration::from_secs(1), rate);
         assert!(b.has(0));
         assert!(b.wait_for(MIB, rate) <= Duration::from_millis(251));
+    }
+
+    #[test]
+    fn a_debt_taken_at_a_high_rate_is_clamped_when_the_rate_falls() {
+        // Review m1: 300 MiB/s near the soft mark, 4 MiB/s lower down.
+        let mut b = Bucket::new();
+        b.refill(Duration::ZERO, 300 * MIB);
+        for _ in 0..10 {
+            b.overdraw(100 * MIB, 300 * MIB);
+        }
+        // The debt is 300 MiB; at the new rate it is clamped to one second
+        // of it, so a 1 MiB request waits about 1.25 s, not 75 s.
+        b.refill(Duration::from_millis(1), 4 * MIB);
+        assert!(b.wait_for(MIB, 4 * MIB) <= Duration::from_millis(1300));
     }
 
     #[test]

@@ -91,6 +91,8 @@ struct State {
     full: bool,
     /// What the snapshot reports as the throttle state (a test script).
     throttle: ThrottleState,
+    /// No writer: the snapshot reports no bytes admitted lately.
+    idle: bool,
 }
 
 impl State {
@@ -163,6 +165,7 @@ impl MemSpace {
                 read_only: false,
                 full: false,
                 throttle: ThrottleState::Open,
+                idle: false,
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
@@ -173,6 +176,12 @@ impl MemSpace {
     /// it to put the collector under pressure.
     pub fn set_throttle_state(&self, state: ThrottleState) {
         lock(&self.st).throttle = state;
+    }
+
+    /// Scripts whether a writer is active (bytes admitted in the last 10 s):
+    /// the default is that one is.
+    pub fn set_throttle_idle(&self, idle: bool) {
+        lock(&self.st).idle = idle;
     }
 
     /// Runs the registered steps, in ladder order, until one frees something.
@@ -350,6 +359,7 @@ impl SpaceGate for MemSpace {
                 } else {
                     st.throttle
                 },
+                ingest_rate: u64::from(!st.idle),
                 ..ThrottleFigures::default()
             },
         }

@@ -505,6 +505,10 @@ pub struct OpenParams {
     /// The compaction rate's multiple while writes are slowed (the daemon's
     /// `gc_pressure_rate_factor`).
     pub gc_pressure_rate_factor: u64,
+    /// The band's middle rate in bytes per second, instead of
+    /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
+    /// small volume hold writes for seconds; the daemon never sets it.
+    pub throttle_mid_rate: Option<u64>,
 }
 
 impl OpenParams {
@@ -526,6 +530,7 @@ impl OpenParams {
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
+            throttle_mid_rate: None,
         }
     }
 }
@@ -809,6 +814,9 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     let mut space_cfg = SpaceConfig::new(early);
     space_cfg.full_timeout = p.full_timeout;
     space_cfg.throttle = p.throttle.with_gc_rate(json.gc_rate);
+    if let Some(r) = p.throttle_mid_rate {
+        space_cfg.throttle.mid_rate = r;
+    }
     let space = LunixSpace::new(
         space_cfg,
         Arc::new(StatvfsProbe::new(&voldir)),

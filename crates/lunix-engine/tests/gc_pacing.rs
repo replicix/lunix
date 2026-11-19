@@ -45,6 +45,8 @@ struct Script {
     quiesce_at: AtomicU64,
     /// Set by the step that asks for the quiesce.
     quiesce_now: AtomicBool,
+    /// Set by the test's other thread once the engine reports it is closing.
+    closing_seen: AtomicBool,
 }
 
 /// No test of this file takes more steps than this: a runaway share (a
@@ -64,8 +66,11 @@ impl Collector for Scripted {
         assert!(n < STEP_LIMIT, "runaway share: {n} collector steps");
         if n == s.quiesce_at.load(Ordering::SeqCst) {
             s.quiesce_now.store(true, Ordering::SeqCst);
-            // The other thread sets the engine's `closing` flag first thing.
-            std::thread::sleep(Duration::from_millis(300));
+            // The quiesce sets the engine's `closing` flag before it waits
+            // for the coordinator: go on only once that is seen.
+            while !s.closing_seen.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
         }
         if n == s.idle_after.load(Ordering::SeqCst) {
             s.busy.store(false, Ordering::SeqCst);
@@ -248,6 +253,7 @@ fn a_quiesce_ends_the_share_and_no_collector_step_follows() {
     script.quiesce_at.store(before + 4, Ordering::SeqCst);
     let engine = &r.engine;
     let script2 = Arc::clone(&script);
+    let script3 = Arc::clone(&script);
     std::thread::scope(|s| {
         s.spawn(move || {
             while !script2.quiesce_now.load(Ordering::SeqCst) {
@@ -255,6 +261,12 @@ fn a_quiesce_ends_the_share_and_no_collector_step_follows() {
             }
             // Sets `closing`, then waits for the coordinator mutex.
             let _ = engine.quiesce();
+        });
+        s.spawn(move || {
+            while !engine.is_closing() {
+                std::thread::yield_now();
+            }
+            script3.closing_seen.store(true, Ordering::SeqCst);
         });
         let _ = engine.tick();
     });

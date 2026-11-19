@@ -233,3 +233,29 @@ fn the_urgent_pass_is_handed_the_boosted_params_under_pressure() {
     assert_eq!(p.rate_bytes_per_s, u64::MAX);
     assert_eq!(p.grace, Duration::from_secs(30));
 }
+
+#[test]
+fn a_volume_resting_in_the_band_with_no_writer_loses_its_pressure() {
+    // Review m4: the state is a function of the headroom, so a volume whose
+    // data sits above the soft mark stays `slowdown` for ever; with no
+    // writer the boost ends after the hold all the same.
+    let (v, r, seen) = setup();
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    let (b, _) = step(&r, &seen);
+    assert_eq!(b.max_duration, Duration::from_millis(200));
+    r.space.set_throttle_idle(true);
+    let (b, _) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Raised, "held");
+    assert_eq!(b.max_duration, Duration::from_millis(200));
+    v.clock.advance(Duration::from_millis(4999));
+    step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
+    v.clock.advance(Duration::from_millis(1));
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Normal);
+    normal(b, p);
+    // A writer again: raised at once.
+    r.space.set_throttle_idle(false);
+    step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
+}

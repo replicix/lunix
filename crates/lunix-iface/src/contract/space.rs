@@ -156,6 +156,57 @@ pub fn wait_mode_parks_and_grants_fifo<
     assert_eq!(g.snapshot().waiters, 0);
 }
 
+/// The class of a reservation (ADR-32): a gate that paces may admit a
+/// `Sync` one at once, and may answer a request that fits with `Paced`
+/// instead of `Reserved`; a gate that does not pace ignores the class. Either
+/// way a `Paced` handle behaves like a `Parked` one: pending until granted,
+/// charged when granted, never charged before, in FIFO order.
+pub fn the_class_and_a_paced_wait_charge_like_a_plain_reservation<
+    G: SpaceGate,
+    M: Fn(SpaceSetup, Arc<ManualClock>) -> Arc<G>,
+>(
+    make: &M,
+) {
+    let clock = Arc::new(ManualClock::new(lunix_format::TimeMs(0)));
+    let g = make(SpaceSetup::new(100, 0, OnFull::Wait), clock.clone());
+    let now = clock.monotonic();
+    reserved(
+        g.reserve_since(K, 30, None, now, ReserveClass::Sync)
+            .expect("reserve"),
+    );
+    assert_eq!(used(&*g), 30);
+    // One that does not fit waits (a gate that paces says `Parked` for it
+    // too), and is charged only when it is granted.
+    let w = match g
+        .reserve_since(K, 80, None, now, ReserveClass::Sync)
+        .expect("reserve")
+    {
+        ReserveOutcome::Parked(w) | ReserveOutcome::Paced(w) => w,
+        other => panic!("expected a wait, got {other:?}"),
+    };
+    assert_eq!(w.state(), WaiterState::Pending);
+    assert_eq!(used(&*g), 30, "nothing charged before the grant");
+    g.release(K, 30);
+    assert_eq!(w.state(), WaiterState::Granted);
+    assert_eq!(used(&*g), 80);
+    // A bulk request that fits is a plain reservation, or a paced wait that
+    // is granted and charged like one.
+    match g
+        .reserve_since(K, 10, None, now, ReserveClass::Bulk)
+        .expect("reserve")
+    {
+        ReserveOutcome::Reserved => assert_eq!(used(&*g), 90),
+        ReserveOutcome::Paced(w) => {
+            assert_eq!(used(&*g), 80);
+            clock.advance(Duration::from_secs(120));
+            g.tick();
+            assert_eq!(w.state(), WaiterState::Granted);
+            assert_eq!(used(&*g), 90);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
 /// A parked request expires on the gate's clock and charges nothing.
 pub fn timeout_expires_waiters_on_the_clock<
     G: SpaceGate,

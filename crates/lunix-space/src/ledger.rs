@@ -273,13 +273,25 @@ impl Ledger {
             let bytes = front.bytes;
             let arrived = front.arrived;
             if !self.fits(bytes) {
+                if self.policy.on_full == OnFull::Error && self.band_rate().is_some() {
+                    // `error` refuses a request that does not fit at once:
+                    // one that was paced while it fitted does not wait for
+                    // space, and nothing latches (review M3).
+                    if let Some(p) = self.waiters.pop_front() {
+                        if p.waiter.expire() {
+                            self.note_delay(&p, now, false);
+                            self.counters.enospc += 1;
+                        }
+                    }
+                    continue;
+                }
                 break;
             }
             if let Some(rate) = self.band_rate() {
                 self.bucket.refill(now, rate);
                 if self.bucket.has(bytes) {
                     self.bucket.take(bytes);
-                } else if now >= self.cap_at(arrived) {
+                } else if now >= self.cap_at(arrived) || self.due_behind(now) {
                     self.bucket.overdraw(bytes, rate);
                     self.counters.delay_capped += 1;
                 } else {
@@ -301,6 +313,18 @@ impl Ledger {
         self.note_state(now);
     }
 
+    /// True when a request behind the head has waited its delay cap: the
+    /// gate's queue is in order of `reserve` calls, not of arrival, so an old
+    /// request can stand behind a young head. The head, and what stands
+    /// before the due request, is admitted with it (the bucket takes the
+    /// debt): a request that fits is never failed for the pace (review M1).
+    fn due_behind(&self, now: Duration) -> bool {
+        self.waiters
+            .iter()
+            .skip(1)
+            .any(|p| p.waiter.state() == WaiterState::Pending && now >= self.cap_at(p.arrived))
+    }
+
     /// Expires waiters whose deadline is at or before `now`. The first expiry
     /// latches the volume full and fails every other request waiting for
     /// space with it (ADR-32). Returns how many this call failed, then lets
@@ -309,6 +333,13 @@ impl Ledger {
         // A paced request that fits is admitted by its cap before its
         // deadline can latch the volume.
         self.grant_waiters(now);
+        // Under `error` nothing waits for space and nothing latches.
+        if self.policy.on_full == OnFull::Error {
+            return 0;
+        }
+        // What is left after the grants is a request that does not fit, or
+        // stands behind one (the cap is never later than the deadline): the
+        // wait is for space.
         let due = self
             .waiters
             .iter()
@@ -519,17 +550,23 @@ impl Ledger {
             deadline,
             parked_at: now,
         });
+        let fits = fits && self.fits(bytes);
         if deadline <= now {
-            // It waited its full_timeout already, in its queue or for the
-            // journal ring (the wait counts from the arrival): refused now,
-            // without parking and without the latch, since it never waited
-            // in the gate (review m1).
-            self.waiters.pop_back();
-            self.counters.enospc += 1;
-            return ReserveOutcome::NoSpace;
+            if !fits {
+                // It waited its full_timeout already, in its queue or for
+                // the journal ring (the wait counts from the arrival):
+                // refused now, without parking and without the latch, since
+                // it never waited in the gate (review m1).
+                self.waiters.pop_back();
+                self.counters.enospc += 1;
+                return ReserveOutcome::NoSpace;
+            }
+            // A request that fits is only waiting for its pace: it is due,
+            // so it is admitted with what stands before it (review M1).
+            self.grant_waiters(now);
         }
         self.note_state(now);
-        if fits && self.fits(bytes) {
+        if fits {
             ReserveOutcome::Paced(waiter)
         } else {
             ReserveOutcome::Parked(waiter)

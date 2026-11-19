@@ -393,6 +393,10 @@ journal):
     most 256 KiB, the write an fsync waits on (admitted at once, charged
     to the bucket; at the hard mark it waits like any write); discards and
     write-zeroes; the commit path and GC;
+  - an O_DSYNC workload of small FUA writes is never paced (it goes from
+    full speed to the hard mark) and keeps the bucket at its debt floor,
+    so bulk writes then pass only by their cap; a FUA write overtakes the
+    paced writes of its own queue;
   - a paced write is not a refusal: it is granted by the gate's timer
     thread, the window turn does not start for it and `ENOSPC` is not
     in play;
