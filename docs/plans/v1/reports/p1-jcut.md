@@ -55,3 +55,63 @@ record; a load below the bound is cut whole); they fail when the drain rate is r
 No test of the per-file wake at the engine level: the engine's `MemJournal` fake has no per-file reclaim, and the real stack's test driver polls its
 queues continuously, so it cannot tell a signalled lane from an unsignalled one; the journal-level test observes the signal itself.
 
+## Gate
+
+`tools/ci.sh` on the host (CPUs 8-15, `-j 4`, `CARGO_PROFILE_{DEV,TEST,RELEASE}_DEBUG=0`) on `6c404b8` (the code commit; the commit after it changes only
+this report): green, ownership included (`jcut ok (27 changed paths)`). 2 087 tests passed, 0 failed, 28 ignored (the existing by-hand cells), the sum of
+every `test result` line. origin/main did not move (8731931), so no rebase.
+
+By hand, in the kill loops that stay out of CI (plain, integrity and encrypted volumes, 16 KiB chunks, first hit of every point,
+`LUNIX_KILL_CUT_MS=1`, the child's commits are `commit_bounded`, `cargo test -p lunixd --features testsupport,crashpoints --test stack_kill`):
+
+| loop | points | reached | kills | result |
+|---|---|---|---|---|
+| `kill_loop_plain_16k` | 55 | 52 | 52 | ok (1 727 s) |
+| `kill_loop_integrity_16k` | 55 | 52 | 52 | ok (1 771 s) |
+| `kill_loop_encrypted_16k` | 55 | 52 | 52 | ok (1 749 s) |
+
+Not run: the 64 KiB loops and `LUNIX_KILL_HITS=all`; I did not measure how many of the commits in the child left requests uncut (the engine model counts it:
+every case has a partial cut). The M16 write cells and `lunix status` under load are T6 (measurement), not this milestone.
+
+## Deviations and choices
+
+1. **`lunix-iface`, beyond the one query.** `Journal::cut_freeing_file` (documented in rustdoc, implemented by `FileJournal`, `MemJournal`, the engine's test
+   wrapper and the iface trivial fixture) is the pre-approved change. The counters also needed the control protocol: `VolumeStatusBody` gains one field,
+   `write_path: WritePathStatus` (seven `u64`; ADR-33's "Interface changes" lists "counters"). `EngineStats` could not carry them: it is persisted in the
+   checkpoint slot. The two `VolumeStatusBody` literals of `lunix-cli` and the ctl property test were updated; the CLI's text output does not show the new
+   fields (they are in `--json`), to keep its goldens untouched. Per the no-compat rule the field has no serde default.
+2. **Explicit commits stay unbounded.** `commit_now`, `grow` and the final commit of a detach cut everything written so far; the bound is the
+   coordinator's (`tick`, hence the background thread). `Engine::commit_bounded` is the bounded counterpart, used by the tests and the kill loops. Nothing
+   in production calls it.
+3. **No history, no rate bound.** The first cut after an attach (and any cut while the history took no measurable time) is bounded only by the half ring and
+   the floor. The history is the last four committed cuts of this process; it is not persisted.
+4. **The floor wins over the ceiling.** If one ring file of the fullest lane is more than half the ring, the cut frees the file.
+5. **`coordinator_wait`, `reclaim_hook` and the `advance` hook of the test bench** are test-only conveniences: `Engine::coordinator_wait` and
+   `FileJournal::set_reclaim_hook` are `#[doc(hidden)]` public (the journal's other hooks are the same). A tick that failed waits its period again, so a
+   commit that keeps failing with the ring above the trigger does not spin.
+6. **Ring waiters and the longest wait** count a request from the first time it parks for the ring to its admission, failure or its queue's drop. A wait
+   still going is counted as of the last time it was judged (each wake and each period of the coordinator thread), not continuously.
+7. **Ownership.** `[jcut]` lists exactly the 27 changed paths, including `crates/lunix-engine/src/**` and `tests/**` (new files `cut.rs`, `tests/jcut.rs`),
+   `lunix-iface`'s `journal.rs`, `ctl/msg.rs`, two test files, the testkit's `journal.rs`, two `lunix-cli` files, three `lunixd` sources and two of its tests. Several overlap
+   other milestones' entries (`lunixd/src/stack/mod.rs`, `daemon.rs`, `config.rs` with `jwin`); the edits are small and local.
+8. **`DECISIONS.md` is not edited** (not in this milestone's paths): ADR-33's "Not implemented yet" is stale for T1-T5 now, and `cut_target_ms` is a
+   `lunixd.toml` key documented in `lunixd/src/config.rs`.
+9. **A wrong first gate run.** My failing-without-the-rule harness restored each mutated file with an older modification time than the remote build, so the
+   next cargo run reused the mutated build; the first `ci.sh` run failed in `lunix-journal` for that reason (it ran the `.max()` mutation). The table above comes
+   from runs in which the mutated file was the newest one; after the harness was fixed (it touches the file) every file was touched and `ci.sh` run again:
+   that is the gate above.
+10. **Not tested:** the per-file wake at the engine level (see above); `cut_freeing_file` against the real journal with several lanes beyond the two-lane
+    test; the daemon's `status` mapping beyond `status_lockfree`'s field checks.
+
+## rust-skills conflicts
+
+None.
+
+## Remote disk
+
+Largest sample 9.0 GiB (the full gate leaves 6.6 GiB of incremental cache; budget 10 GiB), then 2.6 GiB during the kill loops after the incremental
+cache was removed. The remote directory (sources, target, scratch, logs) was deleted afterwards.
+
+## Commits
+
+`6c404b8` (the code, tests and DESIGN) and the commit of this report, both signed, on `p1/jcut` (pushed; not merged).
