@@ -56,7 +56,7 @@ mod stats;
 pub use config::{EngineConfig, OnJournalDamage};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
-pub use engine::{CommitOutcome, Engine, GcStatusHandle};
+pub use engine::{CommitOutcome, CoordHold, Engine, GcStatusHandle};
 pub use error::OpenError;
 pub use pressure::{Pressure, PressureTracker};
 pub use read::{ChunkReader, Expectation};

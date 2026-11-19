@@ -651,6 +651,7 @@ impl Inner {
             sealed.bytes.len() as u64,
         );
         co.tip = full;
+        self.publish_tip(co);
         co.tip_hash = sealed.hash;
         self.full.note_cut(prev, c, commit_seq.0);
         co.retained.push(commit);

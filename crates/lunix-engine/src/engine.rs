@@ -1,7 +1,7 @@
 //! The engine: shared state, `BlockEngine`, the control-plane entry points.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,42 @@ use crate::queue::{Queue, QueueShared};
 use crate::read::{ExtentReader, ReadCtx, ReadPool};
 use crate::recover::{recover, RecoveryReport};
 use crate::stats::Counters;
+
+/// The published tip (see `Inner::tip_view`): all three figures come from one
+/// commit, so a reader never sees a mix of two.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TipView {
+    pub(crate) commit_seq: CommitSeq,
+    pub(crate) cut_seq: WriteSeq,
+    pub(crate) created_at: lunix_format::TimeMs,
+}
+
+impl TipView {
+    pub(crate) fn of(tip: &lunix_format::commit::Full) -> Self {
+        Self {
+            commit_seq: tip.common.commit_seq,
+            cut_seq: tip.cut_seq,
+            created_at: tip.common.created_at,
+        }
+    }
+}
+
+impl Inner {
+    /// Publishes the tip the coordinator just installed. Called with the
+    /// coordinator mutex held, right after `co.tip` changes.
+    pub(crate) fn publish_tip(&self, co: &Coord) {
+        *self.tip_view.write().unwrap_or_else(|p| p.into_inner()) = TipView::of(&co.tip);
+    }
+
+    /// The published tip, without the coordinator mutex.
+    pub(crate) fn tip_view(&self) -> TipView {
+        *self.tip_view.read().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// Test hook: holds the coordinator mutex, as a commit does, until dropped.
+#[doc(hidden)]
+pub struct CoordHold<'a>(#[allow(dead_code)] MutexGuard<'a, Coord>);
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -125,6 +161,11 @@ pub(crate) struct Inner {
     /// yet at or below a durable cut (C9 releases per cut, `jcharges`).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
+    /// The tip's figures as the coordinator last published them (ADR-33 T5):
+    /// `tip`, `tip_created_at` and `window_turn_left` read this and never the
+    /// coordinator mutex, which a commit holds for its whole length. The
+    /// write lock is held for one `Copy` store, never across I/O.
+    pub(crate) tip_view: RwLock<TipView>,
     /// The collector's status after its last call (`GcControl::status` and
     /// [`GcStatusHandle`] read it without the coordinator mutex).
     pub(crate) gc_status: Arc<Mutex<GcStatusSnapshot>>,
@@ -330,6 +371,7 @@ impl Engine {
             journal_full: AtomicBool::new(false),
             durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
+            tip_view: RwLock::new(TipView::of(&coord.tip)),
             coord: Mutex::new(coord),
             gc_status: Arc::new(Mutex::new(gc_status)),
             closing: AtomicBool::new(false),
@@ -427,13 +469,20 @@ impl Engine {
     /// The verified tip: `commit_seq`, its cut and the rollback floor the
     /// engine last wrote.
     pub fn tip(&self) -> (CommitSeq, WriteSeq) {
-        let co = lock(&self.inner.coord);
-        (co.tip.common.commit_seq, co.tip.cut_seq)
+        let v = self.inner.tip_view();
+        (v.commit_seq, v.cut_seq)
     }
 
     /// The tip's `created_at` (the writer clamp of D17), for status displays.
     pub fn tip_created_at(&self) -> lunix_format::TimeMs {
-        lock(&self.inner.coord).tip.common.created_at
+        self.inner.tip_view().created_at
+    }
+
+    /// Test hook: holds the coordinator mutex until the guard drops, as a
+    /// long commit would.
+    #[doc(hidden)]
+    pub fn hold_coordinator(&self) -> CoordHold<'_> {
+        CoordHold(lock(&self.inner.coord))
     }
 
     /// True once a test hook stopped the engine at a crash point, or a
@@ -471,8 +520,8 @@ impl Engine {
     /// decision M6) while writes are refused or parked for space; 0 when
     /// they are not.
     pub fn window_turn_left(&self) -> u64 {
-        let co = lock(&self.inner.coord);
-        self.inner.window_turn_left(&co)
+        self.inner
+            .window_turn_left(self.inner.tip_view().commit_seq)
     }
 
     /// The volume is about to quiesce (ADR-32 review M3, beside

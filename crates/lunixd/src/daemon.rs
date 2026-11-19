@@ -1571,6 +1571,18 @@ impl Daemon {
             .collect()
     }
 
+    /// Test hook: the engine of an attached volume (a test holds its
+    /// coordinator mutex to show that status does not wait for it).
+    #[doc(hidden)]
+    pub fn engine_of(&self, name: &str) -> Option<Arc<lunix_engine::Engine>> {
+        let slot = self.slot(name);
+        let g = lock(&slot);
+        match &*g {
+            Slot::Attached(l) => Some(Arc::clone(&l.stack.engine)),
+            _ => None,
+        }
+    }
+
     /// The volume directory of `name`, from the registry.
     pub fn volume_dir(&self, name: &str) -> Option<PathBuf> {
         lock(&self.registry)
