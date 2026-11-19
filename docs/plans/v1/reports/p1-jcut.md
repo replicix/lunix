@@ -115,3 +115,57 @@ cache was removed. The remote directory (sources, target, scratch, logs) was del
 ## Commits
 
 `6c404b8` (the code, tests and DESIGN) and the commit of this report, both signed, on `p1/jcut` (pushed; not merged).
+
+## Review round (MERGE AFTER FIXES: the Fable review of 6c404b8/7dcf169)
+
+Fix commit `2541d6a`.
+
+| finding | what changed | test (fails with the fix removed) |
+|---|---|---|
+| F1 | `reclaim` resets a freed file's counters **before** the slot goes on the free list, under the ring lock (it was after, outside it: a lane woken by T4 could fill the file before the reset and seal it with `max_seq` 0). `lane.rs`: a closing lane clears its wake fd in `Shared::wakes` | `a_lane_that_fills_a_just_freed_file_keeps_its_counters` (one lane, three files, the lane fills the file freed first while the reclaim is parked in the hook): with the old order the next reclaim, asked for the old cut, frees 2 files instead of 1, one holding records above the cut |
+| F2 | the cut's time ends at C9 (`Coord::cut_end`, before the C10 GC step); a cut without journal bytes (forced FULL, GC moves) is not pushed into the drain history; the budget is at least one ring file of journal bytes (new `JournalFill::file_bytes`, `EngineConfig::cut_min_bytes` overrides it for tests, `None` in the daemon), also with no sealed file | `a_cut_is_timed_to_c9_not_to_the_gc_step_after_it` (11000 ms instead of 1000), `cuts_without_journal_bytes_do_not_dilute_the_drain_rate` (1453 instead of 1800), `a_cut_is_at_least_one_ring_file_of_bytes` (a 50 ms target against a 1 s cut, and a target of 0) |
+| F3 | `journal_full` is cleared before the reclaim, so a write that parks again while the reclaim goes on keeps it; the back-to-back rule is also hot while `journal_full` or ring waiters > 0, not only above the total fill trigger | `one_parked_lane_among_several_gets_back_to_back_cuts_below_the_fill_trigger` (four queues, one writing and parked, ring nearly empty, a backlog behind a bounded cut). The flag order is argued, not tested: the fake journal has no per-file reclaim to park a write in |
+| F4 | the bounded model no longer takes its durability floor from the recovered tip: before a process ends (crash included) it reads `Engine::durable_cut()` of that process (stored at C6, a `#[doc(hidden)]` accessor) and requires the recovered device to hold the log up to it | the model itself; with the bound removed the partial-cut count assertion fails as before |
+| F5 | the half-ring ceiling is in record bytes: half the ring's bytes scaled by `journal_charged / fill.used_bytes` (a ring file holds fewer record bytes than its length: batch padding, headers) | `the_first_cut_after_an_attach_over_a_full_ring_is_bounded_by_the_ceiling` (after a restart, a 3 800-record ring, files holding half as many record bytes as their length through the test wrapper's `fill_scale`: the first cut is 948 records), `a_cut_is_never_more_than_half_the_ring` (fails with the unscaled ceiling) |
+| F8 | explicit lockers of the coordinator mutex (`commit_now`, `commit_bounded`, `grow`, the detach commit, the three GC entries) go through `Inner::lock_coord`, which counts waiters; while the hot loop is hot and a waiter exists, `coordinator_wait` is 2 ms instead of 0, so the unfair `std::sync::Mutex` is let go to the waiter | `a_thread_waiting_for_the_coordinator_is_counted` (a commit parked at C3, a second `commit_now` is seen waiting). The 2 ms sleep itself is argued: the hot thread unlocks between ticks and sleeps with the mutex free, so a blocked thread gets it at the next wake-up of the futex; no test of the starvation itself |
+| F10 | the back-to-back test runs the thread's loop by hand (`Engine::background_tick`, hidden) on the manual clock and counts: three commits, the last two without a wait; no wall clock | `commits_follow_back_to_back_while_the_ring_is_above_the_fill_trigger` (fails when `coordinator_wait` is never zero) |
+| F7 | `commit_bounded` is `#[doc(hidden)]`; `cut_freeing_file`'s doc and both implementations now agree: a sealed file with no record answers 0 (the MemJournal returned the next lane before) | |
+| missing test 4 | `full::cut_for_tests`: lanes interleaved, the replayed stream, a floor above `c`, a floor at the first record, records above `c` | |
+
+Each "fails with the fix removed" was run: F1 (the faithful old order: the reset after the slot is free and after the hook), F2 (three removals), F3
+(fill-only rule), F5 (unscaled ceiling) and F2's floor (`.max(1)`) each failed the tests named; F8 with the counter not incremented hangs the test until its
+20 s bound.
+
+One consequence of F2 that the review did not name: with a floor of one ring file of bytes, "one record" cuts need a smaller floor. The bounded model
+sets `cut_min_bytes = Some(1)` and keeps its about-one-record cuts (first run after the floor: 19 partial cuts in 100 cases, below the model's own assertion, which
+caught it).
+
+Accepted without a change:
+- **F6** (`cut_for` holds all lane mutexes for the merge): once per cut, `O(records x lanes)`, a few milliseconds at the largest budget; a queue thread
+  waits in `push` for that long once per cut. The fix (per-lane prefix sums) changes `JournalCharges`' representation for a cost no measurement shows. T6's
+  stall profile will show it if it matters.
+- **F9** (a discard on a full volume reaches its cut after `backlog / budget` cuts): `space_cut` asks for a cut every `SPACE_CUT_SPACING`, and the floor of
+  one ring file makes each cut large; the added delay is bounded by a few cuts. Not changed.
+- The CLI's text `lunix status` still shows no write-path line (it is in `--json`): ADR-33 says "in the status", the text layout is T10's with the goldens.
+
+### Gate of the review round
+
+`tools/ci.sh` (CPUs 8-15, `-j 4`, `*_DEBUG=0`, `CARGO_INCREMENTAL=0`) on `2541d6a`: green, ownership `jcut ok (30 changed paths)`. 2 103 tests passed, 0 failed,
+28 ignored. (A first run of the same tree failed in `model_16k_one_record_cuts`, which found that the one-ring-file floor turned its one-record cuts into
+whole cuts; `cut_min_bytes` is the fix.) origin/main did not move.
+
+Kill loops by hand at the bounded cadence (`LUNIX_KILL_CUT_MS=1`, the child's commits are `commit_bounded`), all on `2541d6a`:
+
+| loop | hits | points | reached | runs / kills | result |
+|---|---|---|---|---|---|
+| plain 64 KiB | first | 55 | 52 | 52 / 52 | ok (1 801 s) |
+| integrity 64 KiB | first | 55 | 52 | 52 / 52 | ok (1 812 s) |
+| encrypted 64 KiB | first | 55 | 52 | 52 / 52 | ok (1 805 s) |
+| plain 16 KiB | all (first, middle, last) | 55 | 52 | 141 / 141 | ok (8 323 s) |
+
+The 16 KiB first-hit loops of the first round (plain, integrity, encrypted) were run on `6c404b8`, before this round. The HITS=all loops of integrity and
+encrypted (16 KiB and 64 KiB) were not run.
+
+Remote disk this round: 2.9 GiB after the gate (no incremental cache), and the remote directory was deleted afterwards.
+
+Commits: `2541d6a` (the fixes) and the commit of this section.
