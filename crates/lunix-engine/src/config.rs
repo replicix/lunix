@@ -48,6 +48,10 @@ pub struct EngineConfig {
     /// in journal bytes (1 s by default). Never less than what frees a ring
     /// file of the fullest lane, never more than half the ring.
     pub cut_target: Duration,
+    /// The least a bounded cut takes, in journal bytes (`None`: one ring file
+    /// of the journal, the default). Tests that want cuts of a record or two
+    /// set it small; the daemon never does.
+    pub cut_min_bytes: Option<u64>,
     /// FULL commits retained (`last:N`), at least 1.
     pub retain_last: u32,
     /// Recompute chunk ids on every store read.
@@ -106,6 +110,7 @@ impl EngineConfig {
             max_leaves_per_cut: (json.map_dirty_leaves_max / 2).max(2),
             journal_fill_trigger: 0.5,
             cut_target: Duration::from_secs(1),
+            cut_min_bytes: None,
             retain_last: json.retain_last.max(1),
             verify_reads: json.verify_reads,
             read_cache_max: json.read_cache_max,

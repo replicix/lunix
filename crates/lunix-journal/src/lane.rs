@@ -872,6 +872,10 @@ impl Drop for FileLane {
         if let Some(open) = lock(&self.sh.st).lane_open.get_mut(usize::from(self.id)) {
             *open = false;
         }
+        // Reclaim no longer signals a closed lane's queue.
+        if let Some(w) = self.sh.wakes.get(usize::from(self.id)) {
+            *lock(w) = None;
+        }
         // The pool is freed (and unmapped) with the lane.
         self.sh.locked.fetch_sub(self.locked, Ordering::AcqRel);
     }

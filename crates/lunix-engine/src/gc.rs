@@ -171,7 +171,7 @@ impl Inner {
         let Some(budget) = self.cfg.gc_budget else {
             return Err(no_collector());
         };
-        let mut co = lock(&self.coord);
+        let mut co = self.lock_coord();
         self.check_open()?;
         if dry_run {
             return self.with_collector(&mut co, |c, v| c.dry_run(v));
@@ -191,7 +191,7 @@ impl Inner {
         let mut busy = 0u32;
         loop {
             let pause = {
-                let mut co = lock(&self.coord);
+                let mut co = self.lock_coord();
                 self.check_open()?;
                 let c = co.collector.as_mut().ok_or_else(no_collector)?;
                 acc.observe(&**c);
@@ -311,7 +311,7 @@ impl Inner {
     /// free nothing; unlike `space_short`'s, a successful commit does not
     /// reset it), in which case it frees nothing and returns at once.
     pub(crate) fn run_urgent(&self, want_bytes: u64) -> Result<u64> {
-        let mut co = lock(&self.coord);
+        let mut co = self.lock_coord();
         self.check_open()?;
         let now = self.clock.monotonic();
         let pause = self.full.ladder_backoff_at(now);

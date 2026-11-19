@@ -549,9 +549,17 @@ impl Journal for FileJournal {
                         s.ordinal = job.new;
                         s.gen = gen;
                         s.role = Role::Free;
+                        // The counters go before the slot is on the free
+                        // list, under the ring lock: a lane that takes the
+                        // file (the early wake of ADR-33 makes that quick)
+                        // appends after the reset, never before it.
+                        // The counters go before the slot is on the free
+                        // list, under the ring lock: a lane that takes the
+                        // file (the early wake of ADR-33 makes that quick)
+                        // appends after the reset, never before it.
+                        file.reset_counters();
                         inner.free.push_back(job.slot);
                         drop(inner);
-                        file.reset_counters();
                         // Marks are the journal's own: nothing was charged
                         // for them, so nothing is released.
                         if ring.kind == RingKind::Queue {
@@ -633,6 +641,7 @@ impl Journal for FileJournal {
         JournalFill {
             used_bytes: used,
             capacity_bytes: total,
+            file_bytes: len,
         }
     }
 }

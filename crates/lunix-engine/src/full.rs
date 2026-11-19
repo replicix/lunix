@@ -576,3 +576,54 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod cut_for_tests {
+    use super::*;
+
+    /// Lane 0 holds the odd numbers, lane 1 the even ones, 10 bytes each.
+    fn charges() -> JournalCharges {
+        let c = JournalCharges::new(2, Vec::new());
+        for s in 1..=6u64 {
+            c.push(usize::from(s % 2 == 0), s, 10);
+        }
+        c
+    }
+
+    #[test]
+    fn the_cut_is_the_record_where_the_sum_reaches_the_budget_across_lanes() {
+        let c = charges();
+        assert_eq!(c.cut_for(25, 0, 6), 3, "10, 20, 30 at seq 3");
+        assert_eq!(c.cut_for(60, 0, 6), 6);
+        assert_eq!(
+            c.cut_for(0, 0, 6),
+            1,
+            "a budget of 0 takes the first record"
+        );
+        assert_eq!(c.cut_for(1000, 0, 6), 6, "unreachable: everything up to c");
+    }
+
+    #[test]
+    fn records_above_c_are_not_taken_and_the_floor_raises_the_cut() {
+        let c = charges();
+        assert_eq!(c.cut_for(1000, 0, 4), 4);
+        assert_eq!(c.cut_for(10, 5, 6), 5, "the floor is past the budget point");
+        assert_eq!(c.cut_for(10, 100, 6), 6, "a floor above c is c");
+        assert_eq!(
+            c.cut_for(10, 1, 6),
+            1,
+            "a floor at the first record is no floor"
+        );
+    }
+
+    #[test]
+    fn the_replayed_records_come_first_in_write_seq_order() {
+        let c = JournalCharges::new(2, vec![(2, 10), (1, 10)]);
+        c.push(0, 3, 10);
+        c.push(1, 4, 10);
+        assert_eq!(c.cut_for(30, 0, 4), 3);
+        assert_eq!(c.cut_for(40, 0, 4), 4);
+        assert_eq!(c.take_upto(2), 20, "what the cut released");
+        assert_eq!(c.cut_for(10, 0, 4), 3);
+    }
+}

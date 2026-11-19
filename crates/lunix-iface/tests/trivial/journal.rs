@@ -347,6 +347,7 @@ impl Journal for TJournal {
         JournalFill {
             used_bytes: lock(&self.state).records.len() as u64 * 4096,
             capacity_bytes: 1 << 30,
+            file_bytes: 1 << 26,
         }
     }
 

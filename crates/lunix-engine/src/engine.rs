@@ -87,6 +87,9 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// its steps.
 pub(crate) const GC_BUSY_PERIOD: Duration = Duration::from_millis(10);
 
+/// The pause of the hot loop while a thread waits for the coordinator mutex.
+pub(crate) const HOT_YIELD: Duration = Duration::from_millis(2);
+
 /// The error of every call after a failure stopped the commits.
 pub(crate) fn stopped() -> Error {
     Error::Io(std::io::Error::other(
@@ -210,6 +213,10 @@ pub(crate) struct Inner {
     /// The last background tick committed: the next one follows at once while
     /// the ring is above the fill trigger (`coordinator_wait`).
     pub(crate) back_to_back: AtomicBool,
+    /// Threads waiting for the coordinator mutex on an explicit call (a
+    /// commit, a grow, a detach, a GC pass): the hot loop of the background
+    /// thread leaves the mutex to them (`coordinator_wait`).
+    pub(crate) coord_waiters: AtomicU64,
 }
 
 impl Inner {
@@ -251,14 +258,32 @@ impl Inner {
         let hot = self.back_to_back.load(Ordering::Acquire)
             && !self.is_failed()
             && self.journal.last_issued().0 > self.durable_cut.load(Ordering::Acquire)
-            && self.journal.fill().ratio() > self.cfg.journal_fill_trigger;
+            && (self.journal.fill().ratio() > self.cfg.journal_fill_trigger
+                || self.journal_full.load(Ordering::Acquire)
+                || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0);
         if hot {
-            Duration::ZERO
+            // `std::sync::Mutex` is not fair: a thread that waits for the
+            // coordinator (explicit commit, grow, detach, the GC ladder) is
+            // let in by a short sleep, else it could lose every race.
+            if self.coord_waiters.load(Ordering::Acquire) > 0 {
+                HOT_YIELD.min(period)
+            } else {
+                Duration::ZERO
+            }
         } else if self.gc_busy.load(Ordering::Acquire) {
             period.min(GC_BUSY_PERIOD)
         } else {
             period
         }
+    }
+
+    /// Locks the coordinator for an explicit call, visibly waiting while
+    /// it is held (`coordinator_wait`).
+    pub(crate) fn lock_coord(&self) -> MutexGuard<'_, Coord> {
+        self.coord_waiters.fetch_add(1, Ordering::AcqRel);
+        let g = lock(&self.coord);
+        self.coord_waiters.fetch_sub(1, Ordering::AcqRel);
+        g
     }
 
     /// Wakes the coordinator waiting in C1.
@@ -416,6 +441,7 @@ impl Engine {
             jcharges: JournalCharges::new(lanes, rec.journal_charges),
             cuts: crate::cut::CutCounters::default(),
             back_to_back: AtomicBool::new(false),
+            coord_waiters: AtomicU64::new(0),
             cfg,
         });
         let engine = Self {
@@ -479,20 +505,19 @@ impl Engine {
     /// # Errors
     /// Whatever the cut or commit reports.
     pub fn commit_now(&self, force: bool) -> Result<CommitOutcome> {
-        let mut co = lock(&self.inner.coord);
+        let mut co = self.inner.lock_coord();
         self.inner.commit(&mut co, force, None, false)
     }
 
     /// Like [`commit_now`](Self::commit_now), but the cut is bounded by
-    /// journal bytes as the coordinator's own cuts are (ADR-33): at most
-    /// `cut_target` times the drain rate of the last cuts, at least what
-    /// frees a ring file of the fullest lane, at most half the ring. Tests
-    /// of the bound and of the crash points at a small bound use it.
+    /// journal bytes as the coordinator's own cuts are (ADR-33). For the
+    /// tests of the bound and of the crash points at a small bound.
     ///
     /// # Errors
     /// Whatever the cut or commit reports.
+    #[doc(hidden)]
     pub fn commit_bounded(&self, force: bool) -> Result<CommitOutcome> {
-        let mut co = lock(&self.inner.coord);
+        let mut co = self.inner.lock_coord();
         self.inner.commit(&mut co, force, None, true)
     }
 
@@ -503,6 +528,28 @@ impl Engine {
     pub fn coordinator_wait(&self) -> Duration {
         self.inner
             .coordinator_wait(self.inner.cfg.background_period)
+    }
+
+    /// Runs what the background thread runs once (a tick, then the
+    /// bookkeeping of the back-to-back rule), for tests without the thread:
+    /// loop on it while [`coordinator_wait`](Self::coordinator_wait) is zero.
+    #[doc(hidden)]
+    pub fn background_tick(&self) {
+        self.inner.background_tick();
+    }
+
+    /// Threads waiting for the coordinator mutex on an explicit call. For
+    /// tests.
+    #[doc(hidden)]
+    pub fn coordinator_waiters(&self) -> u64 {
+        self.inner.coord_waiters.load(Ordering::Acquire)
+    }
+
+    /// The `cut_seq` of the last commit this process made durable (set at
+    /// C6, before any later step). For tests that crash after C6.
+    #[doc(hidden)]
+    pub fn durable_cut(&self) -> WriteSeq {
+        WriteSeq(self.inner.durable_cut.load(Ordering::Acquire))
     }
 
     /// The write path's counters (ADR-33): ring waits and the last cut. Reads
@@ -701,7 +748,7 @@ impl BlockEngine for Engine {
             return Ok(());
         }
         {
-            let mut co = lock(&self.inner.coord);
+            let mut co = self.inner.lock_coord();
             self.inner
                 .commit(&mut co, true, Some(new_size_bytes), false)?;
         }
@@ -727,7 +774,7 @@ impl BlockEngine for Engine {
             let _g = lock(&self.inner.gc_wake.0);
             self.inner.gc_wake.1.notify_all();
         }
-        let mut co = lock(&self.inner.coord);
+        let mut co = self.inner.lock_coord();
         self.inner.commit(&mut co, false, None, false).map(|_| ())
     }
 

@@ -383,6 +383,7 @@ paths = [
   "crates/lunix-iface/tests/ctl.rs",
   "crates/lunix-iface/tests/trivial/journal.rs",
   "crates/lunix-journal/src/journal.rs",
+  "crates/lunix-journal/src/lane.rs",
   "crates/lunix-journal/src/shared.rs",
   "crates/lunix-journal/tests/reclaim.rs",
   "crates/lunix-testkit/src/journal.rs",

@@ -1020,6 +1020,7 @@ impl Journal for MemJournal {
         JournalFill {
             used_bytes: st.total_files() as u64 * st.cfg.file_bytes,
             capacity_bytes: u64::from(st.cfg.max_files) * st.cfg.file_bytes,
+            file_bytes: st.cfg.file_bytes,
         }
     }
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
@@ -1030,7 +1031,13 @@ impl Journal for MemJournal {
             .iter()
             .filter_map(|l| {
                 let (_, f) = l.files.range(..l.cur).next()?;
-                let seq = f.recs.values().filter(|r| !r.torn).map(|r| r.seq).max()?;
+                let seq = f
+                    .recs
+                    .values()
+                    .filter(|r| !r.torn)
+                    .map(|r| r.seq)
+                    .max()
+                    .unwrap_or(0);
                 Some((l.files.len(), seq))
             })
             .min_by_key(|&(files, seq)| (std::cmp::Reverse(files), seq))

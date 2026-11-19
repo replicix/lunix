@@ -114,6 +114,9 @@ pub(crate) struct Coord {
     pub(crate) drain: crate::cut::DrainHistory,
     /// The journal bytes the cut in flight released at C9.
     pub(crate) cut_bytes: u64,
+    /// `clock.monotonic()` when the cut in flight finished C9 (the GC step of
+    /// C10 is not part of the cut's time).
+    pub(crate) cut_end: Duration,
 }
 
 impl Coord {
@@ -149,6 +152,7 @@ impl Coord {
             rehint_error: None,
             drain: crate::cut::DrainHistory::default(),
             cut_bytes: 0,
+            cut_end: Duration::ZERO,
         }
     }
 }
@@ -459,8 +463,8 @@ impl Inner {
 
     /// ADR-33: lowers `c` to a cut of at most `cut_target` times the drain
     /// rate of the last cuts in journal bytes (the charge lists), at most half
-    /// the ring (the ring's capacity), and at least
-    /// what lets reclaim free a ring file of the fullest lane
+    /// the ring (in record bytes, see below), at least one ring file of bytes
+    /// and at least what lets reclaim free a ring file of the fullest lane
     /// (`Journal::cut_freeing_file`; the floor wins over the half ring, so
     /// every commit under pressure frees something). With no history the rate
     /// bounds nothing. Every `c'` in `(prev, c]` with all writes `<= c` in the
@@ -470,13 +474,28 @@ impl Inner {
         if c <= prev + 1 {
             return c;
         }
-        // A budget of 0 still takes the first record: `cut_for` stops at the
-        // first record at which the sum reaches it.
-        let half = self.journal.fill().capacity_bytes / 2;
+        let fill = self.journal.fill();
+        // The ceiling is half the ring, in the units of the charges: a ring
+        // file holds fewer record bytes than its length (batch padding, file
+        // headers), so half the ring's bytes is scaled by what the charged
+        // records occupy of the files in use.
+        let held = self.journal_charged.load(Ordering::Acquire);
+        let half = if fill.used_bytes == 0 {
+            fill.capacity_bytes / 2
+        } else {
+            let ratio_num = u128::from(held.min(fill.used_bytes));
+            let scaled =
+                u128::from(fill.capacity_bytes / 2) * ratio_num / u128::from(fill.used_bytes);
+            u64::try_from(scaled).unwrap_or(u64::MAX)
+        };
+        // The rate bounds the cut, the half ring caps it, and one ring file of
+        // bytes is the least: a fixed commit cost at or above `cut_target`
+        // cannot shrink the cuts below it.
         let budget = co
             .drain
             .budget(self.cfg.cut_target)
-            .map_or(half, |b| b.min(half));
+            .map_or(half, |b| b.min(half))
+            .max(self.cfg.cut_min_bytes.unwrap_or(fill.file_bytes));
         let floor = self
             .journal
             .cut_freeing_file()
@@ -498,8 +517,12 @@ impl Inner {
     /// Notes a committed cut: its journal bytes and duration feed the next
     /// bound and the status.
     fn note_cut(&self, co: &mut Coord, started: Duration) {
-        let took = self.clock.monotonic().saturating_sub(started);
-        co.drain.push(co.cut_bytes, took);
+        let took = co.cut_end.saturating_sub(started);
+        // A cut without journal bytes (a forced FULL, GC moves) says nothing
+        // about the drain rate.
+        if co.cut_bytes > 0 {
+            co.drain.push(co.cut_bytes, took);
+        }
         let c = &self.cuts;
         c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
         c.last_cut_ms.store(
@@ -810,6 +833,9 @@ impl Inner {
         // The ring files are the journal's to recycle; the charge of every
         // record at or below the cut goes now, whichever files were reused
         // (ADR-32 review M4): the ledger then equals what a restart charges.
+        // Cleared before the reclaim: a write that parks again while the
+        // reclaim goes on (it wakes lane by lane) keeps the flag.
+        self.journal_full.store(false, Ordering::Release);
         match &tail {
             Ok(t) => {
                 if let Err(e) = self.journal.reclaim(t) {
@@ -826,7 +852,7 @@ impl Inner {
         self.space.release(SpaceKind::JournalReserved, give);
         self.overlay.release(&cut);
         self.abandon(acct);
-        self.journal_full.store(false, Ordering::Release);
+        co.cut_end = self.clock.monotonic();
         point!(self.points, "engine.c9.reclaimed");
         self.signal_queues();
         // C10: one budgeted GC step, only between cuts with the map at the tip.

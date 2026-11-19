@@ -74,7 +74,7 @@ pub struct TestHooks {
     pub parked: Mutex<Option<Park>>,
     /// A point at which the manual clock moves, and by how much, every time
     /// the engine passes it (a cut that takes time, for the bound of a cut).
-    pub advance: Mutex<Option<(&'static str, Duration)>>,
+    pub advance: Mutex<Vec<(&'static str, Duration)>>,
     /// The clock `advance` moves.
     pub clock: Mutex<Option<Arc<ManualClock>>>,
 }
@@ -129,10 +129,12 @@ impl TestHooks {
 
 impl EngineHooks for TestHooks {
     fn crash_at(&self, point: &'static str) -> bool {
-        let by = lock(&self.advance)
+        let by: Duration = lock(&self.advance)
+            .iter()
             .filter(|(p, _)| *p == point)
-            .map(|a| a.1);
-        if let (Some(by), Some(clock)) = (by, lock(&self.clock).as_ref()) {
+            .map(|a| a.1)
+            .sum();
+        if let (false, Some(clock)) = (by.is_zero(), lock(&self.clock).as_ref()) {
             clock.advance(by);
         }
         let park = {
@@ -189,6 +191,10 @@ pub struct Checks {
     pub flush_outstanding: Arc<AtomicU64>,
     pub flush_outstanding_max: AtomicU64,
     pub violations: Mutex<Vec<String>>,
+    /// The journal's `fill().used_bytes` is multiplied by this (0 or 1: as
+    /// is): rings whose files hold fewer record bytes than their length
+    /// (batch padding in the real journal).
+    pub fill_scale: AtomicU64,
 }
 
 impl Checks {
@@ -474,7 +480,11 @@ impl Journal for GJournal {
         self.inner.reclaim(upto)
     }
     fn fill(&self) -> JournalFill {
-        self.inner.fill()
+        let mut f = self.inner.fill();
+        f.used_bytes = f
+            .used_bytes
+            .saturating_mul(self.checks.fill_scale.load(Ordering::SeqCst).max(1));
+        f
     }
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
         self.inner.cut_freeing_file()

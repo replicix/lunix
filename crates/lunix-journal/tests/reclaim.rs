@@ -438,3 +438,75 @@ fn the_cut_that_frees_a_file_is_the_last_record_of_the_oldest_sealed_file() {
     // Reclaiming did not touch what the next answer needs.
     assert!(j.cut_freeing_file().is_some_and(|n| n > c));
 }
+
+#[test]
+fn a_lane_that_fills_a_just_freed_file_keeps_its_counters() {
+    // The review of ADR-33's early wake: reclaim put a freed slot on the free
+    // list and reset its counters after, so a woken lane could fill the file
+    // before the reset; the file then went `Used` with `max_seq` 0 and the
+    // next reclaim freed it with records above the cut. One lane, three
+    // files: all full, one cut, two files to free. Parked in the hook after
+    // the first, the lane fills that file; the reclaim goes on; the lane moves
+    // on to the second file, so the first is sealed; a reclaim asked for the
+    // old cut must keep it.
+    use lunix_iface::wake::WakeFd;
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = j
+        .open_lane(LaneId(0), WakeFd::new().expect("eventfd"))
+        .expect("open lane");
+    let old = fill_lane(&mut *l);
+    group_flush(&j);
+    let tail = j.tail_after(WriteSeq(old)).expect("tail");
+
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let go_rx = std::sync::Mutex::new(go_rx);
+    j.set_reclaim_hook(Some(std::sync::Arc::new(move |_lane, freed| {
+        let _ = reached_tx.send(freed);
+        if freed == 1 {
+            let _ = go_rx.lock().expect("gate").recv_timeout(T);
+        }
+    })));
+    let mut newest = Vec::new();
+    std::thread::scope(|s| {
+        let h = s.spawn(|| j.reclaim(&tail).expect("reclaim"));
+        assert_eq!(reached_rx.recv_timeout(T).expect("freed"), 1);
+        // The lane fills the file just freed, while the reclaim is parked.
+        loop {
+            match l.try_reserve(RecordKind::Write, BIG).expect("reserve") {
+                SlotOutcome::Reserved(s) => {
+                    let seq = s.write_seq.0;
+                    l.append(s, 0, &pattern(seq, BIG)).expect("append");
+                    complete_appends(&mut *l, 1);
+                    newest.push(seq);
+                }
+                SlotOutcome::Full => break,
+                SlotOutcome::NoSpace => panic!("unexpected NoSpace"),
+            }
+            assert!(newest.len() < 600, "never full");
+        }
+        go_tx.send(()).expect("release");
+        assert_eq!(h.join().expect("reclaim thread").files, 2);
+    });
+    // The second file is free now: the lane moves on, the first is sealed.
+    write_wait(&mut *l, 0, BIG);
+    complete_appends(&mut *l, 1);
+    assert!(!newest.is_empty());
+    group_flush(&j);
+    // Records above the old cut are in the sealed file: a cut at the old one
+    // frees only the old active file (its records are at or below it), a cut
+    // past the last record of the new file frees that too.
+    let tail = j.tail_after(WriteSeq(old)).expect("tail");
+    assert_eq!(
+        j.reclaim(&tail).expect("reclaim").files,
+        1,
+        "the file the lane filled holds records above the cut"
+    );
+    let tail = j
+        .tail_after(WriteSeq(*newest.last().expect("one")))
+        .expect("tail");
+    assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+}

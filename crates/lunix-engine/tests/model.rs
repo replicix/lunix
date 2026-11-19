@@ -65,6 +65,7 @@ struct Model {
 /// a second of the manual clock (`Vol::hooks.advance`).
 fn one_record_cuts(c: &mut lunix_engine::EngineConfig) {
     c.cut_target = Duration::from_millis(1);
+    c.cut_min_bytes = Some(1);
 }
 
 fn fail(msg: String) -> TestCaseError {
@@ -80,7 +81,7 @@ impl Model {
         vol.marks = seed % 2 == 1;
         if bounded {
             vol.tweak = one_record_cuts;
-            *lock(&vol.hooks.advance) = Some(("engine.c3.destaged", Duration::from_secs(1)));
+            *lock(&vol.hooks.advance) = vec![("engine.c3.destaged", Duration::from_secs(1))];
         }
         let run = vol.open().map_err(|e| e.0).expect("open");
         let size = chunks * u64::from(cs);
@@ -106,6 +107,15 @@ impl Model {
     fn covered(&self, cut: u64) -> usize {
         let k = self.seqs.partition_point(|(s, _)| *s <= cut);
         k.checked_sub(1).map_or(0, |i| self.seqs[i].1)
+    }
+
+    /// Before a process ends (crashed or not): the cut its last commit made
+    /// durable, read from the process itself, never from what recovery later
+    /// finds. The recovered device must hold the log up to it.
+    fn note_durable_cut(&mut self, r: &Running) {
+        if self.bounded {
+            self.min_n = self.min_n.max(self.covered(r.engine.durable_cut().0));
+        }
     }
 
     /// A bounded or an explicit commit, as the model runs.
@@ -267,6 +277,7 @@ impl Model {
 
     fn reopen(&mut self, seed: u64) -> Result<(), TestCaseError> {
         if let Some(r) = self.run.take() {
+            self.note_durable_cut(&r);
             let p = r.stop();
             self.vol.absorb(p, seed);
         }
@@ -274,11 +285,6 @@ impl Model {
             Ok(r) => r,
             Err((e, _)) => return Err(fail(format!("reopen failed: {e}"))),
         };
-        if self.bounded {
-            // The durable tip covers the log up to its cut (a crash at or
-            // after C6 of a bounded cut included).
-            self.min_n = self.min_n.max(self.covered(r.engine.tip().1 .0));
-        }
         let actual = r.read_all();
         let Some(n) = self.log.first_match(&actual, self.min_n) else {
             return Err(fail(format!(
@@ -330,6 +336,7 @@ impl Model {
 
     fn crash_in_recovery(&mut self, point: &'static str, seed: u64) -> Result<(), TestCaseError> {
         if let Some(r) = self.run.take() {
+            self.note_durable_cut(&r);
             let p = r.stop();
             self.vol.absorb(p, seed);
         }
