@@ -93,6 +93,7 @@ impl FileJournal {
             fail_write: AtomicBool::new(false),
             wakes: (0..lanes).map(|_| Mutex::new(None)).collect(),
             reclaim_hook: Mutex::new(None),
+            free_hook: Mutex::new(None),
         });
         let worker = Arc::clone(&sh);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -161,6 +162,15 @@ impl FileJournal {
     #[doc(hidden)]
     pub fn fail_next_sync(&self) {
         self.sh.fail_sync.store(true, Ordering::SeqCst);
+    }
+
+    /// Test hook: `f(lane, freed)` is called by `reclaim` right after a queue
+    /// file is on the free list and the ring lock is released (before the
+    /// lane is signalled), with the number of files that reclaim has freed so
+    /// far; it may block there. A lane can take the file from this moment.
+    #[doc(hidden)]
+    pub fn set_free_hook(&self, f: Option<std::sync::Arc<dyn Fn(u16, u32) + Send + Sync>>) {
+        *lock(&self.sh.free_hook) = f;
     }
 
     /// Test hook: `f(lane, freed)` is called by `reclaim` after each queue
@@ -553,10 +563,6 @@ impl Journal for FileJournal {
                         // list, under the ring lock: a lane that takes the
                         // file (the early wake of ADR-33 makes that quick)
                         // appends after the reset, never before it.
-                        // The counters go before the slot is on the free
-                        // list, under the ring lock: a lane that takes the
-                        // file (the early wake of ADR-33 makes that quick)
-                        // appends after the reset, never before it.
                         file.reset_counters();
                         inner.free.push_back(job.slot);
                         drop(inner);
@@ -565,6 +571,10 @@ impl Journal for FileJournal {
                         if ring.kind == RingKind::Queue {
                             report.files += 1;
                             report.bytes += job.bytes;
+                            let hook = lock(&self.sh.free_hook).clone();
+                            if let Some(h) = hook {
+                                h(ring.lane, report.files);
+                            }
                             // ADR-33: the lane is woken as soon as this file
                             // is free (zero rewrite done), not after the
                             // files of every lane.

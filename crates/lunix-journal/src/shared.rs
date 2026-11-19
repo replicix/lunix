@@ -149,6 +149,9 @@ pub(crate) struct Shared {
     /// Called after each queue file reclaim freed, with the lane and the
     /// number of files freed so far by that reclaim (test hook).
     pub reclaim_hook: Mutex<Option<ReclaimHook>>,
+    /// Called as soon as a queue file is on the free list, before its lane is
+    /// signalled (test hook).
+    pub free_hook: Mutex<Option<ReclaimHook>>,
 }
 
 /// A test hook of reclaim: see [`Shared::reclaim_hook`].

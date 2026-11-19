@@ -45,8 +45,9 @@ pub struct EngineConfig {
     pub journal_fill_trigger: f64,
     /// The cut target (ADR-33, `cut_target_ms` of `lunixd.toml`): the
     /// coordinator cuts at most this long at the drain rate of its last cuts,
-    /// in journal bytes (1 s by default). Never less than what frees a ring
-    /// file of the fullest lane, never more than half the ring.
+    /// in journal bytes (1 s by default). Never less than one ring file of
+    /// journal bytes (`cut_min_bytes`) and than what frees a ring file of the
+    /// fullest lane, never more than half the ring.
     pub cut_target: Duration,
     /// The least a bounded cut takes, in journal bytes (`None`: one ring file
     /// of the journal, the default). Tests that want cuts of a record or two

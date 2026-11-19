@@ -464,9 +464,12 @@ fn a_lane_that_fills_a_just_freed_file_keeps_its_counters() {
     let (reached_tx, reached_rx) = std::sync::mpsc::channel();
     let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
     let go_rx = std::sync::Mutex::new(go_rx);
-    j.set_reclaim_hook(Some(std::sync::Arc::new(move |_lane, freed| {
+    // Parked right after the slot is on the free list, before its lane is
+    // signalled: the lane can take the file from here.
+    let once = std::sync::atomic::AtomicBool::new(true);
+    j.set_free_hook(Some(std::sync::Arc::new(move |_lane, freed| {
         let _ = reached_tx.send(freed);
-        if freed == 1 {
+        if freed == 1 && once.swap(false, std::sync::atomic::Ordering::SeqCst) {
             let _ = go_rx.lock().expect("gate").recv_timeout(T);
         }
     })));
@@ -509,4 +512,29 @@ fn a_lane_that_fills_a_just_freed_file_keeps_its_counters() {
         .tail_after(WriteSeq(*newest.last().expect("one")))
         .expect("tail");
     assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+}
+
+#[test]
+fn a_reopened_lane_is_woken_per_file_after_its_predecessor_closed() {
+    // The closing lane clears its wake fd before it counts as closed, so a
+    // successor's wake is never erased by it; the predecessor's fd is not
+    // signalled any more.
+    use lunix_iface::wake::WakeFd;
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 1, 2);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let w1 = WakeFd::new().expect("eventfd");
+    let mut l = j.open_lane(LaneId(0), w1.clone()).expect("open lane");
+    let last = fill_lane(&mut *l);
+    group_flush(&j);
+    drop(l);
+    let w2 = WakeFd::new().expect("eventfd");
+    let _l = j.open_lane(LaneId(0), w2.clone()).expect("reopen");
+    w1.drain();
+    w2.drain();
+    let tail = j.tail_after(WriteSeq(last)).expect("tail");
+    assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+    assert!(w2.drain() > 0, "the new lane is signalled");
+    assert_eq!(w1.drain(), 0, "the closed lane's wake is not");
 }

@@ -24,7 +24,7 @@ use lunix_testkit::{JournalMode, MemJournalConfig};
 const CS: u32 = 16 << 10;
 /// Bytes of the journal record of one 4 KiB write.
 const REC: u64 = 64 + 4096;
-/// Records that make one ring file of journal bytes (the least a cut takes).
+/// Records that make one ring file of journal bytes.
 const FILE_RECS: u64 = MIN_FILE_BYTES.div_ceil(REC);
 const C3: &str = "engine.c3.destaged";
 const C9: &str = "engine.c9.reclaimed";
@@ -73,6 +73,18 @@ fn ceiling(r: &Running) -> u64 {
         .expect("fits")
 }
 
+/// Records of the one-ring-file minimum of a cut: a file's length in the units
+/// of the charges (scaled by what the charged records occupy of the files in
+/// use), the journal's `fill_scale` being `scale`.
+fn floor_recs(r: &Running, scale: u64) -> u64 {
+    let f = r.journal.fill();
+    let used = f.used_bytes * scale;
+    let held = r.engine.journal_charged().min(used);
+    u64::try_from(u128::from(f.file_bytes) * u128::from(held) / u128::from(used))
+        .expect("fits")
+        .div_ceil(REC)
+}
+
 #[test]
 fn the_cut_follows_the_drain_rate_of_the_last_cuts() {
     let v = ring(1, 64);
@@ -119,7 +131,11 @@ fn the_coordinators_tick_cuts_the_bound_and_a_light_load_is_cut_whole() {
     assert!(matches!(r.engine.tick(), Ok(CommitOutcome::Idle)));
     v.clock.advance(Duration::from_secs(31));
     cut_takes(&v, Duration::from_secs(1));
-    assert_eq!(cut_seq(r.engine.tick().expect("T cut")), 5 + FILE_RECS);
+    // The minimum, or the end of the oldest sealed file when that is later.
+    let sealed = r.journal.cut_freeing_file().map_or(0, |w| w.0);
+    let want = (5 + floor_recs(&r, 1)).max(sealed);
+    assert!(want > 100 && want < 405, "{want}");
+    assert_eq!(cut_seq(r.engine.tick().expect("T cut")), want);
     assert!(v.violations().is_empty(), "{:?}", v.violations());
 }
 
@@ -136,9 +152,11 @@ fn a_cut_is_at_least_one_ring_file_of_bytes() {
     assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut 1")), 500);
     // 500 records in 1 s at 50 ms: 25 records, a file is 253.
     writes(&mut r, 500, 600);
+    let want = 500 + floor_recs(&r, 1);
+    assert!(want > 525, "{want}");
     assert_eq!(
         cut_seq(r.engine.commit_bounded(false).expect("cut 2")),
-        500 + FILE_RECS
+        want
     );
     let mut z = ring(1, 64);
     z.tweak = |c| c.cut_target = Duration::ZERO;
@@ -147,9 +165,10 @@ fn a_cut_is_at_least_one_ring_file_of_bytes() {
     cut_takes(&z, Duration::from_secs(1));
     assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut 1")), 100);
     writes(&mut r, 100, 600);
+    let want = 100 + floor_recs(&r, 1);
     assert_eq!(
         cut_seq(r.engine.commit_bounded(false).expect("cut 2")),
-        100 + FILE_RECS
+        want
     );
 }
 
@@ -173,7 +192,7 @@ fn cuts_without_journal_bytes_do_not_dilute_the_drain_rate() {
     cut_takes(&v, Duration::from_secs(1));
     // Still 1200 records in 2 s: 600. With the empty cuts in the history it
     // would be 1200 records in 32 s, below one ring file, and the cut would
-    // be 253.
+    // be about a file's worth.
     assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut")), 1800);
 }
 
@@ -261,6 +280,56 @@ fn the_first_cut_after_an_attach_over_a_full_ring_is_bounded_by_the_ceiling() {
         cut_seq(r.engine.commit_bounded(false).expect("first cut")),
         want
     );
+}
+
+#[test]
+fn the_one_ring_file_minimum_is_in_record_bytes() {
+    // Files that hold a quarter of their length in records (`fill_scale` 4:
+    // batch padding of a sync-heavy load): the minimum is a file's length
+    // scaled by what the records occupy, not the file's length, which would
+    // be the whole backlog here.
+    let v = ring(1, 4);
+    v.checks
+        .fill_scale
+        .store(4, std::sync::atomic::Ordering::SeqCst);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    writes(&mut r, 0, 10);
+    cut_takes(&v, Duration::from_secs(100));
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("seed")), 10);
+    writes(&mut r, 10, 200);
+    let want = 10 + floor_recs(&r, 4);
+    assert!(want < 100, "a quarter of a file: {want}");
+    assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut")), want);
+}
+
+#[test]
+fn a_tick_cuts_for_a_ring_waiter_after_the_flag_was_cleared() {
+    // C9 clears `journal_full`; the parked write has not been re-judged yet.
+    // `wanted` still sees the waiter: no period of waiting for the queue.
+    let v = ring(4, 64);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    writes(&mut r, 0, 8);
+    cut_takes(&v, Duration::from_secs(100));
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("seed")), 8);
+    for i in 0..400 {
+        assert!(r
+            .write(0, (i % 256) * 4096, &pattern(i, 4096), false)
+            .is_ok());
+    }
+    r.journal.set_nospace(true);
+    let data = pattern(7, 4096);
+    let t = r.submit(0, IoOp::Write, false, 4096, 4096, &data);
+    for _ in 0..20 {
+        r.pump();
+    }
+    assert!(!r.is_done(t));
+    // A bounded cut clears the flag and leaves a backlog; the queue is not
+    // polled before the tick.
+    let first = cut_seq(r.engine.commit_bounded(false).expect("cut"));
+    assert!(first < 408);
+    assert_eq!(r.engine.cut_stats().ring_waiters, 1);
+    let out = r.engine.tick().expect("tick");
+    assert!(matches!(out, CommitOutcome::Committed { .. }), "{out:?}");
 }
 
 #[test]

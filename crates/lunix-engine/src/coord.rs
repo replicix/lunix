@@ -375,6 +375,7 @@ impl Inner {
             || self.overlay.dirty_bytes() >= self.cfg.dirty_bytes
             || self.journal.fill().ratio() > self.cfg.journal_fill_trigger
             || self.journal_full.load(Ordering::Acquire)
+            || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0
     }
 
     /// Cuts at the current `write_seq` and commits (C1-C10). `force`
@@ -480,22 +481,28 @@ impl Inner {
         // headers), so half the ring's bytes is scaled by what the charged
         // records occupy of the files in use.
         let held = self.journal_charged.load(Ordering::Acquire);
-        let half = if fill.used_bytes == 0 {
-            fill.capacity_bytes / 2
-        } else {
-            let ratio_num = u128::from(held.min(fill.used_bytes));
-            let scaled =
-                u128::from(fill.capacity_bytes / 2) * ratio_num / u128::from(fill.used_bytes);
-            u64::try_from(scaled).unwrap_or(u64::MAX)
+        let scale = |bytes: u64| {
+            if fill.used_bytes == 0 {
+                bytes
+            } else {
+                let n = u128::from(held.min(fill.used_bytes));
+                u64::try_from(u128::from(bytes) * n / u128::from(fill.used_bytes))
+                    .unwrap_or(u64::MAX)
+            }
         };
-        // The rate bounds the cut, the half ring caps it, and one ring file of
-        // bytes is the least: a fixed commit cost at or above `cut_target`
+        let half = scale(fill.capacity_bytes / 2);
+        // The rate bounds the cut, the half ring caps it, and one ring file
+        // (in the same record-byte units) is the least: a fixed commit cost at or above `cut_target`
         // cannot shrink the cuts below it.
         let budget = co
             .drain
             .budget(self.cfg.cut_target)
             .map_or(half, |b| b.min(half))
-            .max(self.cfg.cut_min_bytes.unwrap_or(fill.file_bytes));
+            .max(
+                self.cfg
+                    .cut_min_bytes
+                    .unwrap_or_else(|| scale(fill.file_bytes)),
+            );
         let floor = self
             .journal
             .cut_freeing_file()

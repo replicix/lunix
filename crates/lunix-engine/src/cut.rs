@@ -1,8 +1,10 @@
 //! The size of a cut and the write path's counters (ADR-33 T3 and T4).
 //!
 //! A cut is bounded by journal bytes: at most `cut_target` times the drain
-//! rate of the last cuts, never less than what lets reclaim free a ring file
-//! of the fullest lane, never more than half the ring. The rate is
+//! rate of the last cuts, never less than one ring file of journal bytes (in
+//! record bytes, scaled by what the records occupy of the files in use) and
+//! than what lets reclaim free a ring file of the fullest lane, never more
+//! than half the ring (the same scale; the minimum wins). The rate is
 //! `bytes / duration` over the last [`HISTORY`] committed cuts, the duration
 //! being C1 to C9 on the engine's clock. With no history the rate bounds
 //! nothing and the half ring does.

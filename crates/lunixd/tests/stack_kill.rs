@@ -33,10 +33,15 @@
 //! ```
 //!
 //! `LUNIX_KILL_CUT_MS` (unset by default) runs the same loops with every cut
-//! bounded by journal bytes at that cut target in milliseconds (ADR-33 T3;
-//! `1` gives cuts of a few records once the first cuts have set the drain
-//! rate): the child's commits are `Engine::commit_bounded` and its ticks cut
-//! the same bound, and every kill lands inside a bounded cut.
+//! bounded by journal bytes at that cut target in milliseconds (ADR-33 T3):
+//! the child's commits are `Engine::commit_bounded`, its ticks cut the same
+//! bound, and `cut_min_bytes` is 1, so the one-ring-file minimum (64 MiB here,
+//! more than the child's backlog per commit) does not turn every cut into a
+//! whole one; with a target of `1` the cuts are a few records once the first
+//! cuts have set the drain rate. The counting run counts the commits and ticks
+//! that left requests uncut (`partial cuts`, printed, in the child's file
+//! `progress.partial`) and the loop fails when there is none: no kill would
+//! land inside a partial cut.
 //!
 //! `LUNIX_KILL_HITS` is `all` (first, middle and last hit: the gate) or
 //! `first` (the default, one kill per point); `LUNIX_KILL_MIB` (default 160)
@@ -326,6 +331,7 @@ fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
         gc_tune(c);
         if let Some(ms) = cut_ms() {
             c.cut_target = Duration::from_millis(ms);
+            c.cut_min_bytes = Some(1);
         }
     }));
     b
@@ -338,7 +344,9 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
-fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) {
+/// Returns how many commits and ticks left requests uncut.
+fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) -> u64 {
+    let mut partial = 0u64;
     let mut stack = vol.open_with(fast_gc).expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
@@ -390,6 +398,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 .expect("child commit");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
+                    partial += u64::from(k < bounds.len());
                     progress(prog, base + k, &d);
                 }
             }
@@ -397,6 +406,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 let out = stack.engine.tick().expect("child tick");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
+                    partial += u64::from(k < bounds.len());
                     progress(prog, base + k, &d);
                 }
             }
@@ -424,6 +434,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
     drop(d);
     close(stack).expect("child close");
     writeln!(prog, "{n} 0").expect("progress");
+    partial
 }
 
 /// The child entry: does nothing unless this process was started by a kill
@@ -448,8 +459,15 @@ fn kill_child() {
         .open(&spec.progress)
         .expect("progress file");
     match spec.phase.as_str() {
-        "prep" => execute(&vol, &p.prep, 0, &mut prog),
-        _ => execute(&vol, &p.run, p.prep.iter().filter(is_op).count(), &mut prog),
+        "prep" => {
+            execute(&vol, &p.prep, 0, &mut prog);
+        }
+        _ => {
+            let partial = execute(&vol, &p.run, p.prep.iter().filter(is_op).count(), &mut prog);
+            let mut f = spec.progress.as_os_str().to_owned();
+            f.push(".partial");
+            std::fs::write(f, partial.to_string()).expect("partial cuts");
+        }
     }
     lunix_iface::crashpoint::dump_counts().expect("dump counts");
 }
@@ -795,6 +813,20 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         ChildEnd::Exited(c) => c,
         ChildEnd::Killed => panic!("the counting run was killed"),
     };
+    if cut_ms().is_some() {
+        let mut f = p.progress.as_os_str().to_owned();
+        f.push(".partial");
+        let n: u64 = std::fs::read_to_string(f)
+            .expect("the run child's partial cut count")
+            .trim()
+            .parse()
+            .expect("a count");
+        eprintln!("kill loop {mode:?} {} KiB: partial cuts {n}", cs >> 10);
+        assert!(
+            n > 0,
+            "a bounded run without a partial cut: no kill would land in one"
+        );
+    }
     verify(&cfg, &p, "counting run", &mut tally);
     drop(p);
     std::fs::remove_dir_all(t.path().join("count")).expect("cleanup");

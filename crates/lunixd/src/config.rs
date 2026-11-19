@@ -23,7 +23,7 @@
 //! | `detach_busy_retry_ms` | 3000 | how long a detach retries `TRY_STOP_DEV` (udev's probe) |
 //! | `journal_max` | `volume.json` default | `journal_max` of new volumes |
 //! | `journal_resident_max` | the volume's `journal_max` | cap on the resident journal window per attached volume (ADR-33): the bytes the journal keeps in memory of what it wrote until the ring file is reclaimed; plaintext, not locked memory; at least 2097152, a larger value than the volume's `journal_max` counts as `journal_max` |
-//! | `cut_target_ms` | 1000 | the longest a commit's cut should take (ADR-33): the coordinator cuts at most this long at the drain rate of its last cuts, in journal bytes, never less than what frees a ring file of the fullest lane and never more than half the ring; 10 ..= 60000 |
+//! | `cut_target_ms` | 1000 | the longest a commit's cut should take (ADR-33): the coordinator cuts at most this long at the drain rate of its last cuts, in journal bytes, never less than one ring file of journal bytes and than what frees a ring file of the fullest lane, never more than half the ring; 10 ..= 60000 |
 //! | `commit_interval_ms` | `volume.json` default | commit interval `T` of new volumes |
 //! | `argon2_m_kib`, `argon2_t` | 65536, 3 | Argon2id cost of new passphrase slots |
 //! | `dev_dir` | `/dev/lunix` | where the `<name>` symlinks go |
