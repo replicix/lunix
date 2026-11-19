@@ -284,6 +284,7 @@ paths = [
   "crates/lunix-engine/tests/common/mod.rs",
   "crates/lunix-iface/src/space.rs",
   "crates/lunix-iface/src/journal.rs",
+  "tools/ci.sh",
   "crates/lunix-iface/src/contract/space.rs",
   "crates/lunix-iface/src/contract/mod.rs",
   "crates/lunix-iface/tests/trivial/space.rs",
@@ -355,6 +356,20 @@ paths = [
   "docs/explanation/GLOSSARY.md",
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-pace.md",
+  "tools/ownership.toml",
+]
+
+# jwin: ADR-33 T1 and T2 (the resident journal window and the read-around).
+[jwin]
+paths = [
+  "crates/lunix-journal/**",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_window.rs",
+  "crates/lunix-iface/src/journal.rs",
+  "docs/explanation/DESIGN.md",
+  "tools/ci.sh",
   "tools/ownership.toml",
 ]
 

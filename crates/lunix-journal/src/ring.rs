@@ -186,11 +186,19 @@ impl Rings {
     /// The file holding `(lane, ordinal)` if it is in use (not free, not being
     /// recycled).
     pub(crate) fn find_in_use(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
+        self.find_in_use_gen(lane, ordinal).map(|(f, _)| f)
+    }
+
+    /// [`Self::find_in_use`] with the file's generation (the `gen` its
+    /// records carry).
+    pub(crate) fn find_in_use_gen(&self, lane: u16, ordinal: u32) -> Option<(Arc<RingFile>, u64)> {
         let ring = self.lanes.get(usize::from(lane))?;
         let inner = lock(&ring.inner);
         let slot = inner.slot_by_ordinal(ordinal)?;
         match inner.slots[slot].role {
-            Role::Active | Role::Used => Some(Arc::clone(&ring.files[slot])),
+            Role::Active | Role::Used => {
+                Some((Arc::clone(&ring.files[slot]), inner.slots[slot].gen))
+            }
             Role::Free | Role::Recycling => None,
         }
     }

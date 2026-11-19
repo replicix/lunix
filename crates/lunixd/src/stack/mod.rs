@@ -488,6 +488,9 @@ pub struct OpenParams {
     /// install a recording [`FsOps`] to know what a crash may lose; the
     /// daemon never sets it.
     pub store_fs: Option<Arc<dyn FsOps>>,
+    /// Cap on the resident journal window (the daemon's
+    /// `journal_resident_max`; `None`: the volume's `journal_max`).
+    pub journal_resident_max: Option<u64>,
     /// Journal settings hook, applied after [`JournalConfig::new`] and
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
@@ -525,6 +528,7 @@ impl OpenParams {
             allow_unverifiable_fork: false,
             lock_memory: false,
             store_fs: None,
+            journal_resident_max: None,
             journal_tweak: None,
             gc: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
@@ -781,6 +785,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     let cs = desc.chunk_size;
     let mut jcfg = JournalConfig::new(voldir.join("journal"), uuid, p.queues, json.journal_max);
     jcfg.lock_memory = p.lock_memory;
+    jcfg.resident_max = p.journal_resident_max;
     if let Some(t) = &p.journal_tweak {
         t(&mut jcfg);
     }

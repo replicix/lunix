@@ -489,7 +489,11 @@ pub trait Journal: Send + Sync {
     /// replay). Same precondition as `submit_read`.
     ///
     /// # Errors
-    /// `NotFound` for a reclaimed location; `Io`.
+    /// `NotFound` for a reclaimed location; `Io`; `Corrupt` when the journal
+    /// checked the record the bytes belong to and its checksum (or its
+    /// header) did not verify: nothing is written to `buf` then, and a
+    /// destage that reads it fails the cut (a journal may serve a location it
+    /// still holds without checking it again).
     fn read_at(&self, loc: JournalLoc, buf: &mut [u8]) -> Result<()>;
 
     /// Scans every file of every lane (blocking) and returns the records with
