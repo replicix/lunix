@@ -1,0 +1,150 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 5K of event 'sched:sched_switch'
+# Event count (approx.): 5294
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    81.58%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--71.00%--io_schedule
+               |          |          
+               |          |--60.22%--__iomap_dio_rw
+               |          |          |          
+               |          |          |--55.31%--iomap_dio_rw
+               |          |          |          btrfs_direct_read
+               |          |          |          btrfs_file_read_iter
+               |          |          |          vfs_read
+               |          |          |          __x64_sys_pread64
+               |          |          |          do_syscall_64
+               |          |          |          entry_SYSCALL_64_after_hwframe
+               |          |          |          __syscall_cancel_arch
+               |          |          |          __libc_pread
+               |          |          |          <std::sys::fd::unix::FileDesc>::read_at (inlined)
+               |          |          |          <std::sys::fs::unix::File>::read_at (inlined)
+               |          |          |          <std::fs::File as std::os::unix::fs::FileExt>::read_at
+               |          |          |          <std::fs::File as std::os::unix::fs::FileExt>::read_exact_at (inlined)
+               |          |          |          lunix_journal::sys::read_aligned
+               |          |          |          
+               |          |           --4.91%--btrfs_direct_write
+               |          |                     btrfs_do_write_iter
+               |          |                     vfs_write
+               |          |                     __x64_sys_pwrite64
+               |          |                     do_syscall_64
+               |          |                     entry_SYSCALL_64_after_hwframe
+               |          |                     __syscall_cancel_arch
+               |          |                     __libc_pwrite
+               |          |                     <std::sys::fd::unix::FileDesc>::write_at (inlined)
+               |          |                     <std::sys::fs::unix::File>::write_at (inlined)
+               |          |                     <std::fs::File as std::os::unix::fs::FileExt>::write_at
+               |          |                     <std::fs::File as std::os::unix::fs::FileExt>::write_all_at
+               |          |          
+               |          |--7.05%--rq_qos_wait
+               |          |          wbt_wait
+               |          |          __rq_qos_throttle
+               |          |          blk_mq_submit_bio
+               |          |          submit_bio_noacct_nocheck
+               |          |          |          
+               |          |          |--5.21%--btrfs_submit_chunk
+               |          |          |          btrfs_submit_bbio
+               |          |          |          submit_one_bio
+               |          |          |          __syscall_cancel_arch
+               |          |          |          fdatasync
+               |          |          |          <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+               |          |          |          <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+               |          |          |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+               |          |          |          <std::sys::fs::unix::File>::datasync (inlined)
+               |          |          |          <std::fs::File>::sync_data
+               |          |          |          <lunix_store::container::ContainerWriter>::seal
+               |          |          |          |          
+               |          |          |          |--1.19%--0x1007fd7
+               |          |          |          |          
+               |          |          |          |--1.19%--0x1007f86
+               |          |          |          |          
+               |          |          |          |--1.04%--0x1007f8e
+               |          |          |          |          
+               |          |          |          |--1.00%--0x1007f9a
+               |          |          |          |          
+               |          |          |           --0.68%--0x1007fd4
+               |          |          |          
+               |          |           --1.83%--btrfs_submit_bio
+               |          |                     btrfs_submit_chunk
+               |          |                     btrfs_submit_bbio
+               |          |                     __syscall_cancel_arch
+               |          |                     |          
+               |          |                     |--1.11%--fdatasync
+               |          |                     |          <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+               |          |                     |          <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+               |          |                     |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+               |          |                     |          <std::sys::fs::unix::File>::datasync (inlined)
+               |          |                     |          <std::fs::File>::sync_data
+               |          |                     |          |          
+               |          |                     |           --1.04%--<lunix_store::container::ContainerWriter>::seal
+               |          |                     |          
+               |          |                      --0.72%--fsync
+               |          |                                <std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+               |          |                                <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+               |          |                                std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+               |          |                                <std::sys::fs::unix::File>::fsync (inlined)
+               |          |                                <std::fs::File>::sync_all
+               |          |                                |          
+               |          |                                 --0.60%--<lunix_store::fsops::RealFs as lunix_store::fsops::FsOps>::fsync_dir
+               |          |                                           |          
+               |          |                                            --0.55%--<lunix_store::container::ContainerWriter>::seal
+               |          |          
+               |          |--1.95%--bit_wait_io
+               |          |          __wait_on_bit
+               |          |          out_of_line_wait_on_bit
+               |          |          btrfs_btree_wait_writeback_range
+               |          |          __btrfs_wait_marked_extents
+               |          |          btrfs_wait_tree_log_extents
+               |          |          btrfs_sync_log
+               |          |          btrfs_sync_file
+               |          |          __syscall_cancel_arch
+               |          |          |          
+               |          |          |--1.28%--fsync
+               |          |          |          <std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+               |          |          |          <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+               |          |          |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+               |          |          |          <std::sys::fs::unix::File>::fsync (inlined)
+               |          |          |          <std::fs::File>::sync_all
+               |          |          |          |          
+               |          |          |           --0.51%--lunix_index::write_synced
+               |          |          |                     lunix_index::swap_manifest
+               |          |          |          
+               |          |           --0.66%--fdatasync
+               |          |                     <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+               |          |                     <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+               |          |                     std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+               |          |                     <std::sys::fs::unix::File>::datasync (inlined)
+               |          |                     <std::fs::File>::sync_data
+               |          |          
+               |          |--1.28%--folio_wait_bit_common
+               |          |          |          
+               |          |           --0.87%--write_all_supers
+               |          |                     btrfs_sync_log
+               |          |                     btrfs_sync_file
+               |          |                     do_fsync
+               |          |                     |          
+               |          |                      --0.51%--__x64_sys_fsync
+               |          |                                do_syscall_64
+               |          |                                entry_SYSCALL_64_after_hwframe
+               |          |                                __syscall_cancel_arch
+               |          |                                fsync
+               |          |                                <std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+               |          |                                <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+               |          |                                std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+               |          |                                <std::sys::fs::unix::File>::fsync (inlined)
+               |          |                                <std::fs::File>::sync_all
+               |          |          
+               |           --0.51%--blk_mq_get_tag
+               |                     __blk_mq_alloc_requests
+               |                     blk_mq_submit_bio

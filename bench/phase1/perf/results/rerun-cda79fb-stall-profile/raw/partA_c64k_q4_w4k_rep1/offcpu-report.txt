@@ -1,0 +1,108 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 19K of event 'sched:sched_switch'
+# Event count (approx.): 19696
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    89.79%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--85.90%--io_schedule
+               |          |          
+               |          |--82.79%--__iomap_dio_rw
+               |          |          iomap_dio_rw
+               |          |          btrfs_direct_read
+               |          |          btrfs_file_read_iter
+               |          |          vfs_read
+               |          |          __x64_sys_pread64
+               |          |          do_syscall_64
+               |          |          entry_SYSCALL_64_after_hwframe
+               |          |          __syscall_cancel_arch
+               |          |          __libc_pread
+               |          |          <std::sys::fd::unix::FileDesc>::read_at (inlined)
+               |          |          <std::sys::fs::unix::File>::read_at (inlined)
+               |          |          <std::fs::File as std::os::unix::fs::FileExt>::read_at
+               |          |          <std::fs::File as std::os::unix::fs::FileExt>::read_exact_at (inlined)
+               |          |          lunix_journal::sys::read_aligned
+               |          |          
+               |           --2.57%--rq_qos_wait
+               |                     wbt_wait
+               |                     __rq_qos_throttle
+               |                     blk_mq_submit_bio
+               |                     submit_bio_noacct_nocheck
+               |                     |          
+               |                      --2.14%--btrfs_submit_chunk
+               |                                btrfs_submit_bbio
+               |                                submit_one_bio
+               |                                __syscall_cancel_arch
+               |                                fdatasync
+               |                                <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+               |                                <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+               |                                std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+               |                                <std::sys::fs::unix::File>::datasync (inlined)
+               |                                <std::fs::File>::sync_data
+               |                                <lunix_store::container::ContainerWriter>::seal
+               |          
+                --3.80%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+                          std::sys::pal::unix::futex::futex_wait (inlined)
+                          |          
+                           --3.77%--<std::sys::sync::condvar::futex::Condvar>::wait_optional_timeout
+                                     <std::sync::poison::condvar::Condvar>::wait_timeout::<lunix_destage::pipeline::PoolState> (inlined)
+                                     |          
+                                     |--2.26%--<lunix_destage::pipeline::Pool>::run_worker
+                                     |          
+                                      --1.51%--<lunix_destage::pipeline::Pool>::wait_job
+
+     9.56%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --9.44%--io_cqring_wait
+                          __do_sys_io_uring_enter
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+                          io_uring::sys::io_uring_enter (inlined)
+                          <io_uring::submit::Submitter>::enter::<io_uring::types::SubmitArgs> (inlined)
+                          <io_uring::submit::Submitter>::submit_with_args_and_flags
+                          0x2
+
+     0.57%  iou-wrk-2955927  [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     0.03%  lunix-space-tim  [k] perf_trace_sched_switch
+     0.02%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.02%  lunixd-trim      [k] perf_trace_sched_switch
+     0.01%  iou-wrk-2955857  [k] perf_trace_sched_switch
+     0.01%  iou-wrk-2955926  [k] perf_trace_sched_switch
+     0.01%  lunixd           [k] perf_trace_sched_switch
+     0.01%  lunixd-call      [k] perf_trace_sched_switch
+
+
+#
+# (Tip: To browse sample contexts use perf report --sample 10 and select in context menu)
+#

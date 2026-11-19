@@ -1,0 +1,4 @@
+created volume csseqran64ext41 (integrity, uuid 96fd4c60-274f-49ff-bc65-2ec63b99f1b7)
+directory        $SCRATCH/m16-chunksize-vols/96fd4c60-274f-49ff-bc65-2ec63b99f1b7
+key file         $SCRATCH/m16-chunksize-vols/96fd4c60-274f-49ff-bc65-2ec63b99f1b7/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

@@ -1,0 +1,12 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 19.92s
+changed files list: 1386
+alone run 1 rc=0: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 62.05s
+alone run 2 rc=0: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 62.03s
+alone run 3 rc=0: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 62.11s
+alone run 4 rc=0: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 62.06s
+alone run 5 rc=0: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 62.07s
+full stack_gc run 1 rc=101: test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 217.46s test compaction_then_truncate_tip_encrypted_64k ... FAILED test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 217.46s 
+full stack_gc run 2 rc=101: test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 219.22s test compaction_then_truncate_tip_encrypted_64k ... FAILED test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 219.22s 
+full stack_gc run 3 rc=101: test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 221.61s test compaction_then_truncate_tip_encrypted_64k ... FAILED test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 221.61s 
+full stack_gc run 4 rc=101: test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 231.35s test compaction_then_truncate_tip_encrypted_64k ... FAILED test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 231.35s 
+full stack_gc run 5 rc=101: test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 217.31s test compaction_then_truncate_tip_encrypted_64k ... FAILED test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 217.31s 

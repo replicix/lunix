@@ -68,7 +68,29 @@ fio_cell() { # chunkk q name job rep runtime qd
     perf record -F 99 -g -p "$DPID" -o "$d/perf.data" -- sleep $((rt / 3)) >/dev/null 2>&1 &
     pp="$pp $!"
   fi
+  # SAMPLE=1: every SAMPLE_S (5) s during the cell the status JSON, the collector status and the daemon's threads (name, state,
+  # kernel wait channel) go to series.jsonl, to find where a stalled write waits; stopped with the cell
+  local sp="" st0=$SECONDS pp2=""
+  # STALL_PROFILE=1 (first repetition): kernel stacks of the daemon's threads that sit in uninterruptible sleep, every 0.5 s for
+  # 20 s, and an off-CPU `perf record` (sched_switch with user call graphs, dwarf) for 6 s: where the blocked threads wait
+  if [ "${STALL_PROFILE:-0}" = 1 ] && [ "$rep" = 1 ]; then
+    ( sleep "$((RAMP + 3))"; for _i in $(seq 1 40); do
+        for t in /proc/"$DPID"/task/*; do
+          if [ "$(awk '{print $3}' "$t/stat" 2>/dev/null)" = D ]; then printf '== %s %s\n' "$(cat "$t/comm" 2>/dev/null)" "$(cat "$t/stack" 2>/dev/null | head -12 | tr '\n' '|')"; fi
+        done; sleep 0.5; done > "$d/dstacks.txt" 2>/dev/null ) & pp2=$!
+    ( sleep "$((RAMP + 5))"; perf record -e sched:sched_switch --call-graph dwarf,8192 -p "$DPID" -o "$d/offcpu.data" -- sleep 6 >/dev/null 2>&1
+      perf script -i "$d/offcpu.data" -F comm,tid,time,ip,sym --no-inline 2>/dev/null | head -40000 > "$d/offcpu-script.txt"; perf report --stdio --no-children -i "$d/offcpu.data" --sort comm,sym -g caller,0.5,callee --max-stack 12 2>/dev/null | head -150 > "$d/offcpu-report.txt"; rm -f "$d/offcpu.data" ) & pp2="$pp2 $!"
+  fi
+  if [ "${SAMPLE:-0}" = 1 ]; then
+    ( while sleep "${SAMPLE_S:-5}"; do
+        ths=$(for t in /proc/"$DPID"/task/*; do printf '%s:%s:%s\n' "$(cat "$t/comm" 2>/dev/null)" "$(awk '{print $3}' "$t/stat" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"; done | sort | uniq -c | jq -R -s -c 'split("\n")|map(select(length>0))')
+        jq -c -n --argjson st "$(status_json "$VOL" 2>/dev/null || echo null)" --argjson gc "$(lx gc "$VOL" --status --json 2>/dev/null || echo null)" --argjson th "${ths:-null}" --arg t "$((SECONDS - st0))" '{t:$t,status:$st,gc:$gc,threads:$th}' >> "$d/series.jsonl" 2>/dev/null
+      done ) & sp=$!
+  fi
   wait_fio "$fp" $((rt + grace + 120)); local frc=$?
+  [ -n "$sp" ] && { kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; }
+  # shellcheck disable=SC2086
+  [ -n "$pp2" ] && wait $pp2 2>/dev/null
   local c1 w; c1=$(cpu_secs "$DPID"); w=$((SECONDS - t0)); [ "$w" -ge 1 ] || w=1
   thread_cpu "$DPID" > "$d/threads-1.txt"
   # shellcheck disable=SC2086
@@ -126,12 +148,12 @@ for chunk in "${_c[@]}"; do
     rec "partA/c${ck}k/q$q/idle" info rss_kib="$IDLE_RSS" queues="$q" chunk_k="$ck"
     export DEV="$CUR_DEV" WS RUNTIME=$RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=32 SEED=1
     FIO_GRACE=600 fio_run "fill-c${ck}-q$q" "$((WS_GIB * 60))" "$JOBDIR/fill.fio"; expect "write the ${WS_GIB} GiB working set" $? || FAIL=1
-    for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" r4k r4k "$rep" "$RUNTIME" 128; done
+    if [ "${SKIP_READ_CELLS:-0}" != 1 ]; then for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" r4k r4k "$rep" "$RUNTIME" 128; done; fi
     if [ "${SKIP_WRITE_CELLS:-0}" != 1 ]; then   # the supplementary read-cache run skips the journal-bound write cells
       for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" w4k w4k "$rep" "$W_RUNTIME" 128; done
       for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqw seqw "$rep" "$RUNTIME" 32; done
     fi
-    for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqr seqr "$rep" "$RUNTIME" 32; done
+    if [ "${SKIP_READ_CELLS:-0}" != 1 ]; then for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" seqr seqr "$rep" "$RUNTIME" 32; done; fi
     if [ "$VERIFY_READS" = 1 ]; then
       detach_vol "$VOL"; expect "detach for verify_reads" $? || exit 1
       set_vj "$VOL" verify_reads true; expect "volume.json verify_reads = true" $? || { FAIL=1; }
