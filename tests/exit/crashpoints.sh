@@ -121,7 +121,7 @@ one_run() {
   mount_fs "$fs" "$CUR_DEV" "$MNT" || { RUN_STATUS=fail; RUN_NOTES="setup: mount"; RUN_SECS=$((SECONDS - RUN_T0)); return; }
   local rt=$((WL_SECS + POST_SECS + 120))
   case "${SCEN:-}" in
-    full) lx space "$vol" --cache-max "${SCEN_CAP:-1536M}" --on-full wait --full-timeout 600s --json > "$OUT/raw/space-$label.json" 2>&1 ;;
+    full) lx space "$vol" --cache-max "${SCEN_CAP:-3G}" --on-full wait --full-timeout 600s --json > "$OUT/raw/space-$label.json" 2>&1 ;;
   esac
   wl_start "$label" "$fs" "$rt" 268435456 4
   case "${SCEN:-}" in
@@ -187,7 +187,7 @@ budget_left() { [ $((SECONDS - T0 + RUN_CAP_S + 300)) -lt "$BUDGET_S" ]; }
 #           an .open file) is followed by a recovery start that carries LUNIX_CRASH_AT=<target>:1: the sweep and the leftover removal of the open
 #           crash again there, and a third start recovers for good
 #   resize  `lunix resize` 10 s into the load, the daemon crashes at <target>:1 (ublk.after_update_size)
-#   full    the cap (SCEN_CAP, 1536M) is below the working set plus its garbage, `on_full = wait`: the urgent pass of the collector runs when a
+#   full    the cap (SCEN_CAP, 3G: a smaller cap leaves no room for the working set, the journal ring and the headroom, and the guest file system then gets ENOSPC on its journal) is below the working set plus its garbage, `on_full = wait`: the urgent pass of the collector runs when a
 #           write meets NoSpace and the daemon crashes at <target>:1 (gc.urgent.after_mark)
 if [ -n "${SCENARIO:-}" ]; then
   say ""; say "## scenario $SCENARIO: ${TARGETS:?TARGETS is not set}"

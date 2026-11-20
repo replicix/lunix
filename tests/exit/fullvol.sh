@@ -12,7 +12,7 @@
 # Disk: the cap is 8 GiB, the working set 16 GiB; the store stays near 8 GiB plus the journal ring.
 here="$(cd "$(dirname "$0")" && pwd)"
 : "${CAP:=8G}" "${WS_GIB:=16}" "${FULL_TIMEOUT_S:=5}" "${CHUNK:=65536}" "${VOLMODE:=integrity}" "${VOL_GIB:=32}"
-export SCRIPT_CAP="${SCRIPT_CAP:-3600}"
+export SCRIPT_CAP="${SCRIPT_CAP:-6000}"
 . "$here/lib.sh"
 harness_init m15-fullvol
 say "# M15 full-volume cell ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1)): cap $CAP, working set $WS_GIB GiB, full_timeout ${FULL_TIMEOUT_S}s"
@@ -51,10 +51,11 @@ say "- writes after the discard: ok=$((1 - ok)) after $((SECONDS - t0)) s"
 [ "$ok" = 0 ]; expect "writes came back within 90 s of the discard ($((SECONDS - t0)) s)" $? || true
 # ---- 4: SIGTERM with writes parked (long full_timeout so that they park)
 lx space "$VOL" --full-timeout 120s --json > "$D/space-long.json" 2>&1
-fill_job fill2 "$WS_GIB" 300 &
+fill_job fill2 "$WS_GIB" 1200 &
 FP=$!
-# wait (up to 150 s) until writes are parked: the working set is written again from the start, so the cap is reached after a few seconds
-for i in $(seq 1 75); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
+# wait (up to 400 s) until writes are parked: the working set is written again from the start; inside the band the writes are only paced (4 MiB/s at the
+# hard mark), so the cap is reached slowly
+for i in $(seq 1 200); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
 say "- state with writes parked: $(gate_state), waiters $(lx space "$VOL" --json | jq -r '.figures.waiters')"
 [ "$(lx space "$VOL" --json | jq -r '.figures.waiters')" -gt 0 ]; expect "writes are parked at the cap" $? || true
 T0=$SECONDS; kill -TERM "$DPID"
@@ -67,9 +68,9 @@ wait "$DPID" 2>/dev/null; DPID=""
 start_lunixd || wedged "restart after SIGTERM failed"
 wait "$FP" 2>/dev/null
 lx space "$VOL" --full-timeout 120s --json >/dev/null 2>&1
-fill_job fill3 "$WS_GIB" 300 &
+fill_job fill3 "$WS_GIB" 1200 &
 FP=$!
-for i in $(seq 1 75); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
+for i in $(seq 1 200); do [ "$(lx space "$VOL" --json 2>/dev/null | jq -r '.figures.waiters')" -gt 0 ] 2>/dev/null && break; sleep 2; done
 kill -KILL "$DPID"; wait "$DPID" 2>/dev/null; DPID=""
 # ---- 5: on_full = error in volume.json, restart
 VJ="$(vol_dir "$VOL" 2>/dev/null)"
@@ -80,12 +81,20 @@ for i in $(seq 1 600); do kill -0 "$FP" 2>/dev/null || break; sleep 0.5; done
 kill -0 "$FP" 2>/dev/null && wedged "fio did not end within 300 s after the restart with on_full = error"
 wait "$FP"; say "- fio after the restart: rc $?"
 expect "fio ended after the kill -9 and the restart with on_full = error" 0 || true
-dd if=/dev/zero of="$CUR_DEV" bs=1M count=1 seek=$(( (VOL_GIB * 1024) / 2 + 8192 )) oflag=direct 2>/dev/null; expect "the device is usable after the restart (a write succeeds, rc $?)" $? || true
+# with on_full = error and the store still at its cap a write may well fail: it must fail with ENOSPC at once, not hang and not with EIO
+dd if=/dev/zero of="$CUR_DEV" bs=1M count=1 seek=$(( (VOL_GIB * 1024) / 2 + 8192 )) oflag=direct 2> "$D/usable-dd.txt"; urc=$?
+{ [ "$urc" = 0 ] || grep -q "No space left" "$D/usable-dd.txt"; }; expect "the device answers after the restart (a write succeeds or fails with ENOSPC, rc $urc)" $? || true
 dd if="$CUR_DEV" of=/dev/null bs=1M count=64 iflag=direct 2>/dev/null; expect "a read succeeds" $? || true
 [ "$(hung)" = "$H0" ]; expect "no hung-task line in the whole cell" $? || true
 # ---- 6: what ext4 and xfs do with the error (recorded)
 lx space "$VOL" --on-full error --full-timeout 5s --json >/dev/null 2>&1
 blkdiscard "$CUR_DEV" 2>/dev/null
+# the discard frees the store only after the collector's grace: wait until the ledger is below half the cap (up to 5 min) before mkfs
+for i in $(seq 1 100); do
+  u=$(lx space "$VOL" --json | jq -r '.figures.used'); l=$(lx space "$VOL" --json | jq -r '.figures.limit')
+  [ "$u" -lt $((l / 2)) ] 2>/dev/null && break; sleep 3
+done
+say "- store after the full discard: used $((u >> 20)) MiB of $((l >> 20)) MiB"
 for fs in ext4 xfs; do
   mkfs_fs "$fs" "$CUR_DEV" || continue
   mount_fs "$fs" "$CUR_DEV" "$MNT" || continue
@@ -99,6 +108,7 @@ for fs in ext4 xfs; do
   timeout -k 10 120 umount "$MNT" || umount -l "$MNT"
   guest_fsck "$fs" "$CUR_DEV"; say "- $fs guest fsck after the error: rc $?"
   blkdiscard "$CUR_DEV" 2>/dev/null
+  for i in $(seq 1 100); do u=$(lx space "$VOL" --json | jq -r '.figures.used'); [ "$u" -lt $((l / 2)) ] 2>/dev/null && break; sleep 3; done
 done
 rec fullvol/cell "$([ "$FAIL" = 0 ] && echo pass || echo fail)" cap="$CAP" full_timeout_s="$FULL_TIMEOUT_S" sigterm_exit_s="$exit_s" fill_errors="${errs:-}" fill_max_lat_ms="${mlat:-}"
 cell_end "$VOL" fullvol || true

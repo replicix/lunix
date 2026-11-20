@@ -33,6 +33,19 @@ run_cell() { # chunk variant
     sleep "$KILL_AFTER"; kill -KILL "$DPID"; wait "$DPID" 2>/dev/null; DPID=""
     sleep 1; start_lunixd || wedged "restart after the kill failed"
   fi
+  # a status trace every 5 s while the write runs (journal use, last commit, space): evidence if the write stalls after the recovery
+  # when `written` has not moved for 30 s the stacks of every daemon thread (gdb) and the kernel stacks are saved once: the evidence of a stall
+  ( last=""; same=0; got=0
+    while kill -0 "$fp" 2>/dev/null; do
+      cur=$(lx status "$vol" --json 2>/dev/null | tee >(jq -c '{used:.journal_used,cap:.journal_capacity,tip:.last_commit_seq,dirty:.stats.dirty_leaves,commits:.stats.commits,written:.stats.bytes_written,space:.space}' >> "$d/status-trace.txt") | jq -r '.stats.bytes_written')
+      if [ "$cur" = "$last" ]; then same=$((same + 1)); else same=0; last=$cur; fi
+      if [ "$same" -ge 6 ] && [ "$got" = 0 ] && daemon_alive; then
+        got=1; lx status "$vol" --json > "$d/stall-status.json" 2>&1
+        { gdb -p "$DPID" -batch -ex 'thread apply all bt' 2>&1 || true; } > "$d/stall-ustacks.txt"
+        for t in /proc/"$DPID"/task/*; do echo "== $t $(cat "$t/comm")"; cat "$t/stack" 2>/dev/null; done > "$d/stall-kstacks.txt"
+      fi
+      sleep 5
+    done ) </dev/null >/dev/null 2>&1 &
   wait_fio "$fp" 900; local frc=$?
   [ "$frc" = 0 ] && [ "$(fio_errors "$d/fio-write.json")" = 0 ]; expect "$cell: the write finished across the kill and the recovery (fio rc $frc)" $? || return
   python3 -I "$here/readcheck.py" make "$CUR_DEV" "$LEN" "$d/ref.sha"; expect "$cell: reference hashes of $SIZE_GIB GiB taken" $? || return
@@ -43,7 +56,7 @@ run_cell() { # chunk variant
   case "$var" in
     segment) target=$(ls -S "$vd"/segments/*.seg | head -1) ;;
     commit) target=$(ls "$vd"/state/commits/* | sort | tail -1) ;;
-    map) target=$(ls -S "$vd"/map/* | head -1) ;;
+    map) target=$(ls "$vd"/map/* | sort | tail -1) ;;   # the newest pack holds the tip's root path: a damaged node there is on the read path (the largest may hold only superseded nodes)
   esac
   local sz; sz=$(stat -c %s "$target"); off=$((sz / 2))
   say "- flipping one byte at offset $off of $(basename "$(dirname "$target")")/$(basename "$target") ($sz bytes)"

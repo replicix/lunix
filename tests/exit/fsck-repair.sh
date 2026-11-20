@@ -16,19 +16,44 @@ harness_init m15-fsckrepair
 say "# M15 offline repair crash points ($(date -u +%FT%TZ)): $TARGETS"
 for tgt in $TARGETS; do
   cell="fsck-repair/$tgt"; vol="rep$(echo "$tgt" | tr -cd 'a-z0-9' | tail -c 24)"; d=$(cell_dir "$cell"); say ""; say "## $cell"
+  case "$tgt" in
+  store.segment_delete.*)
+    # a real orphan: the daemon (crashpoints build) is killed from inside right after it sealed a segment no commit names, the writer is
+    # stopped, the device of the dead daemon is deleted (W1a: only a device recorded by this run whose daemon is gone), and the volume is
+    # repaired offline
+    DAEMON_BIN="${LUNIXD_CP:?LUNIXD_CP is not set}"; CRASH_ENV="LUNIX_CRASH_AT=destage.after_segment_seal:20"
+    cell_begin "$vol" 4 "$CHUNK" "$VOLMODE"; CRASH_ENV=""
+    taskset -c "$FIO_CPUS" timeout -k 30 300 fio --name=w --filename="$CUR_DEV" --rw=write --bs=1M --iodepth=8 --ioengine=io_uring --direct=1 --size=1g --refill_buffers=1 \
+      --output-format=json --output="$d/fio-write.json" > "$d/fio-write.stdout" 2>&1 &
+    fp=$!
+    for i in $(seq 1 600); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.1; done
+    kill -0 "$DPID" 2>/dev/null && wedged "the daemon did not reach destage.after_segment_seal:20"
+    wait "$DPID" 2>/dev/null; DPID=""; say "- daemon killed at destage.after_segment_seal:20"
+    kill -TERM "$fp" 2>/dev/null; sleep 2
+    timeout -k 5 90 "$TESTD" del --id "${CUR_DEV#/dev/ublkb}" --force; say "- device of the dead daemon deleted (rc $?)"
+    wait_fio "$fp" 200; DAEMON_BIN=""
+    vd=$(ls -d "$VOLS"/*/ | head -1); vd=${vd%/} ;;
+  *)
   cell_begin "$vol" 4 "$CHUNK" "$VOLMODE"
   taskset -c "$FIO_CPUS" fio --name=w --filename="$CUR_DEV" --rw=write --bs=1M --iodepth=8 --ioengine=io_uring --direct=1 --size=1g --refill_buffers=1 \
     --end_fsync=1 --output-format=json --output="$d/fio-write.json" > "$d/fio-write.stdout" 2>&1; expect "$cell: 1 GiB written (fio rc $?)" $? || true
-  detach_vol "$vol"; vd=$(vol_dir "$vol")
+  detach_vol "$vol"; vd=$(vol_dir "$vol") ;;
+  esac
   case "$tgt" in
     store.set_aside.*) f=$(ls "$vd"/state/commits/* | sort | tail -1); python3 -I -c 'import sys; p,o=sys.argv[1],int(sys.argv[2]); f=open(p,"r+b"); f.seek(o); b=f.read(1); f.seek(o); f.write(bytes([b[0]^1])); f.flush()' "$f" $(( $(stat -c %s "$f") / 2 )); args=(--repair --truncate-tip) ;;
-    *) s=$(ls -S "$vd"/segments/*.seg | head -1); cp "$s" "$vd/segments/ffffffffffff0001.seg"; args=(--repair --delete-orphans) ;;
+    *) args=(--repair --delete-orphans) ;;   # the orphan is made below, from a real crash
   esac
   KOPT=(); [ "$VOLMODE" = encrypted ] && KOPT=(--key-file "$KEYS/enc.key")
   env LUNIX_CRASH_AT="$tgt:1" "$LUNIX_FSCK_CP" "${args[@]}" "${KOPT[@]}" "$vd" > "$d/repair1.txt" 2>&1; r1=$?
   say "- first repair with the crash setting: exit $r1"
   reached=0; [ "$r1" = 137 ] && reached=1
   "$LUNIX_FSCK_CP" "${args[@]}" "${KOPT[@]}" "$vd" > "$d/repair2.txt" 2>&1; r2=$?
+  if [ "$r2" -gt 1 ] && [ "$tgt" != "${tgt#store.set_aside.}" ]; then
+    # after the rename the tip is already the previous commit: a second --truncate-tip refuses (it would drop another commit, and does not
+    # touch anything); the plain repair finishes the job (it rewrites the checkpoint that still describes the set-aside commit)
+    say "- the same repair again refuses (exit $r2: $(grep -o 'repair_refused.*' "$d/repair2.txt" | head -1 | cut -c1-120)); trying the plain --repair"
+    "$LUNIX_FSCK_CP" --repair "${KOPT[@]}" "$vd" > "$d/repair3.txt" 2>&1; r2=$?
+  fi
   [ "$r2" -le 1 ]; expect "$cell: the repair run again without the crash setting finishes (exit $r2)" $? || true
   "$LUNIX_FSCK_CP" --deep --json "${KOPT[@]}" "$vd" > "$d/fsck-after.json" 2>&1; r3=$?
   [ "$r3" -le 1 ]; expect "$cell: fsck --deep after the repair clean (exit $r3)" $? || true
