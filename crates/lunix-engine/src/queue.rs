@@ -196,10 +196,13 @@ pub(crate) struct Queue {
     parked_holes: VecDeque<Tag>,
     jreads: HashMap<u64, JRead>,
     /// Scratch for the parked requests that wait for the ring (reused).
-    ring_scratch: Vec<(Tag, std::time::Duration)>,
+    ring_scratch: Vec<(Tag, std::time::Duration, std::time::Duration)>,
     /// What this queue last added to the engine's count of parked requests
     /// that wait for the ring.
     ring_count: i64,
+    /// Requests of this queue the ring refused a slot and that still wait
+    /// (the ones with `ring_since`): the scans below run only when it is not 0.
+    ring_refused: u32,
     next_token: u64,
     next_gen: u64,
     jbuf: Vec<JournalCompletion>,
@@ -226,6 +229,7 @@ impl Queue {
             jreads: HashMap::new(),
             ring_scratch: Vec::new(),
             ring_count: 0,
+            ring_refused: 0,
             next_token: 1,
             next_gen: 1,
             jbuf: Vec::new(),
@@ -372,16 +376,15 @@ impl Queue {
 
     /// True when a parked request waits for the journal ring.
     fn ring_wait_parked(&self) -> bool {
-        self.parked.iter().chain(self.parked_holes.iter()).any(
-            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_since.is_some()),
-        )
+        self.ring_refused > 0
     }
 
     fn fail(&mut self, tag: Tag, errno: i32, done: &mut dyn Completer) {
         if let Some(r) = self.reqs.remove(&tag) {
             if let Kind::Mutate(m) = &r.kind {
-                if m.ring_since.is_some() {
-                    self.inner.end_ring_wait(m.arrived);
+                if let Some(since) = m.ring_since {
+                    self.inner.end_ring_wait(since);
+                    self.ring_refused = self.ring_refused.saturating_sub(1);
                 }
                 if let SpaceWait::Charged(b) = m.space {
                     self.inner.space.release(SpaceKind::JournalReserved, b);
@@ -405,6 +408,7 @@ impl Queue {
                 return Step::Done;
             };
             let gen = r.gen;
+            let lane = usize::from(self.shared.id.0);
             let req_lba = r.req.offset_bytes / BLOCK;
             // The write an fsync waits on is not paced inside the band
             // (ADR-32): a FUA write of at most 256 KiB.
@@ -416,6 +420,12 @@ impl Queue {
                 };
             let Kind::Mutate(m) = &mut r.kind else {
                 return Step::Done;
+            };
+            // A retry after a ring refusal paid its pace the first time.
+            let class = if m.ring_since.is_some() {
+                ReserveClass::Retry
+            } else {
+                class
             };
             if m.next_block >= m.end_block {
                 return Step::Done;
@@ -531,16 +541,17 @@ impl Queue {
                     inner.space.release(SpaceKind::JournalReserved, charged);
                     m.space = SpaceWait::None;
                     // Every wait has a deadline (ADR-32, P6).
-                    if let Some(errno) = inner.ring_wait_verdict(m.arrived) {
+                    if let Some(errno) = inner.ring_wait_verdict(m.arrived, lane) {
                         self.fail(tag, errno, done);
                         return Step::Done;
                     }
                     let now = inner.clock.monotonic();
                     if m.ring_since.is_none() {
                         m.ring_since = Some(now);
+                        self.ring_refused += 1;
                         inner.cuts.ring_waiters.fetch_add(1, Ordering::Relaxed);
                     }
-                    inner.note_ring_wait(now.saturating_sub(m.arrived));
+                    inner.note_ring_wait(now.saturating_sub(m.ring_since.unwrap_or(now)));
                     inner.journal_full.store(true, Ordering::Release);
                     return Step::Parked;
                 }
@@ -554,8 +565,9 @@ impl Queue {
                 }
             };
             m.space = SpaceWait::None;
-            if m.ring_since.take().is_some() {
-                inner.end_ring_wait(m.arrived);
+            if let Some(since) = m.ring_since.take() {
+                inner.end_ring_wait(since);
+                self.ring_refused = self.ring_refused.saturating_sub(1);
             }
             let seq = slot.write_seq;
             if m.record == RecordKind::Hole {
@@ -948,26 +960,39 @@ impl Queue {
     }
 
     /// Collects into `ring_scratch` the parked requests that wait for the
-    /// ring, with their arrival: in a FIFO that holds one refused a ring slot,
-    /// that one and the requests behind it that were never tried (they cannot
-    /// go before it). A request that waits in the gate (`Waiting`) is not one.
+    /// ring, with their arrival and the start of their ring wait: in a FIFO
+    /// that holds one refused a ring slot, that one (from its refusal) and the
+    /// requests behind it that were never tried (they cannot go before it;
+    /// from the later of their arrival and the first refusal of the FIFO).
+    /// A request that waits in the gate (`Waiting`) is not one. Only called
+    /// while `ring_refused` is not 0.
     fn collect_ring_blocked(&mut self) {
         self.ring_scratch.clear();
         for q in [&self.parked, &self.parked_holes] {
-            let blocked = q.iter().any(|t| {
-                matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_since.is_some())
-            });
-            if !blocked {
+            let first = q
+                .iter()
+                .filter_map(|t| match self.reqs.get(t) {
+                    Some(Req {
+                        kind: Kind::Mutate(m),
+                        ..
+                    }) => m.ring_since,
+                    _ => None,
+                })
+                .min();
+            let Some(first) = first else {
                 continue;
-            }
+            };
             for t in q {
                 if let Some(Req {
                     kind: Kind::Mutate(m),
                     ..
                 }) = self.reqs.get(t)
                 {
-                    if m.ring_since.is_some() || matches!(m.space, SpaceWait::None) {
-                        self.ring_scratch.push((*t, m.arrived));
+                    if let Some(since) = m.ring_since {
+                        self.ring_scratch.push((*t, m.arrived, since));
+                    } else if matches!(m.space, SpaceWait::None) {
+                        self.ring_scratch
+                            .push((*t, m.arrived, m.arrived.max(first)));
                     }
                 }
             }
@@ -994,17 +1019,18 @@ impl Queue {
         // A deadline counts from the later of the arrival and the ring's last
         // progress, so the oldest request is the first one due: when it is
         // not, none is (the common case costs one verdict).
-        let Some(oldest) = self.ring_scratch.iter().map(|&(_, a)| a).min() else {
+        let lane = usize::from(self.shared.id.0);
+        let Some(oldest) = self.ring_scratch.iter().map(|&(_, a, _)| a).min() else {
             return false;
         };
-        if self.inner.ring_wait_verdict(oldest).is_none() {
+        if self.inner.ring_wait_verdict(oldest, lane).is_none() {
             return false;
         }
         let mut failed = false;
         let mut i = 0;
-        while let Some(&(tag, arrived)) = self.ring_scratch.get(i) {
+        while let Some(&(tag, arrived, _)) = self.ring_scratch.get(i) {
             i += 1;
-            if let Some(errno) = self.inner.ring_wait_verdict(arrived) {
+            if let Some(errno) = self.inner.ring_wait_verdict(arrived, lane) {
                 self.fail(tag, errno, done);
                 failed = true;
             }
@@ -1026,18 +1052,20 @@ impl Queue {
                 self.fail(tag, EIO, done);
             }
             self.shared.ring_parked.store(false, Ordering::Relaxed);
+            self.ring_refused = 0;
             self.set_ring_count(0);
             return true;
         }
-        // The waits as of this wake, before anything is admitted: from each
-        // request's arrival (the longest wait counters of the status).
-        if any_parked && self.shared.ring_parked.load(Ordering::Relaxed) {
+        // The waits as of this wake, before anything is admitted: from the
+        // start of each request's ring wait (the longest wait counters of the
+        // status; the time in the gate before the ring is not in them).
+        if any_parked && self.ring_refused > 0 {
             self.collect_ring_blocked();
             let now = self.inner.clock.monotonic();
             let oldest = self
                 .ring_scratch
                 .iter()
-                .map(|&(_, arrived)| now.saturating_sub(arrived))
+                .map(|&(_, _, start)| now.saturating_sub(start))
                 .max();
             if let Some(w) = oldest {
                 self.inner.note_ring_wait(w);
@@ -1075,17 +1103,23 @@ impl Queue {
         // What is still waiting for the ring is judged against its deadline
         // all the same: a request behind the front (a small FUA write that
         // overtook, one queued behind) has no other chance to be seen.
-        self.collect_ring_blocked();
-        if !self.ring_scratch.is_empty() && self.fail_overdue_ring_waits(done) {
-            let reqs = &self.reqs;
-            self.parked.retain(|t| reqs.contains_key(t));
-            self.parked_holes.retain(|t| reqs.contains_key(t));
+        if self.ring_refused > 0 {
             self.collect_ring_blocked();
-            progressed = true;
+            if self.fail_overdue_ring_waits(done) {
+                let reqs = &self.reqs;
+                self.parked.retain(|t| reqs.contains_key(t));
+                self.parked_holes.retain(|t| reqs.contains_key(t));
+                if self.ring_refused > 0 {
+                    self.collect_ring_blocked();
+                } else {
+                    self.ring_scratch.clear();
+                }
+                progressed = true;
+            }
+        } else {
+            self.ring_scratch.clear();
         }
-        let ring = self.parked.iter().chain(self.parked_holes.iter()).any(
-            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_since.is_some()),
-        );
+        let ring = self.ring_refused > 0;
         if self.shared.ring_parked.load(Ordering::Relaxed) != ring {
             self.shared.ring_parked.store(ring, Ordering::Relaxed);
         }
@@ -1147,8 +1181,8 @@ impl Drop for Queue {
         // Requests still parked for the ring leave the waiter count.
         for r in self.reqs.values() {
             if let Kind::Mutate(m) = &r.kind {
-                if m.ring_since.is_some() {
-                    self.inner.end_ring_wait(m.arrived);
+                if let Some(since) = m.ring_since {
+                    self.inner.end_ring_wait(since);
                 }
             }
         }

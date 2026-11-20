@@ -374,6 +374,11 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                             .map(|b| (journal_used + b) % 23)
                             .collect(),
                         ring_pace_rate: journal_capacity % 29,
+                        ring_paced_writes: journal_used % 31,
+                        ring_paced_ms: journal_used % 37,
+                        ring_pace_max_ms: journal_capacity % 41,
+                        ring_pace_capped: journal_used % 43,
+                        ring_pace_bypassed_fua: journal_capacity % 47,
                         window_resident_bytes: journal_used,
                         window_hits: journal_capacity % 13,
                         window_misses: journal_used % 17,

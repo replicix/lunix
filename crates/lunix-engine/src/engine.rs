@@ -439,7 +439,12 @@ impl Engine {
             throttle_watch: Mutex::new(crate::pressure::ThrottleWatch::default()),
             resize_hook: Mutex::new(None),
             report: rec.report,
-            full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
+            full: FullState::new(
+                cfg.full_timeout,
+                rec.tip.common.commit_seq.0,
+                rec.last_hole,
+                lanes,
+            ),
             jcharges: JournalCharges::new(lanes, rec.journal_charges),
             cuts: crate::cut::CutCounters::default(),
             latency: crate::cut::LatencyHist::new(lanes),

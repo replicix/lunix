@@ -13,7 +13,15 @@
 //!
 //! ```text
 //! journal-zero-bench --dir DIR [--rounds 12] [--probe 256] [--keep]
+//! journal-zero-bench --dir DIR --nearly-full 8 [--inject-errno 28] [--rounds 3]
 //! ```
+//!
+//! `--nearly-full MB` runs the `ZERO_RANGE` journal alone with a filler file
+//! that leaves `MB` MiB free on the file system, and reports whether every
+//! ring file is fully allocated afterwards (no hole), and how many files went
+//! through `ZERO_RANGE` and through the rewrite; `--inject-errno` makes the
+//! `ZERO_RANGE` calls fail with that errno (a file system that answers
+//! `ENOSPC`).
 //!
 //! Prints one JSON line per mode.
 
@@ -35,6 +43,8 @@ struct Args {
     rounds: usize,
     probe: usize,
     keep: bool,
+    nearly_full: Option<u64>,
+    inject: Option<i32>,
 }
 
 fn parse() -> Result<Args, String> {
@@ -43,6 +53,8 @@ fn parse() -> Result<Args, String> {
         rounds: 12,
         probe: 256,
         keep: false,
+        nearly_full: None,
+        inject: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -52,6 +64,12 @@ fn parse() -> Result<Args, String> {
             "--rounds" => a.rounds = val("--rounds")?.parse().map_err(|e| format!("{e}"))?,
             "--probe" => a.probe = val("--probe")?.parse().map_err(|e| format!("{e}"))?,
             "--keep" => a.keep = true,
+            "--nearly-full" => {
+                a.nearly_full = Some(val("--nearly-full")?.parse().map_err(|e| format!("{e}"))?);
+            }
+            "--inject-errno" => {
+                a.inject = Some(val("--inject-errno")?.parse().map_err(|e| format!("{e}"))?);
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -284,6 +302,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Some(mb) = a.nearly_full {
+        nearly_full(&a, mb);
+        return;
+    }
     let mut range = Ring::open("range", &a.dir, true);
     let mut rewrite = Ring::open("rewrite", &a.dir, false);
     range.first_fill();
@@ -306,5 +328,78 @@ fn main() {
     if !a.keep {
         let _ = std::fs::remove_dir_all(a.dir.join("range"));
         let _ = std::fs::remove_dir_all(a.dir.join("rewrite"));
+    }
+}
+
+/// Free bytes of the file system holding `dir`.
+fn free_bytes(dir: &std::path::Path) -> u64 {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).expect("path");
+    // SAFETY: `c` is a NUL-terminated path, `st` a live out-parameter.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    let rc = unsafe { libc::statvfs(c.as_ptr(), &mut st) };
+    assert_eq!(rc, 0, "statvfs");
+    st.f_bavail as u64 * st.f_frsize as u64
+}
+
+/// The `ZERO_RANGE` journal on a nearly full file system.
+fn nearly_full(a: &Args, mb: u64) {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+    std::fs::create_dir_all(&a.dir).expect("dir");
+    let mut r = Ring::open("range", &a.dir, true);
+    r.first_fill();
+    if let Some(e) = a.inject {
+        r.j.inject_zero_range_errno(Some(e));
+    }
+    // The filler takes everything but `mb` MiB.
+    let filler = a.dir.join("filler");
+    let f = std::fs::File::create(&filler).expect("filler");
+    let mut want = free_bytes(&a.dir).saturating_sub(mb << 20);
+    loop {
+        // SAFETY: the fd is open; plain integers.
+        let rc = unsafe { libc::posix_fallocate(f.as_raw_fd(), 0, want as libc::off_t) };
+        if rc == 0 || want < (16 << 20) {
+            assert_eq!(rc, 0, "filler of {want} bytes: errno {rc}");
+            break;
+        }
+        want -= 8 << 20;
+    }
+    let free = free_bytes(&a.dir);
+    let mut rounds = 0;
+    for i in 0..a.rounds.min(6) {
+        r.round(a.probe.min(64));
+        rounds = i + 1;
+    }
+    let (by_range, by_rewrite) = r.j.reinit_counts();
+    let mut sparse = 0u32;
+    let mut files = 0u32;
+    let jdir = a.dir.join("range").join("journal");
+    for e in std::fs::read_dir(&jdir).expect("journal dir") {
+        let m = e.expect("entry").metadata().expect("meta");
+        if m.is_file() && m.len() >= (1 << 20) {
+            files += 1;
+            if m.blocks() * 512 < m.len() {
+                sparse += 1;
+            }
+        }
+    }
+    println!(
+        "{{\"bench\":\"journal-zero-bench\",\"mode\":\"nearly-full\",\"free_mib_after_filler\":{},\"inject_errno\":{},\"rounds\":{},\"zero_range_calls\":{},\"zero_range_errnos\":{:?},\"files_by_range\":{},\"files_by_rewrite\":{},\"ring_files\":{},\"sparse_ring_files\":{}}}",
+        free >> 20,
+        a.inject.unwrap_or(0),
+        rounds,
+        r.j.zero_range_attempts(),
+        r.j.zero_range_errnos(),
+        by_range,
+        by_rewrite,
+        files,
+        sparse
+    );
+    drop(r);
+    let _ = std::fs::remove_file(&filler);
+    if !a.keep {
+        let _ = std::fs::remove_dir_all(a.dir.join("range"));
     }
 }

@@ -717,3 +717,51 @@ fn freed_files_are_counted_by_lane() {
     assert_eq!(j.reclaim(&tail).expect("again").files, 0);
     assert_eq!(j.freed_files_by_lane(), vec![0, 1]);
 }
+
+#[test]
+fn a_zero_range_that_fails_falls_back_to_the_rewrite_leaves_no_hole_and_is_given_up_after_three() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = scratch();
+    if !o_direct_supported(dir.path()) {
+        eprintln!("skipped: no O_DIRECT here");
+        return;
+    }
+    let cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = open_lane(&j, 0);
+    // ENOSPC from every ZERO_RANGE: a full copy-on-write file system.
+    j.inject_zero_range_errno(Some(libc::ENOSPC));
+    let mut files: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
+    let mut lba = 0;
+    for _round in 0..5 {
+        while files.len() < 3 {
+            let w = write_rec(&mut *l, lba, BIG);
+            lba += 1;
+            complete_appends(&mut *l, 1);
+            let e = files.entry(w.ordinal).or_insert(0);
+            *e = (*e).max(w.seq);
+        }
+        group_flush(&j);
+        let (&oldest, &cut) = files.iter().next().expect("a file");
+        let tail = j.tail_after(WriteSeq(cut)).expect("tail");
+        assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+        files.remove(&oldest);
+    }
+    // Three failed calls, then ZERO_RANGE is not tried again; every file went
+    // through the rewrite.
+    assert_eq!(j.zero_range_attempts(), 3);
+    assert_eq!(j.reinit_counts(), (0, 5));
+    // No ring file is left sparse.
+    for e in std::fs::read_dir(&cfg.dir).expect("dir") {
+        let e = e.expect("entry");
+        let m = e.metadata().expect("meta");
+        assert!(
+            m.blocks() * 512 >= m.len(),
+            "{:?} is sparse: {} blocks for {} bytes",
+            e.file_name(),
+            m.blocks(),
+            m.len()
+        );
+    }
+}

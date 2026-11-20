@@ -304,7 +304,7 @@ impl SpaceGate for MemSpace {
         if st.pacing && st.fits(bytes) {
             st.prune();
             let head_fits = st.waiters.front().is_none_or(|p| st.fits(p.bytes));
-            if class == ReserveClass::Sync && head_fits {
+            if matches!(class, ReserveClass::Sync | ReserveClass::Retry) && head_fits {
                 st.held[kind.index()] += bytes;
                 return Ok(ReserveOutcome::Reserved);
             }

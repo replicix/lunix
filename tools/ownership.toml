@@ -431,13 +431,16 @@ paths = [
   "crates/lunix-journal/tests/reclaim.rs",
   "crates/lunix-space/src/gate.rs",
   "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/src/throttle.rs",
   "crates/lunix-space/tests/pace.rs",
   "crates/lunix-testkit/src/journal.rs",
   "crates/lunix-testkit/src/space.rs",
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/tests/status_lockfree.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
   "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-jstall.md",
+  "tools/jstall-zero-fs.sh",
   "tools/ownership.toml",
 ]
 

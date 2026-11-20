@@ -190,6 +190,13 @@ pub enum ReserveClass {
     /// [`SYNC_MAX_BYTES`] of data): admitted at once inside the band and
     /// charged to its bucket. At the hard mark it waits like any write.
     Sync,
+    /// The retry of a write the journal ring refused after the gate admitted
+    /// it (milestone jstall): it paid its pace and its tokens at the first
+    /// pass and takes none again, neither from the bucket nor from the delay
+    /// cap's overdraw, and it does not make the requests behind it due. It is
+    /// admitted at once when it fits and no request that waits for space
+    /// stands before it; else it waits for space like any request.
+    Retry,
 }
 
 /// The largest FUA write (data bytes) that is a [`ReserveClass::Sync`]
@@ -290,6 +297,21 @@ pub struct ThrottleFigures {
     pub ingest_rate: u64,
     /// Bytes of store freed per second, a 10 s average.
     pub reclaim_rate: u64,
+    /// Requests the ring pace (not the space curve) delayed and the gate
+    /// admitted (milestone jstall). Kept apart from `delayed_writes` and
+    /// the figures around it, which are the space throttle's.
+    pub ring_paced_writes: u64,
+    /// Their summed wait, milliseconds.
+    pub ring_paced_ms: u64,
+    /// The longest wait of one of them, milliseconds.
+    pub ring_pace_max_ms: u64,
+    /// Requests the ring pace admitted by the delay cap.
+    pub ring_pace_capped: u64,
+    /// FUA requests the ring pace let through at once.
+    pub ring_pace_bypassed_fua: u64,
+    /// The ring pace the gate applies now, bytes per second (0: none,
+    /// also with the band off or closing).
+    pub ring_pace_rate: u64,
 }
 
 /// A point-in-time view of the ledger.

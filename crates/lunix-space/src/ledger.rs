@@ -29,6 +29,9 @@ pub(crate) struct Parked {
     pub deadline: Duration,
     /// When the gate parked it (the gate's own wait is measured from here).
     pub parked_at: Duration,
+    /// Only the ring pace delays it (the space curve is not pacing): its
+    /// wait is counted in the ring pace's figures.
+    pub ring_paced: bool,
 }
 
 /// The last file-system reading and the ledger level it was taken at.
@@ -268,12 +271,26 @@ impl Ledger {
     /// A request that waited in the gate was admitted.
     fn note_delay(&mut self, p: &Parked, now: Duration, granted: bool) {
         let ms = u64::try_from(now.saturating_sub(p.parked_at).as_millis()).unwrap_or(u64::MAX);
-        self.counters.delay_max_ms = self.counters.delay_max_ms.max(ms);
+        if p.ring_paced {
+            self.counters.ring_delay_max_ms = self.counters.ring_delay_max_ms.max(ms);
+        } else {
+            self.counters.delay_max_ms = self.counters.delay_max_ms.max(ms);
+        }
         if granted {
-            self.counters.delayed_writes += 1;
-            self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
+            if p.ring_paced {
+                self.counters.ring_delayed_writes += 1;
+                self.counters.ring_delayed_ms = self.counters.ring_delayed_ms.saturating_add(ms);
+            } else {
+                self.counters.delayed_writes += 1;
+                self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
+            }
             self.counters.admitted = self.counters.admitted.saturating_add(p.bytes);
         }
+    }
+
+    /// True when the ring pace alone paces now (the space curve does not).
+    fn ring_only(&self) -> bool {
+        self.band_rate().is_none() && self.pace_rate().is_some()
     }
 
     /// The time at which the delay cap admits a request that arrived at
@@ -323,7 +340,11 @@ impl Ledger {
                     self.bucket.take(bytes);
                 } else if now >= self.cap_at(arrived) || self.due_behind(now) {
                     self.bucket.overdraw(bytes, rate);
-                    self.counters.delay_capped += 1;
+                    if self.ring_only() {
+                        self.counters.ring_capped += 1;
+                    } else {
+                        self.counters.delay_capped += 1;
+                    }
                 } else {
                     break;
                 }
@@ -520,6 +541,12 @@ impl Ledger {
         }
         let head_fits = self.head().is_none_or(|p| self.fits(p.bytes));
         let ahead = self.head().is_some();
+        if class == ReserveClass::Retry && head_fits {
+            // Paid at the first pass: no tokens, no overdraw, no cap.
+            self.admit(kind, bytes);
+            self.note_state(now);
+            return ReserveOutcome::Reserved;
+        }
         let Some(rate) = self.pace_rate() else {
             if !ahead || no_wait {
                 self.admit(kind, bytes);
@@ -532,7 +559,11 @@ impl Ledger {
         if class == ReserveClass::Sync && head_fits {
             // The write an fsync waits on: at once, charged to the bucket.
             self.bucket.overdraw(bytes, rate);
-            self.counters.bypassed_fua += 1;
+            if self.ring_only() {
+                self.counters.ring_bypassed_fua += 1;
+            } else {
+                self.counters.bypassed_fua += 1;
+            }
             self.admit(kind, bytes);
             self.note_state(now);
             return ReserveOutcome::Reserved;
@@ -548,7 +579,11 @@ impl Ledger {
                 // It waited its cap already (in its queue): admitted, the
                 // bucket carries the debt.
                 self.bucket.overdraw(bytes, rate);
-                self.counters.delay_capped += 1;
+                if self.ring_only() {
+                    self.counters.ring_capped += 1;
+                } else {
+                    self.counters.delay_capped += 1;
+                }
                 self.admit(kind, bytes);
                 self.note_state(now);
                 return ReserveOutcome::Reserved;
@@ -578,6 +613,7 @@ impl Ledger {
         let waiter = Waiter::new(wake.cloned());
         let arrived = arrived.min(now);
         let deadline = arrived.saturating_add(self.policy.full_timeout);
+        let ring_paced = fits && self.fits(bytes) && self.ring_only();
         self.waiters.push_back(Parked {
             waiter: waiter.clone(),
             kind,
@@ -585,6 +621,9 @@ impl Ledger {
             arrived,
             deadline,
             parked_at: now,
+            // A request that waits for space is the space throttle's, one
+            // that waits for tokens is the ring pace's when only it paces.
+            ring_paced,
         });
         let fits = fits && self.fits(bytes);
         if deadline <= now {
@@ -686,6 +725,7 @@ impl Ledger {
         t.soft = self.soft();
         t.resume = self.resume_mark();
         t.rate = self.band_rate();
+        t.ring_pace_rate = self.pace_rate().and(self.ring_pace).unwrap_or(0);
         t.paced_waiters = paced;
         t.space_waiters = space;
         SpaceSnapshot {

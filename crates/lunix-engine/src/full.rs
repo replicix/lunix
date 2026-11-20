@@ -9,11 +9,14 @@
 //!   60 s)` without ring progress while commits succeed (ordinary journal
 //!   back-pressure must not turn into `EIO` on a healthy volume with a short
 //!   `full_timeout`): `ENOSPC` while the failed commits since the last success
-//!   failed for space, else `EIO`. **Ring progress** is a ring file freed or a
-//!   cut that released journal bytes (milestone jstall): the time counts from
-//!   the later of the write's arrival and the last progress, so a slow but
-//!   moving ring never fails a write, and a ring that does not move fails
-//!   every parked write at its deadline. The queues judge every parked write
+//!   failed for space, else `EIO`. **Ring progress** is per lane (milestone
+//!   jstall): a ring file freed on the write's lane, or a sign of life of the
+//!   cut that is running (a segment appended or sealed, C5, C6, the reclaim).
+//!   The time counts from the later of the write's arrival and the last
+//!   progress, so a slow but moving ring never fails a write, a cut longer
+//!   than the deadline that keeps working does not either, and a lane that
+//!   gets no file fails its parked writes at their deadline whatever the
+//!   other lanes do. The queues judge every parked write
 //!   of a queue that waits for the ring (not only the head) at each wake and
 //!   on the timer thread's signal ([`Inner::signal_ring_parked`]), which runs
 //!   while a commit holds the coordinator.
@@ -52,7 +55,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lunix_format::CommitSeq;
@@ -103,9 +106,16 @@ pub(crate) struct FullState {
     /// `clock.monotonic()` in ms + 1 when writes were admitted again after
     /// a refusal (0: refusing, or never refused).
     admitted_since_ms: AtomicU64,
-    /// `clock.monotonic()` in ms + 1 of the last ring progress: a ring file
-    /// freed, or a cut that released journal bytes (0: none yet).
-    ring_progress_ms: AtomicU64,
+    /// Per lane: the files `Journal::freed_files_by_lane` last showed, and
+    /// `clock.monotonic()` in ms + 1 when that count last rose (0: never):
+    /// the lane's ring progress (milestone jstall).
+    lane_freed_seen: Vec<AtomicU64>,
+    lane_progress_ms: Vec<AtomicU64>,
+    /// A cut is running (between its start and its end, success or not).
+    cut_running: AtomicBool,
+    /// `clock.monotonic()` in ms + 1 of the last sign of life of the running
+    /// cut: its start, a segment append or seal, C5, C6, the reclaim.
+    cut_alive_ms: Arc<AtomicU64>,
     /// `clock.monotonic()` in ms + 1 of the last "refused" log line.
     refused_logged: AtomicU64,
     /// The ring bound after `begin_close`, in ms.
@@ -130,7 +140,12 @@ pub(crate) struct FullState {
 
 impl FullState {
     /// `last_hole`: the highest replayed hole record (its cut is to come).
-    pub(crate) fn new(full_timeout: Duration, tip_commit: u64, last_hole: u64) -> Self {
+    pub(crate) fn new(
+        full_timeout: Duration,
+        tip_commit: u64,
+        last_hole: u64,
+        lanes: usize,
+    ) -> Self {
         Self {
             full_timeout_ms: AtomicU64::new(ms(full_timeout).max(1)),
             blocked: AtomicBool::new(false),
@@ -138,7 +153,10 @@ impl FullState {
             commit_failures: AtomicU64::new(0),
             last_failure_ms: AtomicU64::new(0),
             admitted_since_ms: AtomicU64::new(0),
-            ring_progress_ms: AtomicU64::new(0),
+            lane_freed_seen: (0..lanes).map(|_| AtomicU64::new(0)).collect(),
+            lane_progress_ms: (0..lanes).map(|_| AtomicU64::new(0)).collect(),
+            cut_running: AtomicBool::new(false),
+            cut_alive_ms: Arc::new(AtomicU64::new(0)),
             refused_logged: AtomicU64::new(0),
             close_bound_ms: AtomicU64::new(0),
             last_hole: AtomicU64::new(last_hole),
@@ -205,16 +223,58 @@ impl FullState {
         self.ladder_backoff()
     }
 
-    /// The ring moved at `now`: a file was freed or a cut released journal
-    /// bytes. Parked writes count their deadline from here.
-    pub(crate) fn note_ring_progress(&self, now: Duration) {
-        self.ring_progress_ms
+    /// The journal's freed-files counts (by lane) as of `now`: a lane whose
+    /// count rose got a file freed, which is that lane's ring progress.
+    pub(crate) fn note_freed_files(&self, counts: &[u64], now: Duration) {
+        for ((seen, at), &n) in self
+            .lane_freed_seen
+            .iter()
+            .zip(&self.lane_progress_ms)
+            .zip(counts)
+        {
+            if seen.swap(n, Ordering::Relaxed) < n {
+                at.fetch_max(ms(now).saturating_add(1), Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// A lane's last ring progress, `None` before the first.
+    pub(crate) fn lane_progress(&self, lane: usize) -> Option<Duration> {
+        match self.lane_progress_ms.get(lane)?.load(Ordering::Relaxed) {
+            0 => None,
+            p => Some(Duration::from_millis(p - 1)),
+        }
+    }
+
+    /// A cut began at `now`.
+    pub(crate) fn cut_begin(&self, now: Duration) {
+        self.cut_alive_ms
+            .store(ms(now).saturating_add(1), Ordering::Relaxed);
+        self.cut_running.store(true, Ordering::Release);
+    }
+
+    /// The running cut did something (appended, sealed, committed).
+    pub(crate) fn cut_alive(&self, now: Duration) {
+        self.cut_alive_ms
             .fetch_max(ms(now).saturating_add(1), Ordering::Relaxed);
     }
 
-    /// The last ring progress, `None` before the first.
-    pub(crate) fn ring_progress(&self) -> Option<Duration> {
-        match self.ring_progress_ms.load(Ordering::Relaxed) {
+    /// The stamp the segment wrapper of the running cut writes to.
+    pub(crate) fn cut_alive_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.cut_alive_ms)
+    }
+
+    /// The cut ended, in success or failure: its life signs stop counting.
+    pub(crate) fn cut_end(&self) {
+        self.cut_running.store(false, Ordering::Release);
+    }
+
+    /// The running cut's last sign of life (`None` when no cut runs).
+    fn cut_life(&self) -> Option<Duration> {
+        if !self.cut_running.load(Ordering::Acquire) {
+            return None;
+        }
+        match self.cut_alive_ms.load(Ordering::Relaxed) {
             0 => None,
             p => Some(Duration::from_millis(p - 1)),
         }
@@ -359,21 +419,37 @@ impl JournalCharges {
 }
 
 impl Inner {
+    /// Reads the journal's per-lane freed-file counts: a lane whose count rose
+    /// got ring progress (milestone jstall).
+    pub(crate) fn note_freed_files(&self) {
+        let counts = self.journal.freed_files_by_lane();
+        self.full.note_freed_files(&counts, self.clock.monotonic());
+        self.full.cut_alive(self.clock.monotonic());
+    }
+
     /// The verdict on a write parked for a full journal ring that arrived at
     /// `arrived` (`clock.monotonic()`): `None` keeps it waiting, else the
     /// errno it fails with. The deadline counts from the later of the arrival
     /// and the ring's last progress.
-    pub(crate) fn ring_wait_verdict(&self, arrived: Duration) -> Option<i32> {
+    pub(crate) fn ring_wait_verdict(&self, arrived: Duration, lane: usize) -> Option<i32> {
         if self.read_only() {
             return Some(EIO);
         }
         let f = &self.full;
         let now = self.clock.monotonic();
         let waited = now.saturating_sub(arrived);
-        let since = f.ring_progress().map_or(arrived, |p| p.max(arrived));
+        // The later of the arrival, the lane's last freed file and the life
+        // of the cut that is running (a long cut that keeps sealing is not
+        // a stuck ring; once it ends only a freed file counts).
+        let since = [f.lane_progress(lane), f.cut_life()]
+            .into_iter()
+            .flatten()
+            .fold(arrived, Duration::max);
         let idle = now.saturating_sub(since);
         let timeout = f.full_timeout();
-        let failed_since = f.last_failure_ms.load(Ordering::Relaxed) > ms(arrived);
+        // A failed commit shortens the limit to `full_timeout` only when it
+        // came after the last sign of progress of this write's wait.
+        let failed_since = f.last_failure_ms.load(Ordering::Relaxed) > ms(since);
         let normal = if failed_since {
             idle >= timeout
         } else {
@@ -538,7 +614,7 @@ mod tests {
 
     #[test]
     fn only_space_and_io_failures_count_for_a_ring_wait() {
-        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        let f = FullState::new(Duration::from_secs(60), 0, 0, 1);
         let busy: Result<()> = Err(Error::Busy {
             what: "writes in flight at the cut",
         });
@@ -561,7 +637,7 @@ mod tests {
 
     #[test]
     fn the_ladder_back_off_starts_over_only_after_writes_were_admitted_a_while() {
-        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        let f = FullState::new(Duration::from_secs(60), 0, 0, 1);
         f.set_ladder_backoff(Duration::from_secs(32));
         assert!(f.set_blocked(true, Duration::from_secs(1)));
         assert!(f.set_blocked(false, Duration::from_secs(2)));
@@ -587,7 +663,7 @@ mod tests {
     fn a_new_episode_after_a_long_admitted_stretch_starts_at_the_minimum() {
         // Final review m-A: the next refusal comes before any ladder pass
         // asked for the back-off; the long admitted stretch still counts.
-        let f = FullState::new(Duration::from_secs(60), 0, 0);
+        let f = FullState::new(Duration::from_secs(60), 0, 0, 1);
         f.set_ladder_backoff(Duration::from_secs(60));
         assert!(f.set_blocked(true, Duration::from_secs(1)));
         assert!(f.set_blocked(false, Duration::from_secs(10)));

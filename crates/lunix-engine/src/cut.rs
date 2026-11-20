@@ -22,16 +22,35 @@ pub(crate) const HISTORY: usize = 4;
 /// The journal bytes and duration of the last [`HISTORY`] committed cuts.
 #[derive(Debug, Default)]
 pub(crate) struct DrainHistory {
-    cuts: VecDeque<(u64, Duration)>,
+    /// Journal bytes, C1 to C9 time, and the time from the end of the cut
+    /// before to the end of this one (never more than twice the cut's own).
+    cuts: VecDeque<(u64, Duration, Duration)>,
 }
 
 impl DrainHistory {
-    /// Notes a committed cut of `bytes` that took `took`.
-    pub(crate) fn push(&mut self, bytes: u64, took: Duration) {
+    /// Notes a committed cut of `bytes` that took `took`, `since_last` after
+    /// the end of the cut before it (`None` for the first).
+    pub(crate) fn push(&mut self, bytes: u64, took: Duration, since_last: Option<Duration>) {
         if self.cuts.len() == HISTORY {
             self.cuts.pop_front();
         }
-        self.cuts.push_back((bytes, took));
+        // The gaps between cuts (the collector's share, the tick) are part of
+        // the sustained rate, an idle spell is not: capped at twice the cut.
+        let interval = since_last.map_or(took, |g| g.clamp(took, took.saturating_mul(2)));
+        self.cuts.push_back((bytes, took, interval));
+    }
+
+    /// The sustained drain rate of the history in journal bytes per second:
+    /// bytes over the time from cut end to cut end, so it is below the rate
+    /// of the cuts themselves by the gaps between them (milestone jstall).
+    /// `None` without a history.
+    pub(crate) fn sustained_rate(&self) -> Option<u64> {
+        let bytes: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
+        let span: u128 = self.cuts.iter().map(|c| c.2.as_nanos()).sum();
+        if span == 0 || bytes == 0 {
+            return None;
+        }
+        Some(u64::try_from(bytes.saturating_mul(1_000_000_000) / span).unwrap_or(u64::MAX))
     }
 
     /// The journal bytes the drain rate of the history moves in `target`;
@@ -224,6 +243,8 @@ pub(crate) struct CutCounters {
     pub(crate) ring_wait_recent: RecentMax,
     /// The ring pace now, bytes per second (0: none).
     pub(crate) ring_pace_rate: AtomicU64,
+    /// The collector yields to the cuts until this `clock.monotonic()` in ms.
+    pub(crate) yield_until_ms: AtomicU64,
     pub(crate) last_cut_bytes: AtomicU64,
     pub(crate) last_cut_ms: AtomicU64,
 }
@@ -379,5 +400,22 @@ mod tests {
         let s = h.snapshot();
         assert_eq!((s[0], s[3], s[7]), (1, 2, 1));
         assert_eq!(s.iter().sum::<u64>(), 4);
+    }
+
+    #[test]
+    fn the_sustained_rate_counts_the_gaps_between_cuts_up_to_twice_the_cut() {
+        let mut h = DrainHistory::default();
+        h.push(1000, secs(1), None);
+        // 0.5 s after the last cut ended; then an idle night, capped at 2 s.
+        h.push(1000, secs(1), Some(Duration::from_millis(1500)));
+        h.push(1000, secs(1), Some(secs(36_000)));
+        // 3000 bytes over 1 + 1.5 + 2 s; the cuts alone moved 1000 per second.
+        assert_eq!(h.sustained_rate(), Some(666));
+        assert_eq!(h.budget(secs(1)), Some(1000));
+        // A gap below the cut's own time is the cut's time.
+        let mut g = DrainHistory::default();
+        g.push(500, secs(2), Some(secs(1)));
+        assert_eq!(g.sustained_rate(), Some(250));
+        assert_eq!(DrainHistory::default().sustained_rate(), None);
     }
 }

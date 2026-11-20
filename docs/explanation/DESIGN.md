@@ -410,7 +410,10 @@ journal):
   Each file is zeroed and renamed before it is free: its old records are
   zeroed with `fallocate(FALLOC_FL_ZERO_RANGE)` where the file system does it
   (a metadata operation, nothing is written; ext4 and xfs), else rewritten
-  with zeros, the choice made at the first reclaim; either way the file reads
+  with zeros, the choice made at the first reclaim; a call that fails for
+  another reason (ENOSPC) rewrites that file after allocating the range again
+  (a ring file is never left sparse), is logged once per errno and is given up
+  after three in a row; either way the file reads
   as zeros past its new records (on-disk-formats §5.1), then gets its new
   header, is renamed and the directory synced. The lane it belongs to is
   signalled at that moment, not when the reclaim of every lane is done
@@ -476,11 +479,14 @@ journal):
      quiesce fails them, so the drain finishes.
 - Every wait has a deadline, the wait for a full journal ring included
   (ADR-32); the ring's counts from the later of the write's arrival and the
-  ring's last progress (a ring file freed, or a cut that released journal
-  bytes), and the queues judge every parked write on a timer of their own,
+  last progress of its lane (a ring file freed on it, or a sign of life of the
+  cut that is running: a segment appended or sealed, C5, C6, the reclaim), and
+  the queues judge every parked write on a timer of their own,
   also while a cut holds the coordinator. A ring that moves slowly never
   fails a write; one that does not move fails every parked write after
-  `max(full_timeout, 60 s)`. Discards and write-zeroes are never refused for space and do
+  `max(full_timeout, 60 s)`. A write kept alive past `full_timeout` by ring
+  progress that then meets a gate in `stop` is refused at once: the gate's own
+  deadline still counts from arrival. Discards and write-zeroes are never refused for space and do
   not queue behind parked writes; on a refusing volume the coordinator
   cuts them and turns the retained window (`retain_last + 1` empty FULLs)
   so their space comes back. Which commit last took a discard is not
@@ -907,18 +913,22 @@ trailer = footer offset + length + magic
   full ring is woken as soon as one of its files is free.
 - **The ring pace.** While the ring is at three quarters full, or a write
   waited for it in the last 5 s (a lane can be full while the ring is not),
-  the coordinator hands the space gate the drain rate of its last four cuts
+  the coordinator hands the space gate the sustained drain rate of its last
+  four cuts (journal bytes over the time from cut end to cut end, so the gaps
+  between cuts are in it)
   (`SpaceGate::set_ring_pace`), until the ring is below half and nothing has
   waited for 5 s. The paced band of §4.3 then admits journal reservations at
   that rate, so a write sees a short smooth wait instead of the stop of two
   cuts: the same bucket, the delay cap counted from arrival and the bypass of
   a FUA write of at most 256 KiB, but no space state, so GC pressure does not
-  follow it.
+  follow it. A write the ring refused after the gate admitted it retries
+  without tokens (`ReserveClass::Retry`): it paid its pace once. The ring
+  pace's delays are counted apart from the space throttle's in the status.
 - **GC yields to the cuts.** While a write waits for the ring, and the gate
   applies no space pressure, the collector gets one step after each cut
   instead of a third of the cut's time and compacts at an eighth of its rate
-  (at least 4 MiB/s): the cuts have the device, and the collector is slowed,
-  never stopped.
+  (at least 4 MiB/s), the switch holding for 2 s after the last waiter: the
+  cuts have the device, and the collector is slowed, never stopped.
 - A cut never stalls new writes; it only waits for in-flight ones. Every
   completed FLUSH names a `write_seq`, so "the state at the last FLUSH before
   time t" is well defined (CDP at commit granularity).

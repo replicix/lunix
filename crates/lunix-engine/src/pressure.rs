@@ -58,6 +58,10 @@ pub fn yielding(base: GcParams) -> GcParams {
     }
 }
 
+/// How long the collector keeps yielding after the last write that waited
+/// for the ring, milliseconds (milestone jstall: no flip-flop of the rate).
+pub const YIELD_HOLD_MS: u64 = 2_000;
+
 /// What the collector is getting.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum Pressure {
@@ -378,8 +382,19 @@ impl Inner {
     /// for the journal ring and the space gate applies no pressure (milestone
     /// jstall; under pressure the volume needs the collector more).
     pub(crate) fn gc_yields_to_ring(&self) -> bool {
-        self.cuts.ring_waiters.load(Ordering::Relaxed) > 0
-            && self.pressure_now() == Pressure::Normal
+        if self.pressure_now() != Pressure::Normal {
+            return false;
+        }
+        let now = u64::try_from(self.clock.monotonic().as_millis()).unwrap_or(u64::MAX);
+        if self.cuts.ring_waiters.load(Ordering::Relaxed) > 0 {
+            // The switch holds for `YIELD_HOLD` after the last waiter, so the
+            // compaction rate does not flip between two steps.
+            self.cuts
+                .yield_until_ms
+                .store(now.saturating_add(YIELD_HOLD_MS), Ordering::Relaxed);
+            return true;
+        }
+        now < self.cuts.yield_until_ms.load(Ordering::Relaxed)
     }
 
     /// Reads the gate at a tick: sets the collector's pressure and writes

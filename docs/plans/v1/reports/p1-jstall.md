@@ -133,3 +133,85 @@ directory was deleted at the end.
 ## Commits
 
 `bb62440` (code, tests, DESIGN, ownership), `1a04bcd` (tests that cannot hang when their rule is removed) and the commit of this report, all signed, on `p1/jstall` (pushed; not merged).
+
+## Review round (MERGE AFTER FIXES: the Fable review of bb62440/1a04bcd/a9e09c2)
+
+One more signed commit on `p1/jstall`. Same host, CPUs 8-15, `-j 4`, debug off. The review found no ordering violation.
+
+| finding | what changed | test (fails with the fix removed) |
+|---|---|---|
+| C1 | Ring progress is **per lane**: `FullState` keeps, per lane, the freed-file count last seen and the time it last rose; the engine reads `Journal::freed_files_by_lane` right after every reclaim (C9 and `reclaim_covered`, also after a failed reclaim, which may have freed some lanes). A queue judges its writes against its own lane. The `cut_bytes > 0` stamp is gone | `a_lane_that_gets_no_file_fails_its_parked_writes_whatever_the_other_lanes_do` (lane 1 refused, lane 0 cuts and frees files every 19 s; the lane-1 write fails at its deadline; new `MemJournal::set_nospace_lane`); `a_slow_but_progressing_ring_never_fails_a_write` now frees a file per cut |
+| C2 | A **running cut** is alive: `CutRunning` (a guard, set from the start of the cut loop until it ends in any way) and a stamp at every segment append and seal (the destage gets the segment store through a small `SealStamp` wrapper), at C3, C5, C6, C8 and after the reclaim. While a cut runs, the later of its last stamp counts as progress for every lane; once it ends only a freed file counts (so a lane the cut did not serve fails at its deadline right after it, as in C1). A failed commit shortens the limit to `full_timeout` only when it came after the write's last sign of progress (it is counted from there, not from the arrival), so a long live cut that then fails does not fail the writes parked before it at once | `a_cut_longer_than_the_deadline_that_keeps_sealing_does_not_fail_a_parked_write` (a cut of 100 s of manual clock, 25 s per seal through `GStore`; a thread polls the queue on the timer's signal; the write survives, and is admitted when the cut freed files) |
+| C3 | New `ReserveClass::Retry`: a write the ring refused (`ring_since` set) retries through the gate without tokens, without the cap's overdraw, and does not make the requests behind it due; it waits only behind a space waiter | `lunix-space/tests/pace.rs::the_retry_of_a_ring_refused_write_takes_no_tokens_and_trips_nothing`; the stack test below |
+| C3, stack | `lunixd/tests/stack_throttle.rs::sustained_ingest_on_a_small_ring_with_a_slow_drain_is_paced_and_never_fails`: the real gate, engine and store; four ring files of 4 MiB (`journal_tweak`), a store whose `fdatasync` and directory sync take 150 ms (`SlowFs`), 25 s of 256 KiB writes at depth 16 over a 32 MiB region. Asserts no failed write, a non-zero `ring_pace_rate` seen, `ring_paced_writes > 0`, the space throttle `open`, files freed, and the longest completion at most two cut durations + the 10 s delay cap + 5 s. Measured: 331 writes, none failed, the longest completion 3.03 s (cuts of at most 1.56 s: bound 18 s), ring pace applied at 4 MiB/s (the band's floor; the engine's own figure was 2.8 MB/s), 198 writes delayed by the pace (12.2 s in all, the longest 62 ms, none by the cap), the space throttle `open` with all its figures 0, 19 ring files freed, longest ring wait 1.6 s. | it is in `tools/ci.sh` (`stack_throttle`) |
+| C4 | A `ZERO_RANGE` failure other than "unsupported" rewrites that file after a plain `fallocate(KEEP_SIZE)` over the range (a half-done punch cannot leave a hole), is logged once per errno, and after 3 failures in a row `ZERO_RANGE` is off for the journal. `FileJournal::inject_zero_range_errno` (hidden) makes the calls fail for tests and the benchmark | `a_zero_range_that_fails_falls_back_to_the_rewrite_leaves_no_hole_and_is_given_up_after_three` (ENOSPC from every call, five reclaims: 3 calls, 5 rewrites, no ring file with fewer blocks than bytes) |
+| S1 | `journal-zero-bench` and the reuse and recovery tests on ext4, xfs and btrfs, nearly full, see the table below | `tools/jstall-zero-fs.sh` (root, through `tools/remote.sh root`) |
+| C5 | In `queue.rs`'s background test every pair of writes of an iteration where the earlier was acknowledged before the later was submitted must have `seq(earlier) < seq(later)`; the log of numbers is emptied every iteration | the test |
+| C6 | The ring pace's delays, caps, FUA bypasses and longest wait are counted apart (`ring_paced_writes`, `ring_paced_ms`, `ring_pace_max_ms`, `ring_pace_capped`, `ring_pace_bypassed_fua`, in the gate's figures and the status); the space throttle's `delayed_*`, `delay_*` and `bypassed_fua` stay what they were. `ring_pace_rate` of the status is the gate's applied rate (0 with the band off or closing). The ring-wait maxima (since attach, 60 s) now start at the **first ring refusal** (a write queued behind a refused one: from the later of its arrival and the refusal), so the time in the space gate is not in them | `the_ring_pace_is_counted_apart_from_the_space_throttle_and_only_while_applied`, `the_recent_longest_wait_counts_from_the_first_ring_refusal_and_ends_after_60_s` |
+| C7 | A queue keeps `ring_refused`, the count of its requests the ring refused; the scans of the FIFOs, the verdicts and the gauge run only when it is not 0, and `ring_wait_parked` is that count. Not measured: the saving is a hash lookup per parked entry per poll while a queue holds paced writes; there is no per-poll benchmark here | `every_parked_write_is_judged_not_only_the_head` fails when the counter is not kept |
+| S3 | The pace is the **sustained** drain: journal bytes over the time from cut end to cut end of the last four cuts, an interval capped at twice the cut's own time (an idle spell is not a drain rate) | `writes_are_paced_to_the_drain_rate_...` (half a second between the cuts), `cut::tests::the_sustained_rate_counts_the_gaps...` |
+| S4 | The GC yield holds for 2 s after the last waiter | `the_collector_keeps_yielding_for_two_seconds_after_the_last_waiter` |
+| C8 | The test count below comes from the `test result` lines of one run | |
+| S2 | Not done: the order (zero, `fdatasync`, header, `fdatasync`, rename, directory sync) is unchanged and the first `fdatasync` follows the range; a dm-log-writes crash run on the three file systems was not made | |
+
+### ZERO_RANGE on ext4, xfs and btrfs (S1)
+
+Loop-device images of 3 GiB under the milestone's directory (`mkfs`, mount, run, unmount, detach, remove), one root run through `tools/remote.sh root`
+(`tools/jstall-zero-fs.sh`). The benchmark is the one above with 8 rounds; the loop device is backed by the page cache of the host, so the append
+latencies (microseconds) and the fill rates (GB/s) say nothing about a device: only the reclaim time, which is the metadata and sync work, and the
+comparison between the two modes are meaningful. "Nearly full": a filler file leaves 8 MiB free (ext4, xfs; btrfs allocates its data chunks apart, the filler
+filled the allocated ones and left 2.2 GiB unallocated), 6 rounds, then every ring file is checked for holes (blocks against length).
+
+| file system | reclaim p50 / p99, `ZERO_RANGE` | reclaim p50 / p99, rewrite | append after reuse p50 / p99 (us), range / rewrite | nearly full, real file system | nearly full, `ZERO_RANGE` failing with ENOSPC | reuse and recovery tests |
+|---|---|---|---|---|---|---|
+| ext4 | 19.4 / 19.8 ms | 152.2 / 159.8 ms | 8 / 16 and 5 / 15 | 6 of 6 files by range, no hole | 3 calls, 6 files by rewrite, no hole | 4 ok |
+| xfs | 12.4 / 12.7 ms | 151.7 / 167.2 ms | 10 / 20 and 6 / 25 | 6 of 6 by range, no hole | 3 calls, 6 by rewrite, no hole | 4 ok |
+| btrfs | 22.2 / 110.5 ms | 135.9 / 222.6 ms | 10 / 21 and 9 / 19 | **`ZERO_RANGE` failed with ENOSPC (errno 28) for real**: 3 calls, then given up, 6 files by rewrite, no hole | 3 calls, 6 by rewrite, no hole | 4 ok |
+
+The ENOSPC fallback ran for real on btrfs and by injection on all three; xfs and ext4 did not refuse with 8 MiB free. The ring files were never sparse. The tests of
+the table's last column are the two reuse tests, `freed_files_are_counted_by_lane` and the failing-`ZERO_RANGE` test, run with their scratch directory on each file system.
+
+### Failing without the rule (this round)
+
+Each removal was one edit on the remote copy, restored after the run.
+
+| rule removed | tests that failed |
+|---|---|
+| progress is one global stamp (any lane's file) | `a_lane_that_gets_no_file_fails_its_parked_writes_whatever_the_other_lanes_do` |
+| a segment seal is no sign of life of the cut | `a_cut_longer_than_the_deadline_that_keeps_sealing_does_not_fail_a_parked_write` |
+| the deadline counts from arrival | `a_slow_but_progressing_ring_never_fails_a_write` |
+| a lane's progress stamped without a freed file | `a_cut_that_frees_no_file_is_no_progress` |
+| only the front of a queue is judged | `every_parked_write_is_judged_not_only_the_head` |
+| `ring_refused` not kept | the same test |
+| the retry is an ordinary reservation | `the_retry_of_a_ring_refused_write_takes_no_tokens_and_trips_nothing` |
+| `ZERO_RANGE` never given up | `a_zero_range_that_fails_falls_back_...` |
+| the ring pace counted with the space throttle | `the_ring_pace_is_counted_apart_from_the_space_throttle_and_only_while_applied` |
+| the pace follows the cuts' own speed | `writes_are_paced_to_the_drain_rate_while_the_ring_is_nearly_full` |
+| no hold of the GC yield | `the_collector_keeps_yielding_for_two_seconds_after_the_last_waiter` |
+| GC does not yield / yields under space pressure | the two GC tests of the first round (`the_collector_yields_...`, `space_pressure_keeps_...`) |
+| `ZERO_RANGE` never used | `a_file_reinitialised_by_zero_range_...` |
+| ring wait counted from arrival | `the_recent_longest_wait_counts_from_the_first_ring_refusal_...` |
+
+Not separately detectable: removing the plain `fallocate` before the rewrite changes no test, because the rewrite itself writes the whole range and so
+allocates it; the call is the review's belt for a rewrite that fails half way (ENOSPC on both).
+
+### Gate of the review round
+
+`tools/ci.sh` (CPUs 8-15, `-j 4`, debug off, `CARGO_INCREMENTAL=0`) on the final head: green, ownership `jstall ok (36 changed paths)`, `ci: all green`; 2 176 tests passed, 0 failed, 28 ignored (the sum of the `test result` lines of the log, one non-interleaved run). Kill loops by hand on the same code (`LUNIX_KILL_CUT_MS=1`, first hit, `cut_min_bytes = 1`; the report commit changes no code):
+
+| loop | points reached | runs / kills | partial cuts | kills inside a partial cut | result |
+|---|---|---|---|---|---|
+| plain 16 KiB | 52 of 55 | 54 / 54 | 10 | 40 of 42 points | ok (1 744 s) |
+| integrity 16 KiB | 52 of 55 | 57 / 57 | 10 | 40 of 42 | ok (1 963 s) |
+| encrypted 16 KiB | 52 of 55 | 54 / 54 | 10 | 40 of 41 | ok (1 804 s) |
+| plain 64 KiB | 52 of 55 | 54 / 54 | 10 | 40 of 42 | ok (1 777 s) |
+
+Deviations of this round:
+1. **The failed-commit path** keeps the ADR-32 rule (a write fails at `full_timeout` after a commit failed for space) but counts it from the write's last progress, a live cut included: a cut that sealed for a minute and then failed fails the writes parked before it `full_timeout` after its last seal, not at once and not never. A failed cut is no progress.
+2. **Cut life only counts while the cut runs.** After it ends, a lane that got no file fails its overdue writes at once (C1 wins over C2 there, on purpose).
+3. **`ring_wait_*` changed meaning again**, from the first ring refusal instead of the arrival (C6's choice; the brief's earlier text said arrival).
+4. **S2** was not run (no dm-log-writes). **C7** has no measurement.
+5. **A first CI run of this round failed once in `lunix-cli`'s `fsck_key`** with "another process holds the volume lock": two test processes of my earlier mutation runs, hung by mutated rules, were still alive on the host (they hold test volumes); I killed them (they were mine) and the whole gate then ran green but for the ownership line, which I fixed; the gate above is the run after that.
+6. `tools/jstall-zero-fs.sh` and `lunixd/tests/stack_throttle.rs` are in `[jstall]`; the root run of S1 was refused once by the ublk-leftovers check while another workload's device was up, and ran when it was gone (retry loop, no bypass of the wrapper).
+
+Remote disk: largest sample 2.6 GiB (target; the three loop images were 3 GiB sparse files of which under 1 GiB was used each, one at a time, and the kill loops add under 1 GiB). The remote directory, the loop images (removed by the script) and the scratch were deleted at the end.

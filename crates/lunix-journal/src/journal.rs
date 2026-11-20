@@ -135,6 +135,31 @@ impl FileJournal {
         )
     }
 
+    /// Test hook: `FALLOC_FL_ZERO_RANGE` calls fail with this errno (`None`:
+    /// they do not), and how many were made so far.
+    #[doc(hidden)]
+    pub fn inject_zero_range_errno(&self, errno: Option<i32>) {
+        self.sh
+            .rings
+            .zero_inject_errno
+            .store(errno.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The errnos `FALLOC_FL_ZERO_RANGE` failed with so far (each once).
+    #[doc(hidden)]
+    pub fn zero_range_errnos(&self) -> Vec<i32> {
+        crate::ring::lock(&self.sh.rings.zero_logged)
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    /// `FALLOC_FL_ZERO_RANGE` calls made so far (failed ones included).
+    #[doc(hidden)]
+    pub fn zero_range_attempts(&self) -> u64 {
+        self.sh.rings.zero_attempts.load(Ordering::Relaxed)
+    }
+
     /// Test hook: the next `append` on `lane` fails with an I/O error after
     /// its slot was consumed, as a failed write would.
     #[doc(hidden)]

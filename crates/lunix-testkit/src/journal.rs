@@ -273,6 +273,8 @@ struct State {
     reclaims: u64,
     fail_flush: bool,
     nospace: bool,
+    /// Lanes whose `try_reserve` answers `NoSpace` (the others go on).
+    nospace_lanes: BTreeSet<u16>,
     retire_from: Option<u64>,
     /// The highest `upto` of a completed group flush, or the recovered
     /// records once the first lane open retired the rest.
@@ -469,6 +471,7 @@ impl MemJournal {
                 reclaims: 0,
                 fail_flush: false,
                 nospace: false,
+                nospace_lanes: BTreeSet::new(),
                 retire_from: None,
                 flushed: 0,
                 marks_on: false,
@@ -588,6 +591,16 @@ impl MemJournal {
     /// While set, `try_reserve` answers `NoSpace` (nothing consumed).
     pub fn set_nospace(&self, on: bool) {
         lock(&self.inner.state).nospace = on;
+    }
+
+    /// The same for one lane only.
+    pub fn set_nospace_lane(&self, lane: u16, on: bool) {
+        let mut st = lock(&self.inner.state);
+        if on {
+            st.nospace_lanes.insert(lane);
+        } else {
+            st.nospace_lanes.remove(&lane);
+        }
     }
 
     /// True once the journal is poisoned.
@@ -1093,7 +1106,7 @@ impl JournalLane for MemLane {
         if malformed {
             return Err(Error::invalid("malformed reservation"));
         }
-        if st.nospace {
+        if st.nospace || st.nospace_lanes.contains(&self.id.0) {
             return Ok(SlotOutcome::NoSpace);
         }
         let idx = self.idx();

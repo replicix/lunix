@@ -850,8 +850,9 @@ pub struct WritePathStatus {
     /// waiters and the writes (and holes) queued behind them.
     pub ring_parked_writes: u64,
     /// The longest any write has waited for the ring since the attach, from
-    /// its arrival to its admission or failure (one still waiting included, as
-    /// of the last time it was judged), milliseconds.
+    /// the ring's first refusal to its admission or failure (the time in the
+    /// space gate before it is not in it; one still waiting included, as of
+    /// the last time it was judged), milliseconds.
     pub ring_wait_max_since_attach_ms: u64,
     /// The same over the last 60 s (five-second steps).
     pub ring_wait_max_60s_ms: u64,
@@ -862,9 +863,18 @@ pub struct WritePathStatus {
     /// (bucket 0: under 1 us; the last bucket takes everything longer).
     /// [`WRITE_LATENCY_BUCKETS`] entries.
     pub write_latency_log2_us: Vec<u64>,
-    /// The rate the admission of writes is paced to now because the ring is
-    /// nearly full, bytes per second (0: no pace).
+    /// The rate the gate paces the admission of writes to now because the ring
+    /// is nearly full, bytes per second (0: no pace applied, also with the
+    /// band off).
     pub ring_pace_rate: u64,
+    /// Writes the ring pace delayed in the gate (the space throttle's own
+    /// figures are in `throttle`), their summed wait, the longest wait, those
+    /// admitted by the delay cap and the FUA writes let through.
+    pub ring_paced_writes: u64,
+    pub ring_paced_ms: u64,
+    pub ring_pace_max_ms: u64,
+    pub ring_pace_capped: u64,
+    pub ring_pace_bypassed_fua: u64,
     /// Bytes of the resident journal window now (what the journal keeps in
     /// memory of what it wrote until the ring file is reclaimed).
     pub window_resident_bytes: u64,

@@ -95,17 +95,18 @@ fn timer_tick(r: &mut Running) {
 
 #[test]
 fn a_slow_but_progressing_ring_never_fails_a_write() {
-    // Four cuts, each 50 s after the last: the ring moves, slowly. A write
-    // parked since the start is 200 s old and has never waited 60 s for
-    // nothing, so it must not fail. (Counted from its arrival it fails at the
-    // second cut.)
+    // Four cuts, each 50 s after the last, each freeing a ring file: the
+    // ring moves, slowly. A write parked since the start is 200 s old and has
+    // never waited 60 s for nothing, so it must not fail. (Counted from its
+    // arrival it fails at the second cut.)
     let mut v = ring(1, 64);
     v.tweak = |c| {
         c.cut_target = Duration::from_millis(1);
         c.cut_min_bytes = Some(1);
     };
     let mut r = v.open().map_err(|e| e.0).expect("open");
-    writes(&mut r, 0, 8);
+    // Six ring files of records, the oldest sealed ones free one per cut.
+    writes(&mut r, 0, 6 * 252);
     r.journal.set_nospace(true);
     let t = r.submit(0, IoOp::Write, false, 8192, 4096, &pattern(99, 4096));
     pump(&mut r, 20);
@@ -114,13 +115,18 @@ fn a_slow_but_progressing_ring_never_fails_a_write() {
     for round in 1..=4u64 {
         v.clock.advance(Duration::from_secs(50));
         timer_tick(&mut r);
-        assert!(!r.is_done(t), "round {round}: 50 s without a cut is fine");
+        assert!(!r.is_done(t), "round {round}: 50 s without a file is fine");
+        let freed = r.engine.write_stats().freed_files_by_lane[0];
         let cut = r.engine.commit_bounded(false).expect("a slow cut");
         assert!(matches!(cut, CommitOutcome::Committed { .. }), "{cut:?}");
+        assert!(
+            r.engine.write_stats().freed_files_by_lane[0] > freed,
+            "the cut freed a ring file"
+        );
         timer_tick(&mut r);
         assert!(
             !r.is_done(t),
-            "round {round}: {} s after its arrival, a cut just moved the ring",
+            "round {round}: {} s after its arrival, a file was just freed",
             (v.clock.monotonic() - arrived).as_secs()
         );
     }
@@ -150,9 +156,9 @@ fn a_ring_without_progress_fails_a_write_at_its_deadline_within_one_timer_tick()
 }
 
 #[test]
-fn a_cut_that_released_nothing_is_no_progress() {
-    // An empty FULL (nothing in the cut) does not move the ring; it must not
-    // keep a parked write alive for ever.
+fn a_cut_that_frees_no_file_is_no_progress() {
+    // A cut that frees no ring file (an empty FULL here) does not move the
+    // ring; it must not keep a parked write alive for ever.
     let v = ring(1, 64);
     let mut r = v.open().map_err(|e| e.0).expect("open");
     let t = ring_parked(&mut r);
@@ -262,15 +268,109 @@ fn the_ring_timer_wakes_a_parked_queue_while_a_cut_holds_the_coordinator() {
     assert_eq!(st.errno(), Some(EIO));
 }
 
+#[test]
+fn a_lane_that_gets_no_file_fails_its_parked_writes_whatever_the_other_lanes_do() {
+    // Lane 1 can never get a file; lane 0 keeps cutting and freeing its own.
+    // Ring progress is the lane's: the write parked on lane 1 fails at its
+    // deadline although every cut moves the ring for lane 0.
+    let mut v = ring(2, 64);
+    v.tweak = |c| {
+        c.cut_target = Duration::from_millis(1);
+        c.cut_min_bytes = Some(1);
+    };
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for i in 0..6 * 252u64 {
+        assert!(r
+            .write(0, (i % 256) * 4096, &pattern(i + 1, 4096), false)
+            .is_ok());
+    }
+    r.journal.set_nospace_lane(1, true);
+    let t = r.submit(1, IoOp::Write, false, 4096, 4096, &pattern(7, 4096));
+    pump(&mut r, 20);
+    assert!(!r.is_done(t), "lane 1 has no room");
+    let mut cuts = 0;
+    for _ in 0..3 {
+        v.clock.advance(Duration::from_secs(19));
+        timer_tick(&mut r);
+        assert!(!r.is_done(t), "not yet at 57 s");
+        let freed = r.engine.write_stats().freed_files_by_lane;
+        r.engine.commit_bounded(false).expect("lane 0 cuts");
+        let now = r.engine.write_stats().freed_files_by_lane;
+        assert!(now[0] > freed[0], "lane 0 got a file: {freed:?} {now:?}");
+        assert_eq!(now[1], 0);
+        cuts += 1;
+    }
+    assert_eq!(cuts, 3);
+    // 57 s + 4 s: past the deadline of the write, with a file just freed
+    // on the other lane.
+    v.clock.advance(Duration::from_secs(4));
+    timer_tick(&mut r);
+    assert_eq!(r.wait(&[t])[0].0.errno(), Some(EIO));
+}
+
+#[test]
+fn a_cut_longer_than_the_deadline_that_keeps_sealing_does_not_fail_a_parked_write() {
+    // One cut seals segments for 100 s of the manual clock: more than the
+    // 60 s deadline of a write that parked before it. The cut is alive the
+    // whole time (and frees files at its end), so the write is not failed
+    // mid-cut. A thread polls the queue on the timer's signal while it runs.
+    let v = ring(1, 64);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    writes(&mut r, 0, 6 * 252);
+    r.journal.set_nospace(true);
+    let t = r.submit(0, IoOp::Write, false, 8192, 4096, &pattern(99, 4096));
+    pump(&mut r, 20);
+    assert!(!r.is_done(t));
+    *lock(&v.read_faults.seal_advance) = Some((Arc::clone(&v.clock), Duration::from_secs(25)));
+    let started = v.clock.monotonic();
+    let journal = Arc::clone(&r.journal);
+    let Running {
+        engine,
+        queues,
+        done,
+        ..
+    } = &mut r;
+    let engine = &*engine;
+    let mut failed = None;
+    std::thread::scope(|s| {
+        let cut = s.spawn(|| engine.commit_now(false));
+        let t0 = std::time::Instant::now();
+        while !cut.is_finished() && t0.elapsed() < Duration::from_secs(30) {
+            engine.ring_timer_tick();
+            for q in queues.iter_mut() {
+                q.poll(done);
+            }
+            if let Some((_, st)) = done.take_completed().into_iter().find(|(tag, _)| *tag == t) {
+                failed = Some(st);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // The cut ends whatever the check saw.
+        let out = cut.join().expect("cut thread");
+        assert!(out.is_ok(), "{out:?}");
+    });
+    assert!(
+        v.clock.monotonic() - started > RING_MIN,
+        "the cut lasted past the deadline"
+    );
+    assert!(failed.is_none(), "failed mid-cut: {failed:?}");
+    journal.set_nospace(false);
+    assert!(
+        r.wait(&[t])[0].0.is_ok(),
+        "freed files at the end of the cut"
+    );
+}
+
 // ------------------------------------------------------------------ counters
 
 #[test]
-fn the_recent_longest_wait_counts_from_arrival_and_ends_after_60_s() {
+fn the_recent_longest_wait_counts_from_the_first_ring_refusal_and_ends_after_60_s() {
     let v = Vol::create(CS, 16, 1, JournalMode::Immediate);
     let mut r = v.open().map_err(|e| e.0).expect("open");
     assert!(r.write(0, 0, &pattern(1, 4096), false).is_ok());
     // A waits 10 s in the gate for its pace; only then does it meet the full
-    // ring. Counted from the first refusal its ring wait would be 0 s.
+    // ring. The 10 s in the gate are the space throttle's, not a ring wait.
     r.space.set_pacing(true);
     let a = r.submit(0, IoOp::Write, false, 4096, 4096, &pattern(2, 4096));
     pump(&mut r, 20);
@@ -281,24 +381,29 @@ fn the_recent_longest_wait_counts_from_arrival_and_ends_after_60_s() {
     assert!(!r.is_done(a));
     let st = r.engine.cut_stats();
     assert_eq!(st.ring_waiters, 1);
-    assert!(st.ring_wait_max_60s_ms >= 10_000, "{st:?}");
-    assert!(st.ring_wait_max_since_attach_ms >= 10_000, "{st:?}");
+    assert!(st.ring_wait_max_60s_ms < 1000, "{st:?}");
+    assert!(st.ring_wait_max_since_attach_ms < 1000, "{st:?}");
+    // 7 s at the ring.
+    v.clock.advance(Duration::from_secs(7));
+    pump(&mut r, 20);
+    let st = r.engine.cut_stats();
+    assert!((7000..10_000).contains(&st.ring_wait_max_60s_ms), "{st:?}");
     // Admitted: the figures stay.
     r.journal.set_nospace(false);
     r.engine.commit_now(false).expect("commit");
     assert!(r.wait(&[a])[0].0.is_ok());
-    assert!(r.engine.cut_stats().ring_wait_max_60s_ms >= 10_000);
+    assert!(r.engine.cut_stats().ring_wait_max_60s_ms >= 7000);
     // A minute later the window has forgotten it, the lifetime figure has not.
     v.clock.advance(Duration::from_secs(61));
     let st = r.engine.cut_stats();
     assert_eq!(st.ring_wait_max_60s_ms, 0, "{st:?}");
-    assert!(st.ring_wait_max_since_attach_ms >= 10_000, "{st:?}");
+    assert!(st.ring_wait_max_since_attach_ms >= 7000, "{st:?}");
     // And a shorter, later wait shows alone.
     let t = ring_parked_again(&mut r);
     v.clock.advance(Duration::from_secs(3));
     pump(&mut r, 20);
     let st = r.engine.cut_stats();
-    assert!((3000..10_000).contains(&st.ring_wait_max_60s_ms), "{st:?}");
+    assert!((3000..7000).contains(&st.ring_wait_max_60s_ms), "{st:?}");
     r.journal.set_nospace(false);
     r.engine.commit_now(false).expect("commit");
     assert!(r.wait(&[t])[0].0.is_ok());
@@ -401,12 +506,16 @@ fn writes_are_paced_to_the_drain_rate_while_the_ring_is_nearly_full() {
     assert!(r.journal.fill().ratio() >= 0.75, "{:?}", r.journal.fill());
     // One bounded cut of one ring file in one second: its journal bytes per
     // second are the drain rate, and the ring is still at three quarters.
+    // Half a second between the two cuts (the collector's share, the tick):
+    // the pace is the sustained rate, over the time from cut end to cut end.
+    v.clock.advance(Duration::from_millis(500));
     r.engine.commit_bounded(false).expect("cut");
     let st = r.engine.cut_stats();
     assert!(st.last_cut_bytes > 0);
     assert!(r.journal.fill().ratio() >= 0.75, "{:?}", r.journal.fill());
     let seed = 10 * REC;
-    let rate = (seed + st.last_cut_bytes) / 2;
+    // 1 s + 1.5 s of interval for the two cuts, which took 1 s each.
+    let rate = (seed + st.last_cut_bytes) * 2 / 5;
     assert_eq!(r.space.ring_pace(), Some(rate), "{st:?}");
     assert_eq!(st.ring_pace_rate, rate);
     // Draining the ring ends the pace below half, and not before: between
@@ -601,6 +710,29 @@ fn the_collector_yields_to_the_cuts_while_a_write_waits_for_the_ring() {
     let yielded = tick_steps(&r, &script, 3);
     assert_eq!(yielded, vec![2, 2, 2], "one share step after each cut");
     assert_eq!(script.rate.load(Ordering::SeqCst), GC_RATE / 8);
+}
+
+#[test]
+fn the_collector_keeps_yielding_for_two_seconds_after_the_last_waiter() {
+    // No flip-flop of the compaction rate between two steps: the switch holds
+    // for 2 s after the write that waited was admitted.
+    let (v, mut r, script) = gc_setup();
+    park_one(&mut r);
+    r.engine.tick().expect("tick");
+    assert_eq!(script.rate.load(Ordering::SeqCst), GC_RATE / 8);
+    r.journal.set_nospace(false);
+    pump(&mut r, 10);
+    assert_eq!(r.engine.cut_stats().ring_waiters, 0, "the write went on");
+    v.clock.advance(Duration::from_secs(1));
+    r.engine.tick().expect("tick");
+    assert_eq!(
+        script.rate.load(Ordering::SeqCst),
+        GC_RATE / 8,
+        "1 s after the last waiter"
+    );
+    v.clock.advance(Duration::from_secs(2));
+    r.engine.tick().expect("tick");
+    assert_eq!(script.rate.load(Ordering::SeqCst), GC_RATE, "3 s after it");
 }
 
 #[test]

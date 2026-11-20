@@ -1,12 +1,13 @@
 //! The ring files of every lane and of the mark ring: naming, creation,
 //! per-file bookkeeping and recycling. All blocking.
 
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lunix_format::journal::{FileHeader, BLOCK, MARK_FILE_LEN};
@@ -177,7 +178,21 @@ pub(crate) struct Rings {
     /// Files re-initialised by `ZERO_RANGE` and by rewriting zeros.
     pub zeroed_by_range: AtomicU64,
     pub zeroed_by_rewrite: AtomicU64,
+    /// `ZERO_RANGE` failures in a row that were not "unsupported"; at
+    /// [`ZERO_RANGE_MAX_FAILURES`] it is turned off.
+    pub zero_failures: AtomicU32,
+    /// The errnos of failed `ZERO_RANGE` calls already logged.
+    pub zero_logged: Mutex<BTreeSet<i32>>,
+    /// `ZERO_RANGE` calls made, and the errno the next ones fail with (0:
+    /// none; test hook).
+    pub zero_attempts: AtomicU64,
+    pub zero_inject_errno: AtomicI32,
 }
+
+/// `ZERO_RANGE` failures in a row (other than "unsupported") after which it is
+/// not tried again: a file system that answers `ENOSPC` or `EIO` to every
+/// call would otherwise cost a failed call and a log line per freed file.
+pub(crate) const ZERO_RANGE_MAX_FAILURES: u32 = 3;
 
 impl Rings {
     pub(crate) fn path(&self, ring: &LaneRing, ordinal: u32) -> PathBuf {
@@ -312,6 +327,10 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
         zero_range_off: AtomicBool::new(!cfg.zero_range),
         zeroed_by_range: AtomicU64::new(0),
         zeroed_by_rewrite: AtomicU64::new(0),
+        zero_failures: AtomicU32::new(0),
+        zero_logged: Mutex::new(BTreeSet::new()),
+        zero_attempts: AtomicU64::new(0),
+        zero_inject_errno: AtomicI32::new(0),
     })
 }
 
@@ -406,9 +425,18 @@ impl Rings {
     /// Either way the range reads as zeros once the caller's `fdatasync`
     /// returned (on-disk-formats §5.1).
     fn zero_body(&self, file: &std::fs::File, to: u64, zero: &AlignedBuf) -> io::Result<()> {
+        let to = sys::round4k(to);
         if !self.zero_range_off.load(Ordering::Relaxed) {
-            match sys::fallocate_zero(file, B, sys::round4k(to)) {
+            self.zero_attempts.fetch_add(1, Ordering::Relaxed);
+            let injected = self.zero_inject_errno.load(Ordering::Relaxed);
+            let res = if injected != 0 {
+                Err(io::Error::from_raw_os_error(injected))
+            } else {
+                sys::fallocate_zero(file, B, to)
+            };
+            match res {
                 Ok(()) => {
+                    self.zero_failures.store(0, Ordering::Relaxed);
                     self.zeroed_by_range.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
                 }
@@ -419,10 +447,29 @@ impl Rings {
                     );
                     self.zero_range_off.store(true, Ordering::Relaxed);
                 }
-                // Any other failure: this file is rewritten (the rewrite
-                // reports its own error), the next one tries again.
+                // Any other failure (ENOSPC on a nearly full copy-on-write or
+                // thin file system, EIO, EPERM): this file is rewritten, the
+                // error is logged once per errno, and after a few in a row
+                // the range is not tried again. A call that failed half way
+                // (xfs punches, then allocates) may have left holes in the
+                // ring file: the range is allocated again before the rewrite,
+                // so the file never stays sparse (a hole record must find its
+                // room on a full volume, ADR-32).
                 Err(e) => {
-                    tracing::warn!(error = %e, "FALLOC_FL_ZERO_RANGE of a freed ring file failed: rewriting it with zeros");
+                    let errno = e.raw_os_error().unwrap_or(0);
+                    if lock(&self.zero_logged).insert(errno) {
+                        tracing::warn!(error = %e, "FALLOC_FL_ZERO_RANGE of a freed ring file failed: rewriting it with zeros (logged once per error)");
+                    }
+                    let _ = sys::fallocate_keep(file, B, to);
+                    if self.zero_failures.fetch_add(1, Ordering::Relaxed) + 1
+                        >= ZERO_RANGE_MAX_FAILURES
+                    {
+                        tracing::warn!(
+                            failures = ZERO_RANGE_MAX_FAILURES,
+                            "FALLOC_FL_ZERO_RANGE failed in a row: freed ring files are rewritten with zeros from now on"
+                        );
+                        self.zero_range_off.store(true, Ordering::Relaxed);
+                    }
                 }
             }
         }
