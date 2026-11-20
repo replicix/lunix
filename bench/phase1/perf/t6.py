@@ -130,7 +130,7 @@ def main():
         for r in rs:
             wp = (r.get("write_path_end") or ",,,,,,").split(",")
             stg = [fnum(x) for x in (r.get("stage_ns_delta") or "").split(",") if x != ""]
-            stgs = ",".join(fmt(x / 1e6) for x in stg) if stg else "-"
+            stgs = "; ".join(fmt(x / 1e6) for x in stg) if stg else "-"
             print(f"| {r['cell']} | {r['rep']} | {fmt(fnum(r.get('iops')))} | {fmt((fnum(r.get('bw_bytes')) or 0) / 1e6, 1)} | {r.get('commits_delta', '')} | {stgs} | "
                   f"{wp[0]} / {wp[1]} | {wp[3]} / {wp[4]} | {wp[5]} / {wp[6]} | {r.get('journal_used_end', '')} |")
     # time series: ring waiters, window, cut bytes and ms, per sample, first repetition of the write cells

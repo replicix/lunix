@@ -34,6 +34,24 @@ bs=4k
 iodepth=128
 size=${WS}
 
+; the same reads through the page cache (the store's segment reads are buffered): the file is read once before (rawbase.sh)
+[r4k-buffered]
+stonewall
+direct=0
+rw=randread
+bs=4k
+iodepth=128
+size=${WS}
+
+[seqr-buffered]
+stonewall
+direct=0
+rw=read
+bs=1m
+iodepth=32
+size=${SLICE}
+offset_increment=${SLICE}
+
 ; 1 MiB sequential write, QD 32, 8 jobs on slices: the Lunix seqw cell
 [seqw]
 stonewall

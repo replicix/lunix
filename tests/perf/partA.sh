@@ -37,13 +37,15 @@ export CFG_EXTRA
 export JOURNAL_MAX="${JOURNAL_MAX:-1073741824}" DAEMON_CPUS FIO_CPUS
 read -ra _c <<< "$CHUNKS"; read -ra _q <<< "$QUEUES_LIST"
 export SCRIPT_CAP="${SCRIPT_CAP:-$((${#_c[@]} * ${#_q[@]} * 3600 + 3600))}"
-. "$here/lib.sh"; . "$here/perflib.sh"
+. "$here/lib.sh"; . "$here/perflib.sh"; . "$here/uprobes.sh"
 harness_init m16-parta
 JOBDIR="$REPO/bench/phase1/perf/fio"
 say "# M16 Part A ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $(nproc) cpus): chunks $CHUNKS, queues $QUEUES_LIST, $REPS reps"
 say "- destage_workers: $DESTAGE_WORKERS (lunixd.toml; seqw of the plan runs on 8 workers); read_cache_max left at the volume default (recorded per cell)"
 say "- daemon CPUs $DAEMON_CPUS (process), queue threads QCPUS_4=$QCPUS_4 / QCPUS_8=$QCPUS_8, fio CPUS $FIO_CPUS; script cap $SCRIPT_CAP s"
 NOISY=0; quiet_check; gov_set
+# UPROBES=1 (ADR-33 T6): timing probes on the cut's steps during the first repetition of the write cells (tests/perf/uprobes.sh)
+if [ "${UPROBES:-0}" = 1 ]; then up_setup "$LUNIXD" && add_cleanup up_clear || { say "- uprobes: setup failed, no step timing"; UPROBES=0; }; fi
 WS=$((WS_GIB * GIB)); SLICE=$((WS / JOBS))
 df_guard "$LUNIX_SPIKE_DIR" "${DF_GIB:-30}" || exit 2
 
@@ -56,6 +58,9 @@ fio_cell() { # chunkk q name job rep runtime qd
   export DEV="$CUR_DEV" WS SLICE RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=$qd SEED=$((100 + CELLNO)) LATLOG="$d/lat"
   local grace=$(((rt + RAMP) / 2 + RAMP))
   read -r l1 _ < /proc/loadavg
+  # DROP_CACHES=1: the page cache is dropped before every read cell, so a read cache miss reaches the device (otherwise the
+  # store segments just written are served from the host page cache)
+  if [ "${DROP_CACHES:-0}" = 1 ]; then case "$name" in r4k*|seqr*) sync; echo 3 > /proc/sys/vm/drop_caches ;; esac; fi
   snap "$VOL" "$d/status-before.json"
   local rss0; rss0=$(rss_kb "$DPID")
   FIO_GRACE=$grace fio_bg "$cell" "$rt" "$JOBDIR/$job.fio"; local fp=$LAST_FIO
@@ -106,6 +111,8 @@ fio_cell() { # chunkk q name job rep runtime qd
         for t in /proc/"$DPID"/task/*; do printf '%s %s %s %s\n' "$_i" "$(cat "$t/comm" 2>/dev/null | tr ' ' _)" "$(awk '{print $3}' "$t/stat" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"; done
         sleep 0.2; done > "$d/thread-states.txt" 2>/dev/null ) & pp3="$pp3 $!"
   fi
+  local upf=""
+  if [ "${UPROBES:-0}" = 1 ] && [ "$rep" = 1 ] && [ "$name" != r4k ] && [ "$name" != seqr ]; then upf="$d/uprobes.txt"; up_start; fi
   if [ "${SAMPLE:-0}" = 1 ]; then
     ( while sleep "${SAMPLE_S:-5}"; do
         ths=$(for t in /proc/"$DPID"/task/*; do printf '%s:%s:%s\n' "$(cat "$t/comm" 2>/dev/null)" "$(awk '{print $3}' "$t/stat" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"; done | sort | uniq -c | jq -R -s -c 'split("\n")|map(select(length>0))')
@@ -115,6 +122,7 @@ fio_cell() { # chunkk q name job rep runtime qd
   wait_fio "$fp" $((rt + grace + 120)); local frc=$?
   [ -n "$sp" ] && { kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; }
   [ -n "$pr" ] && { kill "$pr" 2>/dev/null; wait "$pr" 2>/dev/null; }
+  [ -n "$upf" ] && up_stop "$upf"
   # shellcheck disable=SC2086
   [ -n "$pp3" ] && wait $pp3 2>/dev/null
   # shellcheck disable=SC2086

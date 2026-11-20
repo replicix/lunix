@@ -20,7 +20,8 @@ RUNTIME=1 timeout 900 fio --name=fill --directory="$DIR" --filename=rawfile --io
   --size="$WS" --refill_buffers=1 --buffer_compress_percentage=50 --end_fsync=1 --cpus_allowed="$FIO_CPUS" --output-format=json --output="$OUT/raw/fio-fill.json" >/dev/null 2>&1
 sync; sleep 5
 for rep in $(seq 1 "$REPS"); do
-  for c in w4k r4k seqw seqr commit64k commit4k commit4k-x8; do
+  for c in w4k r4k seqw seqr commit64k commit4k commit4k-x8 r4k-buffered seqr-buffered; do
+    case "$c" in *-buffered) cat "$DIR/rawfile" > /dev/null ;; esac
     rt=$RUNTIME; case "$c" in w4k) rt=60 ;; esac
     f="$OUT/raw/fio-$c-rep$rep.json"
     RUNTIME=$rt timeout -k 30 $((rt + RAMP + 120)) fio "$JOB" --section="$c" --output-format=json --output="$f" > "$f.stdout" 2>&1
