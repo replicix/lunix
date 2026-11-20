@@ -498,7 +498,7 @@ impl Rings {
             file.file.set_len(ring.file_len)?;
         }
         self.zero_body(&file.file, zero_to.min(ring.file_len), zero)?;
-        file.file.sync_data()?;
+        file.file.sync_all()?;
         let gen = sys::random_nonzero()?;
         let hdr = FileHeader {
             lane: ring.lane,

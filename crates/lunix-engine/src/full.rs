@@ -238,6 +238,13 @@ impl FullState {
         }
     }
 
+    /// Stamps the lanes flagged in `left` as of `now`.
+    pub(crate) fn note_lanes_pending(&self, left: &[bool], now: Duration) {
+        for (at, _) in self.lane_progress_ms.iter().zip(left).filter(|(_, l)| **l) {
+            at.fetch_max(ms(now).saturating_add(1), Ordering::Relaxed);
+        }
+    }
+
     /// A lane's last ring progress, `None` before the first.
     pub(crate) fn lane_progress(&self, lane: usize) -> Option<Duration> {
         match self.lane_progress_ms.get(lane)?.load(Ordering::Relaxed) {
@@ -398,23 +405,36 @@ impl JournalCharges {
     }
 
     /// Takes the charges of every record at or below `cut`; returns their
-    /// sum.
-    pub(crate) fn take_upto(&self, cut: u64) -> u64 {
+    /// sum and, per lane, whether the lane still holds charges above the cut
+    /// (the replayed records, while any are left, count for every lane): the
+    /// cuts have not reached that lane's oldest records yet.
+    pub(crate) fn take_upto(&self, cut: u64) -> (u64, Vec<bool>) {
         // The lane's queue thread may be appending: hold its mutex only to
         // split the backlog off, and sum it outside.
         let take = |q: &Charges| {
-            let taken: Vec<(u64, u64)> = {
+            let (taken, left): (Vec<(u64, u64)>, bool) = {
                 let mut q = lock(q);
                 let n = q.partition_point(|(s, _)| *s <= cut);
-                q.drain(..n).collect()
+                let t = q.drain(..n).collect();
+                (t, !q.is_empty())
             };
-            taken.iter().fold(0u64, |a, (_, b)| a.saturating_add(*b))
+            (
+                taken.iter().fold(0u64, |a, (_, b)| a.saturating_add(*b)),
+                left,
+            )
         };
-        self.lanes
-            .iter()
-            .chain(std::iter::once(&self.recovered))
-            .map(take)
-            .fold(0, u64::saturating_add)
+        let mut sum = 0u64;
+        let mut left: Vec<bool> = Vec::with_capacity(self.lanes.len());
+        for q in &self.lanes {
+            let (s, l) = take(q);
+            sum = sum.saturating_add(s);
+            left.push(l);
+        }
+        let (s, rec_left) = take(&self.recovered);
+        if rec_left {
+            left.iter_mut().for_each(|l| *l = true);
+        }
+        (sum.saturating_add(s), left)
     }
 }
 
@@ -425,6 +445,15 @@ impl Inner {
         let counts = self.journal.freed_files_by_lane();
         self.full.note_freed_files(&counts, self.clock.monotonic());
         self.full.cut_alive(self.clock.monotonic());
+    }
+
+    /// A cut released journal bytes: a lane that still holds records above
+    /// the new cut is waiting for the cuts to reach its files, not stuck, so
+    /// it counts as progress for that lane. A lane the cuts have passed holds
+    /// nothing above the cut and gets no stamp: its parked writes fail at
+    /// their deadline.
+    pub(crate) fn note_lane_backlog(&self, left: &[bool]) {
+        self.full.note_lanes_pending(left, self.clock.monotonic());
     }
 
     /// The verdict on a write parked for a full journal ring that arrived at
@@ -438,17 +467,20 @@ impl Inner {
         let f = &self.full;
         let now = self.clock.monotonic();
         let waited = now.saturating_sub(arrived);
-        // The later of the arrival, the lane's last freed file and the life
-        // of the cut that is running (a long cut that keeps sealing is not
-        // a stuck ring; once it ends only a freed file counts).
+        // The later of the arrival, the lane's last progress (a file freed on
+        // it, or a cut that released bytes while the lane still held records
+        // above it) and the life of the cut that is running (a long cut that
+        // keeps sealing is not a stuck ring).
         let since = [f.lane_progress(lane), f.cut_life()]
             .into_iter()
             .flatten()
             .fold(arrived, Duration::max);
         let idle = now.saturating_sub(since);
         let timeout = f.full_timeout();
-        // A failed commit shortens the limit to `full_timeout` only when it
-        // came after the last sign of progress of this write's wait.
+        // The ADR-32 rule: a commit that failed (for space or I/O) after this
+        // write arrived or last progressed shortens the limit to
+        // `full_timeout`. A cut that ran long and then failed is no progress
+        // once it has ended: the write is judged at the next tick.
         let failed_since = f.last_failure_ms.load(Ordering::Relaxed) > ms(since);
         let normal = if failed_since {
             idle >= timeout
@@ -729,7 +761,7 @@ mod cut_for_tests {
         c.push(1, 4, 10);
         assert_eq!(c.cut_for(30, 0, 4), 3);
         assert_eq!(c.cut_for(40, 0, 4), 4);
-        assert_eq!(c.take_upto(2), 20, "what the cut released");
+        assert_eq!(c.take_upto(2).0, 20, "what the cut released");
         assert_eq!(c.cut_for(10, 0, 4), 3);
     }
 }

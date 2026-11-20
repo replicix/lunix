@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use lunix_engine::{CommitOutcome, EngineConfig};
+use lunix_engine::{CommitOutcome, EngineConfig, Retry};
 use lunix_iface::block::{IoOp, Tag};
 use lunix_iface::clock::{Clock, ManualClock};
 use lunix_iface::gc::{
@@ -306,6 +306,72 @@ fn a_lane_that_gets_no_file_fails_its_parked_writes_whatever_the_other_lanes_do(
     v.clock.advance(Duration::from_secs(4));
     timer_tick(&mut r);
     assert_eq!(r.wait(&[t])[0].0.errno(), Some(EIO));
+}
+
+#[test]
+fn a_lane_the_cuts_have_not_reached_yet_is_not_failed_on_a_slow_ring() {
+    // Lane 1 is full; its records stand behind lane 0's backlog in write_seq,
+    // so the cuts (one file of lane 0 each, 25 s apart) have not reached them.
+    // A merely slow lane is not a stuck one: every cut that released bytes
+    // while lane 1 still holds records above it is progress for lane 1, and a
+    // tick between two cuts does not fail its write, though it is 75 s old.
+    let mut v = ring(2, 64);
+    v.tweak = |c| {
+        c.cut_target = Duration::from_millis(1);
+        c.cut_min_bytes = Some(1);
+    };
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for i in 0..6 * 252u64 {
+        assert!(r
+            .write(0, (i % 256) * 4096, &pattern(i + 1, 4096), false)
+            .is_ok());
+    }
+    for i in 0..20u64 {
+        assert!(r
+            .write(1, (i % 256) * 4096, &pattern(i + 9, 4096), false)
+            .is_ok());
+    }
+    r.journal.set_nospace_lane(1, true);
+    let t = r.submit(1, IoOp::Write, false, 4096, 4096, &pattern(7, 4096));
+    pump(&mut r, 20);
+    assert!(!r.is_done(t), "lane 1 has no room");
+    for round in 1..=3 {
+        v.clock.advance(Duration::from_secs(25));
+        let freed = r.engine.write_stats().freed_files_by_lane;
+        r.engine.commit_bounded(false).expect("a cut");
+        let now = r.engine.write_stats().freed_files_by_lane;
+        assert!(now[0] > freed[0] && now[1] == 0, "{freed:?} {now:?}");
+        timer_tick(&mut r);
+        assert!(
+            !r.is_done(t),
+            "round {round}: {} s old, the cuts are on their way to lane 1",
+            25 * round
+        );
+    }
+    r.journal.set_nospace_lane(1, false);
+    r.engine.commit_bounded(false).expect("the fourth cut");
+    assert!(r.wait(&[t])[0].0.is_ok());
+}
+
+#[test]
+fn a_cut_that_ran_long_and_then_failed_for_space_is_no_progress() {
+    // The ADR-32 rule: a commit that failed for space after the write arrived
+    // shortens its limit to `full_timeout`; a cut that ran for 30 s and failed
+    // is no progress once it ended, so the 30 s old write fails (ENOSPC) at
+    // the next tick.
+    let mut v = Vol::create(CS, 16, 1, JournalMode::Immediate);
+    v.tweak = |c| c.full_timeout = Duration::from_secs(5);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let t = ring_parked(&mut r);
+    *lock(&v.hooks.advance) = vec![("engine.c2.cut", Duration::from_secs(30))];
+    *lock(&v.destage_fault) = Some(Retry::AfterSpace);
+    assert!(
+        r.engine.commit_now(false).is_err(),
+        "the cut fails for space"
+    );
+    *lock(&v.hooks.advance) = Vec::new();
+    timer_tick(&mut r);
+    assert_eq!(r.wait(&[t])[0].0.errno(), Some(28));
 }
 
 #[test]

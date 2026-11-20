@@ -1052,7 +1052,10 @@ impl Inner {
         // failed reclaim may have freed some of them); the cut is alive.
         self.note_freed_files();
         let held = self.journal_charged.load(Ordering::Acquire);
-        let released = self.jcharges.take_upto(c);
+        let (released, left) = self.jcharges.take_upto(c);
+        if released > 0 {
+            self.note_lane_backlog(&left);
+        }
         co.cut_bytes = released;
         let give = released.min(held);
         self.journal_charged.fetch_sub(give, Ordering::AcqRel);
