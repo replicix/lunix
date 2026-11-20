@@ -1,0 +1,1 @@
+attached pa64k as $SCRATCH/m16-parta-state/dev/pa64k (8 queues, depth 128)

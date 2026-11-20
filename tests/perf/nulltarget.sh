@@ -29,7 +29,7 @@ for c in r4k seqr; do
   qd=128; [ "$c" = seqr ] && qd=32
   vals=()
   for rep in $(seq 1 "$REPS"); do
-    export QD=$qd SEED=$((200 + rep)) LATLOG="$OUT/raw/$c-rep$rep.lat"
+    export QD=$qd SEED=$((200 + rep))
     timeout -k 30 $((RUNTIME + RAMP + 120)) fio "$here/../../bench/phase1/perf/fio/$c.fio" --output-format=json --output="$OUT/raw/fio-$c-rep$rep.json" > "$OUT/raw/fio-$c-rep$rep.stdout" 2>&1
     vals+=("$(sed -n '/^{/,$p' "$OUT/raw/fio-$c-rep$rep.json" | jq -r '.jobs[0] | [(.read.iops + .write.iops), (.read.bw_bytes + .write.bw_bytes)] | @tsv')")
   done

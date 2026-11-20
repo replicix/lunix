@@ -1,0 +1,150 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 202K of event 'sched:sched_switch'
+# Event count (approx.): 202171
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    20.58%  lunix-read-3     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --20.58%--schedule
+                          |          
+                           --20.58%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.51%--syscall
+                                     |          
+                                      --5.08%--__lll_lock_wait_private
+                                                |          
+                                                |--3.15%--_int_free_chunk
+                                                |          
+                                                |--1.21%--__libc_malloc2
+                                                |          
+                                                 --0.72%--realloc
+
+    20.22%  lunix-read-0     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --20.22%--schedule
+                          |          
+                           --20.21%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.00%--syscall
+                                     |          
+                                      --5.21%--__lll_lock_wait_private
+                                                |          
+                                                |--3.21%--_int_free_chunk
+                                                |          
+                                                |--1.28%--__libc_malloc2
+                                                |          
+                                                 --0.72%--realloc
+
+    20.18%  lunix-read-2     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --20.18%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          |          
+                          |--15.02%--syscall
+                          |          
+                           --5.16%--__lll_lock_wait_private
+                                     |          
+                                     |--3.21%--_int_free_chunk
+                                     |          
+                                     |--1.24%--__libc_malloc2
+                                     |          
+                                      --0.71%--realloc
+
+    20.16%  lunix-read-1     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --20.15%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          |          
+                          |--15.21%--syscall
+                          |          
+                           --4.94%--__lll_lock_wait_private
+                                     |          
+                                     |--3.07%--_int_free_chunk
+                                     |          
+                                     |--1.22%--__libc_malloc2
+                                     |          
+                                      --0.65%--realloc
+
+     9.55%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --9.54%--schedule
+                          |          
+                           --9.54%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--4.84%--__lll_lock_wait_private
+                                     |          _int_free_chunk
+                                     |          
+                                      --4.70%--syscall
+
+     9.16%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --9.16%--schedule
+                          |          
+                           --9.15%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--4.72%--__lll_lock_wait_private
+                                     |          _int_free_chunk
+                                     |          
+                                      --4.43%--syscall
+
+     0.10%  lunix-coord      [k] perf_trace_sched_switch

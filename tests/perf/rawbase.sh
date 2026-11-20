@@ -15,13 +15,17 @@ export DIR WS SLICE RAMP CPUS="$FIO_CPUS" JOBS SEED=7
 echo -e "cell\trep\tiops\tbw_bytes\tp50_us\tp99_us\tp999_us\terrors" > "$OUT/rawbase.tsv"
 echo "# raw baseline $(date -u +%FT%TZ) dir fs: $(findmnt -no FSTYPE -T "$DIR"), $(nproc) cpus, WS ${WS_GIB} GiB" | tee "$OUT/rawbase.txt"
 trap 'rm -f "$DIR/rawfile"' EXIT
-# fill: the whole file, 1 MiB direct sequential (same as the Lunix fill)
-RUNTIME=1 timeout 900 fio --name=fill --directory="$DIR" --filename=rawfile --ioengine=io_uring --direct=1 --rw=write --bs=1m --iodepth=32 \
-  --size="$WS" --refill_buffers=1 --buffer_compress_percentage=50 --end_fsync=1 --cpus_allowed="$FIO_CPUS" --output-format=json --output="$OUT/raw/fio-fill.json" >/dev/null 2>&1
-sync; sleep 5
+# fill: the whole file, 1 MiB direct sequential (same as the Lunix fill); done again at the start of every repetition, because the
+# random write cell (CoW file system) fragments the file and would slow the cells after it. w4k runs last for the same reason.
+fill() {
+  RUNTIME=1 timeout 1800 fio --name=fill --directory="$DIR" --filename=rawfile --ioengine=io_uring --direct=1 --rw=write --bs=1m --iodepth=32 \
+    --size="$WS" --refill_buffers=1 --buffer_compress_percentage=50 --end_fsync=1 --cpus_allowed="$FIO_CPUS" --output-format=json --output="$OUT/raw/fio-fill.json" >/dev/null 2>&1
+  sync; sleep 5
+}
 for rep in $(seq 1 "$REPS"); do
-  for c in w4k r4k seqw seqr commit64k commit4k commit4k-x8 r4k-buffered seqr-buffered; do
-    case "$c" in *-buffered) cat "$DIR/rawfile" > /dev/null ;; esac
+  fill
+  for c in ${CELLS:-r4k seqr seqw commit64k commit4k commit4k-x8 r4k-buffered seqr-buffered w4k}; do
+    case "$c" in *-buffered) dd if="$DIR/rawfile" of=/dev/null bs=4M 2>/dev/null ;; esac
     rt=$RUNTIME; case "$c" in w4k) rt=60 ;; esac
     f="$OUT/raw/fio-$c-rep$rep.json"
     RUNTIME=$rt timeout -k 30 $((rt + RAMP + 120)) fio "$JOB" --section="$c" --output-format=json --output="$f" > "$f.stdout" 2>&1

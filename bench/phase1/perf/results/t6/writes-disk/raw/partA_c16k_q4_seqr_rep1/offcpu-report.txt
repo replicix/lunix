@@ -1,0 +1,150 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 52K of event 'sched:sched_switch'
+# Event count (approx.): 52220
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    36.40%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--35.62%--io_cqring_wait
+               |          __do_sys_io_uring_enter
+               |          do_syscall_64
+               |          entry_SYSCALL_64_after_hwframe
+               |          syscall
+               |          
+                --0.78%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+    35.48%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--34.57%--io_cqring_wait
+               |          __do_sys_io_uring_enter
+               |          do_syscall_64
+               |          entry_SYSCALL_64_after_hwframe
+               |          syscall
+               |          
+                --0.90%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+     6.12%  lunix-read-1     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--4.14%--io_schedule
+               |          |          
+               |           --4.12%--folio_wait_bit_common
+               |                     filemap_update_page
+               |                     filemap_get_pages
+               |                     filemap_read
+               |                     vfs_read
+               |                     __x64_sys_pread64
+               |                     do_syscall_64
+               |                     entry_SYSCALL_64_after_hwframe
+               |          
+                --1.81%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          |          
+                           --1.67%--syscall
+
+     5.96%  lunix-read-2     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--4.13%--io_schedule
+               |          |          
+               |           --4.11%--folio_wait_bit_common
+               |                     |          
+               |                      --4.10%--filemap_update_page
+               |                                filemap_get_pages
+               |                                filemap_read
+               |                                vfs_read
+               |                                __x64_sys_pread64
+               |                                do_syscall_64
+               |                                entry_SYSCALL_64_after_hwframe
+               |          
+                --1.71%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          |          
+                           --1.60%--syscall
+
+     5.94%  lunix-read-3     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--4.17%--io_schedule
+               |          |          
+               |           --4.16%--folio_wait_bit_common
+               |                     filemap_update_page
+               |                     filemap_get_pages
+               |                     filemap_read
+               |                     vfs_read
+               |                     __x64_sys_pread64
+               |                     do_syscall_64
+               |                     entry_SYSCALL_64_after_hwframe
+               |          
+                --1.65%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          |          
+                           --1.52%--syscall
+
+     5.91%  lunix-read-0     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--4.15%--io_schedule
+               |          |          
+               |           --4.13%--folio_wait_bit_common
+               |                     |          
+               |                      --4.13%--filemap_update_page
+               |                                filemap_get_pages
+               |                                filemap_read
+               |                                vfs_read
+               |                                __x64_sys_pread64
+               |                                do_syscall_64
+               |                                entry_SYSCALL_64_after_hwframe

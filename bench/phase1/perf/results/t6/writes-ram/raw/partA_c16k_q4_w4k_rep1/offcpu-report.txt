@@ -1,0 +1,92 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 647
+#
+# Samples: 528K of event 'sched:sched_switch'
+# Event count (approx.): 528191
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    27.66%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --27.66%--schedule
+                          |          
+                           --27.36%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --26.88%--syscall
+
+    18.11%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --18.08%--schedule
+                          |          
+                           --17.65%--exit_to_user_mode_loop
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --17.65%--syscall
+
+    18.02%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --18.00%--schedule
+                          |          
+                           --17.56%--exit_to_user_mode_loop
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --17.56%--syscall
+
+    17.97%  iou-wrk-821670   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+    17.87%  iou-wrk-821669   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     0.35%  lunix-space-tim  [k] perf_trace_sched_switch
+     0.01%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.00%  lunix-q0         [k] perf_trace_sched_switch
+     0.00%  lunix-q1         [k] perf_trace_sched_switch
+     0.00%  lunixd           [k] perf_trace_sched_switch
+     0.00%  lunixd-trim      [k] perf_trace_sched_switch
+     0.00%  iou-wrk-821651   [k] perf_trace_sched_switch
+     0.00%  lunixd-call      [k] perf_trace_sched_switch
+
+
+#
+# (Tip: If you have debuginfo enabled, try: perf report -s sym,srcline)
+#

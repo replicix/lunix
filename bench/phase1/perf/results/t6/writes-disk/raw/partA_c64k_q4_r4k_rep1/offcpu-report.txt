@@ -1,0 +1,143 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 2805
+#
+# Samples: 14K of event 'sched:sched_switch'
+# Event count (approx.): 14900
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    35.93%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --35.81%--io_cqring_wait
+                          __do_sys_io_uring_enter
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+                          |          
+                           --1.17%--io_uring::sys::io_uring_enter (inlined)
+                                     <io_uring::submit::Submitter>::enter::<io_uring::types::SubmitArgs> (inlined)
+                                     <io_uring::submit::Submitter>::submit_with_args_and_flags
+                                     0x1
+
+    35.59%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --35.44%--io_cqring_wait
+                          __do_sys_io_uring_enter
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+                          |          
+                           --1.03%--io_uring::sys::io_uring_enter (inlined)
+                                     <io_uring::submit::Submitter>::enter::<io_uring::types::SubmitArgs> (inlined)
+                                     <io_uring::submit::Submitter>::submit_with_args_and_flags
+                                     0x2
+
+     6.70%  lunix-read-1     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --6.70%--schedule
+                          |          
+                           --6.52%--io_schedule
+                                     folio_wait_bit_common
+                                     filemap_update_page
+                                     filemap_get_pages
+                                     filemap_read
+                                     vfs_read
+                                     __x64_sys_pread64
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+
+     6.51%  lunix-read-0     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --6.46%--io_schedule
+                          folio_wait_bit_common
+                          filemap_update_page
+                          filemap_get_pages
+                          filemap_read
+                          vfs_read
+                          __x64_sys_pread64
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+     6.41%  lunix-read-2     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --6.26%--io_schedule
+                          folio_wait_bit_common
+                          filemap_update_page
+                          filemap_get_pages
+                          filemap_read
+                          vfs_read
+                          __x64_sys_pread64
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+     6.39%  lunix-read-3     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --6.35%--io_schedule
+                          folio_wait_bit_common
+                          filemap_update_page
+                          filemap_get_pages
+                          filemap_read
+                          vfs_read
+                          __x64_sys_pread64
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+     1.79%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --1.44%--io_schedule
+                          |          
+                           --0.59%--rq_qos_wait
+                                     wbt_wait
+                                     __rq_qos_throttle
+                                     blk_mq_submit_bio
+                                     submit_bio_noacct_nocheck
+
+     0.51%  lunixd-ctl       [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+
+     0.09%  lunixd           [k] perf_trace_sched_switch
+     0.03%  lunix-space-tim  [k] perf_trace_sched_switch
+     0.02%  lunixd-trim      [k] perf_trace_sched_switch
+     0.01%  iou-wrk-23936    [k] perf_trace_sched_switch
+     0.01%  iou-wrk-23988    [k] perf_trace_sched_switch
+     0.01%  iou-wrk-23989    [k] perf_trace_sched_switch
+     0.01%  lunix-q0         [k] perf_trace_sched_switch
+     0.01%  lunix-q1         [k] perf_trace_sched_switch
+
+
+#
+# (Tip: To only collect call graph on one event use perf record -e cpu/cpu-cycles,callgraph=1/,branches ; perf report --show-ref-call-graph)
+#

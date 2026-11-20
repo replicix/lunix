@@ -38,6 +38,7 @@ size=${WS}
 [r4k-buffered]
 stonewall
 direct=0
+invalidate=0
 rw=randread
 bs=4k
 iodepth=128
@@ -46,6 +47,7 @@ size=${WS}
 [seqr-buffered]
 stonewall
 direct=0
+invalidate=0
 rw=read
 bs=1m
 iodepth=32
@@ -55,6 +57,19 @@ offset_increment=${SLICE}
 ; 1 MiB sequential write, QD 32, 8 jobs on slices: the Lunix seqw cell
 [seqw]
 stonewall
+rw=write
+bs=1m
+iodepth=32
+size=${SLICE}
+offset_increment=${SLICE}
+refill_buffers=1
+buffer_compress_percentage=50
+
+; 1 MiB sequential write through the page cache with the fsync at the end: the store's segment writes are buffered
+[seqw-buffered]
+stonewall
+direct=0
+end_fsync=1
 rw=write
 bs=1m
 iodepth=32

@@ -1,0 +1,4 @@
+{"cell":"partA/c64k/q4/idle","status":"info","t":"2026-11-20T13:01:53Z","rss_kib":"569244","queues":"4","chunk_k":"64"}
+{"cell":"partA/c64k/q4/coldpass","status":"info","t":"2026-11-20T13:03:32Z","chunk_k":"64","queues":"4","cell_name":"coldpass","seconds":"17","bw_bytes":"252645135","fio_rc":"0","ws_gib":"4"}
+{"cell":"partA/c16k/q4/idle","status":"info","t":"2026-11-20T13:04:05Z","rss_kib":"569168","queues":"4","chunk_k":"16"}
+{"cell":"partA/c16k/q4/coldpass","status":"info","t":"2026-11-20T13:05:43Z","chunk_k":"16","queues":"4","cell_name":"coldpass","seconds":"17","bw_bytes":"252645135","fio_rc":"0","ws_gib":"4"}

@@ -189,6 +189,16 @@ for chunk in "${_c[@]}"; do
     rec "partA/c${ck}k/q$q/idle" info rss_kib="$IDLE_RSS" queues="$q" chunk_k="$ck"
     export DEV="$CUR_DEV" WS RUNTIME=$RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=32 SEED=1
     FIO_GRACE=600 fio_run "fill-c${ck}-q$q" "$((WS_GIB * 60))" "$JOBDIR/fill.fio"; expect "write the ${WS_GIB} GiB working set" $? || FAIL=1
+    # COLD_PASS=1: the page cache is dropped and the whole working set is read once through the volume (default read cache): the
+    # device-bound rate of read cache misses, one 1 MiB sequential pass (bandwidth and time recorded as partA/.../coldpass)
+    if [ "${COLD_PASS:-0}" = 1 ]; then
+      sync; echo 3 > /proc/sys/vm/drop_caches
+      t0cp=$SECONDS; FIO_GRACE=1800 fio_run "coldpass-c${ck}-q$q" 1800 "$JOBDIR/warm.fio"; cprc=$?; cpw=$((SECONDS - t0cp))
+      rec "partA/c${ck}k/q$q/coldpass" info chunk_k="$ck" queues="$q" cell_name=coldpass seconds="$cpw" bw_bytes="$((WS / (cpw > 0 ? cpw : 1)))" fio_rc="$cprc" ws_gib="$WS_GIB"
+      say "- coldpass c${ck}k q$q: $((WS >> 20)) MiB in ${cpw} s"
+    fi
+    # WARM_CACHE=1: one sequential pass over the working set so that a read cache that holds it is populated (the "hit" cells)
+    if [ "${WARM_CACHE:-0}" = 1 ] && [ "${SKIP_READ_CELLS:-0}" != 1 ]; then FIO_GRACE=1800 fio_run "warm-c${ck}-q$q" 1800 "$JOBDIR/warm.fio"; expect "read the working set once (cache warm-up)" $? || FAIL=1; fi
     if [ "${SKIP_READ_CELLS:-0}" != 1 ]; then for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" r4k r4k "$rep" "$RUNTIME" 128; done; fi
     if [ "${SKIP_WRITE_CELLS:-0}" != 1 ]; then   # the supplementary read-cache run skips the journal-bound write cells
       for rep in $(seq 1 "$REPS"); do fio_cell "$ck" "$q" w4k w4k "$rep" "$W_RUNTIME" 128; done

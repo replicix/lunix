@@ -15,8 +15,4 @@ runtime=${RUNTIME}
 ramp_time=${RAMP}
 randseed=${SEED}
 group_reporting=1
-; per-second maximum of the completion latency (ADR-33 T6 stall profile): lat_clat.N.log under ${LATLOG}
-write_lat_log=${LATLOG}
-log_avg_msec=1000
-log_max_value=1
 percentile_list=50:90:99:99.9:99.99

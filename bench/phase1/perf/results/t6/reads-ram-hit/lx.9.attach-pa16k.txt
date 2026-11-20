@@ -1,0 +1,1 @@
+attached pa16k as $RAMDIR/spike/m16-parta-state/dev/pa16k (8 queues, depth 128)

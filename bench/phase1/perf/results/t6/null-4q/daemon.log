@@ -1,0 +1,5 @@
+queue 0 kernel affinity [0, 1, 2, 3]
+queue 1 kernel affinity [4, 5, 6, 7]
+queue 2 kernel affinity [8, 9, 10, 11]
+queue 3 kernel affinity [12, 13, 14, 15]
+READY id=0 bdev=/dev/ublkb0 features=0x26042

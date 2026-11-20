@@ -1,0 +1,31 @@
+1795178283622 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795178283622 INFO  lunixd: lunixd started socket=$SCRATCH/m16-parta-state/ctl.sock
+1795178283622 INFO  lunixd::server: control socket ready
+1795178283740 INFO  lunixd::audit: {"ts_ms":1795178283740,"uid":0,"gid":0,"pid":577544,"method":"volume_create","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795178299300 INFO  lunixd::daemon: volume opened volume="pa64k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795178299355 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=15593
+1795178299355 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=582094848
+1795178299355 INFO  lunixd::audit: {"ts_ms":1795178299355,"uid":0,"gid":0,"pid":577571,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795178330364 INFO  lunix_gc::collector: gc pass done how="step" pass=1 wall_ms=18 steps=1 phases=mark=12ms/13u@0ms condemn=2ms/27u@12ms compact=0ms/1u@15ms finish=2ms/1u@15ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=25
+1795178362298 INFO  lunix_gc::collector: gc pass done how="step" pass=2 wall_ms=516 steps=2 phases=mark=33ms/14u@0ms condemn=166ms/50u@33ms delete=0ms/26u@200ms compact=0ms/1u@200ms finish=315ms/1u@200ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=73
+1795178417031 INFO  lunix_gc::collector: gc pass done how="step" pass=3 wall_ms=2340 steps=20 phases=mark=794ms/15u@0ms condemn=59ms/39u@794ms delete=1207ms/74u@854ms compact=0ms/1u@2152ms finish=87ms/1u@2252ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=9 commits_deleted=16 compacted=0 bytes_freed=454896 bytes_moved=0 pending=85
+1795178430816 INFO  lunix_gc::collector: gc pass done how="step" pass=4 wall_ms=7517 steps=28 phases=mark=51ms/15u@0ms condemn=62ms/3u@52ms delete=1764ms/86u@114ms compact=0ms/1u@2031ms finish=5385ms/1u@2131ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=27 commits_deleted=21 compacted=0 bytes_freed=1593620 bytes_moved=0 pending=38
+1795178465165 INFO  lunix_gc::collector: gc pass done how="step" pass=5 wall_ms=4280 steps=3 phases=mark=203ms/15u@0ms condemn=19ms/5u@223ms delete=0ms/39u@243ms compact=0ms/1u@243ms finish=4037ms/1u@243ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=41
+1795178502221 INFO  lunix_gc::collector: gc pass done how="step" pass=6 wall_ms=26646 steps=14 phases=mark=87ms/15u@0ms delete=10617ms/42u@98ms compact=0ms/1u@10836ms finish=15809ms/1u@10836ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=18 commits_deleted=19 compacted=0 bytes_freed=898860 bytes_moved=0 pending=4
+1795178507997 INFO  lunix_gc::collector: gc pass done how="step" pass=7 wall_ms=695 steps=6 phases=mark=558ms/15u@0ms delete=51ms/5u@599ms compact=0ms/1u@651ms finish=33ms/1u@661ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=292 bytes_moved=0 pending=3
+1795178523106 INFO  lunix_gc::collector: gc pass done how="step" pass=8 wall_ms=1887 steps=7 phases=mark=1717ms/15u@0ms delete=74ms/4u@1768ms compact=0ms/1u@1852ms finish=35ms/1u@1852ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=3 compacted=0 bytes_freed=924 bytes_moved=0 pending=0
+1795178627190 INFO  lunixd::audit: {"ts_ms":1795178627190,"uid":0,"gid":0,"pid":601688,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795178668071 INFO  lunixd::daemon: volume opened volume="pa64k" tip=62 replayed=0 swept_segments=0
+device reload json failed
+1795178668164 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=16683
+1795178668164 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=1161039872
+1795178668164 INFO  lunixd::audit: {"ts_ms":1795178668164,"uid":0,"gid":0,"pid":601789,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795178699389 INFO  lunix_gc::collector: gc pass done how="step" pass=9 wall_ms=515 steps=3 phases=mark=54ms/13u@0ms condemn=276ms/28u@54ms compact=0ms/1u@331ms finish=184ms/1u@331ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=26
+1795178730041 INFO  lunix_gc::collector: gc pass done how="step" pass=10 wall_ms=442 steps=3 phases=mark=55ms/13u@0ms condemn=192ms/31u@55ms delete=0ms/27u@247ms compact=0ms/1u@247ms finish=194ms/1u@247ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=55
+1795178759332 INFO  lunix_gc::collector: gc pass done how="step" pass=11 wall_ms=109 steps=2 phases=mark=54ms/13u@0ms condemn=2ms/13u@65ms delete=37ms/56u@68ms compact=0ms/1u@105ms finish=3ms/1u@105ms condemned=0 segments_deleted=0 packs_deleted=1 runs_deleted=0 commits_deleted=25 compacted=0 bytes_freed=66825 bytes_moved=0 pending=40
+1795178794534 INFO  lunix_gc::collector: gc pass done how="step" pass=12 wall_ms=109 steps=2 phases=mark=55ms/13u@0ms delete=39ms/41u@65ms compact=0ms/1u@105ms finish=3ms/1u@105ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=29 compacted=0 bytes_freed=9396 bytes_moved=0 pending=11
+1795178819437 INFO  lunix_gc::collector: gc pass done how="step" pass=13 wall_ms=84 steps=2 phases=mark=54ms/13u@0ms delete=16ms/12u@65ms compact=0ms/1u@82ms finish=2ms/1u@82ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=11 compacted=0 bytes_freed=3564 bytes_moved=0 pending=0
+1795178960505 INFO  lunixd::audit: {"ts_ms":1795178960505,"uid":0,"gid":0,"pid":611082,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795178965601 INFO  lunixd::server: signal: quiescing every device
+1795178965602 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

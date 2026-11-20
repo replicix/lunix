@@ -1,0 +1,141 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 421152
+#
+# Samples: 946K of event 'sched:sched_switch'
+# Event count (approx.): 946639
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    17.24%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --17.24%--schedule
+                          |          
+                           --16.68%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.86%--syscall
+                                     |          
+                                      --0.82%--__lll_lock_wait_private
+                                                |          
+                                                 --0.82%--_int_free_chunk
+
+    16.75%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --16.74%--schedule
+                          |          
+                           --16.23%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.42%--syscall
+                                     |          
+                                      --0.80%--__lll_lock_wait_private
+                                                |          
+                                                 --0.80%--_int_free_chunk
+
+    16.47%  lunix-read-0     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --16.47%--schedule
+                          |          
+                           --16.25%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.73%--syscall
+                                     |          
+                                      --0.52%--__lll_lock_wait_private
+
+    16.46%  lunix-read-1     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --16.46%--schedule
+                          |          
+                           --16.17%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --15.69%--syscall
+
+    16.43%  lunix-read-2     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --16.43%--schedule
+                          |          
+                           --16.18%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --15.68%--syscall
+
+    16.41%  lunix-read-3     [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --16.41%--schedule
+                          |          
+                           --16.13%--futex_do_wait
+                                     __futex_wait
+                                     futex_wait
+                                     do_futex
+                                     __x64_sys_futex
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                     |--15.62%--syscall
+                                     |          
+                                      --0.50%--__lll_lock_wait_private
+
+     0.23%  lunix-coord      [k] perf_trace_sched_switch
+     0.01%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.00%  lunixd           [k] perf_trace_sched_switch
+     0.00%  lunix-space-tim  [k] perf_trace_sched_switch
+     0.00%  lunixd-trim      [k] perf_trace_sched_switch
+     0.00%  lunixd-call      [k] perf_trace_sched_switch
+     0.00%  iou-wrk-142117   [k] perf_trace_sched_switch
+     0.00%  iou-wrk-142156   [k] perf_trace_sched_switch
+     0.00%  iou-wrk-142157   [k] perf_trace_sched_switch
+     0.00%  lunix-q0         [k] perf_trace_sched_switch
+     0.00%  lunix-q1         [k] perf_trace_sched_switch
+
+
+#
+# (Tip: To adjust path to source files to local file system use perf report --prefix=... --prefix-strip=...)
+#

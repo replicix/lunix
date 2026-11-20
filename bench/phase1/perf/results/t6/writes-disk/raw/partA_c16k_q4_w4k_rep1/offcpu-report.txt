@@ -1,0 +1,118 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 22K of event 'sched:sched_switch'
+# Event count (approx.): 22132
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    82.69%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--73.52%--futex_do_wait
+               |          __futex_wait
+               |          futex_wait
+               |          do_futex
+               |          __x64_sys_futex
+               |          do_syscall_64
+               |          entry_SYSCALL_64_after_hwframe
+               |          |          
+               |           --73.05%--syscall
+               |          
+                --8.37%--io_schedule
+                          |          
+                          |--5.53%--folio_wait_bit_common
+                          |          |          
+                          |           --5.11%--folio_wait_writeback
+                          |                     __filemap_fdatawait_range
+                          |                     filemap_fdatawait_range
+                          |                     |          
+                          |                      --5.10%--btrfs_wait_ordered_range
+                          |                                btrfs_sync_file
+                          |                                do_fsync
+                          |                                |          
+                          |                                 --4.96%--__x64_sys_fdatasync
+                          |                                           __syscall_cancel_arch
+                          |                                           fdatasync
+                          |          
+                          |--1.87%--bit_wait_io
+                          |          __wait_on_bit
+                          |          out_of_line_wait_on_bit
+                          |          btrfs_btree_wait_writeback_range
+                          |          __btrfs_wait_marked_extents
+                          |          btrfs_wait_tree_log_extents
+                          |          btrfs_sync_log
+                          |          btrfs_sync_file
+                          |          __syscall_cancel_arch
+                          |          |          
+                          |          |--0.97%--fsync
+                          |          |          
+                          |           --0.90%--fdatasync
+                          |          
+                           --0.88%--__iomap_dio_rw
+                                     btrfs_direct_write
+                                     btrfs_do_write_iter
+                                     vfs_write
+                                     __x64_sys_pwrite64
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     __syscall_cancel_arch
+                                     __libc_pwrite
+
+    12.50%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+               |--11.94%--io_cqring_wait
+               |          __do_sys_io_uring_enter
+               |          do_syscall_64
+               |          entry_SYSCALL_64_after_hwframe
+               |          syscall
+               |          
+                --0.51%--exit_to_user_mode_loop
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+
+     3.41%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               |          
+                --3.22%--io_cqring_wait
+                          __do_sys_io_uring_enter
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+
+     0.65%  iou-wrk-142156   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     0.33%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.29%  iou-wrk-142157   [k] perf_trace_sched_switch
+     0.05%  lunixd           [k] perf_trace_sched_switch
+     0.03%  lunix-space-tim  [k] perf_trace_sched_switch
+     0.01%  lunix-q0         [k] perf_trace_sched_switch
+     0.01%  lunix-q1         [k] perf_trace_sched_switch
+     0.01%  lunixd-trim      [k] perf_trace_sched_switch
+     0.00%  iou-wrk-142117   [k] perf_trace_sched_switch
+
+
+#
+# (Tip: To set sample time separation other than 100ms with --sort time use --time-quantum)
+#

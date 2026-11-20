@@ -1,0 +1,254 @@
+1795183697870 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795183697871 INFO  lunixd: lunixd started socket=$RAMDIR/spike/m16-parta-state/ctl.sock
+1795183697871 INFO  lunixd::server: control socket ready
+1795183697926 INFO  lunixd::audit: {"ts_ms":1795183697926,"uid":0,"gid":0,"pid":737156,"method":"volume_create","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795183698632 INFO  lunixd::daemon: volume opened volume="pa64k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795183698671 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=740
+1795183698671 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=582094848
+1795183698671 INFO  lunixd::audit: {"ts_ms":1795183698671,"uid":0,"gid":0,"pid":737171,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795183728806 INFO  lunix_gc::collector: gc pass done how="step" pass=1 wall_ms=26 steps=1 phases=mark=26ms/13u@0ms condemn=0ms/27u@26ms compact=0ms/1u@26ms finish=0ms/1u@26ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=25
+1795183788914 INFO  lunix_gc::collector: gc pass done how="step" pass=2 wall_ms=26 steps=1 phases=mark=25ms/13u@0ms delete=0ms/26u@25ms compact=0ms/1u@26ms finish=0ms/1u@26ms condemned=0 segments_deleted=0 packs_deleted=1 runs_deleted=9 commits_deleted=15 compacted=0 bytes_freed=876234 bytes_moved=0 pending=0
+1795183819200 INFO  lunix_gc::collector: gc pass done how="step" pass=3 wall_ms=89 steps=2 phases=mark=88ms/15u@0ms condemn=0ms/4u@89ms compact=0ms/1u@89ms finish=0ms/1u@89ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=2
+1795183828474 INFO  lunix_engine::pressure: write throttle on headroom=2693683472 soft=2875431411 limit=19169542746 rate=994619464 ingest_rate=414693741 reclaim_rate=0
+1795183834198 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183834631 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17374418388 used=17913749408 full_timeout_ms=60000
+1795183834649 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795183834650 INFO  lunix_gc::collector: gc pass done how="urgent" pass=4 wall_ms=119 steps=1 phases= condemned=765 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=215 bytes_freed=0 bytes_moved=175280278 pending=850
+1795183834650 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=173748343 freed=0 urgency=Urgent
+1795183834750 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=173752503 freed=0 urgency=Urgent
+1795183835468 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178149707 freed=0 urgency=Urgent
+1795183836469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178144260 freed=0 urgency=Urgent
+1795183837469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178144260 freed=0 urgency=Urgent
+1795183838469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178141638 freed=0 urgency=Urgent
+1795183839728 INFO  lunix_gc::collector: gc pass done how="urgent" pass=5 wall_ms=259 steps=1 phases= condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=216 bytes_freed=0 bytes_moved=179954856 pending=850
+1795183839728 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178137952 freed=0 urgency=Urgent
+1795183839728 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183840469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178077467 freed=0 urgency=Urgent
+1795183841469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=178064032 freed=0 urgency=Urgent
+1795183842469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179424477 freed=0 urgency=Urgent
+1795183843469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179415835 freed=0 urgency=Urgent
+1795183844469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179408052 freed=0 urgency=Urgent
+1795183844877 INFO  lunix_gc::collector: gc pass done how="step" pass=6 wall_ms=119 steps=1 phases=mark=100ms/15u@1ms condemn=5ms/220u@101ms delete=0ms/851u@106ms compact=12ms/457u@107ms finish=0ms/1u@119ms condemned=216 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=4 bytes_freed=0 bytes_moved=15051501 pending=1068
+1795183845469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179389213 freed=0 urgency=Urgent
+1795183846469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179379670 freed=0 urgency=Urgent
+1795183847469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179365989 freed=0 urgency=Urgent
+1795183848624 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795183848624 INFO  lunix_gc::collector: gc pass done how="urgent" pass=7 wall_ms=154 steps=1 phases= condemned=4 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=30 bytes_freed=0 bytes_moved=179590090 pending=1074
+1795183848624 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179352718 freed=0 urgency=Urgent
+1795183849469 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179342546 freed=0 urgency=Urgent
+1795183850470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179422049 freed=0 urgency=Urgent
+1795183851470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179422049 freed=0 urgency=Urgent
+1795183852470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421967 freed=0 urgency=Urgent
+1795183853470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421967 freed=0 urgency=Urgent
+1795183853687 WARN  lunix_gc::collector: gc compaction stopped for this pass error=no space
+1795183853687 INFO  lunix_gc::collector: gc pass done how="step" pass=8 wall_ms=54 steps=1 phases=mark=43ms/13u@1ms condemn=0ms/20u@44ms delete=0ms/1075u@44ms compact=8ms/324u@45ms finish=0ms/1u@54ms condemned=16 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=2 compacted=47 bytes_freed=616 bytes_moved=269799365 pending=1090
+1795183854470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421879 freed=0 urgency=Urgent
+1795183855470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421838 freed=0 urgency=Urgent
+1795183856470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421797 freed=0 urgency=Urgent
+1795183857470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421716 freed=0 urgency=Urgent
+1795183858470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421716 freed=0 urgency=Urgent
+1795183858743 WARN  lunix_gc::collector: gc compaction stopped for this pass error=no space
+1795183858744 INFO  lunix_gc::collector: gc pass done how="step" pass=9 wall_ms=53 steps=1 phases=mark=42ms/13u@1ms delete=0ms/1091u@44ms compact=8ms/324u@44ms finish=0ms/1u@52ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=47 bytes_freed=0 bytes_moved=269799365 pending=1090
+1795183859470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421593 freed=0 urgency=Urgent
+1795183860470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421593 freed=0 urgency=Urgent
+1795183861470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421511 freed=0 urgency=Urgent
+1795183862470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421511 freed=0 urgency=Urgent
+1795183863470 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421429 freed=0 urgency=Urgent
+1795183863800 WARN  lunix_gc::collector: gc compaction stopped for this pass error=no space
+1795183863801 INFO  lunix_gc::collector: gc pass done how="step" pass=10 wall_ms=54 steps=1 phases=mark=43ms/13u@1ms delete=0ms/1091u@44ms compact=9ms/323u@44ms finish=0ms/1u@54ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=47 bytes_freed=0 bytes_moved=269799365 pending=1090
+1795183864471 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421265 freed=0 urgency=Urgent
+1795183864702 INFO  lunix_engine::pressure: write throttle state="stop" rate=4194304 headroom=0 delayed_writes=10266 delay_max_ms=3 gc_pressure="urgent"
+1795183865527 INFO  lunix_gc::collector: gc pass done how="urgent" pass=11 wall_ms=55 steps=1 phases= condemned=0 segments_deleted=13 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=191699399 bytes_moved=0 pending=1077
+1795183865527 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421224 freed=191699399 urgency=Urgent
+1795183866471 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421076 freed=0 urgency=Urgent
+1795183867471 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421076 freed=0 urgency=Urgent
+1795183868525 INFO  lunix_gc::collector: gc pass done how="urgent" pass=12 wall_ms=54 steps=1 phases= condemned=0 segments_deleted=12 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=187242923 bytes_moved=0 pending=1065
+1795183868525 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179421035 freed=187242923 urgency=Urgent
+1795183874125 INFO  lunix_gc::collector: gc pass done how="urgent" pass=14 wall_ms=99 steps=1 phases= condemned=0 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=184116447 bytes_moved=0 pending=900
+1795183874125 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179420614 freed=184116447 urgency=Urgent
+1795183877540 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183879854 INFO  lunix_engine::pressure: write throttle off throttled_ms=51547 delayed_writes=27785 delayed_ms=96493 delay_max_ms=34052
+1795183882727 INFO  lunix_gc::collector: gc pass done how="step" pass=15 wall_ms=3505 steps=11 phases=mark=89ms/15u@1ms condemn=0ms/7u@91ms delete=1787ms/901u@91ms compact=217ms/8114u@3287ms finish=0ms/1u@3505ms condemned=0 segments_deleted=794 packs_deleted=42 runs_deleted=18 commits_deleted=27 compacted=55 bytes_freed=13202106793 bytes_moved=268406977 pending=24
+1795183891013 INFO  lunix_gc::collector: gc pass done how="step" pass=16 wall_ms=3216 steps=43 phases=mark=104ms/15u@0ms condemn=6ms/239u@125ms delete=0ms/25u@132ms compact=222ms/8199u@132ms finish=0ms/1u@3215ms condemned=222 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=195 bytes_freed=0 bytes_moved=269898596 pending=261
+1795183897521 INFO  lunix_gc::collector: gc pass done how="step" pass=17 wall_ms=1045 steps=8 phases=mark=98ms/15u@0ms condemn=6ms/250u@100ms delete=0ms/262u@106ms compact=96ms/3268u@106ms finish=0ms/1u@1045ms condemned=197 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=130 bytes_freed=0 bytes_moved=107913052 pending=509
+1795183898962 INFO  lunix_engine::pressure: write throttle on headroom=2451238354 soft=2727460605 limit=18183070704 rate=595534287 ingest_rate=174749224 reclaim_rate=0
+1795183902834 INFO  lunix_gc::collector: gc pass done how="step" pass=18 wall_ms=238 steps=2 phases=mark=102ms/15u@1ms condemn=9ms/279u@104ms delete=14ms/510u@113ms compact=99ms/3465u@128ms finish=0ms/1u@237ms condemned=260 segments_deleted=16 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=190 bytes_freed=269991546 bytes_moved=114576892 pending=768
+1795183908086 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183908513 WARN  lunix_gc::collector: gc compaction stopped for this pass error=no space
+1795183908514 INFO  lunix_gc::collector: gc pass done how="step" pass=19 wall_ms=651 steps=2 phases=mark=98ms/15u@1ms condemn=7ms/202u@100ms delete=0ms/769u@107ms compact=92ms/3442u@107ms finish=0ms/1u@651ms condemned=190 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=69 bytes_freed=484 bytes_moved=147564133 pending=967
+1795183908615 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17315170703 used=17915039092 full_timeout_ms=60000
+1795183913676 INFO  lunix_gc::collector: gc pass done how="step" pass=20 wall_ms=157 steps=1 phases=mark=94ms/15u@1ms condemn=1ms/50u@96ms delete=0ms/968u@98ms compact=59ms/2187u@98ms finish=0ms/1u@157ms condemned=46 segments_deleted=0 packs_deleted=3 runs_deleted=0 commits_deleted=2 compacted=30 bytes_freed=1151603 bytes_moved=72273615 pending=1010
+1795183913777 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183914750 INFO  lunix_gc::collector: gc pass done how="urgent" pass=21 wall_ms=106 steps=1 phases= condemned=23 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=2 bytes_freed=0 bytes_moved=14554140 pending=1035
+1795183914750 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179409470 freed=0 urgency=Urgent
+1795183915644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179408001 freed=0 urgency=Urgent
+1795183916644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179408001 freed=0 urgency=Urgent
+1795183917780 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795183917781 INFO  lunix_gc::collector: gc pass done how="urgent" pass=22 wall_ms=137 steps=1 phases= condemned=9 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=66 bytes_freed=0 bytes_moved=180684202 pending=1046
+1795183917781 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179407960 freed=0 urgency=Urgent
+1795183918644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179406479 freed=0 urgency=Urgent
+1795183919644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179406479 freed=0 urgency=Urgent
+1795183920720 INFO  lunix_gc::collector: gc pass done how="urgent" pass=23 wall_ms=76 steps=1 phases= condemned=14 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114185 bytes_moved=0 pending=1051
+1795183920720 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179406479 freed=185114185 urgency=Urgent
+1795183921644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179405664 freed=0 urgency=Urgent
+1795183922644 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179405664 freed=0 urgency=Urgent
+1795183923717 INFO  lunix_gc::collector: gc pass done how="urgent" pass=24 wall_ms=72 steps=1 phases= condemned=0 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114097 bytes_moved=0 pending=1040
+1795183923717 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179405623 freed=185114097 urgency=Urgent
+1795183929324 INFO  lunix_gc::collector: gc pass done how="urgent" pass=26 wall_ms=107 steps=1 phases= condemned=0 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114450 bytes_moved=0 pending=867
+1795183929324 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179404712 freed=185114450 urgency=Urgent
+1795183930035 INFO  lunix_engine::pressure: write throttle off throttled_ms=83118 delayed_writes=57066 delayed_ms=153019 delay_max_ms=34052
+1795183937053 INFO  lunix_gc::collector: gc pass done how="step" pass=27 wall_ms=2636 steps=9 phases=mark=96ms/15u@1ms condemn=0ms/14u@98ms delete=1441ms/868u@98ms compact=77ms/2561u@2557ms finish=0ms/1u@2636ms condemned=3 segments_deleted=483 packs_deleted=32 runs_deleted=19 commits_deleted=32 compacted=140 bytes_freed=8038693337 bytes_moved=84639784 pending=313
+1795183940789 INFO  lunix_engine::pressure: write throttle on headroom=1926045524 soft=2766265619 limit=18441770799 rate=153834367 ingest_rate=231545060 reclaim_rate=840515823
+1795183943456 INFO  lunix_gc::collector: gc pass done how="step" pass=28 wall_ms=1366 steps=5 phases=mark=100ms/15u@1ms condemn=16ms/391u@102ms delete=555ms/314u@118ms compact=153ms/5465u@1212ms finish=0ms/1u@1365ms condemned=368 segments_deleted=190 packs_deleted=1 runs_deleted=8 commits_deleted=1 compacted=204 bytes_freed=3178934102 bytes_moved=180750581 pending=502
+1795183949437 INFO  lunix_gc::collector: gc pass done how="step" pass=29 wall_ms=980 steps=3 phases=mark=95ms/15u@1ms condemn=11ms/253u@97ms delete=207ms/503u@108ms compact=156ms/5684u@326ms finish=0ms/1u@980ms condemned=235 segments_deleted=78 packs_deleted=3 runs_deleted=0 commits_deleted=3 compacted=165 bytes_freed=1300406584 bytes_moved=187977715 pending=669
+1795183954756 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183955367 INFO  lunix_gc::collector: gc pass done how="step" pass=30 wall_ms=834 steps=2 phases=mark=97ms/15u@1ms condemn=8ms/175u@98ms delete=13ms/670u@107ms compact=179ms/6773u@120ms finish=0ms/1u@834ms condemned=169 segments_deleted=14 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=73 bytes_freed=236296781 bytes_moved=224015104 pending=826
+1795183960625 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17961017536 used=17982834856 full_timeout_ms=60000
+1795183960731 INFO  lunix_gc::collector: gc pass done how="urgent" pass=32 wall_ms=115 steps=1 phases= condemned=49 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=14 bytes_freed=0 bytes_moved=15581945 pending=951
+1795183960731 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179618495 freed=0 urgency=Urgent
+1795183960732 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795183961595 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179399782 freed=0 urgency=Urgent
+1795183962595 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179399782 freed=0 urgency=Urgent
+1795183963596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179399741 freed=0 urgency=Urgent
+1795183964596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179399741 freed=0 urgency=Urgent
+1795183965751 INFO  lunix_gc::collector: gc pass done how="urgent" pass=33 wall_ms=154 steps=1 phases= condemned=17 segments_deleted=3 packs_deleted=5 runs_deleted=0 commits_deleted=4 compacted=73 bytes_freed=53377878 bytes_moved=64383184 pending=958
+1795183965751 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179399741 freed=53377878 urgency=Urgent
+1795183966596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179398580 freed=0 urgency=Urgent
+1795183967596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179398539 freed=0 urgency=Urgent
+1795183968700 INFO  lunix_gc::collector: gc pass done how="urgent" pass=34 wall_ms=103 steps=1 phases= condemned=69 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=8 bytes_freed=0 bytes_moved=6564280 pending=1029
+1795183968700 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179398539 freed=0 urgency=Urgent
+1795183969596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179397038 freed=0 urgency=Urgent
+1795183970596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179397038 freed=0 urgency=Urgent
+1795183971596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396997 freed=0 urgency=Urgent
+1795183972596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396997 freed=0 urgency=Urgent
+1795183973693 INFO  lunix_gc::collector: gc pass done how="urgent" pass=35 wall_ms=97 steps=1 phases= condemned=9 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114034 bytes_moved=0 pending=1029
+1795183973693 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396997 freed=185114034 urgency=Urgent
+1795183974596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396388 freed=0 urgency=Urgent
+1795183975596 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396306 freed=0 urgency=Urgent
+1795183976693 INFO  lunix_gc::collector: gc pass done how="urgent" pass=36 wall_ms=96 steps=1 phases= condemned=0 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114060 bytes_moved=0 pending=1018
+1795183976693 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179396306 freed=185114060 urgency=Urgent
+1795183982134 INFO  lunix_engine::pressure: write throttle off throttled_ms=128220 delayed_writes=95656 delayed_ms=225168 delay_max_ms=34052
+1795183983099 INFO  lunix_gc::collector: gc pass done how="step" pass=37 wall_ms=1376 steps=7 phases=mark=84ms/15u@1ms condemn=0ms/12u@85ms delete=1239ms/1019u@86ms compact=0ms/1u@1375ms finish=0ms/1u@1375ms condemned=8 segments_deleted=581 packs_deleted=14 runs_deleted=9 commits_deleted=14 compacted=0 bytes_freed=9632395369 bytes_moved=0 pending=410
+1795183993223 INFO  lunix_engine::pressure: write throttle on headroom=2720868961 soft=2722168916 limit=18147792776 rate=140462112200 ingest_rate=209332047 reclaim_rate=146464628
+1795183994336 INFO  lunix_gc::collector: gc pass done how="step" pass=38 wall_ms=1113 steps=4 phases=mark=105ms/15u@1ms condemn=12ms/252u@107ms delete=467ms/411u@119ms compact=112ms/3911u@1000ms finish=0ms/1u@1113ms condemned=217 segments_deleted=291 packs_deleted=4 runs_deleted=0 commits_deleted=4 compacted=169 bytes_freed=4865377854 bytes_moved=129329981 pending=361
+1795183999576 INFO  lunix_engine::pressure: write throttle off throttled_ms=131454 delayed_writes=100491 delayed_ms=229407 delay_max_ms=34052
+1795183999764 INFO  lunix_gc::collector: gc pass done how="step" pass=39 wall_ms=398 steps=2 phases=mark=101ms/15u@1ms condemn=19ms/343u@102ms delete=84ms/362u@122ms compact=180ms/6460u@217ms finish=0ms/1u@398ms condemned=324 segments_deleted=86 packs_deleted=2 runs_deleted=0 commits_deleted=2 compacted=208 bytes_freed=1404428042 bytes_moved=213671415 pending=612
+1795184004663 INFO  lunix_engine::pressure: write throttle on headroom=2643365686 soft=3017810898 limit=20118739323 rate=473749597 ingest_rate=194936425 reclaim_rate=152489472
+1795184005052 INFO  lunix_gc::collector: gc pass done how="step" pass=40 wall_ms=188 steps=1 phases=mark=96ms/15u@1ms condemn=14ms/232u@97ms delete=7ms/613u@111ms compact=69ms/2430u@118ms finish=0ms/1u@188ms condemned=214 segments_deleted=9 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=125 bytes_freed=141300904 bytes_moved=80329821 pending=831
+1795184005165 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795184005777 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795184005777 INFO  lunix_gc::collector: gc pass done how="urgent" pass=41 wall_ms=106 steps=1 phases= condemned=125 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=62 bytes_freed=0 bytes_moved=176473789 pending=958
+1795184005777 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=174803278 freed=0 urgency=Urgent
+1795184006535 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179441549 freed=0 urgency=Urgent
+1795184007535 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179441549 freed=0 urgency=Urgent
+1795184008535 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179441508 freed=0 urgency=Urgent
+1795184009535 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179441508 freed=0 urgency=Urgent
+1795184009680 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17943318825 used=18137911593 full_timeout_ms=60000
+1795184010717 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795184010718 INFO  lunix_gc::collector: gc pass done how="urgent" pass=42 wall_ms=182 steps=1 phases= condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=63 bytes_freed=0 bytes_moved=179623307 pending=958
+1795184010718 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179441467 freed=0 urgency=Urgent
+1795184010718 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795184011536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386711 freed=0 urgency=Urgent
+1795184012536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386711 freed=0 urgency=Urgent
+1795184013536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386711 freed=0 urgency=Urgent
+1795184014536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386711 freed=0 urgency=Urgent
+1795184015536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386670 freed=0 urgency=Urgent
+1795184015933 INFO  lunix_gc::collector: gc pass done how="step" pass=43 wall_ms=182 steps=1 phases=mark=94ms/15u@1ms condemn=2ms/38u@96ms delete=6ms/959u@98ms compact=77ms/2906u@104ms finish=0ms/1u@182ms condemned=34 segments_deleted=8 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=38 bytes_freed=134174206 bytes_moved=96077514 pending=984
+1795184016536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386530 freed=0 urgency=Urgent
+1795184017536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386489 freed=0 urgency=Urgent
+1795184018536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386489 freed=0 urgency=Urgent
+1795184019625 WARN  lunix_gc::collector: gc urgent compaction stopped error=no space
+1795184019626 INFO  lunix_gc::collector: gc pass done how="urgent" pass=44 wall_ms=89 steps=1 phases= condemned=33 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=73 bytes_freed=0 bytes_moved=77810102 pending=1019
+1795184019626 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179386448 freed=0 urgency=Urgent
+1795184020536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179385056 freed=0 urgency=Urgent
+1795184021536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179385015 freed=0 urgency=Urgent
+1795184022536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179385015 freed=0 urgency=Urgent
+1795184023536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179385015 freed=0 urgency=Urgent
+1795184024536 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179385015 freed=0 urgency=Urgent
+1795184025239 INFO  lunix_gc::collector: gc pass done how="step" pass=45 wall_ms=609 steps=3 phases=mark=84ms/15u@1ms delete=434ms/1020u@85ms compact=69ms/2354u@540ms finish=0ms/1u@609ms condemned=0 segments_deleted=217 packs_deleted=12 runs_deleted=9 commits_deleted=12 compacted=73 bytes_freed=3573014171 bytes_moved=77810102 pending=769
+1795184030889 INFO  lunix_engine::pressure: write throttle off throttled_ms=161511 delayed_writes=124567 delayed_ms=284035 delay_max_ms=34052
+1795184031906 INFO  lunix_gc::collector: gc pass done how="step" pass=46 wall_ms=1648 steps=6 phases=mark=90ms/15u@1ms condemn=5ms/86u@91ms delete=891ms/770u@97ms compact=112ms/4100u@1535ms finish=0ms/1u@1647ms condemned=78 segments_deleted=324 packs_deleted=8 runs_deleted=1 commits_deleted=8 compacted=74 bytes_freed=5382944527 bytes_moved=135562844 pending=512
+1795184035901 INFO  lunix_engine::pressure: write throttle on headroom=610553856 soft=2710051877 limit=18067012515 rate=19515891 ingest_rate=220185796 reclaim_rate=532437638
+1795184038597 INFO  lunix_gc::collector: gc pass done how="step" pass=47 wall_ms=1595 steps=6 phases=mark=105ms/15u@1ms condemn=15ms/234u@107ms delete=811ms/513u@123ms compact=107ms/3623u@1487ms finish=0ms/1u@1595ms condemned=215 segments_deleted=339 packs_deleted=5 runs_deleted=8 commits_deleted=5 compacted=203 bytes_freed=5621768511 bytes_moved=119782063 pending=387
+1795184043919 WARN  lunix_engine::coord: commit headroom is short; charging actual sizes after the fact
+1795184044499 INFO  lunix_gc::collector: gc pass done how="step" pass=48 wall_ms=814 steps=2 phases=mark=99ms/15u@1ms condemn=24ms/339u@101ms delete=0ms/388u@125ms compact=201ms/7391u@125ms finish=0ms/1u@813ms condemned=317 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=179 bytes_freed=0 bytes_moved=244470448 pending=724
+1795184044768 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17952749262 used=17976362629 full_timeout_ms=60000
+1795184045860 INFO  lunix_gc::collector: gc pass done how="urgent" pass=49 wall_ms=259 steps=1 phases= condemned=179 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=70 bytes_freed=0 bytes_moved=181115062 pending=907
+1795184045860 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179382539 freed=0 urgency=Urgent
+1795184046601 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179380863 freed=0 urgency=Urgent
+1795184047601 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179380863 freed=0 urgency=Urgent
+1795184048720 INFO  lunix_gc::collector: gc pass done how="urgent" pass=50 wall_ms=119 steps=1 phases= condemned=70 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114167 bytes_moved=0 pending=968
+1795184048720 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179380822 freed=185114167 urgency=Urgent
+1795184049601 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179379884 freed=0 urgency=Urgent
+1795184050601 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179379884 freed=0 urgency=Urgent
+1795184051715 INFO  lunix_gc::collector: gc pass done how="urgent" pass=51 wall_ms=114 steps=1 phases= condemned=0 segments_deleted=11 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=185114207 bytes_moved=0 pending=957
+1795184051715 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179379884 freed=185114207 urgency=Urgent
+1795184057085 INFO  lunix_gc::collector: gc pass done how="step" pass=52 wall_ms=299 steps=2 phases=mark=98ms/15u@1ms condemn=0ms/5u@99ms delete=49ms/958u@100ms compact=149ms/5536u@149ms finish=0ms/1u@299ms condemned=0 segments_deleted=45 packs_deleted=2 runs_deleted=0 commits_deleted=2 compacted=100 bytes_freed=750611122 bytes_moved=183104096 pending=911
+1795184062275 INFO  lunix_gc::collector: gc pass done how="step" pass=53 wall_ms=177 steps=1 phases=mark=92ms/15u@1ms condemn=7ms/92u@93ms delete=76ms/912u@101ms compact=0ms/1u@177ms finish=0ms/1u@177ms condemned=89 segments_deleted=78 packs_deleted=3 runs_deleted=0 commits_deleted=3 compacted=0 bytes_freed=1299792275 bytes_moved=0 pending=917
+1795184067492 INFO  lunix_engine::pressure: write throttle off throttled_ms=192778 delayed_writes=140466 delayed_ms=318910 delay_max_ms=34052
+1795184068266 INFO  lunix_gc::collector: gc pass done how="step" pass=54 wall_ms=987 steps=4 phases=mark=94ms/15u@1ms delete=578ms/918u@95ms compact=0ms/1u@987ms finish=0ms/1u@987ms condemned=0 segments_deleted=215 packs_deleted=8 runs_deleted=1 commits_deleted=8 compacted=0 bytes_freed=3562994959 bytes_moved=0 pending=685
+1795184072573 INFO  lunix_engine::pressure: write throttle on headroom=1823157184 soft=2718688815 limit=18124592102 rate=136622764 ingest_rate=1467548705 reclaim_rate=387408389
+1795184073356 INFO  lunix_gc::collector: gc pass done how="step" pass=55 wall_ms=82 steps=1 phases=mark=40ms/13u@1ms condemn=20ms/273u@41ms delete=0ms/686u@61ms compact=20ms/764u@62ms finish=0ms/1u@82ms condemned=222 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=25196335 pending=956
+1795184078855 INFO  lunix_engine::pressure: write throttle off throttled_ms=201696 delayed_writes=142164 delayed_ms=334642 delay_max_ms=34052
+1795184080450 INFO  lunix_gc::collector: gc pass done how="step" pass=56 wall_ms=2016 steps=8 phases=mark=37ms/13u@1ms condemn=2ms/41u@38ms delete=1476ms/957u@41ms compact=29ms/1075u@1987ms finish=0ms/1u@2016ms condemned=30 segments_deleted=496 packs_deleted=8 runs_deleted=8 commits_deleted=8 compacted=8 bytes_freed=8234579790 bytes_moved=35473781 pending=475
+1795184085168 INFO  lunix_engine::pressure: write throttle on headroom=2504286978 soft=2692301906 limit=17948679379 rate=893864418 ingest_rate=2927959364 reclaim_rate=843966361
+1795184085999 INFO  lunix_gc::collector: gc pass done how="step" pass=57 wall_ms=523 steps=2 phases=mark=45ms/13u@1ms condemn=40ms/532u@47ms delete=238ms/476u@87ms compact=37ms/1407u@486ms finish=0ms/1u@523ms condemned=433 segments_deleted=70 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=11 bytes_freed=1165012162 bytes_moved=46480557 pending=933
+1795184091120 INFO  lunix_gc::collector: gc pass done how="step" pass=58 wall_ms=70 steps=1 phases=mark=38ms/13u@1ms condemn=9ms/122u@39ms delete=0ms/934u@49ms compact=19ms/752u@50ms finish=0ms/1u@70ms condemned=100 segments_deleted=0 packs_deleted=1 runs_deleted=1 commits_deleted=1 compacted=6 bytes_freed=953226 bytes_moved=24798512 pending=1050
+1795184096704 INFO  lunix_gc::collector: gc pass done how="step" pass=59 wall_ms=508 steps=2 phases=mark=40ms/13u@1ms condemn=1ms/20u@41ms delete=288ms/1051u@43ms compact=27ms/1053u@480ms finish=0ms/1u@508ms condemned=15 segments_deleted=89 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=6 bytes_freed=1472865197 bytes_moved=34744366 pending=978
+1795184096705 INFO  lunix_engine::pressure: write throttle off throttled_ms=213208 delayed_writes=144883 delayed_ms=354392 delay_max_ms=34052
+1795184101765 INFO  lunix_engine::pressure: write throttle on headroom=1906520128 soft=2733196053 limit=18221307025 rate=154769718 ingest_rate=482401590 reclaim_rate=159125453
+1795184101843 INFO  lunix_gc::collector: gc pass done how="step" pass=60 wall_ms=77 steps=1 phases=mark=38ms/13u@1ms condemn=10ms/121u@39ms delete=0ms/979u@49ms compact=27ms/1039u@49ms finish=0ms/1u@77ms condemned=99 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=34280239 pending=1097
+1795184107309 INFO  lunix_engine::pressure: write throttle off throttled_ms=223553 delayed_writes=146549 delayed_ms=363584 delay_max_ms=34052
+1795184107388 INFO  lunix_gc::collector: gc pass done how="step" pass=61 wall_ms=499 steps=3 phases=mark=38ms/13u@1ms condemn=1ms/16u@39ms delete=340ms/1098u@41ms compact=25ms/892u@392ms finish=0ms/1u@498ms condemned=12 segments_deleted=222 packs_deleted=18 runs_deleted=8 commits_deleted=23 compacted=8 bytes_freed=3587383194 bytes_moved=29439951 pending=840
+1795184112458 INFO  lunix_gc::collector: gc pass done how="step" pass=62 wall_ms=63 steps=2 phases=mark=33ms/12u@1ms condemn=1ms/22u@34ms delete=0ms/841u@36ms compact=14ms/546u@36ms finish=0ms/1u@63ms condemned=17 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=4 bytes_freed=0 bytes_moved=17968986 pending=860
+1795184117509 INFO  lunix_gc::collector: gc pass done how="step" pass=63 wall_ms=44 steps=1 phases=mark=29ms/13u@1ms condemn=1ms/16u@31ms delete=0ms/861u@32ms compact=12ms/455u@32ms finish=0ms/1u@44ms condemned=10 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=14985185 pending=874
+1795184122549 INFO  lunix_gc::collector: gc pass done how="step" pass=64 wall_ms=33 steps=1 phases=mark=31ms/13u@1ms condemn=0ms/9u@32ms delete=0ms/875u@33ms compact=0ms/1u@33ms finish=0ms/1u@33ms condemned=6 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=881
+1795184137382 INFO  lunix_engine::pressure: write throttle on headroom=2582171542 soft=2761503445 limit=18410022970 rate=966289856 ingest_rate=1179460435 reclaim_rate=0
+1795184138375 INFO  lunix_gc::collector: gc pass done how="step" pass=65 wall_ms=843 steps=4 phases=mark=51ms/13u@1ms condemn=15ms/195u@53ms delete=589ms/882u@68ms compact=22ms/792u@821ms finish=0ms/1u@843ms condemned=153 segments_deleted=689 packs_deleted=76 runs_deleted=0 commits_deleted=75 compacted=8 bytes_freed=10949699088 bytes_moved=26124640 pending=234
+1795184142407 INFO  lunix_engine::pressure: write throttle off throttled_ms=224098 delayed_writes=146734 delayed_ms=363762 delay_max_ms=34052
+1795184143719 INFO  lunix_gc::collector: gc pass done how="step" pass=66 wall_ms=272 steps=3 phases=mark=48ms/13u@1ms condemn=48ms/538u@49ms delete=0ms/235u@98ms compact=37ms/1263u@98ms finish=0ms/1u@272ms condemned=438 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=11 bytes_freed=0 bytes_moved=41706522 pending=770
+1795184147445 INFO  lunix_engine::pressure: write throttle on headroom=2012699136 soft=2723131640 limit=18154210934 rate=190123554 ingest_rate=4720511701 reclaim_rate=743477995
+1795184148914 INFO  lunix_gc::collector: gc pass done how="step" pass=67 wall_ms=119 steps=1 phases=mark=41ms/13u@1ms condemn=33ms/351u@42ms delete=23ms/771u@75ms compact=19ms/708u@99ms finish=0ms/1u@119ms condemned=287 segments_deleted=27 packs_deleted=3 runs_deleted=0 commits_deleted=4 compacted=4 bytes_freed=426362971 bytes_moved=23339756 pending=1085
+1795184154037 INFO  lunix_gc::collector: gc pass done how="step" pass=68 wall_ms=54 steps=1 phases=mark=38ms/13u@1ms condemn=5ms/51u@39ms delete=5ms/1086u@45ms compact=3ms/115u@50ms finish=0ms/1u@53ms condemned=40 segments_deleted=6 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=3 bytes_freed=96849188 bytes_moved=3713151 pending=1127
+1795184159173 INFO  lunix_gc::collector: gc pass done how="step" pass=69 wall_ms=67 steps=1 phases=mark=40ms/13u@1ms condemn=1ms/18u@42ms delete=0ms/1128u@43ms compact=22ms/884u@43ms finish=0ms/1u@66ms condemned=12 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=29174704 pending=1143
+1795184164269 INFO  lunix_gc::collector: gc pass done how="step" pass=70 wall_ms=43 steps=1 phases=mark=40ms/13u@1ms condemn=1ms/11u@41ms delete=0ms/1144u@42ms compact=0ms/1u@42ms finish=0ms/1u@42ms condemned=7 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=1152
+1795184169490 INFO  lunix_gc::collector: gc pass done how="step" pass=71 wall_ms=192 steps=1 phases=mark=39ms/13u@1ms condemn=1ms/13u@41ms delete=142ms/1153u@42ms compact=6ms/211u@185ms finish=0ms/1u@191ms condemned=9 segments_deleted=153 packs_deleted=20 runs_deleted=0 commits_deleted=20 compacted=6 bytes_freed=2405641203 bytes_moved=6895882 pending=970
+1795184169590 INFO  lunix_engine::pressure: write throttle off throttled_ms=247209 delayed_writes=149694 delayed_ms=406667 delay_max_ms=34052
+1795184175051 INFO  lunix_gc::collector: gc pass done how="step" pass=72 wall_ms=473 steps=3 phases=mark=41ms/13u@1ms condemn=12ms/128u@43ms delete=383ms/971u@56ms compact=13ms/463u@460ms finish=0ms/1u@473ms condemned=105 segments_deleted=438 packs_deleted=49 runs_deleted=0 commits_deleted=49 compacted=7 bytes_freed=6954956278 bytes_moved=15250363 pending=560
+1795184180308 INFO  lunix_gc::collector: gc pass done how="step" pass=73 wall_ms=160 steps=2 phases=mark=42ms/13u@0ms condemn=1ms/11u@43ms delete=0ms/561u@44ms compact=15ms/588u@44ms finish=0ms/1u@160ms condemned=7 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=4 bytes_freed=0 bytes_moved=19361357 pending=569
+1795184185410 INFO  lunix_gc::collector: gc pass done how="step" pass=74 wall_ms=81 steps=2 phases=mark=45ms/13u@1ms condemn=25ms/254u@47ms delete=0ms/570u@73ms compact=7ms/291u@73ms finish=0ms/1u@81ms condemned=205 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=9548074 pending=821
+1795184187891 INFO  lunix_engine::pressure: write throttle on headroom=2570126078 soft=2760681506 limit=18404543374 rate=905134234 ingest_rate=2704884338 reclaim_rate=0
+1795184191010 INFO  lunix_gc::collector: gc pass done how="step" pass=75 wall_ms=564 steps=3 phases=mark=44ms/13u@1ms condemn=28ms/281u@46ms delete=304ms/822u@75ms compact=22ms/804u@542ms finish=0ms/1u@564ms condemned=228 segments_deleted=339 packs_deleted=38 runs_deleted=0 commits_deleted=37 compacted=7 bytes_freed=5415866873 bytes_moved=26522363 pending=686
+1795184192934 INFO  lunix_engine::pressure: write throttle off throttled_ms=254673 delayed_writes=151605 delayed_ms=413657 delay_max_ms=34052
+1795184196183 INFO  lunix_gc::collector: gc pass done how="step" pass=76 wall_ms=111 steps=1 phases=mark=39ms/13u@1ms condemn=44ms/420u@40ms delete=6ms/687u@85ms compact=19ms/754u@91ms finish=0ms/1u@110ms condemned=342 segments_deleted=7 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=6 bytes_freed=113408795 bytes_moved=24864760 pending=1095
+1795184198017 INFO  lunix_engine::pressure: write throttle on headroom=2002141120 soft=2734337368 limit=18228915789 rate=183504649 ingest_rate=2364911367 reclaim_rate=613818346
+1795184201248 INFO  lunix_gc::collector: gc pass done how="step" pass=77 wall_ms=63 steps=1 phases=mark=45ms/13u@1ms condemn=2ms/27u@46ms delete=7ms/1096u@49ms compact=5ms/215u@57ms finish=0ms/1u@63ms condemned=19 segments_deleted=9 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=1 bytes_freed=138598468 bytes_moved=7028397 pending=1109
+1795184206514 INFO  lunix_gc::collector: gc pass done how="step" pass=78 wall_ms=190 steps=1 phases=mark=41ms/13u@1ms condemn=3ms/32u@42ms delete=106ms/1110u@46ms compact=36ms/1355u@153ms finish=0ms/1u@189ms condemned=24 segments_deleted=105 packs_deleted=10 runs_deleted=0 commits_deleted=11 compacted=10 bytes_freed=1645709435 bytes_moved=44756670 pending=1013
+1795184206614 INFO  lunix_engine::pressure: write throttle off throttled_ms=266774 delayed_writes=153622 delayed_ms=434932 delay_max_ms=34052
+1795184211696 INFO  lunix_gc::collector: gc pass done how="step" pass=79 wall_ms=90 steps=1 phases=mark=45ms/13u@1ms condemn=8ms/74u@46ms delete=7ms/1014u@55ms compact=26ms/1019u@63ms finish=0ms/1u@90ms condemned=61 segments_deleted=7 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=11 bytes_freed=117988379 bytes_moved=33617278 pending=1076
+1795184211796 INFO  lunix_engine::pressure: write throttle on headroom=1930500278 soft=2733699152 limit=18224661019 rate=161297139 ingest_rate=427985710 reclaim_rate=180226631
+1795184217000 INFO  lunix_engine::pressure: write throttle off throttled_ms=276750 delayed_writes=155399 delayed_ms=452841 delay_max_ms=34052
+1795184217251 INFO  lunix_gc::collector: gc pass done how="step" pass=80 wall_ms=462 steps=2 phases=mark=43ms/13u@1ms condemn=4ms/36u@45ms delete=223ms/1077u@49ms compact=27ms/1029u@434ms finish=0ms/1u@461ms condemned=29 segments_deleted=205 packs_deleted=23 runs_deleted=0 commits_deleted=24 compacted=9 bytes_freed=3220242087 bytes_moved=33948724 pending=858
+1795184222007 INFO  lunix_engine::pressure: write throttle on headroom=2338713600 soft=2703007257 limit=18020048381 rate=430829386 ingest_rate=1021574261 reclaim_rate=322153069
+1795184222629 INFO  lunix_gc::collector: gc pass done how="step" pass=81 wall_ms=322 steps=2 phases=mark=46ms/13u@1ms condemn=23ms/205u@47ms delete=206ms/859u@70ms compact=34ms/1253u@287ms finish=0ms/1u@321ms condemned=170 segments_deleted=228 packs_deleted=25 runs_deleted=0 commits_deleted=26 compacted=11 bytes_freed=3634752802 bytes_moved=41374939 pending=782
+1795184227072 INFO  lunix_engine::pressure: write throttle off throttled_ms=280413 delayed_writes=155460 delayed_ms=452892 delay_max_ms=34052
+1795184227838 INFO  lunix_gc::collector: gc pass done how="step" pass=82 wall_ms=165 steps=2 phases=mark=40ms/13u@1ms condemn=1ms/16u@41ms delete=0ms/783u@43ms compact=21ms/828u@43ms finish=0ms/1u@165ms condemned=12 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=27318163 pending=796
+1795184233007 INFO  lunix_gc::collector: gc pass done how="step" pass=83 wall_ms=162 steps=2 phases=mark=35ms/12u@1ms condemn=1ms/11u@36ms delete=0ms/797u@38ms compact=23ms/734u@38ms finish=0ms/1u@161ms condemned=7 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=4 bytes_freed=0 bytes_moved=24201722 pending=805
+1795184238062 INFO  lunix_gc::collector: gc pass done how="step" pass=84 wall_ms=46 steps=1 phases=mark=33ms/12u@1ms condemn=1ms/7u@34ms delete=0ms/806u@35ms compact=10ms/323u@35ms finish=0ms/1u@46ms condemned=4 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=2 bytes_freed=0 bytes_moved=10608983 pending=810
+1795184243115 INFO  lunix_gc::collector: gc pass done how="step" pass=85 wall_ms=44 steps=1 phases=mark=34ms/13u@1ms condemn=1ms/8u@35ms delete=0ms/811u@36ms compact=7ms/235u@37ms finish=0ms/1u@44ms condemned=5 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=1 bytes_freed=0 bytes_moved=7691514 pending=816
+1795184248162 INFO  lunix_gc::collector: gc pass done how="step" pass=86 wall_ms=37 steps=1 phases=mark=34ms/13u@1ms condemn=0ms/5u@35ms delete=0ms/817u@36ms compact=0ms/1u@36ms finish=0ms/1u@36ms condemned=2 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=819
+1795184258703 INFO  lunix_gc::collector: gc pass done how="step" pass=87 wall_ms=491 steps=9 phases=mark=35ms/13u@1ms delete=373ms/820u@36ms compact=0ms/1u@491ms finish=0ms/1u@491ms condemned=0 segments_deleted=342 packs_deleted=38 runs_deleted=0 commits_deleted=38 compacted=0 bytes_freed=5477790907 bytes_moved=0 pending=401
+1795184263775 INFO  lunix_gc::collector: gc pass done how="step" pass=88 wall_ms=66 steps=2 phases=mark=33ms/13u@0ms delete=20ms/402u@34ms compact=0ms/1u@65ms finish=0ms/1u@65ms condemned=0 segments_deleted=19 packs_deleted=3 runs_deleted=0 commits_deleted=3 compacted=0 bytes_freed=314306029 bytes_moved=0 pending=376
+1795184268848 INFO  lunix_gc::collector: gc pass done how="step" pass=89 wall_ms=68 steps=2 phases=mark=32ms/13u@0ms delete=25ms/377u@32ms compact=0ms/1u@68ms finish=0ms/1u@68ms condemned=0 segments_deleted=24 packs_deleted=4 runs_deleted=0 commits_deleted=2 compacted=0 bytes_freed=371711784 bytes_moved=0 pending=346
+1795184273960 INFO  lunix_gc::collector: gc pass done how="step" pass=90 wall_ms=108 steps=2 phases=mark=34ms/13u@0ms delete=63ms/347u@34ms compact=0ms/1u@108ms finish=0ms/1u@108ms condemned=0 segments_deleted=61 packs_deleted=5 runs_deleted=0 commits_deleted=6 compacted=0 bytes_freed=943123204 bytes_moved=0 pending=274
+1795184279042 INFO  lunix_gc::collector: gc pass done how="step" pass=91 wall_ms=76 steps=2 phases=mark=33ms/13u@0ms delete=31ms/275u@34ms compact=0ms/1u@76ms finish=0ms/1u@76ms condemned=0 segments_deleted=29 packs_deleted=3 runs_deleted=0 commits_deleted=2 compacted=0 bytes_freed=469284617 bytes_moved=0 pending=240
+1795184284355 INFO  lunix_gc::collector: gc pass done how="step" pass=92 wall_ms=308 steps=6 phases=mark=34ms/13u@0ms delete=222ms/241u@34ms compact=0ms/1u@308ms finish=0ms/1u@308ms condemned=0 segments_deleted=170 packs_deleted=16 runs_deleted=0 commits_deleted=17 compacted=0 bytes_freed=2718599613 bytes_moved=0 pending=37
+1795184289410 INFO  lunix_gc::collector: gc pass done how="step" pass=93 wall_ms=49 steps=1 phases=mark=33ms/13u@0ms delete=15ms/38u@34ms compact=0ms/1u@49ms finish=0ms/1u@49ms condemned=0 segments_deleted=12 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=202208504 bytes_moved=0 pending=23
+1795184294457 INFO  lunix_gc::collector: gc pass done how="step" pass=94 wall_ms=41 steps=1 phases=mark=33ms/13u@0ms delete=7ms/24u@33ms compact=0ms/1u@41ms finish=0ms/1u@41ms condemned=0 segments_deleted=7 packs_deleted=1 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=97493559 bytes_moved=0 pending=14
+1795184299500 INFO  lunix_gc::collector: gc pass done how="step" pass=95 wall_ms=39 steps=1 phases=mark=33ms/13u@0ms delete=5ms/15u@33ms compact=0ms/1u@38ms finish=0ms/1u@38ms condemned=0 segments_deleted=4 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=67317825 bytes_moved=0 pending=9
+1795184304545 INFO  lunix_gc::collector: gc pass done how="step" pass=96 wall_ms=41 steps=1 phases=mark=33ms/13u@0ms delete=7ms/10u@33ms compact=0ms/1u@40ms finish=0ms/1u@40ms condemned=0 segments_deleted=5 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=75166796 bytes_moved=0 pending=3
+1795184309797 INFO  lunix_gc::collector: gc pass done how="step" pass=97 wall_ms=247 steps=2 phases=mark=234ms/13u@0ms delete=2ms/4u@244ms compact=0ms/1u@247ms finish=0ms/1u@247ms condemned=0 segments_deleted=2 packs_deleted=0 runs_deleted=0 commits_deleted=1 compacted=0 bytes_freed=27408309 bytes_moved=0 pending=0
+1795184341668 INFO  lunixd::audit: {"ts_ms":1795184341668,"uid":0,"gid":0,"pid":821558,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795184344399 INFO  lunixd::server: signal: quiescing every device
+1795184344399 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

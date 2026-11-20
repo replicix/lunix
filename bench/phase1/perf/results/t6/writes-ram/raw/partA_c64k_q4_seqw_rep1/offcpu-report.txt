@@ -1,0 +1,145 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 67K of event 'sched:sched_switch'
+# Event count (approx.): 67634
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    65.59%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --65.54%--schedule
+                          |          
+                          |--61.99%--futex_do_wait
+                          |          __futex_wait
+                          |          futex_wait
+                          |          do_futex
+                          |          __x64_sys_futex
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |          |--60.65%--syscall
+                          |          |          
+                          |           --1.35%--__lll_lock_wait_private
+                          |                     |          
+                          |                     |--0.64%--__libc_malloc2
+                          |                     |          
+                          |                      --0.60%--_int_free_chunk
+                          |          
+                          |--2.37%--exit_to_user_mode_loop
+                          |          |          
+                          |           --2.37%--do_syscall_64
+                          |                     entry_SYSCALL_64_after_hwframe
+                          |                     |          
+                          |                      --2.20%--syscall
+                          |          
+                           --1.17%--irqentry_exit
+                                     |          
+                                      --1.00%--asm_sysvec_apic_timer_interrupt
+
+     7.89%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --7.78%--schedule
+                          |          
+                          |--5.02%--exit_to_user_mode_loop
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |           --5.02%--syscall
+                          |          
+                           --2.34%--io_cqring_wait
+                                     __do_sys_io_uring_enter
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     syscall
+
+     7.86%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --7.73%--schedule
+                          |          
+                          |--5.04%--exit_to_user_mode_loop
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |           --5.03%--syscall
+                          |          
+                           --2.30%--io_cqring_wait
+                                     __do_sys_io_uring_enter
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     syscall
+
+     6.62%  iou-wrk-737191   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --6.62%--schedule
+                          schedule_timeout
+                          io_wq_worker
+                          ret_from_fork
+                          ret_from_fork_asm
+
+     6.51%  iou-wrk-737192   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     3.55%  lunix-space-tim  [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               |          
+                --3.54%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+
+     0.25%  :785793          [k] perf_trace_sched_switch
+     0.24%  :785790          [k] perf_trace_sched_switch
+     0.24%  :785794          [k] perf_trace_sched_switch
+     0.24%  :785797          [k] perf_trace_sched_switch
+     0.23%  :785792          [k] perf_trace_sched_switch
+     0.22%  :785791          [k] perf_trace_sched_switch
+     0.16%  :785795          [k] perf_trace_sched_switch
+     0.15%  :785796          [k] perf_trace_sched_switch
+     0.11%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.06%  lunix-q0         [k] perf_trace_sched_switch
+     0.06%  lunix-q1         [k] perf_trace_sched_switch
+     0.02%  lunixd           [k] perf_trace_sched_switch
+     0.00%  lunixd-trim      [k] perf_trace_sched_switch
+     0.00%  lunixd-call      [k] perf_trace_sched_switch
+     0.00%  iou-wrk-737173   [k] perf_trace_sched_switch
+
+
+#
+# (Tip: Skip collecting build-id when recording: perf record -B)
+#

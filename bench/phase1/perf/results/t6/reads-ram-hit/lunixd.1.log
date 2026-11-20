@@ -1,0 +1,22 @@
+1795185119039 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795185119039 INFO  lunixd: lunixd started socket=$RAMDIR/spike/m16-parta-state/ctl.sock
+1795185119039 INFO  lunixd::server: control socket ready
+1795185119094 INFO  lunixd::audit: {"ts_ms":1795185119094,"uid":0,"gid":0,"pid":908375,"method":"volume_create","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795185119818 INFO  lunixd::daemon: volume opened volume="pa64k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795185119859 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=750
+1795185119859 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=582094848
+1795185119859 INFO  lunixd::audit: {"ts_ms":1795185119859,"uid":0,"gid":0,"pid":908401,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795185149997 INFO  lunix_gc::collector: gc pass done how="step" pass=1 wall_ms=22 steps=1 phases=mark=22ms/13u@0ms condemn=0ms/30u@22ms compact=0ms/1u@22ms finish=0ms/1u@22ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=28
+1795185210090 INFO  lunix_gc::collector: gc pass done how="step" pass=2 wall_ms=23 steps=1 phases=mark=22ms/13u@0ms delete=0ms/29u@22ms compact=0ms/1u@22ms finish=0ms/1u@22ms condemned=0 segments_deleted=0 packs_deleted=1 runs_deleted=10 commits_deleted=17 compacted=0 bytes_freed=826724 bytes_moved=0 pending=0
+1795185346467 INFO  lunixd::audit: {"ts_ms":1795185346467,"uid":0,"gid":0,"pid":914938,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795185348358 INFO  lunixd::daemon: volume opened volume="pa64k" tip=19 replayed=0 swept_segments=0
+device reload json failed
+1795185348417 INFO  lunixd::daemon: attached volume="pa64k" recovered=false ms=916
+1795185348417 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa64k locked_bytes=1161039872
+1795185348417 INFO  lunixd::audit: {"ts_ms":1795185348417,"uid":0,"gid":0,"pid":914969,"method":"attach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795185378516 INFO  lunix_gc::collector: gc pass done how="step" pass=3 wall_ms=22 steps=1 phases=mark=22ms/11u@0ms condemn=0ms/43u@22ms compact=0ms/1u@22ms finish=0ms/1u@22ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=41
+1795185438611 INFO  lunix_gc::collector: gc pass done how="step" pass=4 wall_ms=23 steps=1 phases=mark=22ms/11u@0ms delete=0ms/42u@22ms compact=0ms/1u@23ms finish=0ms/1u@23ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=8 commits_deleted=33 compacted=0 bytes_freed=706412 bytes_moved=0 pending=0
+1795185576273 INFO  lunixd::audit: {"ts_ms":1795185576273,"uid":0,"gid":0,"pid":921684,"method":"detach","volume":"pa64k","outcome":"ok","code":null,"message":null}
+1795185577440 INFO  lunixd::server: signal: quiescing every device
+1795185577440 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0
