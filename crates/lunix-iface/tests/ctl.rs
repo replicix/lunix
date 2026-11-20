@@ -366,7 +366,19 @@ fn status() -> impl Strategy<Value = VolumeStatusBody> {
                     journal_marks_skipped: journal_capacity % 3,
                     write_path: WritePathStatus {
                         ring_waiters: journal_used % 5,
-                        ring_wait_longest_ms: journal_capacity % 11,
+                        ring_parked_writes: journal_used % 19,
+                        ring_wait_max_since_attach_ms: journal_capacity % 11,
+                        ring_wait_max_60s_ms: journal_capacity % 7,
+                        freed_files_by_lane: vec![journal_used % 3, journal_capacity % 4],
+                        write_latency_log2_us: (0..WRITE_LATENCY_BUCKETS as u64)
+                            .map(|b| (journal_used + b) % 23)
+                            .collect(),
+                        ring_pace_rate: journal_capacity % 29,
+                        ring_paced_writes: journal_used % 31,
+                        ring_paced_ms: journal_used % 37,
+                        ring_pace_max_ms: journal_capacity % 41,
+                        ring_pace_capped: journal_used % 43,
+                        ring_pace_bypassed_fua: journal_capacity % 47,
                         window_resident_bytes: journal_used,
                         window_hits: journal_capacity % 13,
                         window_misses: journal_used % 17,

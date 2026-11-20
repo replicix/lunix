@@ -253,6 +253,8 @@ struct LaneState {
     wake: Option<WakeFd>,
     accepted_max: u64,
     fail_next: Option<Fail>,
+    /// Files this lane's reclaims freed (`Journal::freed_files_by_lane`).
+    freed: u64,
 }
 
 struct State {
@@ -271,6 +273,8 @@ struct State {
     reclaims: u64,
     fail_flush: bool,
     nospace: bool,
+    /// Lanes whose `try_reserve` answers `NoSpace` (the others go on).
+    nospace_lanes: BTreeSet<u16>,
     retire_from: Option<u64>,
     /// The highest `upto` of a completed group flush, or the recovered
     /// records once the first lane open retired the rest.
@@ -443,6 +447,7 @@ impl MemJournal {
                     wake: None,
                     accepted_max: 0,
                     fail_next: None,
+                    freed: 0,
                 }
             })
             .collect();
@@ -466,6 +471,7 @@ impl MemJournal {
                 reclaims: 0,
                 fail_flush: false,
                 nospace: false,
+                nospace_lanes: BTreeSet::new(),
                 retire_from: None,
                 flushed: 0,
                 marks_on: false,
@@ -585,6 +591,16 @@ impl MemJournal {
     /// While set, `try_reserve` answers `NoSpace` (nothing consumed).
     pub fn set_nospace(&self, on: bool) {
         lock(&self.inner.state).nospace = on;
+    }
+
+    /// The same for one lane only.
+    pub fn set_nospace_lane(&self, lane: u16, on: bool) {
+        let mut st = lock(&self.inner.state);
+        if on {
+            st.nospace_lanes.insert(lane);
+        } else {
+            st.nospace_lanes.remove(&lane);
+        }
     }
 
     /// True once the journal is poisoned.
@@ -1001,6 +1017,7 @@ impl Journal for MemJournal {
             for o in gone {
                 if let Some(f) = l.files.remove(&o) {
                     report.files += 1;
+                    l.freed += 1;
                     report.bytes += f
                         .recs
                         .values()
@@ -1023,6 +1040,14 @@ impl Journal for MemJournal {
             file_bytes: st.cfg.file_bytes,
         }
     }
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        lock(&self.inner.state)
+            .lanes
+            .iter()
+            .map(|l| l.freed)
+            .collect()
+    }
+
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
         let st = lock(&self.inner.state);
         // The files share one pool here: the fullest lane is the one that
@@ -1081,7 +1106,7 @@ impl JournalLane for MemLane {
         if malformed {
             return Err(Error::invalid("malformed reservation"));
         }
-        if st.nospace {
+        if st.nospace || st.nospace_lanes.contains(&self.id.0) {
             return Ok(SlotOutcome::NoSpace);
         }
         let idx = self.idx();

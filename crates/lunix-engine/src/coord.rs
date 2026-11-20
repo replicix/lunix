@@ -29,17 +29,21 @@
 //! the retained window before their entries are in a run.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use lunix_format::commit::{Commit, CommitKind, CommonHeader, Full};
 use lunix_format::local::{CheckpointSlot, RollbackFloor};
+use lunix_format::segment::FooterBody;
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
+use lunix_iface::clock::Clock;
 use lunix_iface::gc::{Collector, GcProgress, GcState, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
 use lunix_iface::space::SpaceKind;
+use lunix_iface::store::{ExtentLocation, SealedSegment, SegmentInfo, SegmentStore, SegmentWriter};
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
@@ -62,6 +66,10 @@ const GC_SHARE_MAX: Duration = Duration::from_secs(1);
 
 /// Steps in a row without the clock moving that end a share (`gc_share`).
 const GC_SHARE_STALLS: u32 = 8;
+
+/// Steps of a share while writes wait for the journal ring (milestone
+/// jstall): the collector gets this much after each cut, never nothing.
+pub(crate) const GC_YIELD_STEPS: u32 = 1;
 
 /// The coordinator's state, under the engine's coordinator mutex.
 pub(crate) struct Coord {
@@ -112,6 +120,8 @@ pub(crate) struct Coord {
     /// The journal bytes and durations of the last committed cuts: the drain
     /// rate behind the bound of the next one (ADR-33).
     pub(crate) drain: crate::cut::DrainHistory,
+    /// When the last committed cut ended (the interval of the next).
+    pub(crate) prev_cut_end: Option<Duration>,
     /// The journal bytes the cut in flight released at C9.
     pub(crate) cut_bytes: u64,
     /// `clock.monotonic()` when the cut in flight finished C9 (the GC step of
@@ -119,6 +129,9 @@ pub(crate) struct Coord {
     pub(crate) cut_end: Duration,
     /// The last error of `reclaim_covered`, logged once per change.
     pub(crate) reclaim_error: Option<String>,
+    /// The ring pace: writes are admitted at the drain rate while the ring is
+    /// nearly full (milestone jstall).
+    pub(crate) ring_pacer: crate::cut::RingPacer,
 }
 
 impl Coord {
@@ -153,10 +166,106 @@ impl Coord {
             gc_error: None,
             rehint_error: None,
             drain: crate::cut::DrainHistory::default(),
+            prev_cut_end: None,
             cut_bytes: 0,
             cut_end: Duration::ZERO,
             reclaim_error: None,
+            ring_pacer: crate::cut::RingPacer::default(),
         }
+    }
+}
+
+/// The running cut as the ring deadline sees it: its life signs count from
+/// `begin` until the guard drops, whatever way the cut ends.
+struct CutRunning<'a>(&'a Inner);
+
+impl<'a> CutRunning<'a> {
+    fn begin(inner: &'a Inner) -> Self {
+        inner.full.cut_begin(inner.clock.monotonic());
+        Self(inner)
+    }
+}
+
+impl Drop for CutRunning<'_> {
+    fn drop(&mut self) {
+        self.0.full.cut_end();
+    }
+}
+
+/// The segment store as a cut sees it: every append and seal stamps the
+/// cut's sign of life.
+struct SealStamp<'a> {
+    inner: &'a dyn SegmentStore,
+    alive: Arc<AtomicU64>,
+    clock: Arc<dyn Clock>,
+}
+
+fn stamp(alive: &AtomicU64, clock: &dyn Clock) {
+    let ms = u64::try_from(clock.monotonic().as_millis()).unwrap_or(u64::MAX);
+    alive.fetch_max(ms.saturating_add(1), Ordering::Relaxed);
+}
+
+struct StampedWriter {
+    inner: Box<dyn SegmentWriter>,
+    alive: Arc<AtomicU64>,
+    clock: Arc<dyn Clock>,
+}
+
+impl SegmentWriter for StampedWriter {
+    fn id(&self) -> SegId {
+        self.inner.id()
+    }
+    fn append_extent(
+        &mut self,
+        chunk_id: &lunix_format::ChunkId,
+        dict_id: Option<u32>,
+        extent: &[u8],
+    ) -> Result<Hint> {
+        let h = self.inner.append_extent(chunk_id, dict_id, extent);
+        stamp(&self.alive, &*self.clock);
+        h
+    }
+    fn len(&self) -> u64 {
+        self.inner.len()
+    }
+    fn is_full(&self) -> bool {
+        self.inner.is_full()
+    }
+    fn seal(self: Box<Self>, writes: Option<WriteSeqRange>) -> Result<SealedSegment> {
+        let Self {
+            inner,
+            alive,
+            clock,
+        } = *self;
+        let r = inner.seal(writes);
+        stamp(&alive, &*clock);
+        r
+    }
+}
+
+impl SegmentStore for SealStamp<'_> {
+    fn open_segment(&self) -> Result<Box<dyn SegmentWriter>> {
+        let inner = self.inner.open_segment()?;
+        Ok(Box::new(StampedWriter {
+            inner,
+            alive: Arc::clone(&self.alive),
+            clock: Arc::clone(&self.clock),
+        }))
+    }
+    fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
+        self.inner.read_extent(hint, out)
+    }
+    fn locate(&self, hint: &Hint) -> Result<ExtentLocation> {
+        self.inner.locate(hint)
+    }
+    fn footer(&self, seg: SegId) -> Result<FooterBody> {
+        self.inner.footer(seg)
+    }
+    fn list(&self) -> Result<Vec<SegmentInfo>> {
+        self.inner.list()
+    }
+    fn delete(&self, seg: SegId) -> Result<u64> {
+        self.inner.delete(seg)
     }
 }
 
@@ -283,6 +392,7 @@ impl Inner {
         // ADR-32 T4: the collector's pressure follows the gate's state.
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
+        self.update_ring_pace(&mut co);
         let wanted = self.wanted(&mut co);
         self.reclaim_covered(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
@@ -343,6 +453,7 @@ impl Inner {
         {
             Ok(r) if r.files > 0 => {
                 co.reclaim_error = None;
+                self.note_freed_files();
                 tracing::debug!(
                     files = r.files,
                     cut = co.tip.cut_seq.0,
@@ -485,6 +596,7 @@ impl Inner {
         let cut_started = self.clock.monotonic();
         // A cut too big for the map's dirty-leaf cap is retried smaller:
         // any c' in (prev, c] is a cut too.
+        let _running = CutRunning::begin(self);
         loop {
             match self.cut_and_commit(co, c, size) {
                 Err(CutFail::Smaller(e)) => {
@@ -536,16 +648,19 @@ impl Inner {
         let half = scale(fill.capacity_bytes / 2);
         // The rate bounds the cut, the half ring caps it, and one ring file
         // (in the same record-byte units) is the least: a fixed commit cost at or above `cut_target`
-        // cannot shrink the cuts below it.
+        // cannot shrink the cuts below it. With no history (the first cut
+        // after an attach) the budget is that one file, not the half ring: a
+        // restart over a full ring must not start with a 30 s cut that parks
+        // every write behind it (milestone jstall; T6 section 1.1).
+        let one_file = self
+            .cfg
+            .cut_min_bytes
+            .unwrap_or_else(|| scale(fill.file_bytes));
         let budget = co
             .drain
             .budget(self.cfg.cut_target)
-            .map_or(half, |b| b.min(half))
-            .max(
-                self.cfg
-                    .cut_min_bytes
-                    .unwrap_or_else(|| scale(fill.file_bytes)),
-            );
+            .map_or(one_file, |b| b.min(half))
+            .max(one_file);
         let floor = self
             .journal
             .cut_freeing_file()
@@ -571,14 +686,41 @@ impl Inner {
         // A cut without journal bytes (a forced FULL, GC moves) says nothing
         // about the drain rate.
         if co.cut_bytes > 0 {
-            co.drain.push(co.cut_bytes, took);
+            let since = co.prev_cut_end.map(|e| co.cut_end.saturating_sub(e));
+            co.drain.push(co.cut_bytes, took, since);
         }
+        co.prev_cut_end = Some(co.cut_end);
         let c = &self.cuts;
         c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
         c.last_cut_ms.store(
             u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             Ordering::Relaxed,
         );
+        // The new drain rate reaches the gate at once, not at the next tick.
+        self.update_ring_pace(co);
+    }
+
+    /// Feeds the space gate the ring pace (milestone jstall, ADR-32): while
+    /// the journal ring is nearly full, or a write waited for it a moment ago,
+    /// writes are admitted at the drain rate of the last cuts, so a write sees
+    /// a short smooth wait in the band instead of a stop of two cuts. Without
+    /// a drain history there is no rate and no pace. The gate keeps its own
+    /// rules (the delay cap, the FUA bypass).
+    fn update_ring_pace(&self, co: &mut Coord) {
+        let fill = self.journal.fill();
+        // A write waits for the ring now (`journal_full` is not asked: it
+        // stays up until the next C9, whoever waits).
+        let waiting = self.cuts.ring_waiters.load(Ordering::Relaxed) > 0;
+        // The sustained drain (bytes over the time from cut end to cut end),
+        // not the speed of the cuts: the gaps between them are in it.
+        let rate = co.drain.sustained_rate().map(|r| r.max(1));
+        let want = co
+            .ring_pacer
+            .observe(fill.ratio(), waiting, rate, self.clock.monotonic());
+        let w = want.unwrap_or(0);
+        if self.cuts.ring_pace_rate.swap(w, Ordering::Relaxed) != w {
+            self.space.set_ring_pace(want);
+        }
     }
 
     /// Lowers `c` so that the cut dirties at most `max_leaves_per_cut` map
@@ -640,11 +782,19 @@ impl Inner {
             first: WriteSeq(prev + 1),
             last: WriteSeq(c),
         });
+        // The segments the cut appends to and seals are its signs of life:
+        // a cut that takes longer than the ring deadline and keeps sealing is
+        // not a stuck ring (milestone jstall).
+        let stamped = SealStamp {
+            inner: &*self.segments,
+            alive: self.full.cut_alive_handle(),
+            clock: Arc::clone(&self.clock),
+        };
         let ctx = DestageCtx {
             journal: &*self.journal,
             map: &*self.map,
             index: &*self.index,
-            segments: &*self.segments,
+            segments: &stamped,
             codec: &*self.extents,
             reader: &*self.reader,
             space: &*self.space,
@@ -696,6 +846,7 @@ impl Inner {
                 }
             }
         }
+        self.full.cut_alive(self.clock.monotonic());
         self.points
             .hit("engine.c3.destaged")
             .map_err(CutFail::Other)?;
@@ -753,6 +904,7 @@ impl Inner {
         add(&self.stats.map_bytes_written, map_actual);
         self.settle(&mut acct, SpaceKind::Map, map_bound, map_actual);
         let map_packs: Vec<_> = map_packs.into_iter().map(|(p, _)| p).collect();
+        self.full.cut_alive(self.clock.monotonic());
         point!(self.points, "engine.c5.map_sealed");
         // C6: the FULL commit, the durability point of the cut.
         let parent = &co.tip;
@@ -818,6 +970,7 @@ impl Inner {
         self.size.store(size, Ordering::Release);
         self.durable_cut.store(c, Ordering::Release);
         add(&self.stats.commits, 1);
+        self.full.cut_alive(self.clock.monotonic());
         point!(self.points, "engine.c6.committed");
         // C7: the checkpoint hint, then the rollback floor (D19: only after
         // C6 is durable, so the floor never exceeds the durable tip).
@@ -879,6 +1032,7 @@ impl Inner {
             }
         }
         self.true_up_index(Some(&mut acct));
+        self.full.cut_alive(self.clock.monotonic());
         point!(self.points, "engine.c8.index");
         // C9: reclaim the journal below the cut, release the overlay.
         // The ring files are the journal's to recycle; the charge of every
@@ -895,8 +1049,14 @@ impl Inner {
             }
             Err(e) => tracing::warn!(error = %e, "journal tail unknown; nothing reclaimed"),
         }
+        // The files the reclaim freed, by lane, are the ring's progress (a
+        // failed reclaim may have freed some of them); the cut is alive.
+        self.note_freed_files();
         let held = self.journal_charged.load(Ordering::Acquire);
-        let released = self.jcharges.take_upto(c);
+        let (released, left) = self.jcharges.take_upto(c);
+        if released > 0 {
+            self.note_lane_backlog(&left);
+        }
         co.cut_bytes = released;
         let give = released.min(held);
         self.journal_charged.fetch_sub(give, Ordering::AcqRel);
@@ -1074,12 +1234,22 @@ impl Inner {
         let until = now.saturating_add(share);
         let mut last = now;
         let mut stalled = 0u32;
+        // While writes wait for the ring the cuts have the device: the share
+        // shrinks to one step, so the collector never stops (milestone
+        // jstall; space pressure keeps the whole share).
+        let mut steps_left = if self.gc_yields_to_ring() {
+            GC_YIELD_STEPS
+        } else {
+            u32::MAX
+        };
         while stalled < GC_SHARE_STALLS
+            && steps_left > 0
             && self.gc_busy.load(Ordering::Acquire)
             && !self.is_failed()
             && !self.closing.load(Ordering::Acquire)
             && last < until
         {
+            steps_left = steps_left.saturating_sub(1);
             self.gc_step(co);
             let t = self.clock.monotonic();
             stalled = if t == last { stalled + 1 } else { 0 };

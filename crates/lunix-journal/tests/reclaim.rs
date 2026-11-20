@@ -568,3 +568,200 @@ fn a_failed_reclaim_gives_back_every_file_it_had_not_processed() {
     let again = j.reclaim(&tail).expect("nothing left");
     assert_eq!(again.files, 0);
 }
+
+// ------------------------------------------------- re-initialisation (jstall)
+//
+// A freed ring file is zeroed with `FALLOC_FL_ZERO_RANGE` where the file
+// system does it, else by rewriting zeros. Either way the reader rule of
+// on-disk-formats §5.1 must hold: a reused file reads as zeros past its new
+// records, so recovery finds no stale record and no damage in it.
+
+/// True when the scratch file system does `FALLOC_FL_ZERO_RANGE`.
+fn zero_range_supported(dir: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let p = dir.join("zero-range-probe");
+    let f = std::fs::File::create(&p).expect("probe file");
+    f.set_len(1 << 20).expect("len");
+    // SAFETY: the fd is open; plain integers.
+    let rc = unsafe {
+        libc::fallocate(
+            f.as_raw_fd(),
+            libc::FALLOC_FL_ZERO_RANGE | libc::FALLOC_FL_KEEP_SIZE,
+            4096,
+            8192,
+        )
+    };
+    let _ = std::fs::remove_file(&p);
+    rc == 0
+}
+
+/// Fills one lane of a three-file ring until it has sealed its first file,
+/// cuts after that file, reclaims, then writes until the lane has taken the
+/// re-initialised file into use and one record lies in it; returns the ring
+/// files that did not exist before the reclaim, the cut and the last record.
+fn reuse_a_file(
+    cfg: &lunix_journal::JournalConfig,
+) -> (lunix_journal::FileJournal, Vec<String>, u64, u64) {
+    let j = open_journal(cfg);
+    recover_all(&j);
+    let mut l = open_lane(&j, 0);
+    let mut ws: Vec<Written> = Vec::new();
+    while ws.last().is_none_or(|w| w.ordinal == ws[0].ordinal) {
+        ws.push(write_rec(&mut *l, ws.len() as u64, BIG));
+        complete_appends(&mut *l, 1);
+    }
+    group_flush(&j);
+    let first = ws[0].ordinal;
+    let cut = ws
+        .iter()
+        .filter(|w| w.ordinal == first)
+        .map(|w| w.seq)
+        .max()
+        .expect("a record");
+    let before = ring_files(cfg);
+    let tail = j.tail_after(WriteSeq(cut)).expect("tail");
+    assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+    let fresh: Vec<String> = ring_files(cfg)
+        .into_iter()
+        .filter(|f| !before.contains(f))
+        .collect();
+    assert_eq!(fresh.len(), 1, "{fresh:?}");
+    // Keep writing until the lane is in the re-initialised file (the ring has
+    // three files: the second, the third, then the freed one).
+    let reused_ordinal = u32::from_str_radix(&fresh[0][4..12], 16).expect("ordinal");
+    let last = loop {
+        let w = write_rec(&mut *l, 0, BIG);
+        complete_appends(&mut *l, 1);
+        if w.ordinal == reused_ordinal {
+            break w.seq;
+        }
+        assert!(w.seq < 500, "the lane never reached the freed file");
+    };
+    group_flush(&j);
+    drop(l);
+    (j, fresh, cut, last)
+}
+
+fn reused_file_reads_as_zeros_and_recovery_finds_nothing_stale(zero_range: bool) {
+    let dir = scratch();
+    if !o_direct_supported(dir.path()) {
+        eprintln!("skipped: no O_DIRECT here");
+        return;
+    }
+    let supported = zero_range_supported(dir.path());
+    let mut cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    cfg.zero_range = zero_range;
+    let (j, fresh, cut, last) = reuse_a_file(&cfg);
+    let (by_range, by_rewrite) = j.reinit_counts();
+    if zero_range && supported {
+        assert_eq!((by_range, by_rewrite), (1, 0), "ZERO_RANGE was used");
+    } else {
+        assert_eq!((by_range, by_rewrite), (0, 1), "the rewrite was used");
+    }
+    // The re-initialised file holds one record at its start and zeros after
+    // it: nothing of the old file's records is left.
+    let body = read_at_path(&cfg.dir.join(&fresh[0]), 0, SMALL_FILE as usize);
+    let used = 4096 + (64 + BIG as usize * 4096).next_multiple_of(4096);
+    assert!(
+        body[used..].iter().all(|&b| b == 0),
+        "stale bytes past the new records"
+    );
+    // A crash right now: recovery sees exactly the records above the cut, no
+    // damaged range and nothing ignored.
+    drop(j);
+    let j = open_journal(&cfg);
+    let r = j.recover(None, WriteSeq(cut)).expect("recover");
+    assert_eq!(seqs(&r), (cut + 1..=last).collect::<Vec<_>>());
+    assert!(r.damaged.is_empty(), "{:?}", r.damaged);
+    assert!(r.ignored_after_gap.is_none() && r.duplicate.is_none());
+}
+
+#[test]
+fn a_file_reinitialised_by_zero_range_reads_as_zeros_and_recovery_finds_no_stale_record() {
+    reused_file_reads_as_zeros_and_recovery_finds_nothing_stale(true);
+}
+
+#[test]
+fn a_file_reinitialised_by_rewriting_zeros_reads_as_zeros_and_recovery_finds_no_stale_record() {
+    reused_file_reads_as_zeros_and_recovery_finds_nothing_stale(false);
+}
+
+#[test]
+fn freed_files_are_counted_by_lane() {
+    let dir = scratch();
+    if !o_direct_supported(dir.path()) {
+        eprintln!("skipped: no O_DIRECT here");
+        return;
+    }
+    let cfg = small_cfg(dir.path().join("journal"), 2, 3);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    assert_eq!(j.freed_files_by_lane(), vec![0, 0]);
+    let mut l1 = open_lane(&j, 1);
+    // Lane 1 seals its first file; lane 0 writes nothing.
+    let mut ws: Vec<Written> = Vec::new();
+    while ws.last().is_none_or(|w| w.ordinal == ws[0].ordinal) {
+        ws.push(write_rec(&mut *l1, ws.len() as u64, BIG));
+        complete_appends(&mut *l1, 1);
+    }
+    group_flush(&j);
+    let cut = ws
+        .iter()
+        .filter(|w| w.ordinal == ws[0].ordinal)
+        .map(|w| w.seq)
+        .max()
+        .expect("a record");
+    let tail = j.tail_after(WriteSeq(cut)).expect("tail");
+    assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+    assert_eq!(j.freed_files_by_lane(), vec![0, 1], "the file was lane 1's");
+    assert_eq!(j.reclaim(&tail).expect("again").files, 0);
+    assert_eq!(j.freed_files_by_lane(), vec![0, 1]);
+}
+
+#[test]
+fn a_zero_range_that_fails_falls_back_to_the_rewrite_leaves_no_hole_and_is_given_up_after_three() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = scratch();
+    if !o_direct_supported(dir.path()) {
+        eprintln!("skipped: no O_DIRECT here");
+        return;
+    }
+    let cfg = small_cfg(dir.path().join("journal"), 1, 3);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = open_lane(&j, 0);
+    // ENOSPC from every ZERO_RANGE: a full copy-on-write file system.
+    j.inject_zero_range_errno(Some(libc::ENOSPC));
+    let mut files: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
+    let mut lba = 0;
+    for _round in 0..5 {
+        while files.len() < 3 {
+            let w = write_rec(&mut *l, lba, BIG);
+            lba += 1;
+            complete_appends(&mut *l, 1);
+            let e = files.entry(w.ordinal).or_insert(0);
+            *e = (*e).max(w.seq);
+        }
+        group_flush(&j);
+        let (&oldest, &cut) = files.iter().next().expect("a file");
+        let tail = j.tail_after(WriteSeq(cut)).expect("tail");
+        assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
+        files.remove(&oldest);
+    }
+    // Three failed calls, then ZERO_RANGE is not tried again; every file went
+    // through the rewrite.
+    assert_eq!(j.zero_range_attempts(), 3);
+    assert_eq!(j.reinit_counts(), (0, 5));
+    // No ring file is left sparse.
+    for e in std::fs::read_dir(&cfg.dir).expect("dir") {
+        let e = e.expect("entry");
+        let m = e.metadata().expect("meta");
+        assert!(
+            m.blocks() * 512 >= m.len(),
+            "{:?} is sparse: {} blocks for {} bytes",
+            e.file_name(),
+            m.blocks(),
+            m.len()
+        );
+    }
+}

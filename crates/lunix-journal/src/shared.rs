@@ -155,6 +155,8 @@ pub(crate) struct Shared {
     /// The n-th file the next reclaim re-initialises fails (0: none; test
     /// hook).
     pub fail_reclaim_nth: std::sync::atomic::AtomicU32,
+    /// Ring files freed so far, by lane (`Journal::freed_files_by_lane`).
+    pub freed: Vec<AtomicU64>,
 }
 
 /// A test hook of reclaim: see [`Shared::reclaim_hook`].

@@ -674,6 +674,7 @@ impl Daemon {
                 let fill = lunix_iface::journal::Journal::fill(&*s.journal);
                 let tip = s.engine.tip_view();
                 let cuts = s.engine.cut_stats();
+                let wstats = s.engine.write_stats();
                 let win = s.journal.window_stats();
                 let read_only = s.space.is_read_only() || s.engine.is_stopped();
                 let written = stats.chunks_total.saturating_sub(stats.chunks_zero);
@@ -709,7 +710,17 @@ impl Daemon {
                     journal_marks_skipped: s.journal.marks_skipped(),
                     write_path: WritePathStatus {
                         ring_waiters: cuts.ring_waiters,
-                        ring_wait_longest_ms: cuts.ring_wait_longest_ms,
+                        ring_parked_writes: cuts.ring_parked_writes,
+                        ring_wait_max_since_attach_ms: cuts.ring_wait_max_since_attach_ms,
+                        ring_wait_max_60s_ms: cuts.ring_wait_max_60s_ms,
+                        freed_files_by_lane: wstats.freed_files_by_lane,
+                        write_latency_log2_us: wstats.write_latency_log2_us.to_vec(),
+                        ring_pace_rate: snap.throttle.ring_pace_rate,
+                        ring_paced_writes: snap.throttle.ring_paced_writes,
+                        ring_paced_ms: snap.throttle.ring_paced_ms,
+                        ring_pace_max_ms: snap.throttle.ring_pace_max_ms,
+                        ring_pace_capped: snap.throttle.ring_pace_capped,
+                        ring_pace_bypassed_fua: snap.throttle.ring_pace_bypassed_fua,
                         window_resident_bytes: win.resident_bytes,
                         window_hits: win.hits,
                         window_misses: win.misses,

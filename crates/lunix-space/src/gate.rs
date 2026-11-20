@@ -559,6 +559,20 @@ impl SpaceGate for LunixSpace {
         st.ledger.snapshot(now)
     }
 
+    /// The ring pace (milestone jstall): the engine's drain rate while the
+    /// journal ring is nearly full. A new rate or its end re-judges the parked
+    /// requests and wakes the timer thread for its new deadlines.
+    fn set_ring_pace(&self, rate: Option<u64>) {
+        let now = self.sh.clock.monotonic();
+        let mut st = lock(&self.sh.st);
+        if st.ledger.ring_pace == rate.map(|r| r.max(st.ledger.throttle.min_rate)) {
+            return;
+        }
+        st.ledger.set_ring_pace(rate);
+        st.ledger.grant_waiters(now);
+        self.sh.cv.notify_all();
+    }
+
     /// Re-judges every parked request under the new policy (ADR-32):
     /// `on_full = error` fails them now, a new `full_timeout` counts from
     /// each request's arrival (the overdue ones fail now and latch the

@@ -205,6 +205,70 @@ pub(crate) fn zero_range(file: &File, from: u64, to: u64, zero: &AlignedBuf) -> 
     Ok(())
 }
 
+/// Zeroes `[from, to)` of `file` with `fallocate(FALLOC_FL_ZERO_RANGE |
+/// FALLOC_FL_KEEP_SIZE)`: the range then reads as zeros and the file keeps its
+/// length. Both ends are block multiples here. `Err` carries the errno; see
+/// [`zero_range_unsupported`].
+pub(crate) fn fallocate_zero(file: &File, from: u64, to: u64) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    if from >= to {
+        return Ok(());
+    }
+    let off = libc::off_t::try_from(from).map_err(io::Error::other)?;
+    let len = libc::off_t::try_from(to - from).map_err(io::Error::other)?;
+    loop {
+        // SAFETY: the fd is open for the whole call; the range is plain
+        // integers.
+        let rc = unsafe {
+            libc::fallocate(
+                file.as_raw_fd(),
+                libc::FALLOC_FL_ZERO_RANGE | libc::FALLOC_FL_KEEP_SIZE,
+                off,
+                len,
+            )
+        };
+        if rc == 0 {
+            return Ok(());
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
+/// `fallocate(FALLOC_FL_KEEP_SIZE)` over `[from, to)`: allocates every block
+/// of the range that is a hole (a failed `ZERO_RANGE` may have left some) and
+/// changes no data.
+pub(crate) fn fallocate_keep(file: &File, from: u64, to: u64) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    if from >= to {
+        return Ok(());
+    }
+    let off = libc::off_t::try_from(from).map_err(io::Error::other)?;
+    let len = libc::off_t::try_from(to - from).map_err(io::Error::other)?;
+    loop {
+        // SAFETY: the fd is open for the whole call; plain integers.
+        let rc = unsafe { libc::fallocate(file.as_raw_fd(), libc::FALLOC_FL_KEEP_SIZE, off, len) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
+/// True when `e` says the file system does not do `FALLOC_FL_ZERO_RANGE`
+/// (now and for every later file): `EOPNOTSUPP`, `ENOSYS` or `EINVAL`.
+pub(crate) fn zero_range_unsupported(e: &io::Error) -> bool {
+    matches!(
+        e.raw_os_error(),
+        Some(libc::EOPNOTSUPP | libc::ENOSYS | libc::EINVAL)
+    )
+}
+
 /// True when every byte of `block` is zero.
 pub(crate) fn is_zero(block: &[u8]) -> bool {
     block.iter().all(|&b| b == 0)
@@ -220,4 +284,23 @@ pub(crate) fn nonzero_end(data: &[u8]) -> u64 {
         }
     }
     B
+}
+
+#[cfg(test)]
+mod zero_range_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_unsupported_operation_turns_zero_range_off() {
+        for errno in [libc::EOPNOTSUPP, libc::ENOSYS, libc::EINVAL] {
+            assert!(zero_range_unsupported(&io::Error::from_raw_os_error(errno)));
+        }
+        // A full disk or a failing device is not "unsupported": the file is
+        // rewritten, the next one tries again.
+        for errno in [libc::EIO, libc::ENOSPC, libc::EBADF] {
+            assert!(!zero_range_unsupported(&io::Error::from_raw_os_error(
+                errno
+            )));
+        }
+    }
 }

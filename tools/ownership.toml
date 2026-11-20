@@ -401,6 +401,49 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# jstall: the five T6 write-stall fixes (ring-drain pacing, ZERO_RANGE reclaim,
+# GC yield while parked, bounded first cut, progress-based ring deadline) and
+# the write-path instrumentation.
+[jstall]
+paths = [
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/cut.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/src/pressure.rs",
+  "crates/lunix-engine/src/queue.rs",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/jcut.rs",
+  "crates/lunix-engine/tests/jstall.rs",
+  "crates/lunix-engine/tests/model.rs",
+  "crates/lunix-engine/tests/queue.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/src/journal.rs",
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-journal/src/bin/journal-zero-bench.rs",
+  "crates/lunix-journal/src/config.rs",
+  "crates/lunix-journal/src/journal.rs",
+  "crates/lunix-journal/src/ring.rs",
+  "crates/lunix-journal/src/shared.rs",
+  "crates/lunix-journal/src/sys.rs",
+  "crates/lunix-journal/tests/reclaim.rs",
+  "crates/lunix-space/src/gate.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/src/throttle.rs",
+  "crates/lunix-space/tests/pace.rs",
+  "crates/lunix-testkit/src/journal.rs",
+  "crates/lunix-testkit/src/space.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/tests/status_lockfree.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-jstall.md",
+  "tools/jstall-zero-fs.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 
