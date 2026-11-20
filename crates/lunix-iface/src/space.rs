@@ -190,6 +190,13 @@ pub enum ReserveClass {
     /// [`SYNC_MAX_BYTES`] of data): admitted at once inside the band and
     /// charged to its bucket. At the hard mark it waits like any write.
     Sync,
+    /// The retry of a write the journal ring refused after the gate admitted
+    /// it (milestone jstall): it paid its pace and its tokens at the first
+    /// pass and takes none again, neither from the bucket nor from the delay
+    /// cap's overdraw, and it does not make the requests behind it due. It is
+    /// admitted at once when it fits and no request that waits for space
+    /// stands before it; else it waits for space like any request.
+    Retry,
 }
 
 /// The largest FUA write (data bytes) that is a [`ReserveClass::Sync`]
@@ -290,6 +297,21 @@ pub struct ThrottleFigures {
     pub ingest_rate: u64,
     /// Bytes of store freed per second, a 10 s average.
     pub reclaim_rate: u64,
+    /// Requests the ring pace (not the space curve) delayed and the gate
+    /// admitted (milestone jstall). Kept apart from `delayed_writes` and
+    /// the figures around it, which are the space throttle's.
+    pub ring_paced_writes: u64,
+    /// Their summed wait, milliseconds.
+    pub ring_paced_ms: u64,
+    /// The longest wait of one of them, milliseconds.
+    pub ring_pace_max_ms: u64,
+    /// Requests the ring pace admitted by the delay cap.
+    pub ring_pace_capped: u64,
+    /// FUA requests the ring pace let through at once.
+    pub ring_pace_bypassed_fua: u64,
+    /// The ring pace the gate applies now, bytes per second (0: none,
+    /// also with the band off or closing).
+    pub ring_pace_rate: u64,
 }
 
 /// A point-in-time view of the ledger.
@@ -461,4 +483,17 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// `Invalid` for a setting that fails `VolumeJson` validation, or one
     /// that still carries a `cache_max_percent`.
     fn reconfigure(&self, settings: &SpaceSettings) -> Result<()>;
+
+    /// Paces the admission of journal reservations to `rate` bytes per
+    /// second while the journal ring is nearly full (ADR-32's band, fed by the
+    /// engine with the drain rate of its last cuts; milestone jstall), or
+    /// ends the pace (`None`). It is a second input of the band, not a
+    /// space state: the throttle state, the GC pressure and the headroom
+    /// marks do not follow it. The band's own rules apply to it: a
+    /// [`ReserveClass::Sync`] request is admitted at once and charged to
+    /// the bucket, and no request is delayed longer than the delay cap
+    /// (counted from its arrival), so a ring pace never fails a request.
+    /// The rate is raised to the band's minimum rate. A gate without a band
+    /// ignores it.
+    fn set_ring_pace(&self, _rate: Option<u64>) {}
 }

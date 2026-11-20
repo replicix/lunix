@@ -316,6 +316,48 @@ pub struct ReadFaults {
     /// A read of these hints returns the bytes with the last byte flipped.
     pub flip: Mutex<HashSet<Hint>>,
     pub reads: AtomicU64,
+    /// Every segment seal moves this manual clock by this much (and sleeps a
+    /// few real milliseconds, so a thread that watches sees the steps): a cut
+    /// that takes long and keeps sealing.
+    pub seal_advance: Mutex<Option<(Arc<ManualClock>, Duration)>>,
+}
+
+/// A segment writer whose seal takes manual time (`ReadFaults::seal_advance`).
+struct GWriter {
+    inner: Box<dyn SegmentWriter>,
+    faults: Arc<ReadFaults>,
+}
+
+impl SegmentWriter for GWriter {
+    fn id(&self) -> SegId {
+        self.inner.id()
+    }
+    fn append_extent(
+        &mut self,
+        chunk_id: &ChunkId,
+        dict_id: Option<u32>,
+        extent: &[u8],
+    ) -> Result<Hint> {
+        self.inner.append_extent(chunk_id, dict_id, extent)
+    }
+    fn len(&self) -> u64 {
+        self.inner.len()
+    }
+    fn is_full(&self) -> bool {
+        self.inner.is_full()
+    }
+    fn seal(
+        self: Box<Self>,
+        writes: Option<lunix_iface::journal::WriteSeqRange>,
+    ) -> Result<lunix_iface::store::SealedSegment> {
+        let Self { inner, faults } = *self;
+        let r = inner.seal(writes);
+        if let Some((clock, by)) = lock(&faults.seal_advance).clone() {
+            clock.advance(by);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        r
+    }
 }
 
 /// The store behind every store trait, with the queue-thread rule and the
@@ -330,7 +372,11 @@ pub struct GStore {
 impl SegmentStore for GStore {
     fn open_segment(&self) -> Result<Box<dyn SegmentWriter>> {
         not_on_queue("open_segment");
-        self.inner.open_segment()
+        let inner = self.inner.open_segment()?;
+        Ok(Box::new(GWriter {
+            inner,
+            faults: Arc::clone(&self.faults),
+        }))
     }
     fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
         not_on_queue("read_extent");
@@ -488,6 +534,9 @@ impl Journal for GJournal {
     }
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
         self.inner.cut_freeing_file()
+    }
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        self.inner.freed_files_by_lane()
     }
 }
 

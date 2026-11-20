@@ -55,7 +55,7 @@ mod recover;
 mod stats;
 
 pub use config::{EngineConfig, OnJournalDamage};
-pub use cut::CutStats;
+pub use cut::{CutStats, WriteStats, LATENCY_BUCKETS};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
 #[cfg(feature = "testsupport")]

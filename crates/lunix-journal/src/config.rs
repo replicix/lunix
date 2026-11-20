@@ -129,6 +129,13 @@ pub struct JournalConfig {
     /// resident (see the `window` module): leave it at the default unless
     /// memory is tight.
     pub resident_max: Option<u64>,
+    /// Zero a recycled ring file's old records with `fallocate`
+    /// (`FALLOC_FL_ZERO_RANGE`) where the file system supports it, instead of
+    /// rewriting them with zeros (milestone jstall; the reader rule of
+    /// on-disk-formats §5.1 holds either way: the file reads as zeros past its
+    /// last write). A file system that refuses it is detected at the first
+    /// reclaim and the rewrite is used from then on. `false` always rewrites.
+    pub zero_range: bool,
     /// Test hook, see [`TraceEvent`].
     pub trace: Option<TraceFn>,
 }
@@ -150,6 +157,7 @@ impl JournalConfig {
             mark_idle: Some(DEFAULT_MARK_IDLE),
             lock_memory: false,
             resident_max: None,
+            zero_range: true,
             trace: None,
         }
     }
@@ -225,6 +233,7 @@ impl std::fmt::Debug for JournalConfig {
             .field("mark_idle", &self.mark_idle)
             .field("lock_memory", &self.lock_memory)
             .field("resident_max", &self.resident_max)
+            .field("zero_range", &self.zero_range)
             .finish_non_exhaustive()
     }
 }

@@ -68,6 +68,15 @@ fn one_record_cuts(c: &mut lunix_engine::EngineConfig) {
     c.cut_min_bytes = Some(1);
 }
 
+/// Whole cuts: no cut is bounded to a ring file. The first cut after an attach
+/// is one ring file (milestone jstall) and the manual clock gives the cuts no
+/// drain rate, so every cut of the default configuration would be a prefix; the
+/// unbounded model asserts what a commit made durable, which is everything
+/// written before it. The bounded model covers prefix cuts.
+fn whole_cuts(c: &mut lunix_engine::EngineConfig) {
+    c.cut_min_bytes = Some(u64::MAX);
+}
+
 fn fail(msg: String) -> TestCaseError {
     TestCaseError::fail(msg)
 }
@@ -79,6 +88,7 @@ impl Model {
         // Half the workloads run with journal marks: write_seq numbers the
         // engine never issued, interleaved with its own.
         vol.marks = seed % 2 == 1;
+        vol.tweak = whole_cuts;
         if bounded {
             vol.tweak = one_record_cuts;
             *lock(&vol.hooks.advance) = vec![("engine.c3.destaged", Duration::from_secs(1))];

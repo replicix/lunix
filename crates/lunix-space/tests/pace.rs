@@ -974,3 +974,224 @@ mod model {
         }
     }
 }
+
+// ---------------------------------------------------------------- ring pace
+//
+// Milestone jstall: the engine feeds the band the drain rate of its last cuts
+// while the journal ring is nearly full (`SpaceGate::set_ring_pace`). It is a
+// second input of the band: the same bucket, delay cap and FUA bypass, but no
+// space state.
+
+/// A gate far above its soft mark (10 GiB of headroom): only the ring pace can
+/// pace it.
+fn open_gate(c: SpaceConfig, ck: &Arc<ManualClock>) -> Arc<LunixSpace> {
+    at_headroom(LIMIT, c, ck)
+}
+
+/// Reserves 64 KiB records until the bucket is empty; returns the first paced
+/// waiter.
+fn drain_bucket(g: &LunixSpace) -> Waiter {
+    for _ in 0..64 {
+        match g.reserve(K, 64 * KIB, None).unwrap() {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => return w,
+            other => panic!("{other:?}"),
+        }
+    }
+    panic!("a pace of 8 MiB/s did not empty its bucket in 4 MiB of records");
+}
+
+#[test]
+fn a_ring_pace_admits_at_its_rate_on_an_open_gate_and_is_no_space_state() {
+    let ck = clock();
+    let g = open_gate(cfg(None, |_| {}), &ck);
+    // No pace: everything goes.
+    for _ in 0..200 {
+        reserved(g.reserve(K, 64 * KIB, None).unwrap());
+        g.release(K, 64 * KIB);
+    }
+    g.set_ring_pace(Some(8 * MIB));
+    let w = drain_bucket(&g);
+    assert_eq!(w.state(), WaiterState::Pending);
+    // 64 KiB at 8 MiB/s is 7.8 ms of tokens.
+    ck.advance(Duration::from_millis(4));
+    g.tick();
+    assert_eq!(w.state(), WaiterState::Pending, "4 ms is not enough");
+    ck.advance(Duration::from_millis(5));
+    g.tick();
+    assert_eq!(w.state(), WaiterState::Granted, "9 ms is");
+    // The pace is not a space state: open, no band rate, no GC pressure input.
+    let t = g.snapshot().throttle;
+    assert_eq!(t.state, ThrottleState::Open);
+    assert_eq!(t.rate, None);
+}
+
+#[test]
+fn a_ring_pace_holds_the_long_run_rate() {
+    let ck = clock();
+    let g = open_gate(cfg(None, |_| {}), &ck);
+    g.set_ring_pace(Some(16 * MIB));
+    let rec = 64 * KIB;
+    let mut waiting: VecDeque<Waiter> = VecDeque::new();
+    let mut admitted = 0u64;
+    for _ in 0..10 * 100 {
+        ck.advance(Duration::from_millis(10));
+        g.tick();
+        while waiting
+            .front()
+            .is_some_and(|w| w.state() == WaiterState::Granted)
+        {
+            waiting.pop_front();
+            admitted += rec;
+            g.release(K, rec);
+        }
+        let mut tries = 0;
+        while waiting.len() < 100 {
+            tries += 1;
+            assert!(tries < 5_000, "nothing is paced: {admitted} bytes admitted");
+            match g.reserve(K, rec, None).unwrap() {
+                ReserveOutcome::Reserved => {
+                    admitted += rec;
+                    g.release(K, rec);
+                }
+                ReserveOutcome::Paced(w) => waiting.push_back(w),
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+    // 10 s at 16 MiB/s, plus the bucket the first records found full.
+    let want = 160 * MIB;
+    assert!(
+        admitted >= want - 2 * MIB && admitted <= want + 2 * MIB,
+        "admitted {admitted} against {want}"
+    );
+}
+
+#[test]
+fn the_ring_pace_never_bypasses_the_fua_class_and_never_exceeds_the_delay_cap() {
+    let ck = clock();
+    let g = open_gate(
+        cfg(None, |c| c.throttle.max_delay = Duration::from_millis(100)),
+        &ck,
+    );
+    g.set_ring_pace(Some(4 * MIB));
+    let w = drain_bucket(&g);
+    // A FUA write of at most 256 KiB goes at once, charged to the bucket.
+    reserved(
+        g.reserve_since(K, 64 * KIB, None, ck_now(&ck), ReserveClass::Sync)
+            .unwrap(),
+    );
+    // Counted with the ring pace's figures: the space curve is not pacing.
+    let t = g.snapshot().throttle;
+    assert_eq!((t.ring_pace_bypassed_fua, t.bypassed_fua), (1, 0));
+    // A bulk request that needs more tokens than 100 ms bring is admitted at
+    // its cap, counted from its arrival, and the bucket carries the debt.
+    let big = paced(g.reserve(K, 4 * MIB, None).unwrap());
+    assert_eq!(w.state(), WaiterState::Pending);
+    ck.advance(Duration::from_millis(99));
+    g.tick();
+    assert_eq!(big.state(), WaiterState::Pending);
+    ck.advance(Duration::from_millis(2));
+    g.tick();
+    assert_eq!(w.state(), WaiterState::Granted);
+    assert_eq!(big.state(), WaiterState::Granted, "the cap admits it");
+    let t = g.snapshot().throttle;
+    assert!(t.ring_pace_capped >= 1, "{t:?}");
+    assert_eq!(t.delay_capped, 0);
+}
+
+#[test]
+fn ending_the_ring_pace_admits_what_it_held_and_a_slower_curve_still_rules() {
+    let ck = clock();
+    let g = open_gate(cfg(None, |_| {}), &ck);
+    g.set_ring_pace(Some(8 * MIB));
+    let w = drain_bucket(&g);
+    assert_eq!(w.state(), WaiterState::Pending);
+    g.set_ring_pace(None);
+    assert_eq!(
+        w.state(),
+        WaiterState::Granted,
+        "the end of the pace grants"
+    );
+    reserved(g.reserve(K, 64 * KIB, None).unwrap());
+    // Inside the band the slower of the curve and the ring pace rules, and
+    // the reported rate is the curve's.
+    let g = at_headroom(SOFT / 4, cfg(None, |_| {}), &ck);
+    let curve = g.snapshot().throttle.rate.expect("in the band");
+    g.set_ring_pace(Some(curve * 4));
+    assert_eq!(g.snapshot().throttle.rate, Some(curve));
+    assert_eq!(state(&g), ThrottleState::Slowdown);
+}
+
+#[test]
+fn the_retry_of_a_ring_refused_write_takes_no_tokens_and_trips_nothing() {
+    // The write paid its pace at its first pass; the ring refused it, and the
+    // engine asks again at every wake. A retry takes nothing from the bucket,
+    // is no overdraw by the cap, and does not make the requests behind it due.
+    let ck = clock();
+    let g = open_gate(
+        cfg(None, |c| c.throttle.max_delay = Duration::from_millis(100)),
+        &ck,
+    );
+    g.set_ring_pace(Some(8 * MIB));
+    let w = drain_bucket(&g);
+    for _ in 0..200 {
+        reserved(
+            g.reserve_since(K, 64 * KIB, None, ck_now(&ck), ReserveClass::Retry)
+                .unwrap(),
+        );
+        g.release(K, 64 * KIB);
+        ck.advance(Duration::from_millis(1));
+    }
+    // 200 ms: past the 100 ms cap of every request that waited since the
+    // start. The paced waiter got its tokens (7.8 ms of them) by the clock,
+    // not by the cap, and the retries took none of them.
+    g.tick();
+    assert_eq!(w.state(), WaiterState::Granted);
+    let t2 = g.snapshot().throttle;
+    assert_eq!(t2.ring_pace_capped, 0, "nothing was admitted by the cap");
+    assert_eq!(t2.delay_capped, 0);
+    assert_eq!(t2.ring_paced_writes, 1, "only the waiter was ever paced");
+    // A retry stands behind no waiter that waits for space: it is admitted at
+    // once; here the pace has a waiter in front, the retry still does not wait.
+    let w2 = paced(g.reserve(K, 4 * MIB, None).unwrap());
+    reserved(
+        g.reserve_since(K, 64 * KIB, None, ck_now(&ck), ReserveClass::Retry)
+            .unwrap(),
+    );
+    assert_eq!(w2.state(), WaiterState::Pending);
+}
+
+#[test]
+fn the_ring_pace_is_counted_apart_from_the_space_throttle_and_only_while_applied() {
+    let ck = clock();
+    let g = open_gate(cfg(None, |_| {}), &ck);
+    g.set_ring_pace(Some(8 * MIB));
+    let w = drain_bucket(&g);
+    ck.advance(Duration::from_millis(9));
+    g.tick();
+    assert_eq!(w.state(), WaiterState::Granted);
+    let t = g.snapshot().throttle;
+    assert_eq!(t.ring_pace_rate, 8 * MIB);
+    assert_eq!(t.ring_paced_writes, 1);
+    assert!(t.ring_paced_ms >= 9, "{t:?}");
+    assert_eq!(
+        (
+            t.delayed_writes,
+            t.delayed_ms,
+            t.delay_max_ms,
+            t.delay_capped
+        ),
+        (0, 0, 0, 0),
+        "the space throttle's figures stay at zero: {t:?}"
+    );
+    assert_eq!(t.state, ThrottleState::Open);
+    // The pace the engine wishes is shown only while the gate applies it: with
+    // the band off nothing is paced and no rate is reported.
+    let off = open_gate(cfg(None, |c| c.throttle.enabled = false), &ck);
+    off.set_ring_pace(Some(8 * MIB));
+    assert_eq!(off.snapshot().throttle.ring_pace_rate, 0);
+    reserved(off.reserve(K, 64 * KIB, None).unwrap());
+    g.set_ring_pace(None);
+    assert_eq!(g.snapshot().throttle.ring_pace_rate, 0);
+}
