@@ -1045,7 +1045,10 @@ fn a_ring_pace_holds_the_long_run_rate() {
             admitted += rec;
             g.release(K, rec);
         }
+        let mut tries = 0;
         while waiting.len() < 100 {
+            tries += 1;
+            assert!(tries < 5_000, "nothing is paced: {admitted} bytes admitted");
             match g.reserve(K, rec, None).unwrap() {
                 ReserveOutcome::Reserved => {
                     admitted += rec;

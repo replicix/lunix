@@ -234,11 +234,9 @@ fn the_ring_timer_wakes_a_parked_queue_while_a_cut_holds_the_coordinator() {
             .expect("the cut holds the coordinator");
         v.clock.advance(RING_MIN + Duration::from_secs(1));
         let t0 = std::time::Instant::now();
-        while result.is_none() {
-            assert!(
-                t0.elapsed() < Duration::from_secs(20),
-                "the queue was never woken for the deadline"
-            );
+        // A bound, not a measure; on expiry the cut is released first, so the
+        // failure is reported instead of the scope waiting for it.
+        while result.is_none() && t0.elapsed() < Duration::from_secs(20) {
             let mut b = [0u8; 8];
             match wake.read(&mut b) {
                 Ok(8) => {}
@@ -260,7 +258,8 @@ fn the_ring_timer_wakes_a_parked_queue_while_a_cut_holds_the_coordinator() {
         park.release.send(()).expect("release");
         let _ = cut.join().expect("cut thread");
     });
-    assert_eq!(result.expect("completed").errno(), Some(EIO));
+    let st = result.expect("the queue was never woken for the deadline");
+    assert_eq!(st.errno(), Some(EIO));
 }
 
 // ------------------------------------------------------------------ counters
@@ -610,11 +609,13 @@ fn the_collector_keeps_moving_under_sustained_parking() {
     park_one(&mut r);
     let before = script.steps.load(Ordering::SeqCst);
     let per_tick = tick_steps(&r, &script, 25);
+    // The cut's own step and one step of the share after every cut, however
+    // long the parking lasts.
     assert!(
-        per_tick.iter().all(|&n| n >= 1),
+        per_tick.iter().all(|&n| n >= 2),
         "never starved: {per_tick:?}"
     );
-    assert!(script.steps.load(Ordering::SeqCst) - before >= 25);
+    assert!(script.steps.load(Ordering::SeqCst) - before >= 50);
     // Slowed, never stopped, and never below the floor.
     assert!(script.min_rate.load(Ordering::SeqCst) >= 4 << 20);
     assert!(script.min_rate.load(Ordering::SeqCst) > 0);
