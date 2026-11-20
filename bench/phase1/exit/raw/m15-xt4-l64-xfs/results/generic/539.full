@@ -1,0 +1,9 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+21. Test file SEEK_HOLE that was created by PUNCH_HOLE
+21.01 SEEK_DATA expected 0 or 0, got 0.                           succ
+21.02 SEEK_HOLE expected 4096 or 12288, got 4096.                 succ
+21.03 SEEK_DATA expected 8192 or 8192, got 8192.                  succ
+
+umount: /dev/ublkb1: not mounted.

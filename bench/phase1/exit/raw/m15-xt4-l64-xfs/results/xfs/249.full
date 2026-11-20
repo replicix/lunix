@@ -1,0 +1,97 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0009 sec (4.134 GiB/sec and 1083597.8836 ops/sec)
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0008 sec (4.521 GiB/sec and 1185185.1852 ops/sec)
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0009 sec (4.237 GiB/sec and 1110629.0672 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0066 sec (9.414 MiB/sec and 150.6251 ops/sec)
+linked 65536/65536 bytes at offset 196608
+64 KiB, 1 ops; 0.0031 sec (20.161 MiB/sec and 322.5806 ops/sec)
+linked 65536/65536 bytes at offset 327680
+64 KiB, 1 ops; 0.0030 sec (20.181 MiB/sec and 322.8931 ops/sec)
+linked 65536/65536 bytes at offset 458752
+64 KiB, 1 ops; 0.0031 sec (20.045 MiB/sec and 320.7184 ops/sec)
+linked 65536/65536 bytes at offset 589824
+64 KiB, 1 ops; 0.0047 sec (13.270 MiB/sec and 212.3142 ops/sec)
+linked 65536/65536 bytes at offset 720896
+64 KiB, 1 ops; 0.0031 sec (20.013 MiB/sec and 320.2049 ops/sec)
+linked 65536/65536 bytes at offset 851968
+64 KiB, 1 ops; 0.0030 sec (20.799 MiB/sec and 332.7787 ops/sec)
+linked 65536/65536 bytes at offset 983040
+64 KiB, 1 ops; 0.0030 sec (20.813 MiB/sec and 333.0003 ops/sec)
+linked 65536/65536 bytes at offset 1114112
+64 KiB, 1 ops; 0.0042 sec (14.671 MiB/sec and 234.7418 ops/sec)
+linked 65536/65536 bytes at offset 1245184
+64 KiB, 1 ops; 0.0037 sec (16.837 MiB/sec and 269.3966 ops/sec)
+linked 65536/65536 bytes at offset 1376256
+64 KiB, 1 ops; 0.0044 sec (14.131 MiB/sec and 226.0909 ops/sec)
+linked 65536/65536 bytes at offset 1507328
+64 KiB, 1 ops; 0.0034 sec (18.355 MiB/sec and 293.6858 ops/sec)
+linked 65536/65536 bytes at offset 1638400
+64 KiB, 1 ops; 0.0034 sec (18.142 MiB/sec and 290.2758 ops/sec)
+linked 65536/65536 bytes at offset 1769472
+64 KiB, 1 ops; 0.0037 sec (16.614 MiB/sec and 265.8161 ops/sec)
+linked 65536/65536 bytes at offset 1900544
+64 KiB, 1 ops; 0.0029 sec (21.186 MiB/sec and 338.9831 ops/sec)
+linked 65536/65536 bytes at offset 2031616
+64 KiB, 1 ops; 0.0028 sec (22.163 MiB/sec and 354.6099 ops/sec)
+linked 65536/65536 bytes at offset 2162688
+64 KiB, 1 ops; 0.0028 sec (21.626 MiB/sec and 346.0208 ops/sec)
+linked 65536/65536 bytes at offset 2293760
+64 KiB, 1 ops; 0.0028 sec (22.258 MiB/sec and 356.1254 ops/sec)
+linked 65536/65536 bytes at offset 2424832
+64 KiB, 1 ops; 0.0029 sec (21.093 MiB/sec and 337.4958 ops/sec)
+linked 65536/65536 bytes at offset 2555904
+64 KiB, 1 ops; 0.0029 sec (20.959 MiB/sec and 335.3454 ops/sec)
+linked 65536/65536 bytes at offset 2686976
+64 KiB, 1 ops; 0.0028 sec (21.686 MiB/sec and 346.9813 ops/sec)
+linked 65536/65536 bytes at offset 2818048
+64 KiB, 1 ops; 0.0029 sec (21.317 MiB/sec and 341.0641 ops/sec)
+linked 65536/65536 bytes at offset 2949120
+64 KiB, 1 ops; 0.0028 sec (22.046 MiB/sec and 352.7337 ops/sec)
+linked 65536/65536 bytes at offset 3080192
+64 KiB, 1 ops; 0.0028 sec (21.664 MiB/sec and 346.6205 ops/sec)
+linked 65536/65536 bytes at offset 3211264
+64 KiB, 1 ops; 0.0028 sec (22.234 MiB/sec and 355.7453 ops/sec)
+linked 65536/65536 bytes at offset 3342336
+64 KiB, 1 ops; 0.0028 sec (21.976 MiB/sec and 351.6174 ops/sec)
+linked 65536/65536 bytes at offset 3473408
+64 KiB, 1 ops; 0.0029 sec (21.208 MiB/sec and 339.3281 ops/sec)
+linked 65536/65536 bytes at offset 3604480
+64 KiB, 1 ops; 0.0028 sec (21.930 MiB/sec and 350.8772 ops/sec)
+linked 65536/65536 bytes at offset 3735552
+64 KiB, 1 ops; 0.0029 sec (21.478 MiB/sec and 343.6426 ops/sec)
+linked 65536/65536 bytes at offset 3866624
+64 KiB, 1 ops; 0.0029 sec (21.441 MiB/sec and 343.0532 ops/sec)
+linked 65536/65536 bytes at offset 3997696
+64 KiB, 1 ops; 0.0029 sec (21.515 MiB/sec and 344.2341 ops/sec)
+linked 65536/65536 bytes at offset 4128768
+64 KiB, 1 ops; 0.0029 sec (21.165 MiB/sec and 338.6387 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 2097152/2097152 bytes at offset 1048576
+2 MiB, 1 ops; 0.0072 sec (276.281 MiB/sec and 138.1406 ops/sec)
+wrote 2097152/2097152 bytes at offset 1048576
+2 MiB, 512 ops; 0.0001 sec (10.016 GiB/sec and 2625641.0256 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds

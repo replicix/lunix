@@ -1,0 +1,88 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Userspace support of large timestamps: 1
+xfs_io support of statx: 1
+before
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_max_time:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_max_time
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_min_time:
+1901-12-13 20:45:52.000000000 +0000 -2147483648 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_min_time
+stat.mtime.tv_sec = -2147483648
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_all_twos:
+2222-02-22 22:22:22.000000000 +0000 7956915742 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_all_twos
+stat.mtime.tv_sec = 7956915742
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_max:
+2038-01-19 03:14:07.000000000 +0000 2147483647 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_max
+stat.mtime.tv_sec = 2147483647
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_min:
+1901-12-13 20:45:52.000000000 +0000 -2147483648 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_min
+stat.mtime.tv_sec = -2147483648
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_from_s32_min:
+2446-05-10 22:38:55.000000000 +0000 15032385535 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_from_s32_min
+stat.mtime.tv_sec = 15032385535
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_max:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_max
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u64ns_from_s32_min:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u64ns_from_s32_min
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+after
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_max_time:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_max_time
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_min_time:
+1901-12-13 20:45:52.000000000 +0000 -2147483648 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_abs_min_time
+stat.mtime.tv_sec = -2147483648
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_all_twos:
+2222-02-22 22:22:22.000000000 +0000 7956915742 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_all_twos
+stat.mtime.tv_sec = 7956915742
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_max:
+2038-01-19 03:14:07.000000000 +0000 2147483647 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_max
+stat.mtime.tv_sec = 2147483647
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_min:
+1901-12-13 20:45:52.000000000 +0000 -2147483648 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_s32_min
+stat.mtime.tv_sec = -2147483648
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_from_s32_min:
+2446-05-10 22:38:55.000000000 +0000 15032385535 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_from_s32_min
+stat.mtime.tv_sec = 15032385535
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_max:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u34_max
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u64ns_from_s32_min:
+2486-07-02 20:20:24.000000000 +0000 16299260424 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/t_u64ns_from_s32_min
+stat.mtime.tv_sec = 16299260424
+stat.mtime.tv_nsec = 0

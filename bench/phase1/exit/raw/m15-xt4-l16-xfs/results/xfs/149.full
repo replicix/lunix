@@ -1,0 +1,3 @@
+loop device is /dev/loop8
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mntdir: not mounted.
+umount: /dev/ublkb1: not mounted.

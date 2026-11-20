@@ -1,0 +1,310 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+recs[1].blockcount = 1048460
+recs[1].blockcount = 1048460
+longest = 1048460
+freeblks = 1048460
+Allowing write of corrupted data with good CRC
+fdblocks = 4166994
+numrecs = 1
+recs[1].startblock = 1048476
+recs[1].blockcount = 100
+recs[1].refcount = 1
+recs[1].cowflag = 1
+numrecs = 7
+recs[7].startblock = 1048476
+recs[7].blockcount = 100
+recs[7].owner = -9
+recs[7].offset = 0
+**  broken fs config
+magicnum = 0x58465342
+blocksize = 4096
+dblocks = 4194304
+rblocks = 0
+rextents = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+logstart = 2097162
+rootino = 128
+rbmino = 129
+rsumino = 130
+rextsize = 1
+agblocks = 1048576
+agcount = 4
+rbmblocks = 0
+logblocks = 27162
+versionnum = 0xbca5
+sectsize = 4096
+inodesize = 512
+inopblock = 8
+fname = "\000\000\000\000\000\000\000\000\000\000\000\000"
+blocklog = 12
+sectlog = 12
+inodelog = 9
+inopblog = 3
+agblklog = 20
+rextslog = 0
+inprogress = 0
+imax_pct = 25
+icount = 64
+ifree = 61
+fdblocks = 4166994
+frextents = 0
+uquotino = 0
+gquotino = 0
+qflags = 0
+flags = 0
+shared_vn = 0
+inoalignmt = 8
+unit = 0
+width = 0
+dirblklog = 0
+logsectlog = 12
+logsectsize = 4096
+logsunit = 4096
+features2 = 0x18a
+bad_features2 = 0x18a
+features_compat = 0
+features_ro_compat = 0xf
+features_incompat = 0x2b
+features_log_incompat = 0
+crc = 0x8cf31bd7 (correct)
+spino_align = 4
+pquotino = 0
+lsn = 0
+meta_uuid = 00000000-0000-0000-0000-000000000000
+** agf header
+magicnum = 0x58414746
+versionnum = 1
+seqno = 1
+length = 1048576
+bnoroot = 4
+cntroot = 5
+rmaproot = 8
+refcntroot = 9
+bnolevel = 1
+cntlevel = 1
+rmaplevel = 1
+refcntlevel = 1
+rmapblocks = 1
+refcntblocks = 1
+flfirst = 1
+fllast = 6
+flcount = 6
+freeblks = 1048460
+longest = 1048460
+btreeblks = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+lsn = 0
+crc = 0xa3a1a348 (correct)
+** refcntbt
+magic = 0x52334643
+level = 0
+numrecs = 1
+leftsib = null
+rightsib = null
+bno = 8388680
+lsn = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0x9a7c0ddb (correct)
+recs[1] = [startblock,blockcount,refcount,cowflag] 
+1:[1048476,100,1,1]
+** rmapbt
+magic = 0x524d4233
+level = 0
+numrecs = 7
+leftsib = null
+rightsib = null
+bno = 8388672
+lsn = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0x2e670bbe (correct)
+recs[1-7] = [startblock,blockcount,owner,offset,extentflag,attrfork,bmbtblock] 
+1:[0,4,-3,0,0,0,0] 
+2:[4,2,-5,0,0,0,0] 
+3:[6,2,-6,0,0,0,0] 
+4:[8,1,-5,0,0,0,0] 
+5:[9,1,-8,0,0,0,0] 
+6:[10,6,-5,0,0,0,0] 
+7:[1048476,100,-9,0,0,0,0]
+** bnobt
+magic = 0x41423342
+level = 0
+numrecs = 1
+leftsib = null
+rightsib = null
+bno = 8388640
+lsn = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0xf2bd4212 (correct)
+recs[1] = [startblock,blockcount] 
+1:[16,1048460]
+** cntbt
+magic = 0x41423343
+level = 0
+numrecs = 1
+leftsib = null
+rightsib = null
+bno = 8388648
+lsn = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0xcf4722ba (correct)
+recs[1] = [startblock,blockcount] 
+1:[16,1048460]
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+**  supposedly fixed fs config
+magicnum = 0x58465342
+blocksize = 4096
+dblocks = 4194304
+rblocks = 0
+rextents = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+logstart = 2097162
+rootino = 128
+rbmino = 129
+rsumino = 130
+rextsize = 1
+agblocks = 1048576
+agcount = 4
+rbmblocks = 0
+logblocks = 27162
+versionnum = 0xbcb5
+sectsize = 4096
+inodesize = 512
+inopblock = 8
+fname = "\000\000\000\000\000\000\000\000\000\000\000\000"
+blocklog = 12
+sectlog = 12
+inodelog = 9
+inopblog = 3
+agblklog = 20
+rextslog = 0
+inprogress = 0
+imax_pct = 25
+icount = 64
+ifree = 60
+fdblocks = 4167093
+frextents = 0
+uquotino = null
+gquotino = null
+qflags = 0
+flags = 0
+shared_vn = 0
+inoalignmt = 8
+unit = 0
+width = 0
+dirblklog = 0
+logsectlog = 12
+logsectsize = 4096
+logsunit = 4096
+features2 = 0x18a
+bad_features2 = 0x18a
+features_compat = 0
+features_ro_compat = 0xf
+features_incompat = 0x2b
+features_log_incompat = 0
+crc = 0xb102d54f (correct)
+spino_align = 4
+pquotino = null
+lsn = 0x100000020
+meta_uuid = 00000000-0000-0000-0000-000000000000
+** agf header
+magicnum = 0x58414746
+versionnum = 1
+seqno = 1
+length = 1048576
+bnoroot = 4
+cntroot = 5
+rmaproot = 8
+refcntroot = 9
+bnolevel = 1
+cntlevel = 1
+rmaplevel = 1
+refcntlevel = 1
+rmapblocks = 1
+refcntblocks = 1
+flfirst = 1
+fllast = 6
+flcount = 6
+freeblks = 1048560
+longest = 1048560
+btreeblks = 0
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+lsn = 0x100000010
+crc = 0xfa4428fe (correct)
+** refcntbt
+magic = 0x52334643
+level = 0
+numrecs = 0
+leftsib = null
+rightsib = null
+bno = 8388680
+lsn = 0x100000010
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0x65297fce (correct)
+** rmapbt
+magic = 0x524d4233
+level = 0
+numrecs = 6
+leftsib = null
+rightsib = null
+bno = 8388672
+lsn = 0x100000010
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0xd13279ab (correct)
+recs[1-6] = [startblock,blockcount,owner,offset,extentflag,attrfork,bmbtblock] 
+1:[0,4,-3,0,0,0,0] 
+2:[4,2,-5,0,0,0,0] 
+3:[6,2,-6,0,0,0,0] 
+4:[8,1,-5,0,0,0,0] 
+5:[9,1,-8,0,0,0,0] 
+6:[10,6,-5,0,0,0,0]
+** bnobt
+magic = 0x41423342
+level = 0
+numrecs = 1
+leftsib = null
+rightsib = null
+bno = 8388640
+lsn = 0x100000010
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0xc2745133 (correct)
+recs[1] = [startblock,blockcount] 
+1:[16,1048560]
+** cntbt
+magic = 0x41423343
+level = 0
+numrecs = 1
+leftsib = null
+rightsib = null
+bno = 8388648
+lsn = 0x100000010
+uuid = b2c18fa4-531b-4b3d-9d44-d7bb090361da
+owner = 1
+crc = 0xff8e319b (correct)
+recs[1] = [startblock,blockcount] 
+1:[16,1048560]
+umount: /dev/ublkb1: not mounted.

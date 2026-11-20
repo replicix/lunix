@@ -1,0 +1,78 @@
+{
+  "exit": 2,
+  "volume": "80055b27-bf2f-4cfd-bc56-95791cf169a0",
+  "mode": "integrity",
+  "tip": 32,
+  "deep": true,
+  "findings": [
+    {
+      "code": "seg_hash",
+      "severity": "error",
+      "object": "map/0000000000000009",
+      "message": "the extent region does not hash to the footer's seg_hash"
+    },
+    {
+      "code": "extent_auth",
+      "severity": "error",
+      "object": "map/0000000000000009",
+      "message": "the tag does not verify, or the recomputed id differs from the header id",
+      "range": [
+        93443,
+        102783
+      ]
+    },
+    {
+      "code": "map_node_auth",
+      "severity": "error",
+      "object": "map/0000000000000009",
+      "message": "the node extent does not authenticate",
+      "range": [
+        93443,
+        102783
+      ]
+    },
+    {
+      "code": "map_node_auth",
+      "severity": "error",
+      "object": "map/0000000000000009",
+      "message": "the node extent does not authenticate",
+      "range": [
+        93443,
+        102783
+      ]
+    },
+    {
+      "code": "map_node_auth",
+      "severity": "error",
+      "object": "map/0000000000000009",
+      "message": "the node extent does not authenticate",
+      "range": [
+        93443,
+        102783
+      ]
+    }
+  ],
+  "counts": {
+    "extent_auth": 1,
+    "map_node_auth": 3,
+    "seg_hash": 1
+  },
+  "stats": {
+    "commits": 33,
+    "segments": 131,
+    "packs": 32,
+    "extents": 131419,
+    "map_nodes": 265,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 2048
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 96536
+}

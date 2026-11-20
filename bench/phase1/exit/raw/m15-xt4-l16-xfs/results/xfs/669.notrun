@@ -1,0 +1,1 @@
+This test requires /sys/fs/xfs//dev/ublkb1/zoned/nr_open_zones

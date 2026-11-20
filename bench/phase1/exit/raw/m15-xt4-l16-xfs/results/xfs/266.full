@@ -1,0 +1,205 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 0 dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+/usr/sbin/xfsdump: dump date: Thu Nov 19 23:18:50 2026
+/usr/sbin/xfsdump: session id: 068d6fd3-4910-496c-8a1f-86a7ff7a9e44
+/usr/sbin/xfsdump: session label: "stress_266"
+/usr/sbin/xfsdump: ino map phase 1: constructing initial dump list
+/usr/sbin/xfsdump: ino map phase 2: skipping (no pruning necessary)
+/usr/sbin/xfsdump: ino map phase 3: skipping (only one dump stream)
+/usr/sbin/xfsdump: ino map construction complete
+/usr/sbin/xfsdump: estimated dump size: 3150016 bytes
+/usr/sbin/xfsdump: /var/lib/xfsdump/inventory created
+/usr/sbin/xfsdump: creating dump session media file 0 (media 0, file 0)
+/usr/sbin/xfsdump: dumping ino map
+/usr/sbin/xfsdump: dumping directories
+/usr/sbin/xfsdump: dumping non-directory files
+/usr/sbin/xfsdump: ending media file
+/usr/sbin/xfsdump: media file size 3101232 bytes
+/usr/sbin/xfsdump: dump size (non-dir files) : 3058032 bytes
+/usr/sbin/xfsdump: dump complete: 1 seconds elapsed
+/usr/sbin/xfsdump: Dump Summary:
+/usr/sbin/xfsdump:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2775288.df.0 OK (success)
+/usr/sbin/xfsdump: Dump Status: SUCCESS
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 1 incremental dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch based on level 0 dump begun Thu Nov 19 23:18:50 2026
+/usr/sbin/xfsdump: dump date: Thu Nov 19 23:18:51 2026
+/usr/sbin/xfsdump: session id: 5dfe1c54-c58c-4753-8302-1240f04d9427
+/usr/sbin/xfsdump: session label: "stress_266"
+/usr/sbin/xfsdump: ino map phase 1: constructing initial dump list
+/usr/sbin/xfsdump: ino map phase 2: skipping (no pruning necessary)
+/usr/sbin/xfsdump: ino map phase 3: skipping (only one dump stream)
+/usr/sbin/xfsdump: ino map construction complete
+/usr/sbin/xfsdump: estimated dump size: 149696 bytes
+/usr/sbin/xfsdump: creating dump session media file 0 (media 0, file 0)
+/usr/sbin/xfsdump: dumping ino map
+/usr/sbin/xfsdump: dumping directories
+/usr/sbin/xfsdump: dumping non-directory files
+/usr/sbin/xfsdump: ending media file
+/usr/sbin/xfsdump: media file size 131392 bytes
+/usr/sbin/xfsdump: dump size (non-dir files) : 106640 bytes
+/usr/sbin/xfsdump: dump complete: 0 seconds elapsed
+/usr/sbin/xfsdump: Dump Summary:
+/usr/sbin/xfsdump:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2775288.df.1 OK (success)
+/usr/sbin/xfsdump: Dump Status: SUCCESS
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: dump description: 
+/usr/sbin/xfsrestore: hostname: <host>
+/usr/sbin/xfsrestore: mount point: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+/usr/sbin/xfsrestore: volume: /dev/ublkb1
+/usr/sbin/xfsrestore: session time: Thu Nov 19 23:18:50 2026
+/usr/sbin/xfsrestore: level: 0
+/usr/sbin/xfsrestore: session label: "stress_266"
+/usr/sbin/xfsrestore: media label: "stress_tape_media"
+/usr/sbin/xfsrestore: file system id: 417f74e2-64f8-4c7b-9f38-199d47620e1c
+/usr/sbin/xfsrestore: session id: 068d6fd3-4910-496c-8a1f-86a7ff7a9e44
+/usr/sbin/xfsrestore: media id: 52ab2fbf-b03f-4936-b9a1-1359f5789b14
+/usr/sbin/xfsrestore: using online session inventory
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 3 directories and 38 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2775288.df.0 OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: dump description: 
+/usr/sbin/xfsrestore: hostname: <host>
+/usr/sbin/xfsrestore: mount point: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+/usr/sbin/xfsrestore: volume: /dev/ublkb1
+/usr/sbin/xfsrestore: session time: Thu Nov 19 23:18:51 2026
+/usr/sbin/xfsrestore: level: 1
+/usr/sbin/xfsrestore: session label: "stress_266"
+/usr/sbin/xfsrestore: media label: "stress_tape_media"
+/usr/sbin/xfsrestore: file system id: 417f74e2-64f8-4c7b-9f38-199d47620e1c
+/usr/sbin/xfsrestore: session id: 5dfe1c54-c58c-4753-8302-1240f04d9427
+/usr/sbin/xfsrestore: media id: a928fe12-c63a-424f-9773-fab1e45221a4
+/usr/sbin/xfsrestore: using online session inventory
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: NOTE: dump is not self-contained, orphaned files expected if base dump(s) was not applied
+/usr/sbin/xfsrestore: 1 directories and 4 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2775288.df.1 OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/dumpdir:
+total 112
+-rw-r--r-- 1 1 3 102400 Nov 19 23:18 big
+-rw-r--r-- 1 0 0      9 Nov 19 23:18 newfile
+-rw-r--r-- 1 4 4     21 Nov 19 23:18 small
+drwxr-xr-x 2 0 0   4096 Nov 19 23:18 sub
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/dumpdir/sub:
+total 2944
+-rw-r--r-- 1 4 4      12 Nov 19 23:18 a
+-rw-r--r-- 1 4 4     100 Nov 19 23:18 a00
+-rw-r--r-- 1 4 4    1000 Nov 19 23:18 a000
+-rw-r--r-- 1 4 4       2 Nov 19 23:18 b
+-rw-r--r-- 1 4 4     200 Nov 19 23:18 b00
+-rw-r--r-- 1 4 3  102411 Nov 19 23:18 big
+-rw-r--r-- 1 4 4      15 Nov 19 23:18 c
+-rw-r--r-- 1 4 4     400 Nov 19 23:18 c00
+-rw-r--r-- 1 4 4       8 Nov 19 23:18 d
+-rw-r--r-- 1 4 4     800 Nov 19 23:18 d00
+-rw-r--r-- 1 4 4      27 Nov 19 23:18 e
+-rw-r--r-- 1 4 4    1600 Nov 19 23:18 e00
+-rw-r--r-- 1 4 4   16000 Nov 19 23:18 e000
+-rw-r--r-- 1 4 4      32 Nov 19 23:18 f
+-rw-r--r-- 1 4 4    3200 Nov 19 23:18 f00
+-rw-r--r-- 1 4 4      64 Nov 19 23:18 g
+-rw-r--r-- 1 4 4    6400 Nov 19 23:18 g00
+-rw-r--r-- 1 4 4     128 Nov 19 23:18 h
+-rw-r--r-- 1 4 4   12800 Nov 19 23:18 h00
+-rw-r--r-- 1 4 4  128000 Nov 19 23:18 h000
+-rw-r--r-- 1 4 4     256 Nov 19 23:18 i
+-rw-r--r-- 1 4 4   25600 Nov 19 23:18 i00
+-rw-r--r-- 1 4 4     512 Nov 19 23:18 j
+-rw-r--r-- 1 4 4   51200 Nov 19 23:18 j00
+-rw-r--r-- 1 4 4    1024 Nov 19 23:18 k
+-rw-r--r-- 1 4 4  102400 Nov 19 23:18 k00
+-rw-r--r-- 1 4 4 1024000 Nov 19 23:18 k000
+-rw-r--r-- 1 4 4    2048 Nov 19 23:18 l
+-rw-r--r-- 1 4 4  204800 Nov 19 23:18 l00
+-rw-r--r-- 1 4 4    4096 Nov 19 23:18 m
+-rw-r--r-- 1 4 4  409600 Nov 19 23:18 m00
+-rw-r--r-- 1 4 4    8192 Nov 19 23:18 n
+-rw-r--r-- 1 4 4  819200 Nov 19 23:18 n00
+-rw-r--r-- 1 2 2      10 Nov 19 23:18 small
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/restoredir/dumpdir:
+total 112
+-rw-r--r-- 1 1 3 102400 Nov 19 23:18 big
+-rw-r--r-- 1 0 0      9 Nov 19 23:18 newfile
+-rw-r--r-- 1 4 4     21 Nov 19 23:18 small
+drwxr-xr-x 2 0 0   4096 Nov 19 23:18 sub
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/restoredir/dumpdir/sub:
+total 2944
+-rw-r--r-- 1 4 4      12 Nov 19 23:18 a
+-rw-r--r-- 1 4 4     100 Nov 19 23:18 a00
+-rw-r--r-- 1 4 4    1000 Nov 19 23:18 a000
+-rw-r--r-- 1 4 4       2 Nov 19 23:18 b
+-rw-r--r-- 1 4 4     200 Nov 19 23:18 b00
+-rw-r--r-- 1 4 3  102411 Nov 19 23:18 big
+-rw-r--r-- 1 4 4      15 Nov 19 23:18 c
+-rw-r--r-- 1 4 4     400 Nov 19 23:18 c00
+-rw-r--r-- 1 4 4       8 Nov 19 23:18 d
+-rw-r--r-- 1 4 4     800 Nov 19 23:18 d00
+-rw-r--r-- 1 4 4      27 Nov 19 23:18 e
+-rw-r--r-- 1 4 4    1600 Nov 19 23:18 e00
+-rw-r--r-- 1 4 4   16000 Nov 19 23:18 e000
+-rw-r--r-- 1 4 4      32 Nov 19 23:18 f
+-rw-r--r-- 1 4 4    3200 Nov 19 23:18 f00
+-rw-r--r-- 1 4 4      64 Nov 19 23:18 g
+-rw-r--r-- 1 4 4    6400 Nov 19 23:18 g00
+-rw-r--r-- 1 4 4     128 Nov 19 23:18 h
+-rw-r--r-- 1 4 4   12800 Nov 19 23:18 h00
+-rw-r--r-- 1 4 4  128000 Nov 19 23:18 h000
+-rw-r--r-- 1 4 4     256 Nov 19 23:18 i
+-rw-r--r-- 1 4 4   25600 Nov 19 23:18 i00
+-rw-r--r-- 1 4 4     512 Nov 19 23:18 j
+-rw-r--r-- 1 4 4   51200 Nov 19 23:18 j00
+-rw-r--r-- 1 4 4    1024 Nov 19 23:18 k
+-rw-r--r-- 1 4 4  102400 Nov 19 23:18 k00
+-rw-r--r-- 1 4 4 1024000 Nov 19 23:18 k000
+-rw-r--r-- 1 4 4    2048 Nov 19 23:18 l
+-rw-r--r-- 1 4 4  204800 Nov 19 23:18 l00
+-rw-r--r-- 1 4 4    4096 Nov 19 23:18 m
+-rw-r--r-- 1 4 4  409600 Nov 19 23:18 m00
+-rw-r--r-- 1 4 4    8192 Nov 19 23:18 n
+-rw-r--r-- 1 4 4  819200 Nov 19 23:18 n00
+-rw-r--r-- 1 2 2      10 Nov 19 23:18 small

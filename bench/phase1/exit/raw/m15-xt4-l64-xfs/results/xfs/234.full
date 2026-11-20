@@ -1,0 +1,17 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 5591040/5591040 bytes at offset 0
+5 MiB, 1365 ops; 0.0011 sec (4.653 GiB/sec and 1219839.1421 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/loop8/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/retry_timeout_seconds
+mount -o nosuid,nodev /dev/loop8 <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch failed
+umount: /dev/loop8: not mounted.
+umount: /dev/loop8: not mounted.
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb0: not mounted.
+umount: /dev/ublkb1: not mounted.

@@ -1,0 +1,6 @@
+1795134920
+{"used":0,"cap":536870912,"tip":0,"dirty":0,"commits":0,"written":0,"space":{"used":212,"limit":17179869184,"fs_free":290254659584,"journal":0,"segments":0,"cache":0,"map":0,"index":0,"commits":212,"headroom_held":0,"waiters":0}}
+1795134925
+{"used":134217728,"cap":536870912,"tip":11,"dirty":0,"commits":11,"written":801112064,"space":{"used":869389239,"limit":17179869184,"fs_free":289541603328,"journal":66064320,"segments":797705686,"cache":0,"map":1478145,"index":4137696,"commits":3392,"headroom_held":0,"waiters":0}}
+1795134930
+{"used":134217728,"cap":536870912,"tip":22,"dirty":0,"commits":22,"written":1527775232,"space":{"used":1605968755,"limit":17179869184,"fs_free":288856322048,"journal":66064320,"segments":1528936191,"cache":0,"map":2880224,"index":8081344,"commits":6676,"headroom_held":0,"waiters":0}}

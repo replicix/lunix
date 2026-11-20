@@ -1,0 +1,5 @@
+QA output created by 082
+quotaon: Cannot stat() mounted device tmpfs: No such file or directory
+quotaon: Cannot stat() mounted device tmpfs: No such file or directory
+group quota on SCRATCH_MNT (SCRATCH_DEV) is on
+user quota on SCRATCH_MNT (SCRATCH_DEV) is on

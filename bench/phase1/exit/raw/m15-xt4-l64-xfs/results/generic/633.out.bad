@@ -1,0 +1,3 @@
+QA output created by 633
+Silence is golden
+vfstest.c: 2418: run_test - Success - failure: setid binaries on regular mounts

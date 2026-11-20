@@ -1,0 +1,7 @@
+wrote 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0000 sec (325.521 MiB/sec and 83333.3333 ops/sec)
+before clone: 1795128687 1795128687
+linked 0/0 bytes at offset 0
+0.000000 bytes, 1 ops; 0.0000 sec (0.000000 bytes/sec and 18181.8182 ops/sec)
+after clone : 1795128688 1795128688
+umount: /dev/ublkb1: not mounted.

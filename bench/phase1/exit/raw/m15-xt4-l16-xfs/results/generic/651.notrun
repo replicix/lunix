@@ -1,0 +1,1 @@
+_scratch_mkfs_xfs: block size 1024 cannot be smaller than sector size 4096

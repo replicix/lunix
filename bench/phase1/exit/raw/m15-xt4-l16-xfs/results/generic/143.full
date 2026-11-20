@@ -1,0 +1,28 @@
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0038 sec (4.064 GiB/sec and 1065279.5839 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/retry_timeout_seconds
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.90 (4.097 MiB/sec and 1048.7422 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.83 (4.174 MiB/sec and 1068.5199 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.84 (4.163 MiB/sec and 1065.7813 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.90 (4.094 MiB/sec and 1048.1499 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.84 (4.162 MiB/sec and 1065.3685 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.84 (4.166 MiB/sec and 1066.4156 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.85 (4.147 MiB/sec and 1061.7310 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0:00:03.88 (4.121 MiB/sec and 1055.0409 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/retry_timeout_seconds
+umount: /dev/ublkb1: not mounted.

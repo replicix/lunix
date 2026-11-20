@@ -1,0 +1,1316 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0 inode 132
+would have cleared inode 132
+bad inode type 0 inode 133
+would have cleared inode 133
+bad inode type 0 inode 134
+would have cleared inode 134
+bad inode type 0 inode 135
+would have cleared inode 135
+bad inode type 0 inode 136
+would have cleared inode 136
+bad inode type 0 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 3
+        - agno = 1
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+        - agno = 2
+bad inode type 0 inode 8388736
+would have cleared inode 8388736
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0 inode 132
+would have cleared inode 132
+bad inode type 0 inode 133
+would have cleared inode 133
+bad inode type 0 inode 134
+would have cleared inode 134
+bad inode type 0 inode 135
+would have cleared inode 135
+bad inode type 0 inode 136
+would have cleared inode 136
+bad inode type 0 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 132
+bad inode format in inode 133
+bad inode format in inode 134
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+        - agno = 1
+bad inode format in inode 8388736
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+        - agno = 3
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+would fix ftype mismatch (3/5) in directory/child inode 131/135
+would fix ftype mismatch (4/5) in directory/child inode 131/136
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 132
+bad inode format in inode 133
+bad inode format in inode 134
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+        - agno = 1
+bad inode format in inode 8388736
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 2
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+        - agno = 3
+        - agno = 1
+bad inode format in inode 8388736
+would have cleared inode 8388736
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+would fix ftype mismatch (4/3) in directory/child inode 131/136
+would fix ftype mismatch (5/3) in directory/child inode 131/137
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 030000 inode 132
+would have cleared inode 132
+bad inode type 030000 inode 133
+would have cleared inode 133
+bad inode type 030000 inode 134
+would have cleared inode 134
+bad inode type 030000 inode 135
+would have cleared inode 135
+bad inode type 030000 inode 136
+would have cleared inode 136
+bad inode type 030000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 030000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+        - agno = 2
+bad inode type 030000 inode 8388736
+        - agno = 3
+would have cleared inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 030000 inode 132
+would have cleared inode 132
+bad inode type 030000 inode 133
+would have cleared inode 133
+bad inode type 030000 inode 134
+would have cleared inode 134
+bad inode type 030000 inode 135
+would have cleared inode 135
+bad inode type 030000 inode 136
+would have cleared inode 136
+bad inode type 030000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 135
+bad inode format in inode 136
+bad inode format in inode 137
+mismatch between format (2) and size (4) in directory ino 132
+would have cleared inode 132
+mismatch between format (2) and size (0) in directory ino 133
+would have cleared inode 133
+entry "                                               lunix-p1/m15/scratch/mnt/m15-xfstests-lunix-xfs-16k-scratch/test/DATA" in shortform directory 134 references invalid inode 0
+entry #0 extends past end of dir in shortform dir 134, would junk 255 entries
+would have corrected entry count in directory 134 from 47 to 0
+would have corrected i8 count in directory 134 from 104 to 1
+would have corrected directory 134 size from 82 to 10
+bogus .. inode number (30792026968716654) in directory inode 134, would clear inode number
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+        - agno = 1
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 1
+        - agno = 2
+        - agno = 3
+        - agno = 0
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+mismatch between format (2) and size (4) in directory ino 132
+would have cleared inode 132
+mismatch between format (2) and size (0) in directory ino 133
+would have cleared inode 133
+entry "                                               lunix-p1/m15/scratch/mnt/m15-xfstests-lunix-xfs-16k-scratch/test/DATA" in shortform directory 134 references invalid inode 0
+entry #0 extends past end of dir in shortform dir 134, would junk 255 entries
+would have corrected entry count in directory 134 from 47 to 0
+would have corrected i8 count in directory 134 from 104 to 1
+would have corrected directory 134 size from 82 to 10
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in dir ino 131 doesn't have a .. entry, will set it in ino 134.
+would fix ftype mismatch (7/2) in directory/child inode 131/134
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+Invalid inode number 0x6d652f7562756e
+Metadata corruption detected at 0x5ceeb0537d60, inode 0x86 data fork
+couldn't map inode 134, err = 117
+Invalid inode number 0x6d652f7562756e
+Metadata corruption detected at 0x5ceeb0537d60, inode 0x86 data fork
+couldn't map inode 134, err = 117
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 4
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 050000 inode 132
+would have cleared inode 132
+bad inode type 050000 inode 133
+would have cleared inode 133
+bad inode type 050000 inode 134
+would have cleared inode 134
+bad inode type 050000 inode 135
+would have cleared inode 135
+bad inode type 050000 inode 136
+would have cleared inode 136
+bad inode type 050000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 050000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+        - agno = 2
+bad inode type 050000 inode 8388736
+would have cleared inode 8388736
+        - agno = 3
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 050000 inode 132
+would have cleared inode 132
+bad inode type 050000 inode 133
+would have cleared inode 133
+bad inode type 050000 inode 134
+would have cleared inode 134
+bad inode type 050000 inode 135
+would have cleared inode 135
+bad inode type 050000 inode 136
+would have cleared inode 136
+bad inode type 050000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 132
+bad inode format in inode 133
+bad inode format in inode 134
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+        - agno = 1
+bad inode format in inode 8388736
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+        - agno = 2
+bad inode format in inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+would have cleared inode 8388736
+        - agno = 3
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+would fix ftype mismatch (3/4) in directory/child inode 131/135
+would fix ftype mismatch (5/4) in directory/child inode 131/137
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 070000 inode 132
+would have cleared inode 132
+bad inode type 070000 inode 133
+would have cleared inode 133
+bad inode type 070000 inode 134
+would have cleared inode 134
+bad inode type 070000 inode 135
+would have cleared inode 135
+bad inode type 070000 inode 136
+would have cleared inode 136
+bad inode type 070000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 070000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+        - agno = 2
+        - agno = 3
+bad inode type 070000 inode 8388736
+would have cleared inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 070000 inode 132
+would have cleared inode 132
+bad inode type 070000 inode 133
+would have cleared inode 133
+bad inode type 070000 inode 134
+would have cleared inode 134
+bad inode type 070000 inode 135
+would have cleared inode 135
+bad inode type 070000 inode 136
+would have cleared inode 136
+bad inode type 070000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 134
+bad inode format in inode 135
+bad inode format in inode 136
+bad inode format in inode 137
+bad inode format in inode 134
+would have cleared inode 134
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode format in inode 8388736
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 2
+        - agno = 1
+bad inode format in inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have cleared inode 8388736
+        - agno = 3
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode format in inode 134
+would have cleared inode 134
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0110000 inode 132
+would have cleared inode 132
+bad inode type 0110000 inode 133
+would have cleared inode 133
+bad inode type 0110000 inode 134
+would have cleared inode 134
+bad inode type 0110000 inode 135
+would have cleared inode 135
+bad inode type 0110000 inode 136
+would have cleared inode 136
+bad inode type 0110000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0110000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 3
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+        - agno = 2
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0110000 inode 132
+        - agno = 1
+bad inode type 0110000 inode 8388736
+would have cleared inode 8388736
+would have cleared inode 132
+bad inode type 0110000 inode 133
+would have cleared inode 133
+bad inode type 0110000 inode 134
+would have cleared inode 134
+bad inode type 0110000 inode 135
+would have cleared inode 135
+bad inode type 0110000 inode 136
+would have cleared inode 136
+bad inode type 0110000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 135
+bad inode format in inode 136
+bad inode format in inode 137
+Metadata CRC error detected at 0x5b12ec2b73d3, xfs_symlink block 0xc0/0x1000
+Bad symlink buffer CRC, block 24, inode 132.
+Correcting CRC, but symlink may be bad.
+bad symlink header ino 132, file block 0, disk block 24
+problem with symbolic link in inode 132
+would have cleared inode 132
+zero size symlink in inode 133
+problem with symbolic link in inode 133
+would have cleared inode 133
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+        - agno = 1
+found illegal null character in symlink inode 8388736
+problem with symbolic link in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+        - check for inodes claiming duplicate blocks...
+        - agno = 1
+found illegal null character in symlink inode 8388736
+problem with symbolic link in inode 8388736
+would have cleared inode 8388736
+        - agno = 3
+        - agno = 2
+        - agno = 0
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad symlink header ino 132, file block 0, disk block 24
+problem with symbolic link in inode 132
+would have cleared inode 132
+zero size symlink in inode 133
+problem with symbolic link in inode 133
+would have cleared inode 133
+bad inode format in inode 135
+would have cleared inode 135
+bad inode format in inode 136
+would have cleared inode 136
+bad inode format in inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0130000 inode 132
+would have cleared inode 132
+bad inode type 0130000 inode 133
+would have cleared inode 133
+bad inode type 0130000 inode 134
+would have cleared inode 134
+bad inode type 0130000 inode 135
+would have cleared inode 135
+bad inode type 0130000 inode 136
+would have cleared inode 136
+bad inode type 0130000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0130000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 1
+        - agno = 2
+        - agno = 0
+bad inode type 0130000 inode 8388736
+would have cleared inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0130000 inode 132
+would have cleared inode 132
+bad inode type 0130000 inode 133
+would have cleared inode 133
+bad inode type 0130000 inode 134
+would have cleared inode 134
+        - agno = 3
+bad inode type 0130000 inode 135
+would have cleared inode 135
+bad inode type 0130000 inode 136
+would have cleared inode 136
+bad inode type 0130000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode format in inode 132
+bad inode format in inode 133
+bad inode format in inode 134
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+        - agno = 1
+bad inode format in inode 8388736
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+bad inode format in inode 8388736
+would have cleared inode 8388736
+        - agno = 3
+        - agno = 2
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+bad inode format in inode 132
+would have cleared inode 132
+bad inode format in inode 133
+would have cleared inode 133
+bad inode format in inode 134
+would have cleared inode 134
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+would fix ftype mismatch (3/6) in directory/child inode 131/135
+would fix ftype mismatch (4/6) in directory/child inode 131/136
+would fix ftype mismatch (5/6) in directory/child inode 131/137
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0150000 inode 132
+would have cleared inode 132
+bad inode type 0150000 inode 133
+would have cleared inode 133
+bad inode type 0150000 inode 134
+would have cleared inode 134
+bad inode type 0150000 inode 135
+would have cleared inode 135
+bad inode type 0150000 inode 136
+would have cleared inode 136
+bad inode type 0150000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0150000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 2
+        - agno = 1
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+        - agno = 3
+bad inode type 0150000 inode 8388736
+would have cleared inode 8388736
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0150000 inode 132
+would have cleared inode 132
+bad inode type 0150000 inode 133
+would have cleared inode 133
+bad inode type 0150000 inode 134
+would have cleared inode 134
+bad inode type 0150000 inode 135
+would have cleared inode 135
+bad inode type 0150000 inode 136
+would have cleared inode 136
+bad inode type 0150000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0160000 inode 132
+would have cleared inode 132
+bad inode type 0160000 inode 133
+would have cleared inode 133
+bad inode type 0160000 inode 134
+would have cleared inode 134
+bad inode type 0160000 inode 135
+would have cleared inode 135
+bad inode type 0160000 inode 136
+would have cleared inode 136
+bad inode type 0160000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0160000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 2
+        - agno = 1
+bad inode type 0160000 inode 8388736
+would have cleared inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+        - agno = 3
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0160000 inode 132
+would have cleared inode 132
+bad inode type 0160000 inode 133
+would have cleared inode 133
+bad inode type 0160000 inode 134
+would have cleared inode 134
+bad inode type 0160000 inode 135
+would have cleared inode 135
+bad inode type 0160000 inode 136
+would have cleared inode 136
+bad inode type 0160000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0170000 inode 132
+would have cleared inode 132
+bad inode type 0170000 inode 133
+would have cleared inode 133
+bad inode type 0170000 inode 134
+would have cleared inode 134
+bad inode type 0170000 inode 135
+would have cleared inode 135
+bad inode type 0170000 inode 136
+would have cleared inode 136
+bad inode type 0170000 inode 137
+would have cleared inode 137
+        - agno = 1
+bad inode type 0170000 inode 8388736
+would have cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 1
+bad inode type 0170000 inode 8388736
+        - agno = 2
+        - agno = 3
+        - agno = 0
+would have cleared inode 8388736
+entry "DIR" in shortform directory 131 references free inode 8388736
+would have junked entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+would have junked entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+would have junked entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+would have junked entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+would have junked entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+would have junked entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+would have junked entry "FIFO" in directory inode 131
+bad inode type 0170000 inode 132
+would have cleared inode 132
+bad inode type 0170000 inode 133
+would have cleared inode 133
+bad inode type 0170000 inode 134
+would have cleared inode 134
+bad inode type 0170000 inode 135
+would have cleared inode 135
+bad inode type 0170000 inode 136
+would have cleared inode 136
+bad inode type 0170000 inode 137
+would have cleared inode 137
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+entry "DIR" in shortform directory inode 131 points to free inode 8388736, would junk entry
+entry "DATA" in shortform directory inode 131 points to free inode 132, would junk entry
+entry "EMPTY" in shortform directory inode 131 points to free inode 133, would junk entry
+entry "SYMLINK" in shortform directory inode 131 points to free inode 134, would junk entry
+entry "CHRDEV" in shortform directory inode 131 points to free inode 135, would junk entry
+entry "BLKDEV" in shortform directory inode 131 points to free inode 136, would junk entry
+entry "FIFO" in shortform directory inode 131 points to free inode 137, would junk entry
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+would have reset inode 131 nlinks from 3 to 2
+No modify flag set, skipping filesystem flush and exiting.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan and clear agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+bad inode type 0170000 inode 132
+cleared inode 132
+bad inode type 0170000 inode 133
+cleared inode 133
+bad inode type 0170000 inode 134
+cleared inode 134
+bad inode type 0170000 inode 135
+cleared inode 135
+bad inode type 0170000 inode 136
+cleared inode 136
+bad inode type 0170000 inode 137
+cleared inode 137
+        - agno = 1
+bad inode type 0170000 inode 8388736
+cleared inode 8388736
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+unknown block state, ag 0, blocks 24-24
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+        - agno = 3
+        - agno = 2
+entry "DIR" in shortform directory 131 references free inode 8388736
+junking entry "DIR" in directory inode 131
+entry "DATA" in shortform directory 131 references free inode 132
+junking entry "DATA" in directory inode 131
+entry "EMPTY" in shortform directory 131 references free inode 133
+junking entry "EMPTY" in directory inode 131
+entry "SYMLINK" in shortform directory 131 references free inode 134
+junking entry "SYMLINK" in directory inode 131
+entry "CHRDEV" in shortform directory 131 references free inode 135
+junking entry "CHRDEV" in directory inode 131
+entry "BLKDEV" in shortform directory 131 references free inode 136
+junking entry "BLKDEV" in directory inode 131
+entry "FIFO" in shortform directory 131 references free inode 137
+junking entry "FIFO" in directory inode 131
+Phase 5 - rebuild AG headers and trees...
+        - reset superblock...
+Phase 6 - check inode connectivity...
+        - resetting contents of realtime bitmap and summary inodes
+        - traversing filesystem ...
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify and correct link counts...
+resetting inode 131 nlinks from 3 to 2
+done
+umount: /dev/ublkb1: not mounted.

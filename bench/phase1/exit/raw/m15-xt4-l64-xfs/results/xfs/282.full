@@ -1,0 +1,664 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+ino 128 mode 040755 nlink 3 uid 0 gid 0 rdev 0
+	blksize 4096 size 21 blocks 0 xflags 0 extsize 0
+	atime Thu Nov 19 22:34:14.829709000 2026
+	mtime Thu Nov 19 22:34:14.910889388 2026
+	ctime Thu Nov 19 22:34:14.910889388 2026
+	extents 0 0 gen 0
+	DMI: event mask 0x00000000 state 0x0000
+ino 131 mode 040755 nlink 3 uid 0 gid 0 rdev 0
+	blksize 4096 size 41 blocks 0 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.910889388 2026
+	mtime Thu Nov 19 22:34:14.921889414 2026
+	ctime Thu Nov 19 22:34:14.921889414 2026
+	extents 0 0 gen -533127655
+	DMI: event mask 0x00000000 state 0x0000
+ino 132 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 10 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.913889395 2026
+	mtime Thu Nov 19 22:34:14.914622981 2026
+	ctime Thu Nov 19 22:34:14.914889398 2026
+	extents 1 0 gen 1861464657
+	DMI: event mask 0x00000000 state 0x0000
+ino 133 mode 0100644 nlink 1 uid 1 gid 3 rdev 0
+	blksize 4096 size 102400 blocks 25 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.915889400 2026
+	mtime Thu Nov 19 22:34:14.917094620 2026
+	ctime Thu Nov 19 22:34:14.918200594 2026
+	extents 1 0 gen 1949115291
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388736 mode 040755 nlink 2 uid 0 gid 0 rdev 0
+	blksize 4096 size 4096 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.921889414 2026
+	mtime Thu Nov 19 22:34:15.006889609 2026
+	ctime Thu Nov 19 22:34:15.006889609 2026
+	extents 1 0 gen 245074533
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388737 mode 0100644 nlink 1 uid 2 gid 2 rdev 0
+	blksize 4096 size 10 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.922889416 2026
+	mtime Thu Nov 19 22:34:14.924046727 2026
+	ctime Thu Nov 19 22:34:14.924597199 2026
+	extents 1 0 gen 767615924
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388738 mode 0100644 nlink 1 uid 4 gid 3 rdev 0
+	blksize 4096 size 102400 blocks 25 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.924889421 2026
+	mtime Thu Nov 19 22:34:14.926232825 2026
+	ctime Thu Nov 19 22:34:14.926889425 2026
+	extents 1 0 gen 1069532999
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388739 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.927889427 2026
+	mtime Thu Nov 19 22:34:14.929007196 2026
+	ctime Thu Nov 19 22:34:14.929669229 2026
+	extents 1 0 gen 1788584247
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388740 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 2 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.930889434 2026
+	mtime Thu Nov 19 22:34:14.931349315 2026
+	ctime Thu Nov 19 22:34:14.932002787 2026
+	extents 1 0 gen -584028100
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388741 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 4 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.932889439 2026
+	mtime Thu Nov 19 22:34:14.933657564 2026
+	ctime Thu Nov 19 22:34:14.933889441 2026
+	extents 1 0 gen -2054945771
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388742 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 8 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.934889443 2026
+	mtime Thu Nov 19 22:34:14.935893292 2026
+	ctime Thu Nov 19 22:34:14.936526315 2026
+	extents 1 0 gen -1553431962
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388743 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 16 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.936889448 2026
+	mtime Thu Nov 19 22:34:14.938093481 2026
+	ctime Thu Nov 19 22:34:14.938675103 2026
+	extents 1 0 gen 126747178
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388744 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 32 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.939889455 2026
+	mtime Thu Nov 19 22:34:14.940275739 2026
+	ctime Thu Nov 19 22:34:14.940909702 2026
+	extents 1 0 gen 1333014147
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388745 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 64 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.941889460 2026
+	mtime Thu Nov 19 22:34:14.942541708 2026
+	ctime Thu Nov 19 22:34:14.943186920 2026
+	extents 1 0 gen -459822969
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388746 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 128 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.943889464 2026
+	mtime Thu Nov 19 22:34:14.944861547 2026
+	ctime Thu Nov 19 22:34:14.944889467 2026
+	extents 1 0 gen 1304822535
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388747 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 256 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.945889469 2026
+	mtime Thu Nov 19 22:34:14.947114455 2026
+	ctime Thu Nov 19 22:34:14.947795458 2026
+	extents 1 0 gen 1103759051
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388748 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 512 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.948889476 2026
+	mtime Thu Nov 19 22:34:14.949428044 2026
+	ctime Thu Nov 19 22:34:14.950064427 2026
+	extents 1 0 gen 332277939
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388749 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1024 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.950889480 2026
+	mtime Thu Nov 19 22:34:14.951704153 2026
+	ctime Thu Nov 19 22:34:14.951889483 2026
+	extents 1 0 gen -1614586207
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388750 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 2048 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.952889485 2026
+	mtime Thu Nov 19 22:34:14.954004732 2026
+	ctime Thu Nov 19 22:34:14.954659044 2026
+	extents 1 0 gen 825071555
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388751 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 4096 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.955889492 2026
+	mtime Thu Nov 19 22:34:14.956345541 2026
+	ctime Thu Nov 19 22:34:14.956988863 2026
+	extents 1 0 gen 109735360
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388752 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 8192 blocks 2 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.957889496 2026
+	mtime Thu Nov 19 22:34:14.958661200 2026
+	ctime Thu Nov 19 22:34:14.958889499 2026
+	extents 1 0 gen 1137957163
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388753 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 100 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.959889501 2026
+	mtime Thu Nov 19 22:34:14.960950258 2026
+	ctime Thu Nov 19 22:34:14.961597091 2026
+	extents 1 0 gen -687726385
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388754 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 200 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.961889506 2026
+	mtime Thu Nov 19 22:34:14.963187397 2026
+	ctime Thu Nov 19 22:34:14.963829319 2026
+	extents 1 0 gen -1929194087
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388755 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 400 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.964889512 2026
+	mtime Thu Nov 19 22:34:14.965428596 2026
+	ctime Thu Nov 19 22:34:14.966066728 2026
+	extents 1 0 gen 900258
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388756 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 800 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.966889517 2026
+	mtime Thu Nov 19 22:34:14.967710994 2026
+	ctime Thu Nov 19 22:34:14.967889519 2026
+	extents 1 0 gen 1768992832
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388757 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1600 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.968889522 2026
+	mtime Thu Nov 19 22:34:14.970035433 2026
+	ctime Thu Nov 19 22:34:14.970688326 2026
+	extents 1 0 gen -206775543
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388758 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 3200 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.971889528 2026
+	mtime Thu Nov 19 22:34:14.972305352 2026
+	ctime Thu Nov 19 22:34:14.972929044 2026
+	extents 1 0 gen 1663310833
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388759 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 6400 blocks 2 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.973889533 2026
+	mtime Thu Nov 19 22:34:14.974534171 2026
+	ctime Thu Nov 19 22:34:14.975179753 2026
+	extents 1 0 gen 838817000
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388760 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 12800 blocks 4 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.975889538 2026
+	mtime Thu Nov 19 22:34:14.976784079 2026
+	ctime Thu Nov 19 22:34:14.976889540 2026
+	extents 1 0 gen -680472921
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388761 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 25600 blocks 7 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.977889542 2026
+	mtime Thu Nov 19 22:34:14.979064268 2026
+	ctime Thu Nov 19 22:34:14.979799421 2026
+	extents 1 0 gen 556098510
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388762 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 51200 blocks 13 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.980889549 2026
+	mtime Thu Nov 19 22:34:14.981426207 2026
+	ctime Thu Nov 19 22:34:14.981889552 2026
+	extents 1 0 gen 511887731
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388763 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 102400 blocks 25 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.982889554 2026
+	mtime Thu Nov 19 22:34:14.983930397 2026
+	ctime Thu Nov 19 22:34:14.985050271 2026
+	extents 1 0 gen -94911785
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388764 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 204800 blocks 50 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.985889561 2026
+	mtime Thu Nov 19 22:34:14.986889563 2026
+	ctime Thu Nov 19 22:34:14.987889565 2026
+	extents 1 0 gen 1458719255
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388765 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 409600 blocks 100 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.988889568 2026
+	mtime Thu Nov 19 22:34:14.990889572 2026
+	ctime Thu Nov 19 22:34:14.991889574 2026
+	extents 1 0 gen -734150628
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388766 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 819200 blocks 200 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.992889577 2026
+	mtime Thu Nov 19 22:34:14.996889586 2026
+	ctime Thu Nov 19 22:34:14.997889588 2026
+	extents 1 0 gen -140428404
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388767 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1000 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.999889593 2026
+	mtime Thu Nov 19 22:34:15.000447990 2026
+	ctime Thu Nov 19 22:34:15.001080122 2026
+	extents 1 0 gen -1469405884
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388768 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 16000 blocks 4 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.001889597 2026
+	mtime Thu Nov 19 22:34:15.002719409 2026
+	ctime Thu Nov 19 22:34:15.002889600 2026
+	extents 1 0 gen 945678326
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388769 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 128000 blocks 32 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.003889602 2026
+	mtime Thu Nov 19 22:34:15.005044408 2026
+	ctime Thu Nov 19 22:34:15.005889607 2026
+	extents 1 0 gen 1663967797
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388770 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1024000 blocks 250 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.006889609 2026
+	mtime Thu Nov 19 22:34:15.011889620 2026
+	ctime Thu Nov 19 22:34:15.012889623 2026
+	extents 1 0 gen 602674371
+	DMI: event mask 0x00000000 state 0x0000
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 0 dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+/usr/sbin/xfsdump: dump date: Thu Nov 19 22:34:17 2026
+/usr/sbin/xfsdump: session id: 1c853d4e-493f-4692-b1f8-62c6475a9479
+/usr/sbin/xfsdump: session label: "stress_282"
+/usr/sbin/xfsdump: ino map phase 1: constructing initial dump list
+/usr/sbin/xfsdump: ino map phase 2: skipping (no pruning necessary)
+/usr/sbin/xfsdump: ino map phase 3: skipping (only one dump stream)
+/usr/sbin/xfsdump: ino map construction complete
+/usr/sbin/xfsdump: estimated dump size: 3150016 bytes
+/usr/sbin/xfsdump: /var/lib/xfsdump/inventory created
+/usr/sbin/xfsdump: creating dump session media file 0 (media 0, file 0)
+/usr/sbin/xfsdump: dumping ino map
+/usr/sbin/xfsdump: dumping directories
+/usr/sbin/xfsdump: dumping non-directory files
+/usr/sbin/xfsdump: ending media file
+/usr/sbin/xfsdump: media file size 3101232 bytes
+/usr/sbin/xfsdump: dump size (non-dir files) : 3058040 bytes
+/usr/sbin/xfsdump: dump complete: 0 seconds elapsed
+/usr/sbin/xfsdump: Dump Summary:
+/usr/sbin/xfsdump:   stream 0 <scratch>/m15-xt4-l64-xfs/tmp/1088003.l0 OK (success)
+/usr/sbin/xfsdump: Dump Status: SUCCESS
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+ino 128 mode 040755 nlink 3 uid 0 gid 0 rdev 0
+	blksize 4096 size 21 blocks 0 xflags 0 extsize 0
+	atime Thu Nov 19 22:34:17.093894403 2026
+	mtime Thu Nov 19 22:34:14.910889388 2026
+	ctime Thu Nov 19 22:34:14.910889388 2026
+	extents 0 0 gen 0
+	DMI: event mask 0x00000000 state 0x0000
+ino 131 mode 040755 nlink 3 uid 0 gid 0 rdev 0
+	blksize 4096 size 41 blocks 0 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:17.113894448 2026
+	mtime Thu Nov 19 22:34:14.921889414 2026
+	ctime Thu Nov 19 22:34:14.921889414 2026
+	extents 0 0 gen -533127655
+	DMI: event mask 0x00000000 state 0x0000
+ino 132 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 21 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.913889395 2026
+	mtime Thu Nov 19 22:34:17.159158919 2026
+	ctime Thu Nov 19 22:34:17.159158919 2026
+	extents 1 0 gen 1861464657
+	DMI: event mask 0x00000000 state 0x0000
+ino 133 mode 0100644 nlink 1 uid 1 gid 3 rdev 0
+	blksize 4096 size 102400 blocks 25 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.915889400 2026
+	mtime Thu Nov 19 22:34:14.917094620 2026
+	ctime Thu Nov 19 22:34:14.918200594 2026
+	extents 1 0 gen 1949115291
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388736 mode 040755 nlink 2 uid 0 gid 0 rdev 0
+	blksize 4096 size 4096 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:17.114894451 2026
+	mtime Thu Nov 19 22:34:15.006889609 2026
+	ctime Thu Nov 19 22:34:15.006889609 2026
+	extents 1 0 gen 245074533
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388737 mode 0100644 nlink 1 uid 2 gid 2 rdev 0
+	blksize 4096 size 10 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.922889416 2026
+	mtime Thu Nov 19 22:34:14.924046727 2026
+	ctime Thu Nov 19 22:34:14.924597199 2026
+	extents 1 0 gen 767615924
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388738 mode 0100644 nlink 1 uid 4 gid 3 rdev 0
+	blksize 4096 size 102411 blocks 26 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.924889421 2026
+	mtime Thu Nov 19 22:34:17.159158919 2026
+	ctime Thu Nov 19 22:34:17.159158919 2026
+	extents 2 0 gen 1069532999
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388739 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 12 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.927889427 2026
+	mtime Thu Nov 19 22:34:17.159158919 2026
+	ctime Thu Nov 19 22:34:17.159158919 2026
+	extents 1 0 gen 1788584247
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388740 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 2 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.930889434 2026
+	mtime Thu Nov 19 22:34:14.931349315 2026
+	ctime Thu Nov 19 22:34:14.932002787 2026
+	extents 1 0 gen -584028100
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388741 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 15 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.932889439 2026
+	mtime Thu Nov 19 22:34:17.159158919 2026
+	ctime Thu Nov 19 22:34:17.159158919 2026
+	extents 1 0 gen -2054945771
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388742 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 8 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.934889443 2026
+	mtime Thu Nov 19 22:34:14.935893292 2026
+	ctime Thu Nov 19 22:34:14.936526315 2026
+	extents 1 0 gen -1553431962
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388743 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 27 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.936889448 2026
+	mtime Thu Nov 19 22:34:17.159158919 2026
+	ctime Thu Nov 19 22:34:17.159158919 2026
+	extents 1 0 gen 126747178
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388744 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 32 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.939889455 2026
+	mtime Thu Nov 19 22:34:14.940275739 2026
+	ctime Thu Nov 19 22:34:14.940909702 2026
+	extents 1 0 gen 1333014147
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388745 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 64 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.941889460 2026
+	mtime Thu Nov 19 22:34:14.942541708 2026
+	ctime Thu Nov 19 22:34:14.943186920 2026
+	extents 1 0 gen -459822969
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388746 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 128 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.943889464 2026
+	mtime Thu Nov 19 22:34:14.944861547 2026
+	ctime Thu Nov 19 22:34:14.944889467 2026
+	extents 1 0 gen 1304822535
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388747 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 256 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.945889469 2026
+	mtime Thu Nov 19 22:34:14.947114455 2026
+	ctime Thu Nov 19 22:34:14.947795458 2026
+	extents 1 0 gen 1103759051
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388748 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 512 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.948889476 2026
+	mtime Thu Nov 19 22:34:14.949428044 2026
+	ctime Thu Nov 19 22:34:14.950064427 2026
+	extents 1 0 gen 332277939
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388749 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1024 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.950889480 2026
+	mtime Thu Nov 19 22:34:14.951704153 2026
+	ctime Thu Nov 19 22:34:14.951889483 2026
+	extents 1 0 gen -1614586207
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388750 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 2048 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.952889485 2026
+	mtime Thu Nov 19 22:34:14.954004732 2026
+	ctime Thu Nov 19 22:34:14.954659044 2026
+	extents 1 0 gen 825071555
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388751 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 4096 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.955889492 2026
+	mtime Thu Nov 19 22:34:14.956345541 2026
+	ctime Thu Nov 19 22:34:14.956988863 2026
+	extents 1 0 gen 109735360
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388752 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 8192 blocks 2 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.957889496 2026
+	mtime Thu Nov 19 22:34:14.958661200 2026
+	ctime Thu Nov 19 22:34:14.958889499 2026
+	extents 1 0 gen 1137957163
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388753 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 100 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.959889501 2026
+	mtime Thu Nov 19 22:34:14.960950258 2026
+	ctime Thu Nov 19 22:34:14.961597091 2026
+	extents 1 0 gen -687726385
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388754 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 200 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.961889506 2026
+	mtime Thu Nov 19 22:34:14.963187397 2026
+	ctime Thu Nov 19 22:34:14.963829319 2026
+	extents 1 0 gen -1929194087
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388755 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 400 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.964889512 2026
+	mtime Thu Nov 19 22:34:14.965428596 2026
+	ctime Thu Nov 19 22:34:14.966066728 2026
+	extents 1 0 gen 900258
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388756 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 800 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.966889517 2026
+	mtime Thu Nov 19 22:34:14.967710994 2026
+	ctime Thu Nov 19 22:34:14.967889519 2026
+	extents 1 0 gen 1768992832
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388757 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1600 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.968889522 2026
+	mtime Thu Nov 19 22:34:14.970035433 2026
+	ctime Thu Nov 19 22:34:14.970688326 2026
+	extents 1 0 gen -206775543
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388758 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 3200 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.971889528 2026
+	mtime Thu Nov 19 22:34:14.972305352 2026
+	ctime Thu Nov 19 22:34:14.972929044 2026
+	extents 1 0 gen 1663310833
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388759 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 6400 blocks 2 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.973889533 2026
+	mtime Thu Nov 19 22:34:14.974534171 2026
+	ctime Thu Nov 19 22:34:14.975179753 2026
+	extents 1 0 gen 838817000
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388760 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 12800 blocks 4 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.975889538 2026
+	mtime Thu Nov 19 22:34:14.976784079 2026
+	ctime Thu Nov 19 22:34:14.976889540 2026
+	extents 1 0 gen -680472921
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388761 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 25600 blocks 7 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.977889542 2026
+	mtime Thu Nov 19 22:34:14.979064268 2026
+	ctime Thu Nov 19 22:34:14.979799421 2026
+	extents 1 0 gen 556098510
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388762 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 51200 blocks 13 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.980889549 2026
+	mtime Thu Nov 19 22:34:14.981426207 2026
+	ctime Thu Nov 19 22:34:14.981889552 2026
+	extents 1 0 gen 511887731
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388763 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 102400 blocks 25 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.982889554 2026
+	mtime Thu Nov 19 22:34:14.983930397 2026
+	ctime Thu Nov 19 22:34:14.985050271 2026
+	extents 1 0 gen -94911785
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388764 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 204800 blocks 50 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.985889561 2026
+	mtime Thu Nov 19 22:34:14.986889563 2026
+	ctime Thu Nov 19 22:34:14.987889565 2026
+	extents 1 0 gen 1458719255
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388765 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 409600 blocks 100 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.988889568 2026
+	mtime Thu Nov 19 22:34:14.990889572 2026
+	ctime Thu Nov 19 22:34:14.991889574 2026
+	extents 1 0 gen -734150628
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388766 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 819200 blocks 200 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.992889577 2026
+	mtime Thu Nov 19 22:34:14.996889586 2026
+	ctime Thu Nov 19 22:34:14.997889588 2026
+	extents 1 0 gen -140428404
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388767 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1000 blocks 1 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:14.999889593 2026
+	mtime Thu Nov 19 22:34:15.000447990 2026
+	ctime Thu Nov 19 22:34:15.001080122 2026
+	extents 1 0 gen -1469405884
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388768 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 16000 blocks 4 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.001889597 2026
+	mtime Thu Nov 19 22:34:15.002719409 2026
+	ctime Thu Nov 19 22:34:15.002889600 2026
+	extents 1 0 gen 945678326
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388769 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 128000 blocks 32 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.003889602 2026
+	mtime Thu Nov 19 22:34:15.005044408 2026
+	ctime Thu Nov 19 22:34:15.005889607 2026
+	extents 1 0 gen 1663967797
+	DMI: event mask 0x00000000 state 0x0000
+ino 8388770 mode 0100644 nlink 1 uid 4 gid 4 rdev 0
+	blksize 4096 size 1024000 blocks 250 xflags 0x80000000 extsize 0
+	atime Thu Nov 19 22:34:15.006889609 2026
+	mtime Thu Nov 19 22:34:15.011889620 2026
+	ctime Thu Nov 19 22:34:15.012889623 2026
+	extents 1 0 gen 602674371
+	DMI: event mask 0x00000000 state 0x0000
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 1 incremental dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch based on level 0 dump begun Thu Nov 19 22:34:17 2026
+/usr/sbin/xfsdump: dump date: Thu Nov 19 22:34:17 2026
+/usr/sbin/xfsdump: session id: 2bf66d6d-7970-4646-b5c1-0c365167cf98
+/usr/sbin/xfsdump: session label: "stress_282"
+/usr/sbin/xfsdump: ino map phase 1: constructing initial dump list
+/usr/sbin/xfsdump: ino map phase 2: pruning unneeded subtrees
+/usr/sbin/xfsdump: ino map phase 3: skipping (only one dump stream)
+/usr/sbin/xfsdump: ino map construction complete
+/usr/sbin/xfsdump: estimated dump size: 145920 bytes
+/usr/sbin/xfsdump: creating dump session media file 0 (media 0, file 0)
+/usr/sbin/xfsdump: dumping ino map
+/usr/sbin/xfsdump: dumping directories
+/usr/sbin/xfsdump: dumping non-directory files
+/usr/sbin/xfsdump: ending media file
+/usr/sbin/xfsdump: media file size 131392 bytes
+/usr/sbin/xfsdump: dump size (non-dir files) : 105552 bytes
+/usr/sbin/xfsdump: dump complete: 0 seconds elapsed
+/usr/sbin/xfsdump: Dump Summary:
+/usr/sbin/xfsdump:   stream 0 <scratch>/m15-xt4-l64-xfs/tmp/1088003.l1 OK (success)
+/usr/sbin/xfsdump: Dump Status: SUCCESS
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: dump description: 
+/usr/sbin/xfsrestore: hostname: <host>
+/usr/sbin/xfsrestore: mount point: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+/usr/sbin/xfsrestore: volume: /dev/ublkb1
+/usr/sbin/xfsrestore: session time: Thu Nov 19 22:34:17 2026
+/usr/sbin/xfsrestore: level: 0
+/usr/sbin/xfsrestore: session label: "stress_282"
+/usr/sbin/xfsrestore: media label: "stress_tape_media"
+/usr/sbin/xfsrestore: file system id: 960ace39-052b-4d86-9682-b08cf25bd916
+/usr/sbin/xfsrestore: session id: 1c853d4e-493f-4692-b1f8-62c6475a9479
+/usr/sbin/xfsrestore: media id: 93ac9e36-b56d-4c78-81c7-80627e324ebb
+/usr/sbin/xfsrestore: using online session inventory
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 3 directories and 38 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <scratch>/m15-xt4-l64-xfs/tmp/1088003.l0 OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: dump description: 
+/usr/sbin/xfsrestore: hostname: <host>
+/usr/sbin/xfsrestore: mount point: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+/usr/sbin/xfsrestore: volume: /dev/ublkb1
+/usr/sbin/xfsrestore: session time: Thu Nov 19 22:34:17 2026
+/usr/sbin/xfsrestore: level: 1
+/usr/sbin/xfsrestore: session label: "stress_282"
+/usr/sbin/xfsrestore: media label: "stress_tape_media"
+/usr/sbin/xfsrestore: file system id: 960ace39-052b-4d86-9682-b08cf25bd916
+/usr/sbin/xfsrestore: session id: 2bf66d6d-7970-4646-b5c1-0c365167cf98
+/usr/sbin/xfsrestore: media id: e4e92d1e-6762-4a9e-bdae-b5dc15805191
+/usr/sbin/xfsrestore: using online session inventory
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 3 directories and 38 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <scratch>/m15-xt4-l64-xfs/tmp/1088003.l1 OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS

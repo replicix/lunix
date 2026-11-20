@@ -1,0 +1,1 @@
+XFS error injection requires CONFIG_XFS_DEBUG

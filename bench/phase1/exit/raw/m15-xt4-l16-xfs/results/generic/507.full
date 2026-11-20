@@ -1,0 +1,128 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Test chattr +A
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: -------A-------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : -------A-------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -A
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+sync
+Test chattr +A
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: -------A-------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : -------A-------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -A
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Test chattr +S
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: --S------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : --S------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -S
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+sync
+Test chattr +S
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: --S------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : --S------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -S
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Test chattr +a
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: -----a---------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : -----a---------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -a
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+sync
+Test chattr +a
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: -----a---------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : -----a---------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -a
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Test chattr +i
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ----i----------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ----i----------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -i
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+sync
+Test chattr +i
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ----i----------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ----i----------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+Test chattr -i
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before: ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+After : ---------------------- <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/testfile
+umount: /dev/ublkb1: not mounted.

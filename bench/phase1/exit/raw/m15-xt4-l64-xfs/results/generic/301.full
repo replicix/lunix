@@ -1,0 +1,44 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 8388609/8388609 bytes at offset 0
+8 MiB, 9 ops; 0.0006 sec (12.850 GiB/sec and 14802.6316 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0015 sec (4.941 GiB/sec and 1295382.6692 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0025 sec (3.087 GiB/sec and 809166.3374 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0025 sec (3.123 GiB/sec and 818545.1639 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0025 sec (3.110 GiB/sec and 815286.6242 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0024 sec (3.134 GiB/sec and 821500.2006 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0025 sec (3.103 GiB/sec and 813343.9237 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0024 sec (3.159 GiB/sec and 828143.9547 ops/sec)
+wrote 8388608/8388608 bytes at offset 0
+8 MiB, 2048 ops; 0.0025 sec (3.088 GiB/sec and 809486.1660 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+old extents: 928
+new extents: 928
+maximum extents: 2048

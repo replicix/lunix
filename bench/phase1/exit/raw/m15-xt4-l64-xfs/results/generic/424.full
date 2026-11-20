@@ -1,0 +1,10 @@
+a=1 d=1 c= i=1
+Trying +a 0 +d +i
+Trying +a 0 +d -i
+Trying +a 0 -d +i
+Trying +a 0 -d -i
+Trying -a 0 +d +i
+Trying -a 0 +d -i
+Trying -a 0 -d +i
+Trying -a 0 -d -i
+umount: /dev/ublkb1: not mounted.

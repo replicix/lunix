@@ -1,0 +1,43 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+/dev/tty: No such device or address
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: dump description: 
+/usr/sbin/xfsrestore: hostname: <host>
+/usr/sbin/xfsrestore: mount point: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+/usr/sbin/xfsrestore: volume: /dev/ublkb1
+/usr/sbin/xfsrestore: session time: Thu Nov 19 22:24:49 2026
+/usr/sbin/xfsrestore: level: 0
+/usr/sbin/xfsrestore: session label: ""
+/usr/sbin/xfsrestore: media label: ""
+/usr/sbin/xfsrestore: file system id: 992d2308-9db5-489b-9ebf-eb022c6e31f5
+/usr/sbin/xfsrestore: session id: ee0bd2ef-f7c8-447a-a258-565d19142af5
+/usr/sbin/xfsrestore: media id: 8231f772-8f0b-4909-aafa-ef50774a130a
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 3 directories and 39 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Status: SUCCESS

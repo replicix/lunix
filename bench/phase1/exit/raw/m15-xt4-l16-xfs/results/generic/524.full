@@ -1,0 +1,129 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0071 sec (4.380 GiB/sec and 1148303.8968 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (229.779 MiB/sec and 58823.5294 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0080 sec (3.892 GiB/sec and 1020301.4074 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (111.607 MiB/sec and 28571.4286 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0075 sec (4.146 GiB/sec and 1086760.4139 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (217.014 MiB/sec and 55555.5556 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0078 sec (3.982 GiB/sec and 1043965.8468 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (144.676 MiB/sec and 37037.0370 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0076 sec (4.065 GiB/sec and 1065556.7118 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (434.028 MiB/sec and 111111.1111 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0076 sec (4.097 GiB/sec and 1073938.1227 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (488 MiB/sec and 125000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0073 sec (4.248 GiB/sec and 1113497.3495 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (434.028 MiB/sec and 111111.1111 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0075 sec (4.112 GiB/sec and 1078036.5838 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (434.028 MiB/sec and 111111.1111 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0079 sec (3.947 GiB/sec and 1034604.6982 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (390.625 MiB/sec and 100000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0076 sec (4.106 GiB/sec and 1076478.3180 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (434.028 MiB/sec and 111111.1111 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0081 sec (3.825 GiB/sec and 1002692.7785 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (97.656 MiB/sec and 25000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0077 sec (4.026 GiB/sec and 1055398.0933 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (390.625 MiB/sec and 100000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0077 sec (4.037 GiB/sec and 1058261.2066 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (156 MiB/sec and 40000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0074 sec (4.183 GiB/sec and 1096506.4918 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0078 sec (3.985 GiB/sec and 1044764.6984 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (390.625 MiB/sec and 100000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 8192 ops; 0.0077 sec (4.047 GiB/sec and 1061002.4608 ops/sec)
+wrote 4096/4096 bytes at offset 33550336
+4 KiB, 1 ops; 0.0000 sec (114.890 MiB/sec and 29411.7647 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds

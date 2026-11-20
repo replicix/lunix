@@ -1,0 +1,10 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test_file:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL FLAGS
+   0: [0..7]:          192..199          0 (192..199)           8 000000
+   1: [8..12287]:      200..12479        0 (200..12479)     12280 010000
+   2: [12288..12295]:  12480..12487      0 (12480..12487)       8 000000
+   3: [12296..24567]:  12488..24759      0 (12488..24759)   12272 010000
+   4: [24568..24575]:  24760..24767      0 (24760..24767)       8 000000

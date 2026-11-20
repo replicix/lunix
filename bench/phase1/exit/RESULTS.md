@@ -19,7 +19,10 @@ for the runs below; `6d16fbf` for the rerun). Exact fio job files: `bench/phase1
 | 1 fio verify | 12 cells on `03b858e` | **PASS** (zero errors, fsck clean, peak store 64 GiB); settled store bound not shown by these cells |
 | 2 xfstests | all six runs complete; comparison below | ext4: no Lunix-only failure but the reference fails 244 of 684 for an environment reason (needs a fix before it means anything); xfs: 3 Lunix-only (xfs/129, 234, 253), one reference hang excluded (xfs/118) |
 | 3a kill -9 loops | ext4 100 cycles, xfs 50 cycles | **PASS** |
-| 3b crash points | 79 points, 3 hits each (rerun on `03b858e`) | 211 PASS, 0 FAIL; 69 of 79 points reached and clean; 10 points never executed by the workload (listed), tamper step missing |
+| 3b crash points | 79 points, 3 hits each (rerun on `03b858e`) plus scenarios | 211 PASS, 0 FAIL; 69 of 79 reached by the workload, the other 10 reached by scenarios (10 of 10 clean) |
+| 3d tamper | 6 cells (2 chunk sizes x segment, commit, map) | **PASS**: fsck exit 2 with an authentication code, attach refused or reads fail, 0 wrong bytes |
+| finding | write stall after kill -9 and recovery (journal ring, nothing moves) | **open, see Finding** |
+| ADR-32 T7 (M15) | full-volume cell and cache_max cells | full-volume cell PASS (see 4'); fio-verify `cache_max` cells not yet run |
 | 3c QUIESCE handover x20 (SIGUSR2) | 20 cycles | **PASS** |
 | negative controls | M10 noreissue and fault, corrupted block, inflated fsyncer ack, dropped writes | **PASS** (all five tripped) |
 | 4 ratios | both chunk sizes | **PASS** (table below) |
@@ -87,7 +90,8 @@ Rust coreutils break the tests); xfs/118 hung on the reference and is excluded o
 |---|---|---|---|---|---|---|
 | ext4 64 KiB | 404 / 14 | 404 / 14 | 390 | 14 | **0** | 0 |
 | ext4 16 KiB | 404 / 14 | 404 / 14 | 390 | 14 | **0** | 0 |
-| xfs 64 KiB, 16 KiB | 751 / 23 | rerun with GNU PATH in progress (`xt4-*`) | | | | |
+| xfs 64 KiB | 751 / 23 | 751 / 23 | 728 | 23 | **0** | 0 |
+| xfs 16 KiB | 751 / 23 | 751 / 23 | 728 | 23 | **0** | 0 |
 
 - **ext4: gate met.** Against the 4096-byte-sector reference, every test passes on Lunix that passes on the reference, the 14 failures are
   the same 14 on both sides (host environment: quota tools on tmpfs, no `newring`, statfs permission, stripe geometry, ...; and ext4/054,
@@ -97,12 +101,12 @@ Rust coreutils break the tests); xfs/118 hung on the reference and is excluded o
 - **xfs/129, 234, 253** fail on the 4096-byte-sector reference exactly as on Lunix (`xfs_mdrestore` on a 4096-byte-sector device): explained,
   not Lunix defects. The 26 xfs tests that do not run on Lunix against the 512-byte reference (`block size 1024 cannot be smaller than sector
   size 4096`, ...) also do not run on the 4096-byte one (751 ran on both).
-- **xfs, Lunix-only against the 4096-byte reference (first comparison, before the rerun): generic/294, 321, 634, 635, xfs/103, 132, 148.**
-  These are an environment mismatch of the comparison, not yet findings: the Lunix xfs runs of that comparison were made *before* the GNU
-  coreutils PATH fix (generic/294, 634, 635 print Rust-coreutils errors: `mknod: File exists (os error 17)`, `touch: Unable to parse date`), the
-  4096-byte reference after it. The two Lunix xfs runs are being repeated with the fix (`xt4-l64-xfs`, `xt4-l16-xfs`); whatever still differs then is a
-  Lunix-only failure to classify (xfs/132 printed `Structure needs cleaning` and xfs/148 is a metadata-corruption test, both worth a close look
-  if they persist).
+- **xfs: gate met.** The 7 tests that looked Lunix-only (generic/294, 321, 634, 635, xfs/103, 132, 148) came from an environment mismatch of the
+  first comparison: that Lunix run was made before the GNU coreutils PATH fix, the 4096-byte reference after it. Their failing text was the Rust
+  coreutils' (`mknod: File exists (os error 17)`, `touch: Unable to parse date`, `ls: general io error: ... (os error 117)`, `ln: ... Permission denied`
+  instead of `Operation not permitted`, and `touch: ... Structure needs cleaning` instead of `Input/output error` in xfs/132, whose expected
+  output also differs by tool). Rerun with the fix (`xt4-l64-xfs`, `xt4-l16-xfs`): **0 Lunix-only failures, 0 stalls, the uutils messages absent**
+  (23 failures on both sides, the same 23).
 
 ## 3b crash points (rerun `cp2`, binaries of main `03b858e`, before pace, jwin and tipstat)
 
@@ -123,26 +127,82 @@ detach and `lunix fsck --deep` (this verifies every extent's tag or AEAD and eve
 Recovery stall after a crash (daemon exec to recovered): p50 395 ms, p99 1801 ms, max 2303 ms (197 runs).
 **Every point that the workload reaches (69 of 79) crashed and recovered clean at least once, and at every reached hit that fired.**
 
-**Not reached, and why (10 points, count 0 in the counting run):**
+**The 10 points the churn workload never executes (count 0) were reached by dedicated scenarios, all with the daemon or `lunix-fsck` killed at
+the point and the volume recovered: 10 of 10 reached, 0 failures.**
 
-| points | why the churn workload never executes them | what would reach them |
+| point(s) | scenario (script) | result |
 |---|---|---|
-| `gc.urgent.after_mark` | the urgent GC pass runs only when the space ladder meets NoSpace; the volume never fills | a volume sized to fill, `on_full = wait`, and a writer |
-| `store.leftover.before_unlink`, `.after_unlink` | removal of a leftover temporary file at open | a kill that leaves a `.tmp` or `.open` file, then a restart |
-| `store.segment_delete.before_unlink`, `.after_unlink`, `.after_dirsync` | deletion of an orphan segment by the open-time sweep or by fsck repair, not by GC (GC uses `store.delete.*`, which are reached) | a crash after a sealed, never-named segment, then a restart; or `lunix fsck --repair --delete-orphans` under the crashpoints build |
-| `store.set_aside.before_rename`, `.after_rename`, `.after_dirsync` | moving a damaged tip aside, an offline `fsck --repair --truncate-tip` | a damaged tip and a crashpoints build of `lunix-fsck` |
-| `ublk.after_update_size` | the online resize path | `lunix resize` under load |
+| `gc.urgent.after_mark` | a cap (3G) too small for the working set plus its garbage, `on_full = wait`; the urgent pass runs when a write meets no space (`crashpoints.sh SCENARIO=full`) | crashed after 42 s, recovery clean (a first attempt with a 1.5G cap left no room even for the journal ring and the headroom; the guest ext4 got ENOSPC on its journal, which was the scenario's fault) |
+| `store.leftover.before_unlink`, `.after_unlink`, `.after_dirsync` | the preparing crash at `destage.after_segment_append` leaves an `.open` segment; the restart carries a second crash at the point (`SCENARIO=prep`) | 3 of 3 reached, recovery clean |
+| `store.segment_delete.before_unlink`, `.after_unlink`, `.after_dirsync` | reached only by `lunix-fsck --repair --delete-orphans` (not by the open sweep, which uses `store.delete.*`): a real orphan from a daemon killed at `destage.after_segment_seal`, repaired offline by a crashpoints build of `lunix-fsck` killed at the point; the repair runs again (`fsck-repair.sh`) | 3 of 3 reached, the repeated repair finishes and `fsck --deep` is clean (exit 0) |
+| `store.set_aside.before_rename`, `.after_rename`, `.after_dirsync` | a damaged tip (one flipped byte), `lunix-fsck --repair --truncate-tip` killed at the point (`fsck-repair.sh`) | 3 of 3 reached; before_rename: the same command again completes; after_rename and after_dirsync: the same command again **refuses** (`repair_refused: --truncate-tip: the chain below the previous commit does not verify`; it would drop a second commit and changes nothing), the plain `--repair` then completes (rewrites the checkpoint that still names the set-aside commit); `fsck --deep` exit 1 (warnings only), the volume attaches |
+| `ublk.after_update_size` | `lunix resize` 10 s into the load, daemon killed at the point (`SCENARIO=resize`) | crashed after 13 s, recovery clean |
 
-These ten need dedicated scenarios (a resize under load, a full volume, an fsck repair of a damaged copy); they are **not covered** by
-this run and are listed as open for the final report. The 5 unreached variants (`destage.after_segment_append` last, `engine.c1.waited`
-last, `engine.c7.floor` last, `index.before_manifest_swap` last, `store.pack.after_dirsync` mid) are reached points whose other hits passed: the count of
-one run was not repeated in the crash run (variance of 10-20 %).
+Note for the repair protocol (not a defect): after a crash of `--truncate-tip` that already renamed the commit, rerun `lunix fsck --repair`
+without `--truncate-tip`.
 
-**The bar** the lead set (data byte-exact, tampering detected in integrity mode): byte-exactness is what fio verify and the fsyncers check
-in every cell. Tamper detection is *not* exercised by the crash cells: `lunix fsck --deep` verifies tags (so a damaged copy would show),
-and the negative control N2 shows that a corrupted block is caught on a live volume, but no crash cell flips a byte of a segment after
-the crash and expects `NeedCredential`/`BadMac`-style refusal. That is a gap against the stated bar, to be covered by a tamper step in
-the cp cells (flip one byte of a named segment after the daemon died, expect fsck error and an attach refusal), not yet written.
+**The bar (data byte-exact, tampering detected in integrity mode).** Byte-exactness: fio verify, the fsyncers and the deep fsck in every cell. Tamper
+detection: the new tamper cell, below.
+
+## 3d tamper cell (integrity mode, both chunk sizes, `tamper.sh`)
+
+After a 2 GiB incompressible sequential write (every chunk live) and the detach, `lunix fsck --deep` is clean; then one byte (XOR 0x01) in the middle of
+the largest segment (variant segment), of the tip commit (commit) or of the newest map pack (map) is flipped. Required: `fsck --deep` exits 2 with an
+authentication finding; attach is refused, or the attached device returns read errors for the damaged blocks and **no block with other bytes**
+(SHA-256 of every MiB of the first 2 GiB against the reference).
+
+| chunk | variant | fsck --deep after the flip | attach / read | wrong bytes |
+|---|---|---|---|---|
+| 64 K | segment | exit 2: `extent_auth`, `seg_hash` | attached; 1 MiB block unreadable (EIO) | **0** |
+| 64 K | commit | exit 2: `tip_auth` | attach refused: `tip commit ... does not authenticate` | 0 |
+| 64 K | map | exit 2: `extent_auth`, `seg_hash` | attached; every block unreadable (the tip's map root is damaged) | 0 |
+| 16 K | segment | exit 2: `extent_auth`, `seg_hash` | attached; 1 block unreadable | 0 |
+| 16 K | commit | exit 2: `tip_auth` | attach refused | 0 |
+| 16 K | map | exit 2: `extent_auth`, `map_node_auth`, `seg_hash` | attached; 8 blocks unreadable | 0 |
+
+**All six cells meet the bar** (without the crash: `raw/m15-tamper-nokill` plus `raw/m15-tamper-map`, where the largest map pack, picked first, held only
+superseded nodes: fsck found the damage but no read touched it, 0 wrong bytes; the newest pack is on the read path and every read failed). With the
+crash (a kill -9 8 s into the write and a recovery before the flip; `raw/m15-tamper`, `m15-tamper2`, `m15-tamper3`) every cell that finished its
+write passed the same checks; **but the write itself stalled after the recovery in 3 of 6 (first run), 2 of 6 (second) and 1 (third): see "Finding".**
+
+## Finding: the write stalls after a kill -9 and recovery (journal ring wait, then EIO or a hang)
+
+Repro: `tests/exit/tamper.sh` (it kills the daemon 8 s into a 2 GiB, 1 MiB, QD 8 sequential incompressible write on an integrity volume,
+4 queues, `journal_max` 512 MiB, restarts it, and lets fio finish). In roughly a third to a half of the cells fio makes **no progress after the
+recovery** and fails with EIO after `full_timeout` (60 s): `write failed: journal ring full ... last_commit_error="other"`; in the third run one
+cell did not end at all (900 s; the daemon aborted when `gdb` attached to capture stacks, so the stack capture of that run must not attach
+again to a live daemon, or the script must expect that).
+Evidence (`raw/m15-tamper2/raw/tamper_c64k_segment/status-trace.txt`, `raw/m15-tamper3/raw/tamper_c64k_commit/stall-*`): `bytes_written`, the tip
+(`tip` 17 or 18), `commits` and `journal_used` (134 217 728 = 128 MiB = one lane's two ring files) are **constant for 60 s**; `dirty_leaves` 0; the
+space ledger is far from its limit (1.2 GB of 17 GB); every daemon thread is idle: `lunix-coord` waits in `Condvar::wait_timeout` at
+`engine.rs:425`, the journal flusher in its condvar, the queue threads in `io_uring_enter`. `Coord::wanted` asks for a cut when records are
+dirty, or `journal.fill().ratio() > journal_fill_trigger` (aggregate, here 0.25), or the `journal_full` flag is set: a **single** lane whose ring is
+full of old (replayed) records, with nothing new issued because writes are parked on that ring, satisfies none of them. That is the hypothesis; the
+status trace and stacks are in the raw directories. Not in the crash-loop cells before (their writers are rate limited, not saturating one lane).
+
+## 4' ADR-32 T7, the M15 parts (research note 2026-11-18 section 9.4)
+
+Implemented in the harness (`fio-verify.sh`, `fullvol.sh`), run on `03b858e` plus the merged main of 2026-11-19 (T3 to T5 of ADR-32 are not all merged: the
+status fields `delayed_ms`, `delayed_writes`, `delay_max_ms`, `enospc`, `throttle.state` are read when present and the cell says so when they are not):
+
+- every fio-verify cell sets `cache_max` (default 48G for the 32 GiB volumes; run the 4 GiB-profile raw cell also with `CACHE_MAX=24G`), samples the
+  store directory every 10 s and requires it to stay under cache_max + headroom + journal ring + 1 GiB, no ENOSPC (job errors, the `enospc`
+  counter), fio's longest completion under `full_timeout`, no hung-task line; per-cell `delayed_ms`, `delayed_writes`, `delay_max_ms`;
+- the full-volume cell (`fullvol.sh`, run `fullvol4`/`fullvol5`): cap 8G below a 16 GiB incompressible working set. Results: fio saw ENOSPC, the longest write
+  completion 5.0 s (full_timeout 5 s + 5 s allowed), no hung-task line, the ledger at the limit (the throttle state field is absent in this build), `blkdiscard` of
+  half the device brought writes back after 42 s, SIGTERM with writes parked exited in 2-4 s (quiesce_timeout_ms 30 s), kill -9 with writes parked,
+  `space.on_full = "error"` written to volume.json, restart: fio ended with errors, the device answered (a write failed with ENOSPC at once, reads worked), **no forced device
+  deletion**, `lunix fsck --deep` clean. The "writes are parked at the cap" check passed in 2 of 3 runs (inside the band writes are only paced, at 4 MiB/s near the hard
+  mark; whether they park within 400 s varies). What the guest file systems do with the error: **ext4** aborts its journal and remounts read-only (`dd: Read-only file
+  system`, `Buffer I/O error`, `failed to convert unwritten extents`; guest fsck rc 4 = needs repair), **xfs** returns ENOSPC to the writer and stays mounted
+  read-write (guest fsck clean). Both recorded in `raw/m15-fullvol5/raw/fullvol/fs-*`.
+
+**M16 parts (§9.5) that need the M16 scripts, not done here:** (1) the open path costs nothing: 4 KiB random-write and 1 MiB ingest cells before and after
+on the same host (a before/after pair of the Part A cells); (2) a §20 cell is valid only if not throttled: `delayed_ms` and `delayed_writes` zero for the cell
+or it is reported "throttled; not a §20 measurement", and each write cell sets `cache_max` to its garbage room (about 70 GiB for the 4 KiB random-write cell, about
+170 GiB for a 60 s rewrite at 3 GB/s); (3) one sustained cell, 4 KiB random write for 15 min on a 4 GiB working set with a 48 GiB cap, reporting steady IOPS,
+p99, p99.9, max latency, the store's maximum, GC write amplification and time per gate state, compared with `(cap - live store) / tau`; (4) the §20 sentence
+(a decision for the maintainer, not a script).
 
 ## 1 fio verify (rerun on the merged build): PASS in all 12 cells
 

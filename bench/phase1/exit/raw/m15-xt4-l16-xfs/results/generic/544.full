@@ -1,0 +1,145 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+1: low to high, neither share
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.597 GiB/sec and 680851.0638 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.488 GiB/sec and 914285.7143 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0065 sec (9.581 MiB/sec and 153.3037 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+2: high to low, neither share
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.839 GiB/sec and 744186.0465 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.699 GiB/sec and 969696.9697 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0046 sec (13.395 MiB/sec and 214.3163 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+3: low to high, only source shares
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.212 GiB/sec and 842105.2632 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.391 GiB/sec and 888888.8889 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0015 sec (41.037 MiB/sec and 656.5988 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+4: high to low, only source shares
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.543 GiB/sec and 666666.6667 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.212 GiB/sec and 842105.2632 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0015 sec (39.283 MiB/sec and 628.5355 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+5: low to high, only dest shares
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.906 GiB/sec and 761904.7619 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0045 sec (13.691 MiB/sec and 219.0581 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+6: high to low, only dest shares
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (1.938 GiB/sec and 507936.5079 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.130 GiB/sec and 820512.8205 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0050 sec (12.320 MiB/sec and 197.1220 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+7: low to high, both files share with each other
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.906 GiB/sec and 761904.7619 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+linked 65536/65536 bytes at offset 0
+64 KiB, 1 ops; 0.0059 sec (10.541 MiB/sec and 168.6625 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0033 sec (18.475 MiB/sec and 295.5956 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+8: high to low, both files share with each other
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.299 GiB/sec and 864864.8649 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+linked 65536/65536 bytes at offset 0
+64 KiB, 1 ops; 0.0062 sec (10.035 MiB/sec and 160.5652 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0027 sec (22.442 MiB/sec and 359.0664 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+9: low to high, both files share but not with each other
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.212 GiB/sec and 842105.2632 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.938 GiB/sec and 1032258.0645 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0000 sec (1.744 GiB/sec and 28571.4286 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+10: high to low, both files share but not with each other
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.488 GiB/sec and 914285.7143 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.699 GiB/sec and 969696.9697 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0000 sec (2.105 GiB/sec and 34482.7586 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+11: low to high, both files share mutually
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.977 GiB/sec and 780487.8049 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.938 GiB/sec and 1032258.0645 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0015 sec (39.333 MiB/sec and 629.3266 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0018 sec (33.422 MiB/sec and 534.7594 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+12: high to low, both files share mutually
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.299 GiB/sec and 864864.8649 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.699 GiB/sec and 969696.9697 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0014 sec (42.779 MiB/sec and 684.4627 ops/sec)
+linked 65536/65536 bytes at offset 65536
+64 KiB, 1 ops; 0.0016 sec (37.247 MiB/sec and 595.9476 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds

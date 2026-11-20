@@ -1,0 +1,58 @@
+{
+  "exit": 2,
+  "volume": "95a814ec-3534-4c8f-83a6-29d186a049ef",
+  "mode": "integrity",
+  "tip": 32,
+  "deep": true,
+  "findings": [
+    {
+      "code": "seg_hash",
+      "severity": "error",
+      "object": "map/00000000000000c4",
+      "message": "the extent region does not hash to the footer's seg_hash"
+    },
+    {
+      "code": "extent_auth",
+      "severity": "error",
+      "object": "map/00000000000000c4",
+      "message": "the tag does not verify, or the recomputed id differs from the header id",
+      "range": [
+        9479,
+        34126
+      ]
+    },
+    {
+      "code": "map_node_auth",
+      "severity": "error",
+      "object": "map/00000000000000c4",
+      "message": "the node extent does not authenticate",
+      "range": [
+        9479,
+        34126
+      ]
+    }
+  ],
+  "counts": {
+    "extent_auth": 1,
+    "map_node_auth": 1,
+    "seg_hash": 1
+  },
+  "stats": {
+    "commits": 33,
+    "segments": 130,
+    "packs": 32,
+    "extents": 32894,
+    "map_nodes": 67,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 2048
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 88888
+}

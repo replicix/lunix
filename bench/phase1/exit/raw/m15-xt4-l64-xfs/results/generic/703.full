@@ -1,0 +1,71 @@
+fio --name=test_io_uring_dio_dsync --ioengine=io_uring --direct=1 --bs=64K --sync=1 --rw=randwrite --time_based --runtime=10 --filename=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/foo 
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+Running fio with config:
+
+[test_io_uring_dio_dsync]
+ioengine=io_uring
+direct=1
+bs=64K
+sync=1
+filename=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/foo
+rw=randwrite
+time_based
+runtime=10
+
+Output from fio:
+
+test_io_uring_dio_dsync: (g=0): rw=randwrite, bs=(R) 64.0KiB-64.0KiB, (W) 64.0KiB-64.0KiB, (T) 64.0KiB-64.0KiB, ioengine=io_uring, iodepth=1
+fio-3.41
+Starting 1 process
+
+test_io_uring_dio_dsync: (groupid=0, jobs=1): err= 0: pid=636109: Thu Nov 19 22:21:09 2026
+  write: IOPS=382, BW=23.9MiB/s (25.0MB/s)(239MiB/10002msec); 0 zone resets
+    slat (nsec): min=710, max=28110, avg=2207.71, stdev=861.10
+    clat (usec): min=1781, max=6344, avg=2614.34, stdev=364.49
+     lat (usec): min=1784, max=6346, avg=2616.55, stdev=364.50
+    clat percentiles (usec):
+     |  1.00th=[ 2212],  5.00th=[ 2376], 10.00th=[ 2409], 20.00th=[ 2442],
+     | 30.00th=[ 2474], 40.00th=[ 2507], 50.00th=[ 2507], 60.00th=[ 2540],
+     | 70.00th=[ 2573], 80.00th=[ 2671], 90.00th=[ 2835], 95.00th=[ 3195],
+     | 99.00th=[ 4424], 99.50th=[ 5014], 99.90th=[ 5473], 99.95th=[ 5932],
+     | 99.99th=[ 6325]
+   bw (  KiB/s): min=23168, max=25728, per=100.00%, avg=24460.80, stdev=932.22, samples=20
+   iops        : min=  362, max=  402, avg=382.20, stdev=14.57, samples=20
+  lat (msec)   : 2=0.26%, 4=97.91%, 10=1.83%
+  cpu          : usr=0.02%, sys=0.17%, ctx=3822, majf=0, minf=8
+  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
+     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
+     issued rwts: total=0,3822,0,0 short=0,0,0,0 dropped=0,0,0,0
+     latency   : target=0, window=0, percentile=100.00%, depth=1
+
+Run status group 0 (all jobs):
+  WRITE: bw=23.9MiB/s (25.0MB/s), 23.9MiB/s-23.9MiB/s (25.0MB/s-25.0MB/s), io=239MiB (250MB), run=10002-10002msec
+
+Disk stats (read/write):
+    dm-0: ios=0/11351, sectors=0/574424, merge=0/0, ticks=0/9724, in_queue=9724, util=97.30%, aggrios=0/11466, aggsectors=0/580280, aggrmerge=0/0, aggrticks=0/9830, aggrin_queue=9924, aggrutil=97.30%
+  ublkb1: ios=0/11466, sectors=0/580280, merge=0/0, ticks=0/9830, in_queue=9924, util=97.30%
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch: not mounted.
+umount: /dev/ublkb1: not mounted.

@@ -1,0 +1,5 @@
+432 not run: _scratch_mkfs_xfs: block size 1024 cannot be smaller than sector size 4096
+using only test 432 options: -b size=1k -n size=64k **
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb1: not mounted.

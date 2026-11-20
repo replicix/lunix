@@ -1,0 +1,4 @@
+{"cell":"tamper/c64k/commit","status":"pass","t":"2026-11-20T00:51:24Z","variant":"commit","chunk":"65536","fsck_exit":"2","fsck_codes":"tip_auth","attach_refused":"yes","read_errors":"0","mismatches":"0"}
+{"cell":"tamper/c64k/map","status":"pass","t":"2026-11-20T00:51:53Z","variant":"map","chunk":"65536","fsck_exit":"2","fsck_codes":"extent_auth,map_node_auth,seg_hash","attach_refused":"no","read_errors":"2048","mismatches":"0"}
+{"cell":"tamper/c16k/segment","status":"pass","t":"2026-11-20T00:52:27Z","variant":"segment","chunk":"16384","fsck_exit":"2","fsck_codes":"extent_auth,seg_hash","attach_refused":"no","read_errors":"1","mismatches":"0"}
+{"cell":"tamper/c16k/map","status":"pass","t":"2026-11-20T00:54:17Z","variant":"map","chunk":"16384","fsck_exit":"2","fsck_codes":"extent_auth,map_node_auth,seg_hash","attach_refused":"no","read_errors":"2048","mismatches":"0"}

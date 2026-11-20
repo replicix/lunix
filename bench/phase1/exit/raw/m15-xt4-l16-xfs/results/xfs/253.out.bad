@@ -1,0 +1,7 @@
+QA output created by 253
+Disciplyne of silence is goed.
+xfs_mdrestore: Invalid superblock disk address/length
+mount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: can't read superblock on /dev/loop8.
+       dmesg(1) may have more information after failed mount system call.
+mount -o nosuid,nodev /dev/loop8 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch failed
+(see <scratch>/m15-xt4-l16-xfs/results/xfs/253.full for details)

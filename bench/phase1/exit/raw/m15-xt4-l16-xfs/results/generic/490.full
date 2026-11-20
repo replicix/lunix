@@ -1,0 +1,16 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+19. Test file SEEK_DATA from middle of a large hole   
+19.01 SEEK_DATA expected 4243456 or 4243456, got 4243456.         succ
+19.02 SEEK_DATA expected 4243456 or 4243456, got 4243456.         succ
+19.03 SEEK_DATA expected 4243456 or 4243456, got 4243456.         succ
+
+20. Test file SEEK_DATA from middle of a huge hole    
+20.01 SEEK_DATA expected 34372386816 or 34372386816, got 34372386816. succ
+20.02 SEEK_DATA expected 34372386816 or 34372386816, got 34372386816. succ
+20.03 SEEK_DATA expected 34372386816 or 34372386816, got 34372386816. succ
+20.03 SEEK_DATA expected 34372386816 or 34372386816, got 34372386816. succ
+20.03 SEEK_DATA expected 34372386816 or 34372386816, got 34372386816. succ
+
+umount: /dev/ublkb1: not mounted.

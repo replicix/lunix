@@ -1,0 +1,3 @@
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/target-mnt: no mount point specified.
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+umount: /dev/ublkb1: not mounted.

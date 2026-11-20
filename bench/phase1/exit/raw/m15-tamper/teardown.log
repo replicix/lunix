@@ -1,0 +1,7 @@
+detached tammap16
+teardown: deleting /dev/ublkb0 (its daemon is gone)
+DEL_DEV result=0
+teardown: deleting /dev/ublkb1 (its daemon is gone)
+DEL_DEV result=0
+teardown: deleting /dev/ublkb2 (its daemon is gone)
+DEL_DEV result=0

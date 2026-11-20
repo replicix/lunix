@@ -1,0 +1,168 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+BACKUP <scratch>/m15-xt4-l64-xfs/tmp/4109824.backup1
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend/down
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend/down/here
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/b
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/c
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/p
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dir
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here/up
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here/up/ascend
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/lnk
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/reg
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+AFTER REMOVE
+BACKUP <scratch>/m15-xt4-l64-xfs/tmp/4109824.backup2
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend/down
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/descend/down/here
+user.1="23"
+user.x="yz"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/b
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/c
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dev/p
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dir
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here/up
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/here/up/ascend
+trusted.9="87"
+trusted.a="bc"
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/lnk
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/reg
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+AFTER RESTORE
+# file: SCRATCH_MNT/reg
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+# file: SCRATCH_MNT/dir
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+user.name=0sur4=
+user.name3=0s3vrO
+
+# file: SCRATCH_MNT/lnk
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: SCRATCH_MNT/dev/b
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: SCRATCH_MNT/dev/c
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: SCRATCH_MNT/dev/p
+trusted.name=0sur4=
+trusted.name3=0s3vrO
+
+# file: SCRATCH_MNT/here
+trusted.9="87"
+trusted.a="bc"
+
+# file: SCRATCH_MNT/here/up
+trusted.9="87"
+trusted.a="bc"
+
+# file: SCRATCH_MNT/here/up/ascend
+trusted.9="87"
+trusted.a="bc"
+
+# file: SCRATCH_MNT/descend
+user.1="23"
+user.x="yz"
+
+# file: SCRATCH_MNT/descend/down
+user.1="23"
+user.x="yz"
+
+# file: SCRATCH_MNT/descend/down/here
+user.1="23"
+user.x="yz"
+
+# file: SCRATCH_MNT/descend/and/ascend
+trusted.9="87"
+trusted.a="bc"
+
+umount: /dev/ublkb1: not mounted.

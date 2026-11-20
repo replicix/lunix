@@ -1,0 +1,11 @@
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+device-mapper: remove ioctl on thin-vol.757  failed: No such device or address
+Command failed.
+device-mapper: remove ioctl on thin-provision-pool.757  failed: No such device or address
+Command failed.
+device-mapper: remove ioctl on thin-meta.757  failed: No such device or address
+Command failed.
+device-mapper: remove ioctl on thin-data.757  failed: No such device or address
+Command failed.
+umount: /dev/ublkb1: not mounted.

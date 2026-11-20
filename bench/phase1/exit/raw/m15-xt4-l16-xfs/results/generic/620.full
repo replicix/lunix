@@ -1,0 +1,10 @@
+device-mapper: remove ioctl on huge-test.620  failed: No such device or address
+Command failed.
+device-mapper: remove ioctl on huge-test-zero.620  failed: No such device or address
+Command failed.
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+device-mapper: remove ioctl on huge-test.620  failed: No such device or address
+Command failed.
+device-mapper: remove ioctl on huge-test-zero.620  failed: No such device or address
+Command failed.
+umount: /dev/ublkb1: not mounted.

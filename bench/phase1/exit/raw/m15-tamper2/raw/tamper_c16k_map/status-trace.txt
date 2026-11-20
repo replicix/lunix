@@ -1,0 +1,6 @@
+1795136037
+{"used":134217728,"cap":536870912,"tip":15,"dirty":0,"commits":15,"written":1073741824,"space":{"used":1136591283,"limit":17179869184,"fs_free":289414189056,"journal":66064320,"segments":1063607798,"cache":0,"map":1983965,"index":4930656,"commits":4544,"headroom_held":0,"waiters":0}}
+1795136042
+{"used":134217728,"cap":536870912,"tip":19,"dirty":0,"commits":19,"written":1271922688,"space":{"used":1405566024,"limit":17179869184,"fs_free":289190412288,"journal":66064320,"segments":1329510228,"cache":0,"map":2499028,"index":7486624,"commits":5824,"headroom_held":0,"waiters":0}}
+1795136047
+{"used":134217728,"cap":536870912,"tip":26,"dirty":0,"commits":26,"written":1800404992,"space":{"used":1939834230,"limit":17179869184,"fs_free":288588677120,"journal":66064320,"segments":1861497156,"cache":0,"map":3390526,"index":8874304,"commits":7924,"headroom_held":2289588,"waiters":0}}

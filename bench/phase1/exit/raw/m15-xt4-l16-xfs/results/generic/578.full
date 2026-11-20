@@ -1,0 +1,447 @@
+wrote 262144/262144 bytes at offset 0
+256 KiB, 64 ops; 0.0000 sec (3.875 GiB/sec and 1015873.0159 ops/sec)
+linked 262144/262144 bytes at offset 65536
+256 KiB, 1 ops; 0.0000 sec (12.850 GiB/sec and 52631.5789 ops/sec)
+linked 262144/262144 bytes at offset 131072
+256 KiB, 1 ops; 0.0000 sec (9.042 GiB/sec and 37037.0370 ops/sec)
+linked 262144/262144 bytes at offset 196608
+256 KiB, 1 ops; 0.0000 sec (12.207 GiB/sec and 50000.0000 ops/sec)
+linked 262144/262144 bytes at offset 262144
+256 KiB, 1 ops; 0.0000 sec (13.563 GiB/sec and 55555.5556 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/retry_timeout_seconds
+Compare files before cow
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file1
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file2
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file3
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file4
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file5
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0065536  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0327680
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file6
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0131072  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0393216
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file7
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0196608  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0458752
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file8
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0262144  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0524288
+mwrite all copies
+Compare files before remount
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file1
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0000160  61  61  61  61  61  61  61  61  6a  6a  6a  6a  6a  6a  6a  6a
+          a   a   a   a   a   a   a   a   j   j   j   j   j   j   j   j
+0000176  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a
+          j   j   j   j   j   j   j   j   j   j   j   j   j   j   j   j
+*
+0000496  6a  6a  6a  6a  6a  6a  6a  6a  6a  61  61  61  61  61  61  61
+          j   j   j   j   j   j   j   j   j   a   a   a   a   a   a   a
+0000512  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  62  62  62  62  62  62  62  62
+          a   a   a   a   a   a   a   a   b   b   b   b   b   b   b   b
+0130912  62  62  62  62  62  62  62  62  62  62  62  62  62  62  62  62
+          b   b   b   b   b   b   b   b   b   b   b   b   b   b   b   b
+*
+0131232  62  62  62  62  62  62  62  62  62  61  61  61  61  61  61  61
+          b   b   b   b   b   b   b   b   b   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file2
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0065360  61  61  61  61  61  61  61  61  6b  6b  6b  6b  6b  6b  6b  6b
+          a   a   a   a   a   a   a   a   k   k   k   k   k   k   k   k
+0065376  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b
+          k   k   k   k   k   k   k   k   k   k   k   k   k   k   k   k
+*
+0065696  6b  6b  6b  6b  6b  6b  6b  6b  6b  61  61  61  61  61  61  61
+          k   k   k   k   k   k   k   k   k   a   a   a   a   a   a   a
+0065712  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  63  63  63  63  63  63  63  63
+          a   a   a   a   a   a   a   a   c   c   c   c   c   c   c   c
+0130912  63  63  63  63  63  63  63  63  63  63  63  63  63  63  63  63
+          c   c   c   c   c   c   c   c   c   c   c   c   c   c   c   c
+*
+0131232  63  63  63  63  63  63  63  63  63  61  61  61  61  61  61  61
+          c   c   c   c   c   c   c   c   c   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file3
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  64  64  64  64  64  64  64  64
+          a   a   a   a   a   a   a   a   d   d   d   d   d   d   d   d
+0130912  64  64  64  64  64  64  64  64  64  64  64  64  64  64  64  64
+          d   d   d   d   d   d   d   d   d   d   d   d   d   d   d   d
+*
+0131232  64  64  64  64  64  64  64  64  64  61  61  61  61  61  61  61
+          d   d   d   d   d   d   d   d   d   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0261360  61  61  61  61  61  61  61  6c  6c  6c  6c  6c  6c  6c  6c  6c
+          a   a   a   a   a   a   a   l   l   l   l   l   l   l   l   l
+0261376  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c
+          l   l   l   l   l   l   l   l   l   l   l   l   l   l   l   l
+*
+0261696  6c  6c  6c  6c  6c  6c  6c  6c  61  61  61  61  61  61  61  61
+          l   l   l   l   l   l   l   l   a   a   a   a   a   a   a   a
+0261712  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file4
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  65  65  65  65  65  65  65  65
+          a   a   a   a   a   a   a   a   e   e   e   e   e   e   e   e
+0130912  65  65  65  65  65  65  65  65  65  65  65  65  65  65  65  65
+          e   e   e   e   e   e   e   e   e   e   e   e   e   e   e   e
+*
+0131232  65  65  65  65  65  65  65  65  65  61  61  61  61  61  61  61
+          e   e   e   e   e   e   e   e   e   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0196432  61  61  61  61  61  61  61  61  6d  6d  6d  6d  6d  6d  6d  6d
+          a   a   a   a   a   a   a   a   m   m   m   m   m   m   m   m
+0196448  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d
+          m   m   m   m   m   m   m   m   m   m   m   m   m   m   m   m
+*
+0196768  6d  6d  6d  6d  6d  6d  6d  6d  6d  61  61  61  61  61  61  61
+          m   m   m   m   m   m   m   m   m   a   a   a   a   a   a   a
+0196784  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file5
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0065536  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0196432  61  61  61  61  61  61  61  61  66  66  66  66  66  66  66  66
+          a   a   a   a   a   a   a   a   f   f   f   f   f   f   f   f
+0196448  66  66  66  66  66  66  66  66  66  66  66  66  66  66  66  66
+          f   f   f   f   f   f   f   f   f   f   f   f   f   f   f   f
+*
+0196768  66  66  66  66  66  66  66  66  66  61  61  61  61  61  61  61
+          f   f   f   f   f   f   f   f   f   a   a   a   a   a   a   a
+0196784  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0327680
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file6
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0131072  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0261968  61  61  61  61  61  61  61  61  67  67  67  67  67  67  67  67
+          a   a   a   a   a   a   a   a   g   g   g   g   g   g   g   g
+0261984  67  67  67  67  67  67  67  67  67  67  67  67  67  67  67  67
+          g   g   g   g   g   g   g   g   g   g   g   g   g   g   g   g
+*
+0262304  67  67  67  67  67  67  67  67  67  61  61  61  61  61  61  61
+          g   g   g   g   g   g   g   g   g   a   a   a   a   a   a   a
+0262320  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0393216
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file7
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0196608  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0327504  61  61  61  61  61  61  61  61  68  68  68  68  68  68  68  68
+          a   a   a   a   a   a   a   a   h   h   h   h   h   h   h   h
+0327520  68  68  68  68  68  68  68  68  68  68  68  68  68  68  68  68
+          h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h
+*
+0327840  68  68  68  68  68  68  68  68  68  61  61  61  61  61  61  61
+          h   h   h   h   h   h   h   h   h   a   a   a   a   a   a   a
+0327856  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0458752
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file8
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0262144  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0393040  61  61  61  61  61  61  61  61  69  69  69  69  69  69  69  69
+          a   a   a   a   a   a   a   a   i   i   i   i   i   i   i   i
+0393056  69  69  69  69  69  69  69  69  69  69  69  69  69  69  69  69
+          i   i   i   i   i   i   i   i   i   i   i   i   i   i   i   i
+*
+0393376  69  69  69  69  69  69  69  69  69  61  61  61  61  61  61  61
+          i   i   i   i   i   i   i   i   i   a   a   a   a   a   a   a
+0393392  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0524288
+echo '1' 2>&1 > /sys/fs/xfs/ublkb0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb0/error/metadata/EIO/retry_timeout_seconds
+Compare files after remount
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file1
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0000160  61  61  61  61  61  61  61  61  6a  6a  6a  6a  6a  6a  6a  6a
+          a   a   a   a   a   a   a   a   j   j   j   j   j   j   j   j
+0000176  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a  6a
+          j   j   j   j   j   j   j   j   j   j   j   j   j   j   j   j
+*
+0000496  6a  6a  6a  6a  6a  6a  6a  6a  6a  61  61  61  61  61  61  61
+          j   j   j   j   j   j   j   j   j   a   a   a   a   a   a   a
+0000512  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  62  62  62  62  62  62  62  62
+          a   a   a   a   a   a   a   a   b   b   b   b   b   b   b   b
+0130912  62  62  62  62  62  62  62  62  62  62  62  62  62  62  62  62
+          b   b   b   b   b   b   b   b   b   b   b   b   b   b   b   b
+*
+0131232  62  62  62  62  62  62  62  62  62  61  61  61  61  61  61  61
+          b   b   b   b   b   b   b   b   b   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file2
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0065360  61  61  61  61  61  61  61  61  6b  6b  6b  6b  6b  6b  6b  6b
+          a   a   a   a   a   a   a   a   k   k   k   k   k   k   k   k
+0065376  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b  6b
+          k   k   k   k   k   k   k   k   k   k   k   k   k   k   k   k
+*
+0065696  6b  6b  6b  6b  6b  6b  6b  6b  6b  61  61  61  61  61  61  61
+          k   k   k   k   k   k   k   k   k   a   a   a   a   a   a   a
+0065712  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  63  63  63  63  63  63  63  63
+          a   a   a   a   a   a   a   a   c   c   c   c   c   c   c   c
+0130912  63  63  63  63  63  63  63  63  63  63  63  63  63  63  63  63
+          c   c   c   c   c   c   c   c   c   c   c   c   c   c   c   c
+*
+0131232  63  63  63  63  63  63  63  63  63  61  61  61  61  61  61  61
+          c   c   c   c   c   c   c   c   c   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file3
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  64  64  64  64  64  64  64  64
+          a   a   a   a   a   a   a   a   d   d   d   d   d   d   d   d
+0130912  64  64  64  64  64  64  64  64  64  64  64  64  64  64  64  64
+          d   d   d   d   d   d   d   d   d   d   d   d   d   d   d   d
+*
+0131232  64  64  64  64  64  64  64  64  64  61  61  61  61  61  61  61
+          d   d   d   d   d   d   d   d   d   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0261360  61  61  61  61  61  61  61  6c  6c  6c  6c  6c  6c  6c  6c  6c
+          a   a   a   a   a   a   a   l   l   l   l   l   l   l   l   l
+0261376  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c  6c
+          l   l   l   l   l   l   l   l   l   l   l   l   l   l   l   l
+*
+0261696  6c  6c  6c  6c  6c  6c  6c  6c  61  61  61  61  61  61  61  61
+          l   l   l   l   l   l   l   l   a   a   a   a   a   a   a   a
+0261712  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file4
+0000000  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0130896  61  61  61  61  61  61  61  61  65  65  65  65  65  65  65  65
+          a   a   a   a   a   a   a   a   e   e   e   e   e   e   e   e
+0130912  65  65  65  65  65  65  65  65  65  65  65  65  65  65  65  65
+          e   e   e   e   e   e   e   e   e   e   e   e   e   e   e   e
+*
+0131232  65  65  65  65  65  65  65  65  65  61  61  61  61  61  61  61
+          e   e   e   e   e   e   e   e   e   a   a   a   a   a   a   a
+0131248  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0196432  61  61  61  61  61  61  61  61  6d  6d  6d  6d  6d  6d  6d  6d
+          a   a   a   a   a   a   a   a   m   m   m   m   m   m   m   m
+0196448  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d  6d
+          m   m   m   m   m   m   m   m   m   m   m   m   m   m   m   m
+*
+0196768  6d  6d  6d  6d  6d  6d  6d  6d  6d  61  61  61  61  61  61  61
+          m   m   m   m   m   m   m   m   m   a   a   a   a   a   a   a
+0196784  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0262144
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file5
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0065536  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0196432  61  61  61  61  61  61  61  61  66  66  66  66  66  66  66  66
+          a   a   a   a   a   a   a   a   f   f   f   f   f   f   f   f
+0196448  66  66  66  66  66  66  66  66  66  66  66  66  66  66  66  66
+          f   f   f   f   f   f   f   f   f   f   f   f   f   f   f   f
+*
+0196768  66  66  66  66  66  66  66  66  66  61  61  61  61  61  61  61
+          f   f   f   f   f   f   f   f   f   a   a   a   a   a   a   a
+0196784  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0327680
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file6
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0131072  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0261968  61  61  61  61  61  61  61  61  67  67  67  67  67  67  67  67
+          a   a   a   a   a   a   a   a   g   g   g   g   g   g   g   g
+0261984  67  67  67  67  67  67  67  67  67  67  67  67  67  67  67  67
+          g   g   g   g   g   g   g   g   g   g   g   g   g   g   g   g
+*
+0262304  67  67  67  67  67  67  67  67  67  61  61  61  61  61  61  61
+          g   g   g   g   g   g   g   g   g   a   a   a   a   a   a   a
+0262320  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0393216
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file7
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0196608  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0327504  61  61  61  61  61  61  61  61  68  68  68  68  68  68  68  68
+          a   a   a   a   a   a   a   a   h   h   h   h   h   h   h   h
+0327520  68  68  68  68  68  68  68  68  68  68  68  68  68  68  68  68
+          h   h   h   h   h   h   h   h   h   h   h   h   h   h   h   h
+*
+0327840  68  68  68  68  68  68  68  68  68  61  61  61  61  61  61  61
+          h   h   h   h   h   h   h   h   h   a   a   a   a   a   a   a
+0327856  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0458752
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/test-578/file8
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0262144  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0393040  61  61  61  61  61  61  61  61  69  69  69  69  69  69  69  69
+          a   a   a   a   a   a   a   a   i   i   i   i   i   i   i   i
+0393056  69  69  69  69  69  69  69  69  69  69  69  69  69  69  69  69
+          i   i   i   i   i   i   i   i   i   i   i   i   i   i   i   i
+*
+0393376  69  69  69  69  69  69  69  69  69  61  61  61  61  61  61  61
+          i   i   i   i   i   i   i   i   i   a   a   a   a   a   a   a
+0393392  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61  61
+          a   a   a   a   a   a   a   a   a   a   a   a   a   a   a   a
+*
+0524288
+Check for non-shared extents
+   0:        0..       0:       1656..      1656:      1:            
+   1:        1..      27:       1258..      1284:     27:       1657: shared
+   2:       28..      35:       1684..      1691:      8:       1285:
+   3:       36..      63:       1293..      1320:     28:       1692: last,shared,eof
+   0:        0..      14:       1257..      1271:     15:             shared
+   1:       15..      19:       1735..      1739:      5:       1272:
+   2:       20..      27:       1277..      1284:      8:       1740: shared
+   3:       28..      35:       1748..      1755:      8:       1285:
+   4:       36..      63:       1293..      1320:     28:       1756: last,shared,eof
+   0:        0..      27:       1257..      1284:     28:             shared
+   1:       28..      35:       1812..      1819:      8:       1285:
+   2:       36..      47:       1293..      1304:     12:       1820: shared
+   3:       48..      63:       1832..      1847:     16:       1305: last,eof
+   0:        0..      27:       1257..      1284:     28:             shared
+   1:       28..      35:       1876..      1883:      8:       1285:
+   2:       36..      43:       1293..      1300:      8:       1884: shared
+   3:       44..      63:       1892..      1911:     20:       1301: last,eof
+   0:       16..      43:       1257..      1284:     28:         16: shared
+   1:       44..      63:       1333..      1352:     20:       1285:
+   2:       64..      79:       1305..      1320:     16:       1353: last,shared,eof
+   0:       32..      47:       1257..      1272:     16:         32: shared
+   1:       48..      79:       1928..      1959:     32:       1273:
+   2:       80..      95:       1305..      1320:     16:       1960: last,shared,eof
+   0:       48..      63:       1257..      1272:     16:         48: shared
+   1:       64..      95:       1408..      1439:     32:       1273:
+   2:       96..     111:       1305..      1320:     16:       1440: last,shared,eof
+   0:       64..      79:       1257..      1272:     16:         64: shared
+   1:       80..     111:       1992..      2023:     32:       1273:
+   2:      112..     127:       1305..      1320:     16:       2024: last,shared,eof
+umount: /dev/ublkb1: not mounted.

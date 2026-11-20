@@ -1,0 +1,23 @@
+{
+  "settings": {
+    "free_floor": "10%",
+    "on_full": "wait",
+    "full_timeout_ms": 120000,
+    "cache_max": 8589934592,
+    "cache_max_percent": null,
+    "headroom": 268435456
+  },
+  "figures": {
+    "used": 6622874480,
+    "limit": 8589934592,
+    "fs_free": 284006371328,
+    "journal": 8389120,
+    "segments": 6598667314,
+    "cache": 0,
+    "map": 9466370,
+    "index": 6349584,
+    "commits": 2092,
+    "headroom_held": 0,
+    "waiters": 0
+  }
+}

@@ -1,0 +1,78 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+==== falloc 1024 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4203520 a: 2026-11-19 22:53:59.048889610 +0000 m: 2026-11-19 22:53:59.061889642 +0000 c: 2026-11-19 22:53:59.061889642 +0000"
+After :  "b: 8216 s: 4203520 a: 2026-11-19 22:53:59.048889610 +0000 m: 2026-11-19 22:53:59.061889642 +0000 c: 2026-11-19 22:53:59.061889642 +0000"
+==== falloc 4096 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4206592 a: 2026-11-19 22:53:59.143889848 +0000 m: 2026-11-19 22:53:59.152889871 +0000 c: 2026-11-19 22:53:59.152889871 +0000"
+After :  "b: 8216 s: 4206592 a: 2026-11-19 22:53:59.143889848 +0000 m: 2026-11-19 22:53:59.152889871 +0000 c: 2026-11-19 22:53:59.152889871 +0000"
+==== falloc 104857600 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 213008 s: 109060096 a: 2026-11-19 22:53:59.231890069 +0000 m: 2026-11-19 22:53:59.241890093 +0000 c: 2026-11-19 22:53:59.241890093 +0000"
+After :  "b: 213008 s: 109060096 a: 2026-11-19 22:53:59.231890069 +0000 m: 2026-11-19 22:53:59.241890093 +0000 c: 2026-11-19 22:53:59.241890093 +0000"
+==== falloc -k 1024 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4202496 a: 2026-11-19 22:53:59.324890302 +0000 m: 2026-11-19 22:53:59.334890327 +0000 c: 2026-11-19 22:53:59.334890327 +0000"
+After :  "b: 8216 s: 4202496 a: 2026-11-19 22:53:59.324890302 +0000 m: 2026-11-19 22:53:59.334890327 +0000 c: 2026-11-19 22:53:59.334890327 +0000"
+==== falloc -k 4096 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4202496 a: 2026-11-19 22:53:59.418890537 +0000 m: 2026-11-19 22:53:59.430890567 +0000 c: 2026-11-19 22:53:59.430890567 +0000"
+After :  "b: 8216 s: 4202496 a: 2026-11-19 22:53:59.418890537 +0000 m: 2026-11-19 22:53:59.430890567 +0000 c: 2026-11-19 22:53:59.430890567 +0000"
+==== falloc -k 104857600 test with fsync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 213008 s: 4202496 a: 2026-11-19 22:53:59.517890785 +0000 m: 2026-11-19 22:53:59.526890808 +0000 c: 2026-11-19 22:53:59.526890808 +0000"
+After :  "b: 213008 s: 4202496 a: 2026-11-19 22:53:59.517890785 +0000 m: 2026-11-19 22:53:59.526890808 +0000 c: 2026-11-19 22:53:59.526890808 +0000"
+==== falloc 1024 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4203520"
+After :  "b: 8216 s: 4203520"
+==== falloc 4096 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4206592"
+After :  "b: 8216 s: 4206592"
+==== falloc 104857600 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 213008 s: 109060096"
+After :  "b: 213008 s: 109060096"
+==== falloc -k 1024 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4202496"
+After :  "b: 8216 s: 4202496"
+==== falloc -k 4096 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 8216 s: 4202496"
+After :  "b: 8216 s: 4202496"
+==== falloc -k 104857600 test with fdatasync ====
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Before:  "b: 213008 s: 4202496"
+After :  "b: 213008 s: 4202496"

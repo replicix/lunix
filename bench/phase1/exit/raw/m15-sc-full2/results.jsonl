@@ -1,0 +1,1 @@
+{"cell":"scenario/full/gc.urgent.after_mark","status":"pass","t":"2026-11-20T00:06:11Z","point":"gc.urgent.after_mark","kind":"full","hit":"1","fs":"ext4","crashed":"1","crash_after_s":"42","secs":"94","recovery_stall_ms":"1034","fio_rc":"124","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","notes":""}

@@ -1,0 +1,100 @@
+MOUNT_OPTIONS = -o nosuid,nodev
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+creating entries
+Attribute "a_something" set to a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+Attribute "a_too_many_beans" set to a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+Attribute "a_are_bad_for_you" set to a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+Attribute "a_another" set to a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+++ ACCESSING GOOD METADATA
+f_another
+f_are_bad_for_you
+f_something
+f_too_many_beans
+Attribute "a_another" has a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+Attribute "a_are_bad_for_you" has a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+Attribute "a_something" has a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+Attribute "a_too_many_beans" has a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_something
+Attribute "a_something" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_too_many_beans
+Attribute "a_too_many_beans" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_are_bad_for_you
+Attribute "a_are_bad_for_you" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_another
+Attribute "a_another" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_too_many': No such file or directory
+attr_get: No data available
+Could not get "a_too_many" for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_are_bad/for_you': No such file or directory
+attr_get: No data available
+Could not get "a_are_bad/for_you" for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+++ ACCESSING BAD METADATA
+ls: reading directory '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir': Structure needs cleaning
+f_something
+attr_list: Structure needs cleaning
+Could not list <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_something
+Attribute "a_something" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_too_many_beans': No such file or directory
+attr_get: No data available
+Could not get "a_too_many_beans" for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_are_bad_for_you': No such file or directory
+attr_get: No data available
+Could not get "a_are_bad_for_you" for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_another
+Attribute "a_another" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_too_many': No such file or directory
+attr_get: No data available
+Could not get "a_too_many" for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile
+ls: cannot access '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testdir/f_are_bad/for_you': No such file or directory
+Attribute "a_are_bad/for_you" had a 3 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148/testfile:
+heh
+does scrub complain?
+does repair complain?
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan (but don't clear) agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+entry contains illegal character in shortform dir 99
+would have junked entry "f_too_many" in directory inode 99
+entry contains illegal character in shortform dir 99
+would have junked entry "f_are_bad/for_you" in directory inode 99
+entry contains illegal character in shortform attribute name
+would remove attribute entry 1 for inode 104
+        - agno = 1
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+        - check for inodes claiming duplicate blocks...
+        - agno = 0
+        - agno = 1
+entry contains illegal character in shortform dir 99
+would have junked entry "f_too_many" in directory inode 99
+entry contains illegal character in shortform dir 99
+would have junked entry "f_are_bad/for_you" in directory inode 99
+No modify flag set, skipping phase 5
+Phase 6 - check inode connectivity...
+        - traversing filesystem ...
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify link counts...
+No modify flag set, skipping filesystem flush and exiting.
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mount-148: not mounted.
+umount: /dev/ublkb1: not mounted.

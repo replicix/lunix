@@ -1,0 +1,216 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Storing french_café.txt (66 72 65 6e 63 68 5f 63 61 66 c3 a9 2e 74 78 74) -> NFC
+Storing french_café.txt (66 72 65 6e 63 68 5f 63 61 66 65 cc 81 2e 74 78 74) -> NFD
+Storing chinese_ｶ.txt (63 68 69 6e 65 73 65 5f ef bd b6 2e 74 78 74) -> NFKC1
+Storing chinese_カ.txt (63 68 69 6e 65 73 65 5f e3 82 ab 2e 74 78 74) -> NFKC2
+Storing greek_ϓ.txt (67 72 65 65 6b 5f cf 93 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFC
+Storing greek_ϓ.txt (67 72 65 65 6b 5f cf 92 cc 81 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFD
+Storing greek_Ύ.txt (67 72 65 65 6b 5f ce 8e 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKC
+Storing greek_Ύ.txt (67 72 65 65 6b 5f ce a5 cc 81 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKD
+Storing arabic_ﷺ.txt (61 72 61 62 69 63 5f ef b7 ba 2e 74 78 74) -> ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFC
+Storing arabic_صلى الله عليه وسلم.txt (61 72 61 62 69 63 5f d8 b5 d9 84 d9 89 20 d8 a7 d9 84 d9 84 d9 87 20 d8 b9 d9 84 d9 8a d9 87 20 d9 88 d8 b3 d9 84 d9 85 2e 74 78 74) -> ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFKC
+Storing urk��moo (75 72 6b c0 af 6d 6f 6f) -> FAKESLASH
+Storing emoji_🦑🦋🦉🦒.txt (65 6d 6f 6a 69 5f f0 9f a6 91 f0 9f a6 8b f0 9f a6 89 f0 9f a6 92 2e 74 78 74) -> octopus butterfly owl giraffe emoji
+Storing linedraw_
+╔═══════════╗
+║ metatable ║
+╟───────────╢
+║ __index   ║
+╚═══════════╝
+.txt (6c 69 6e 65 64 72 61 77 5f 0a e2 95 94 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 97 0a e2 95 91 20 6d 65 74 61 74 61 62 6c 65 20 e2 95 91 0a e2 95 9f e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 95 a2 0a e2 95 91 20 5f 5f 69 6e 64 65 78 20 20 20 e2 95 91 0a e2 95 9a e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 9d 0a 2e 74 78 74) -> ugly box because we can
+Storing moo‮gnp.txt (6d 6f 6f e2 80 ae 67 6e 70 2e 74 78 74) -> Well say hello,
+Storing mootxt.png (6d 6f 6f 74 78 74 2e 70 6e 67) -> Harvey
+Storing mixed_tοp.txt (6d 69 78 65 64 5f 74 ce bf 70 2e 74 78 74) -> greek omicron instead of o
+Storing mixed_top.txt (6d 69 78 65 64 5f 74 6f 70 2e 74 78 74) -> greek omicron instead of o
+Storing hyphens_a‐b.txt (68 79 70 68 65 6e 73 5f 61 e2 80 90 62 2e 74 78 74) -> hyphens
+Storing hyphens_a-b.txt (68 79 70 68 65 6e 73 5f 61 2d 62 2e 74 78 74) -> hyphens
+Storing dz_digraph_dze.txt (64 7a 5f 64 69 67 72 61 70 68 5f 64 7a 65 2e 74 78 74) -> d-z digraph
+Storing dz_digraph_ʣe.txt (64 7a 5f 64 69 67 72 61 70 68 5f ca a3 65 2e 74 78 74) -> d-z digraph
+Storing inadequate_al.txt (69 6e 61 64 65 71 75 61 74 65 5f 61 6c 2e 74 78 74) -> is it l or is it 1
+Storing inadequate_a1.txt (69 6e 61 64 65 71 75 61 74 65 5f 61 31 2e 74 78 74) -> is it l or is it 1
+Storing prohibition_Rs.txt (70 72 6f 68 69 62 69 74 69 6f 6e 5f 52 73 2e 74 78 74) -> rupee symbol
+Storing prohibition_₨.txt (70 72 6f 68 69 62 69 74 69 6f 6e 5f e2 82 a8 2e 74 78 74) -> rupee symbol
+Storing zerojoin_moocow.txt (7a 65 72 6f 6a 6f 69 6e 5f 6d 6f 6f 63 6f 77 2e 74 78 74) -> zero width joiners
+Storing zerojoin_moo‌cow.txt (7a 65 72 6f 6a 6f 69 6e 5f 6d 6f 6f e2 80 8c 63 6f 77 2e 74 78 74) -> zero width joiners
+Storing combmark_လို.txt (63 6f 6d 62 6d 61 72 6b 5f e1 80 9c e1 80 ad e1 80 af 2e 74 78 74) -> combining marks
+Storing combmark_လုိ.txt (63 6f 6d 62 6d 61 72 6b 5f e1 80 9c e1 80 af e1 80 ad 2e 74 78 74) -> combining marks
+Storing llamapirate󠀁󠁔󠁨󠁥󠀠󠁳󠁡󠁬󠁥󠁳󠀠󠁦󠁯󠁲󠀠󠁓󠁥󠁡󠁴󠁴󠁬󠁥󠀠󠁷󠁥󠁲󠁥󠀠󠁕󠁓󠁄󠀠󠀱󠀲󠀰󠀰󠀰󠀰󠁿 (6c 6c 61 6d 61 70 69 72 61 74 65 f3 a0 80 81 f3 a0 81 94 f3 a0 81 a8 f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 b3 f3 a0 81 a1 f3 a0 81 ac f3 a0 81 a5 f3 a0 81 b3 f3 a0 80 a0 f3 a0 81 a6 f3 a0 81 af f3 a0 81 b2 f3 a0 80 a0 f3 a0 81 93 f3 a0 81 a5 f3 a0 81 a1 f3 a0 81 b4 f3 a0 81 b4 f3 a0 81 ac f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 b7 f3 a0 81 a5 f3 a0 81 b2 f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 95 f3 a0 81 93 f3 a0 81 84 f3 a0 80 a0 f3 a0 80 b1 f3 a0 80 b2 f3 a0 80 b0 f3 a0 80 b0 f3 a0 80 b0 f3 a0 80 b0 f3 a0 81 bf) -> secret instructions
+Storing llamapirate (6c 6c 61 6d 61 70 69 72 61 74 65) -> no secret instructions
+Storing 💜 (f0 9f 92 9c) -> purple
+Storing 💙 (f0 9f 92 99) -> blue
+Storing 💚 (f0 9f 92 9a) -> green
+Storing 💛 (f0 9f 92 9b) -> yellow
+Storing 🫀 (f0 9f ab 80) -> heart
+Storing ❤️ (e2 9d a4 ef b8 8f) -> red
+Storing 🤎 (f0 9f a4 8e) -> brown
+Storing 🤍 (f0 9f a4 8d) -> white
+Storing 🖤 (f0 9f 96 a4) -> black
+Storing 🧡 (f0 9f a7 a1) -> orange
+Storing ♥️ (e2 99 a5 ef b8 8f) -> red suit
+Storing 💔 (f0 9f 92 94) -> broken heart
+Storing ❤️‍🩹 (e2 9d a4 ef b8 8f e2 80 8d f0 9f a9 b9) -> mending heart
+Storing 🧑🏻‍❤�
+�‍🧑🏼 (f0 9f a7 91 f0 9f 8f bb e2 80 8d e2 9d a4 ef b8 0a 8f e2 80 8d f0 9f a7 91 f0 9f 8f bc) -> couple with heart
+Storing 🧑🏻‍❤️‍🧑🏿 (f0 9f a7 91 f0 9f 8f bb e2 80 8d e2 9d a4 ef b8 8f e2 80 8d f0 9f a7 91 f0 9f 8f bf) -> couple with heart, light and dark skin tone
+Storing 🫶🏿 (f0 9f ab b6 f0 9f 8f bf) -> dark
+Storing 🫶🏾 (f0 9f ab b6 f0 9f 8f be) -> medium dark
+Storing 🫶🏽 (f0 9f ab b6 f0 9f 8f bd) -> medium
+Storing 🫶🏼 (f0 9f ab b6 f0 9f 8f bc) -> medium light
+Storing 🫶🏻 (f0 9f ab b6 f0 9f 8f bb) -> light
+Storing 🫶 (f0 9f ab b6) -> neutral
+Storing variations.txt (76 61 72 69 61 74 69 6f 6e 73 2e 74 78 74) -> v0
+Storing varia︀tions.txt (76 61 72 69 61 ef b8 80 74 69 6f 6e 73 2e 74 78 74) -> v1
+Storing ︀variations.txt (ef b8 80 76 61 72 69 61 74 69 6f 6e 73 2e 74 78 74) -> v2
+Storing vari︀︁ations.txt (76 61 72 69 ef b8 80 ef b8 81 61 74 69 6f 6e 73 2e 74 78 74) -> v3
+Storing varia󠇤tions.txt (76 61 72 69 61 f3 a0 87 a4 74 69 6f 6e 73 2e 74 78 74) -> v4
+Storing tags_moocow.txt (74 61 67 73 5f 6d 6f 6f 63 6f 77 2e 74 78 74) -> u0
+Storing tags_m󠁭oocow.txt (74 61 67 73 5f 6d f3 a0 81 ad 6f 6f 63 6f 77 2e 74 78 74) -> u1
+Storing 󠀨󠁈󠁩󠀩 (f3 a0 80 a8 f3 a0 81 88 f3 a0 81 a9 f3 a0 80 a9) -> (Hi)
+Storing עברית.pdf (d7 a2 d7 91 d7 a8 d7 99 d7 aa 2e 70 64 66) -> mixed rtl and ltr chars?
+# file: /home/ubuntu/lunix-p1/m15/scratch/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-454/attrfile
+user.arabic_صلى الله عليه وسلم.txt="ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFKC"
+user.arabic_ﷺ.txt="ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFC"
+user.chinese_カ.txt="NFKC2"
+user.chinese_ｶ.txt="NFKC1"
+user.combmark_လို.txt="combining marks"
+user.combmark_လုိ.txt="combining marks"
+user.dz_digraph_dze.txt="d-z digraph"
+user.dz_digraph_ʣe.txt="d-z digraph"
+user.emoji_🦑🦋🦉🦒.txt="octopus butterfly owl giraffe emoji"
+user.french_café.txt="NFD"
+user.french_café.txt="NFC"
+user.greek_Ύ.txt="GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKC"
+user.greek_Ύ.txt="GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKD"
+user.greek_ϓ.txt="GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFD"
+user.greek_ϓ.txt="GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFC"
+user.hyphens_a-b.txt="hyphens"
+user.hyphens_a‐b.txt="hyphens"
+user.inadequate_a1.txt="is it l or is it 1"
+user.inadequate_al.txt="is it l or is it 1"
+user.linedraw_\012╔═══════════╗\012║ metatable ║\012╟───────────╢\012║ __index   ║\012╚═══════════╝\012.txt="ugly box because we can"
+user.llamapirate="no secret instructions"
+user.llamapirate󠀁󠁔󠁨󠁥󠀠󠁳󠁡󠁬󠁥󠁳󠀠󠁦󠁯󠁲󠀠󠁓󠁥󠁡󠁴󠁴󠁬󠁥󠀠󠁷󠁥󠁲󠁥󠀠󠁕󠁓󠁄󠀠󠀱󠀲󠀰󠀰󠀰󠀰󠁿="secret instructions"
+user.mixed_top.txt="greek omicron instead of o"
+user.mixed_tοp.txt="greek omicron instead of o"
+user.mootxt.png="Harvey"
+user.moo‮gnp.txt="Well say hello,"
+user.prohibition_Rs.txt="rupee symbol"
+user.prohibition_₨.txt="rupee symbol"
+user.tags_moocow.txt="u0"
+user.tags_m󠁭oocow.txt="u1"
+user.urk��moo="FAKESLASH"
+user.variations.txt="v0"
+user.varia︀tions.txt="v1"
+user.varia󠇤tions.txt="v4"
+user.vari︀︁ations.txt="v3"
+user.zerojoin_moocow.txt="zero width joiners"
+user.zerojoin_moo‌cow.txt="zero width joiners"
+user.עברית.pdf="mixed rtl and ltr chars?"
+user.♥️="red suit"
+user.❤️="red"
+user.❤️‍🩹="mending heart"
+user.︀variations.txt="v2"
+user.💔="broken heart"
+user.💙="blue"
+user.💚="green"
+user.💛="yellow"
+user.💜="purple"
+user.🖤="black"
+user.🤍="white"
+user.🤎="brown"
+user.🧑🏻‍❤�\012�‍🧑🏼="couple with heart"
+user.🧑🏻‍❤️‍🧑🏿="couple with heart, light and dark skin tone"
+user.🧡="orange"
+user.🫀="heart"
+user.🫶="neutral"
+user.🫶🏻="light"
+user.🫶🏼="medium light"
+user.🫶🏽="medium"
+user.🫶🏾="medium dark"
+user.🫶🏿="dark"
+user.󠀨󠁈󠁩󠀩="(Hi)"
+
+Testing french_café.txt (66 72 65 6e 63 68 5f 63 61 66 c3 a9 2e 74 78 74) -> NFC
+Testing french_café.txt (66 72 65 6e 63 68 5f 63 61 66 65 cc 81 2e 74 78 74) -> NFD
+Testing chinese_ｶ.txt (63 68 69 6e 65 73 65 5f ef bd b6 2e 74 78 74) -> NFKC1
+Testing chinese_カ.txt (63 68 69 6e 65 73 65 5f e3 82 ab 2e 74 78 74) -> NFKC2
+Testing greek_ϓ.txt (67 72 65 65 6b 5f cf 93 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFC
+Testing greek_ϓ.txt (67 72 65 65 6b 5f cf 92 cc 81 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFD
+Testing greek_Ύ.txt (67 72 65 65 6b 5f ce 8e 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKC
+Testing greek_Ύ.txt (67 72 65 65 6b 5f ce a5 cc 81 2e 74 78 74) -> GREEK UPSILON WITH ACUTE AND HOOK SYMBOL, NFKD
+Testing arabic_ﷺ.txt (61 72 61 62 69 63 5f ef b7 ba 2e 74 78 74) -> ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFC
+Testing arabic_صلى الله عليه وسلم.txt (61 72 61 62 69 63 5f d8 b5 d9 84 d9 89 20 d8 a7 d9 84 d9 84 d9 87 20 d8 b9 d9 84 d9 8a d9 87 20 d9 88 d8 b3 d9 84 d9 85 2e 74 78 74) -> ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM, NFKC
+Testing urk��moo (75 72 6b c0 af 6d 6f 6f) -> FAKESLASH
+Testing emoji_🦑🦋🦉🦒.txt (65 6d 6f 6a 69 5f f0 9f a6 91 f0 9f a6 8b f0 9f a6 89 f0 9f a6 92 2e 74 78 74) -> octopus butterfly owl giraffe emoji
+Testing linedraw_
+╔═══════════╗
+║ metatable ║
+╟───────────╢
+║ __index   ║
+╚═══════════╝
+.txt (6c 69 6e 65 64 72 61 77 5f 0a e2 95 94 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 97 0a e2 95 91 20 6d 65 74 61 74 61 62 6c 65 20 e2 95 91 0a e2 95 9f e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 94 80 e2 95 a2 0a e2 95 91 20 5f 5f 69 6e 64 65 78 20 20 20 e2 95 91 0a e2 95 9a e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 90 e2 95 9d 0a 2e 74 78 74) -> ugly box because we can
+Testing moo‮gnp.txt (6d 6f 6f e2 80 ae 67 6e 70 2e 74 78 74) -> Well say hello,
+Testing mootxt.png (6d 6f 6f 74 78 74 2e 70 6e 67) -> Harvey
+Testing mixed_tοp.txt (6d 69 78 65 64 5f 74 ce bf 70 2e 74 78 74) -> greek omicron instead of o
+Testing mixed_top.txt (6d 69 78 65 64 5f 74 6f 70 2e 74 78 74) -> greek omicron instead of o
+Testing hyphens_a‐b.txt (68 79 70 68 65 6e 73 5f 61 e2 80 90 62 2e 74 78 74) -> hyphens
+Testing hyphens_a-b.txt (68 79 70 68 65 6e 73 5f 61 2d 62 2e 74 78 74) -> hyphens
+Testing dz_digraph_dze.txt (64 7a 5f 64 69 67 72 61 70 68 5f 64 7a 65 2e 74 78 74) -> d-z digraph
+Testing dz_digraph_ʣe.txt (64 7a 5f 64 69 67 72 61 70 68 5f ca a3 65 2e 74 78 74) -> d-z digraph
+Testing inadequate_al.txt (69 6e 61 64 65 71 75 61 74 65 5f 61 6c 2e 74 78 74) -> is it l or is it 1
+Testing inadequate_a1.txt (69 6e 61 64 65 71 75 61 74 65 5f 61 31 2e 74 78 74) -> is it l or is it 1
+Testing prohibition_Rs.txt (70 72 6f 68 69 62 69 74 69 6f 6e 5f 52 73 2e 74 78 74) -> rupee symbol
+Testing prohibition_₨.txt (70 72 6f 68 69 62 69 74 69 6f 6e 5f e2 82 a8 2e 74 78 74) -> rupee symbol
+Testing zerojoin_moocow.txt (7a 65 72 6f 6a 6f 69 6e 5f 6d 6f 6f 63 6f 77 2e 74 78 74) -> zero width joiners
+Testing zerojoin_moo‌cow.txt (7a 65 72 6f 6a 6f 69 6e 5f 6d 6f 6f e2 80 8c 63 6f 77 2e 74 78 74) -> zero width joiners
+Testing combmark_လို.txt (63 6f 6d 62 6d 61 72 6b 5f e1 80 9c e1 80 ad e1 80 af 2e 74 78 74) -> combining marks
+Testing combmark_လုိ.txt (63 6f 6d 62 6d 61 72 6b 5f e1 80 9c e1 80 af e1 80 ad 2e 74 78 74) -> combining marks
+Testing llamapirate󠀁󠁔󠁨󠁥󠀠󠁳󠁡󠁬󠁥󠁳󠀠󠁦󠁯󠁲󠀠󠁓󠁥󠁡󠁴󠁴󠁬󠁥󠀠󠁷󠁥󠁲󠁥󠀠󠁕󠁓󠁄󠀠󠀱󠀲󠀰󠀰󠀰󠀰󠁿 (6c 6c 61 6d 61 70 69 72 61 74 65 f3 a0 80 81 f3 a0 81 94 f3 a0 81 a8 f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 b3 f3 a0 81 a1 f3 a0 81 ac f3 a0 81 a5 f3 a0 81 b3 f3 a0 80 a0 f3 a0 81 a6 f3 a0 81 af f3 a0 81 b2 f3 a0 80 a0 f3 a0 81 93 f3 a0 81 a5 f3 a0 81 a1 f3 a0 81 b4 f3 a0 81 b4 f3 a0 81 ac f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 b7 f3 a0 81 a5 f3 a0 81 b2 f3 a0 81 a5 f3 a0 80 a0 f3 a0 81 95 f3 a0 81 93 f3 a0 81 84 f3 a0 80 a0 f3 a0 80 b1 f3 a0 80 b2 f3 a0 80 b0 f3 a0 80 b0 f3 a0 80 b0 f3 a0 80 b0 f3 a0 81 bf) -> secret instructions
+Testing llamapirate (6c 6c 61 6d 61 70 69 72 61 74 65) -> no secret instructions
+Testing 💜 (f0 9f 92 9c) -> purple
+Testing 💙 (f0 9f 92 99) -> blue
+Testing 💚 (f0 9f 92 9a) -> green
+Testing 💛 (f0 9f 92 9b) -> yellow
+Testing 🫀 (f0 9f ab 80) -> heart
+Testing ❤️ (e2 9d a4 ef b8 8f) -> red
+Testing 🤎 (f0 9f a4 8e) -> brown
+Testing 🤍 (f0 9f a4 8d) -> white
+Testing 🖤 (f0 9f 96 a4) -> black
+Testing 🧡 (f0 9f a7 a1) -> orange
+Testing ♥️ (e2 99 a5 ef b8 8f) -> red suit
+Testing 💔 (f0 9f 92 94) -> broken heart
+Testing ❤️‍🩹 (e2 9d a4 ef b8 8f e2 80 8d f0 9f a9 b9) -> mending heart
+Testing 🧑🏻‍❤�
+�‍🧑🏼 (f0 9f a7 91 f0 9f 8f bb e2 80 8d e2 9d a4 ef b8 0a 8f e2 80 8d f0 9f a7 91 f0 9f 8f bc) -> couple with heart
+Testing 🧑🏻‍❤️‍🧑🏿 (f0 9f a7 91 f0 9f 8f bb e2 80 8d e2 9d a4 ef b8 8f e2 80 8d f0 9f a7 91 f0 9f 8f bf) -> couple with heart, light and dark skin tone
+Testing 🫶🏿 (f0 9f ab b6 f0 9f 8f bf) -> dark
+Testing 🫶🏾 (f0 9f ab b6 f0 9f 8f be) -> medium dark
+Testing 🫶🏽 (f0 9f ab b6 f0 9f 8f bd) -> medium
+Testing 🫶🏼 (f0 9f ab b6 f0 9f 8f bc) -> medium light
+Testing 🫶🏻 (f0 9f ab b6 f0 9f 8f bb) -> light
+Testing 🫶 (f0 9f ab b6) -> neutral
+Testing variations.txt (76 61 72 69 61 74 69 6f 6e 73 2e 74 78 74) -> v0
+Testing varia︀tions.txt (76 61 72 69 61 ef b8 80 74 69 6f 6e 73 2e 74 78 74) -> v1
+Testing ︀variations.txt (ef b8 80 76 61 72 69 61 74 69 6f 6e 73 2e 74 78 74) -> v2
+Testing vari︀︁ations.txt (76 61 72 69 ef b8 80 ef b8 81 61 74 69 6f 6e 73 2e 74 78 74) -> v3
+Testing varia󠇤tions.txt (76 61 72 69 61 f3 a0 87 a4 74 69 6f 6e 73 2e 74 78 74) -> v4
+Testing tags_moocow.txt (74 61 67 73 5f 6d 6f 6f 63 6f 77 2e 74 78 74) -> u0
+Testing tags_m󠁭oocow.txt (74 61 67 73 5f 6d f3 a0 81 ad 6f 6f 63 6f 77 2e 74 78 74) -> u1
+Testing 󠀨󠁈󠁩󠀩 (f3 a0 80 a8 f3 a0 81 88 f3 a0 81 a9 f3 a0 80 a9) -> (Hi)
+Testing עברית.pdf (d7 a2 d7 91 d7 a8 d7 99 d7 aa 2e 70 64 66) -> mixed rtl and ltr chars?

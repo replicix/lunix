@@ -1,0 +1,94 @@
+QA output created by 594
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+1. set project quota timer
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: DEF_TIME; Inode grace time: DEF_TIME
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: DEF_TIME; Inode grace time: DEF_TIME
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20
+
+2. set group quota timer
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: DEF_TIME; Inode grace time: DEF_TIME
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: 00:30; Inode grace time: 00:40
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20
+
+3. set user quota timer
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+setquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: 00:50; Inode grace time: 01:00
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: 00:30; Inode grace time: 00:40
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20
+
+4. cycle mount test-1
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: 00:50; Inode grace time: 01:00
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: 00:30; Inode grace time: 00:40
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20
+
+5. fsck to force quota check
+
+6. cycle mount test-2
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: 00:50; Inode grace time: 01:00
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: 00:30; Inode grace time: 00:40
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20
+
+7. cycle mount test-3
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+repquota: Cannot stat() mounted device tmpfs: No such file or directory
+*** Report for user quotas on device SCRATCH_DEV
+Block grace time: 00:50; Inode grace time: 01:00
+*** Report for group quotas on device SCRATCH_DEV
+Block grace time: 00:30; Inode grace time: 00:40
+*** Report for project quotas on device SCRATCH_DEV
+Block grace time: 00:10; Inode grace time: 00:20

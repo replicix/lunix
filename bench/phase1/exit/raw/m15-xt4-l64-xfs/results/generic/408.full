@@ -1,0 +1,9 @@
+wrote 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+wrote 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+before dedup: 1795126437 1795126437
+deduped 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0000 sec (55.804 MiB/sec and 14285.7143 ops/sec)
+after dedup : 1795126437 1795126437
+umount: /dev/ublkb1: not mounted.

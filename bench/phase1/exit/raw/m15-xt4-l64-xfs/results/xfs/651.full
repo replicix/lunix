@@ -1,0 +1,21 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=32768 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=0    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=1   metadir=1
+data     =                       bsize=4096   blocks=131072, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=16384, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =internal               extsz=4096   blocks=4063232, rtextents=4063232
+         =                       rgcount=62   rgsize=65536 extents
+         =                       zoned=1      start=131072 reserved=0
+Discarding blocks...Done.
+Allowing write of corrupted data with good CRC
+rblocks = 4059136
+realtime geometry check failed
+Metadata corruption detected at 0x5832ae5957b5, xfs_sb block 0x0/0x1000
+Allowing write of corrupted data with good CRC
+rextents = 4059136
+umount: /dev/ublkb1: not mounted.

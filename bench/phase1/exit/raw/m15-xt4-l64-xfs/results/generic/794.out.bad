@@ -1,0 +1,8 @@
+QA output created by 794
+append_write
+FAIL: non-zero data in gap [4080,4096) after shutdown+remount
+000000 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a 5a  >ZZZZZZZZZZZZZZZZ<
+*
+001000
+truncate_up
+fallocate

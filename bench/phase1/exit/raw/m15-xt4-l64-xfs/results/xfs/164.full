@@ -1,0 +1,49 @@
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0011 sec (44.741 MiB/sec and 881.0573 ops/sec)
+read 102400/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0008 sec (115.570 MiB/sec and 1183.4320 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..199]: hole
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0016 sec (30.499 MiB/sec and 600.6006 ops/sec)
+read 102399/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0006 sec (145.537 MiB/sec and 1490.3130 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..199]: hole
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0016 sec (29.995 MiB/sec and 590.6675 ops/sec)
+read 102401/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0006 sec (152.828 MiB/sec and 1564.9452 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..207]: hole
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0016 sec (30.102 MiB/sec and 592.7682 ops/sec)
+read 102400/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0006 sec (153.548 MiB/sec and 1572.3270 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..199]: unwritten
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0017 sec (29.524 MiB/sec and 581.3953 ops/sec)
+read 102399/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0006 sec (140.917 MiB/sec and 1443.0014 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..199]: unwritten
+wrote 53248/53248 bytes at offset 0
+52 KiB, 1 ops; 0.0016 sec (29.889 MiB/sec and 588.5815 ops/sec)
+read 102401/204800 bytes at offset 0
+100 KiB, 1 ops; 0.0007 sec (136.203 MiB/sec and 1394.7001 ops/sec)
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/file.164: 
+EXT: FILE-OFFSET
+0: [0..103]:
+1: [104..207]: unwritten
+umount: /dev/ublkb1: not mounted.

@@ -1,0 +1,11 @@
+wrote 1000/1000 bytes at offset 0
+1000.000000 bytes, 1 ops; 0.0000 sec (63.578 MiB/sec and 66666.6667 ops/sec)
+wrote 1000/1000 bytes at offset 1000
+1000.000000 bytes, 1 ops; 0.0000 sec (190.735 MiB/sec and 200000.0000 ops/sec)
+wrote 1000/1000 bytes at offset 2000
+1000.000000 bytes, 1 ops; 0.0000 sec (158.946 MiB/sec and 166666.6667 ops/sec)
+wrote 1000/1000 bytes at offset 3000
+1000.000000 bytes, 1 ops; 0.0000 sec (158.946 MiB/sec and 166666.6667 ops/sec)
+wrote 1000/1000 bytes at offset 4000
+1000.000000 bytes, 1 ops; 0.0000 sec (119 MiB/sec and 125000.0000 ops/sec)
+umount: /dev/ublkb1: not mounted.

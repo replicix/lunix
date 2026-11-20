@@ -1,0 +1,36 @@
+--- _scratch_mkfs
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+--- _try_scratch_mount
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.0
+--- chacl u::r--,g::rwx,o::rw- <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.0
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.1
+--- chacl u::r-x,g::---,o::--- <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.1
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.2
+--- chacl u::---,g::r-x,o::--- <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.2
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.3
+--- chacl u::---,g::---,o::r-x <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.3
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.4
+--- chacl u::---,g::r-x,o::rwx <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.4
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.5
+--- chacl u::---,g::---,o::---,u:14:r-x,m::rwx <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.5
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.6
+--- chacl u::rwx,g::r-x,o::r-- <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.6
+--- touch <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.7
+--- chacl u::---,g::---,o::---,g:14:r-x,m::-w- <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test.7
+--- _check_scratch_fs

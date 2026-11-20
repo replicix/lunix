@@ -1,0 +1,98 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: searching media for dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: found dump matching specified label:
+/usr/sbin/xfsrestore: hostname: crackle.melbourne.sgi.com
+/usr/sbin/xfsrestore: mount point: /spare1
+/usr/sbin/xfsrestore: volume: /hw/node/io/gio/hpc/scsi_ctlr/0/target/2/lun/0/disk/partition/1/char
+/usr/sbin/xfsrestore: session time: Fri Sep 28 06:52:19 2001
+/usr/sbin/xfsrestore: level: 0
+/usr/sbin/xfsrestore: session label: "stress_056"
+/usr/sbin/xfsrestore: media label: "stress_tape_media"
+/usr/sbin/xfsrestore: file system id: 927825d6-4680-1025-8afe-080069091980
+/usr/sbin/xfsrestore: session id: 927825d7-4680-1025-8afe-080069091980
+/usr/sbin/xfsrestore: media id: 927825d9-4680-1025-8afe-080069091980
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 7 directories and 11 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <m15>/xfstests/src/dumpfile OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir:
+total 20
+drwxrwsrwx 2 4 4  6 Nov 19 22:28 dir_guid
+drwxrw---x 2 4 4  6 Nov 19 22:28 dir_mix1
+drw-r---w- 2 4 4  6 Nov 19 22:28 dir_mix2
+drwxrwxrwt 2 4 4  6 Nov 19 22:28 dir_sticky
+drwsrwxrwx 2 4 4  6 Nov 19 22:28 dir_suid
+-rwxrwsrwx 1 4 4 10 Nov 19 22:28 file_guid
+-rwxrw---x 1 4 4 10 Nov 19 22:28 file_mix1
+-rw-r---w- 1 4 4 10 Nov 19 22:28 file_mix2
+-rwxrwxrwt 1 4 4 10 Nov 19 22:28 file_sticky
+-rwsrwxrwx 1 4 4 10 Nov 19 22:28 file_suid
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir_guid:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir_mix1:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir_mix2:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir_sticky:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir_suid:
+total 0
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir:
+total 20
+drwxrwsrwx 2 4 4  6 Sep 28  2001 dir_guid
+drwxrw---x 2 4 4  6 Sep 28  2001 dir_mix1
+drw-r---w- 2 4 4  6 Sep 28  2001 dir_mix2
+drwxrwxrwt 2 4 4  6 Sep 28  2001 dir_sticky
+drwsrwxrwx 2 4 4  6 Sep 28  2001 dir_suid
+-rwxrwsrwx 1 4 4 10 Sep 28  2001 file_guid
+-rwxrw---x 1 4 4 10 Sep 28  2001 file_mix1
+-rw-r---w- 1 4 4 10 Sep 28  2001 file_mix2
+-rwxrwxrwt 1 4 4 10 Sep 28  2001 file_sticky
+-rwsrwxrwx 1 4 4 10 Sep 28  2001 file_suid
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir/dir_guid:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir/dir_mix1:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir/dir_mix2:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir/dir_sticky:
+total 0
+
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/restoredir/dumpdir/dir_suid:
+total 0

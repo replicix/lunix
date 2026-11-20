@@ -1,0 +1,9 @@
+QA output created by 079
+*** starting up
+statfs failed: Permission denied
+statfs failed: Permission denied
+testing immutable...PASS.
+testing append-only...PASS.
+testing immutable as non-root...FAILED! (1 tests failed)
+testing append-only as non-root...FAILED! (1 tests failed)
+*** cleaning up

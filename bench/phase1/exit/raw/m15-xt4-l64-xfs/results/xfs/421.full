@@ -1,0 +1,98 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+[0] <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421
+[524288] <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (2.597 GiB/sec and 680851.0638 ops/sec)
+wrote 524288/524288 bytes at offset 0
+512 KiB, 128 ops; 0.0001 sec (4.035 GiB/sec and 1057851.2397 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (12.207 GiB/sec and 3200000.0000 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+CoW the shared part then write into the empty part
+[524288] <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1
+[524288] <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0260 sec (2.404 MiB/sec and 615.3609 ops/sec)
+wrote 65536/65536 bytes at offset 196608
+64 KiB, 16 ops; 0.0198 sec (3.152 MiB/sec and 806.8176 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0148 sec (4.211 MiB/sec and 1078.0945 ops/sec)
+wrote 65536/65536 bytes at offset 196608
+64 KiB, 16 ops; 0.0149 sec (4.170 MiB/sec and 1067.4495 ops/sec)
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        192..319          0 (192..319)         128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..1023]:     hole                                   768
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        1600..1727        0 (1600..1727)       128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..383]:      hole                                   128
+   3: [384..511]:      1984..2111        0 (1984..2111)       128
+   4: [512..1023]:     hole                                   512
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..1023]:       576..1599         0 (576..1599)       1024
+sync filesystem
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        192..319          0 (192..319)         128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..1023]:     hole                                   768
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        1600..1727        0 (1600..1727)       128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..383]:      hole                                   128
+   3: [384..511]:      1984..2111        0 (1984..2111)       128
+   4: [512..1023]:     hole                                   512
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..1023]:       576..1599         0 (576..1599)       1024
+Remount
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file1:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        192..319          0 (192..319)         128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..1023]:     hole                                   768
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file2:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..127]:        1600..1727        0 (1600..1727)       128
+   1: [128..255]:      320..447          0 (320..447)         128 100000
+   2: [256..383]:      hole                                   128
+   3: [384..511]:      1984..2111        0 (1984..2111)       128
+   4: [512..1023]:     hole                                   512
+xfs_io: xfsctl(XFS_IOC_GETBMAPX) iflags=0x28 ["<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3"]: Invalid argument
+<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/test-421/file3:
+ EXT: FILE-OFFSET      BLOCK-RANGE      AG AG-OFFSET        TOTAL
+   0: [0..1023]:       576..1599         0 (576..1599)       1024

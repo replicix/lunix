@@ -1,0 +1,181 @@
+{
+  "exit": 2,
+  "volume": "3236b417-6893-4f16-a39f-eda0fbdb2410",
+  "mode": "integrity",
+  "deep": true,
+  "findings": [
+    {
+      "code": "tip_auth",
+      "severity": "error",
+      "object": "state/commits/0000000000000020",
+      "message": "the tip does not authenticate; mount refuses and never falls back (repair: --repair --truncate-tip)"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/000000000000000a",
+      "message": "condemned (99200 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000010",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000016",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/000000000000001c",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000022",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000028",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/000000000000002e",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000034",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/000000000000003a",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "index/0000000000000071",
+      "message": "condemned (49632 bytes): a pass deletes it after its grace and a recheck"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000000",
+      "message": "condemned (212 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000001",
+      "message": "condemned (284 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000002",
+      "message": "condemned (260 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000003",
+      "message": "condemned (268 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000004",
+      "message": "condemned (276 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000005",
+      "message": "condemned (284 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000006",
+      "message": "condemned (292 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000007",
+      "message": "condemned (300 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000008",
+      "message": "condemned (308 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/0000000000000009",
+      "message": "condemned (316 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/000000000000000a",
+      "message": "condemned (260 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/000000000000000b",
+      "message": "condemned (268 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/000000000000000c",
+      "message": "condemned (276 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    },
+    {
+      "code": "gc_pending",
+      "severity": "note",
+      "object": "state/commits/000000000000000d",
+      "message": "condemned (284 bytes) but a retained commit names or references it: the recheck un-condemns it"
+    }
+  ],
+  "counts": {
+    "gc_pending": 27,
+    "tip_auth": 1
+  },
+  "stats": {
+    "commits": 0,
+    "segments": 130,
+    "packs": 32,
+    "extents": 32894,
+    "map_nodes": 0,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 0
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at",
+    "journal: not classified, the tip did not authenticate"
+  ],
+  "peak_rss_kib": 88872
+}

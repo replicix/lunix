@@ -1,0 +1,72 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 314572800/314572800 bytes at offset 0
+300 MiB, 300 ops; 0.0327 sec (8.935 GiB/sec and 9149.6889 ops/sec)
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=19200 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=76800, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=16384, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0000 sec (1.969 GiB/sec and 516129.0323 ops/sec)
+wrote 8192/8192 bytes at offset 1048576
+8 KiB, 2 ops; 0.0000 sec (600.962 MiB/sec and 153846.1538 ops/sec)
+fd.path = "<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/b"
+fd.flags = non-sync,non-direct,read-write
+stat.ino = 132
+stat.type = regular file
+stat.size = 1056768
+stat.blocks = 256
+fsxattr.xflags = 0x80000002 [-p--------------X]
+fsxattr.projid = 0
+fsxattr.extsize = 0
+fsxattr.cowextsize = 0
+fsxattr.nextents = 3
+fsxattr.naextents = 0
+dioattr.mem = 0x8
+dioattr.miniosz = 4096
+dioattr.maxiosz = 2147479552
+linked 65536/65536 bytes at offset 1114112
+64 KiB, 1 ops; 0.0024 sec (26.031 MiB/sec and 416.4931 ops/sec)
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+1048576  57  57  57  57  57  57  57  57  57  57  57  57  57  57  57  57
+          W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+1056768  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+1114112  72  72  72  72  72  72  72  72  72  72  72  72  72  72  72  72
+          r   r   r   r   r   r   r   r   r   r   r   r   r   r   r   r
+*
+1179648
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+0000000  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+1048576  57  57  57  57  57  57  57  57  57  57  57  57  57  57  57  57
+          W   W   W   W   W   W   W   W   W   W   W   W   W   W   W   W
+*
+1056768  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00  00
+         \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+1114112  72  72  72  72  72  72  72  72  72  72  72  72  72  72  72  72
+          r   r   r   r   r   r   r   r   r   r   r   r   r   r   r   r
+*
+1179648

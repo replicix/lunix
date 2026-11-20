@@ -1,0 +1,58 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 65536/65536 bytes at offset 0
+64 KiB, 1 ops; 0.0000 sec (3.212 GiB/sec and 52631.5789 ops/sec)
+wrote 4096/4096 bytes at offset 20480
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 28672
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+0: 0/0 len 4 owner -3 offset 0 bmbt 0 attrfork 0 extflag 0
+1: 0/4 len 2 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+2: 0/6 len 2 owner -6 offset 0 bmbt 0 attrfork 0 extflag 0
+3: 0/8 len 1 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+4: 0/9 len 1 owner -8 offset 0 bmbt 0 attrfork 0 extflag 0
+5: 0/10 len 6 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+6: 0/16 len 8 owner -7 offset 0 bmbt 0 attrfork 0 extflag 0
+7: 0/24 len 1 owner 131 offset 0 bmbt 0 attrfork 0 extflag 0
+8: 0/26 len 1 owner 131 offset 2 bmbt 0 attrfork 0 extflag 0
+9: 0/28 len 5 owner 131 offset 4 bmbt 0 attrfork 0 extflag 0
+10: 0/34 len 1 owner 131 offset 9 bmbt 0 attrfork 0 extflag 0
+11: 0/35 len 5 owner 131 offset 11 bmbt 0 attrfork 0 extflag 0
+12: 0/40 len 1 owner 131 offset 3 bmbt 0 attrfork 0 extflag 1
+13: 1/0 len 4 owner -3 offset 0 bmbt 0 attrfork 0 extflag 0
+14: 1/4 len 2 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+15: 1/6 len 2 owner -6 offset 0 bmbt 0 attrfork 0 extflag 0
+16: 1/8 len 1 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+17: 1/9 len 1 owner -8 offset 0 bmbt 0 attrfork 0 extflag 0
+18: 1/10 len 6 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+19: 2/0 len 4 owner -3 offset 0 bmbt 0 attrfork 0 extflag 0
+20: 2/4 len 2 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+21: 2/6 len 2 owner -6 offset 0 bmbt 0 attrfork 0 extflag 0
+22: 2/8 len 1 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+23: 2/9 len 1 owner -8 offset 0 bmbt 0 attrfork 0 extflag 0
+24: 2/10 len 27162 owner -4 offset 0 bmbt 0 attrfork 0 extflag 0
+25: 2/27172 len 6 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+26: 3/0 len 4 owner -3 offset 0 bmbt 0 attrfork 0 extflag 0
+27: 3/4 len 2 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+28: 3/6 len 2 owner -6 offset 0 bmbt 0 attrfork 0 extflag 0
+29: 3/8 len 1 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+30: 3/9 len 1 owner -8 offset 0 bmbt 0 attrfork 0 extflag 0
+31: 3/10 len 6 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+0: 0/0 len 4 owner -3 offset 0 bmbt 0 attrfork 0 extflag 0
+1: 0/4 len 2 owner -5 offset 0 bmbt 0 attrfork 0 extflag 0
+umount: /dev/ublkb1: not mounted.

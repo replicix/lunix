@@ -1,0 +1,8 @@
+[568196.951247] JBD2: I/O error when updating journal superblock for ublkb0-8.
+[568196.951331] EXT4-fs (ublkb0): failed to convert unwritten extents to written extents -- potential data loss!  (inode 13, error -5)
+[568196.951500] EXT4-fs (ublkb0): failed to convert unwritten extents to written extents -- potential data loss!  (inode 13, error -5)
+[568196.951700] EXT4-fs (ublkb0): failed to convert unwritten extents to written extents -- potential data loss!  (inode 13, error -5)
+[568196.951868] Buffer I/O error on dev ublkb0, logical block 0, lost sync page write
+[568196.952471] EXT4-fs (ublkb0): I/O error while writing superblock
+[568196.952480] EXT4-fs (ublkb0): previous I/O error to superblock detected
+[568196.952839] Buffer I/O error on dev ublkb0, logical block 0, lost sync page write

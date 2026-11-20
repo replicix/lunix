@@ -1,0 +1,144 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+scratch device atomic write properties
+stat.mask = 0x17ff
+stat.blksize = 4096
+stat.attributes = 0x0
+stat.nlink = 1
+stat.uid = 0
+stat.gid = 6
+stat.mode: 060660
+stat.ino = 85766
+stat.size = 0
+stat.blocks = 0
+stat.attributes_mask = 0x203070
+stat.atime.tv_sec = 1795126977
+stat.atime.tv_nsec = 508945996
+stat.btime.tv_sec = 0
+stat.btime.tv_nsec = 0
+stat.ctime.tv_sec = 1795126977
+stat.ctime.tv_nsec = 507555780
+stat.mtime.tv_sec = 1795126977
+stat.mtime.tv_nsec = 507555780
+stat.rdev_major = 259
+stat.rdev_minor = 6
+stat.dev_major = 0
+stat.dev_minor = 7
+stat.mnt_id = 0x29
+stat.dio_mem_align = 0
+stat.dio_offset_align = 0
+stat.subvol = 0x0
+stat.atomic_write_unit_min = 0
+stat.atomic_write_unit_max = 0
+stat.atomic_write_segments_max = 0
+stat.dio_read_offset_align = 0
+stat.atomic_write_unit_max_opt = 0
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+filesystem atomic write properties
+stat.mask = 0x1173f
+stat.blksize = 4096
+stat.attributes = 0x400000
+stat.nlink = 1
+stat.uid = 0
+stat.gid = 0
+stat.mode: 0100644
+stat.ino = 131
+stat.size = 0
+stat.blocks = 0
+stat.attributes_mask = 0x603070
+stat.atime.tv_sec = 1795126977
+stat.atime.tv_nsec = 712556178
+stat.btime.tv_sec = 0
+stat.btime.tv_nsec = 0
+stat.ctime.tv_sec = 0
+stat.ctime.tv_nsec = 0
+stat.mtime.tv_sec = 0
+stat.mtime.tv_nsec = 0
+stat.rdev_major = 0
+stat.rdev_minor = 0
+stat.dev_major = 259
+stat.dev_minor = 6
+stat.mnt_id = 0x509
+stat.dio_mem_align = 0
+stat.dio_offset_align = 0
+stat.subvol = 0x0
+stat.atomic_write_unit_min = 4096
+stat.atomic_write_unit_max = 4194304
+stat.atomic_write_segments_max = 1
+stat.dio_read_offset_align = 0
+stat.atomic_write_unit_max_opt = 0
+testing pos=2048 count=2048 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=-d
+testing pos=8388608 count=8388608 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=-d
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+testing pos=0 count=4096 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=

@@ -1,0 +1,17 @@
+scsi_debug options sector_size=4096 physblk_exp=0 lowest_aligned=0 dev_size_mb=600 delay=0 clustering=1
+SCSI debug device /dev/sda
+  Physical volume "/dev/sda" successfully created.
+  Physical volume "/dev/ublkb1" successfully created.
+  Volume group "vg_108" successfully created
+  Rounding up size to full physical extent 548.00 MiB
+  Rounding size 548.00 MiB (137 extents) up to stripe boundary size 552.00 MiB (138 extents).
+  Logical volume "lv_108" created.
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0040 sec (3.899 GiB/sec and 1022211.1305 ops/sec)
+wrote 6291456/6291456 bytes at offset 0
+6 MiB, 6 ops; 0.0012 sec (4.803 GiB/sec and 4918.0328 ops/sec)
+  Logical volume "lv_108" successfully removed.
+  Volume group "vg_108" successfully removed
+  Labels on physical volume "/dev/ublkb1" successfully wiped.
+  Labels on physical volume "/dev/sda" successfully wiped.
+umount: /dev/ublkb1: not mounted.

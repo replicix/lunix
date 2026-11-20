@@ -1,0 +1,77 @@
+"/usr/bin/mount -t xfs -o nosuid,nodev /dev/loop8 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch" failed at Thu Nov 19 23:14:06 UTC 2026
+[561145.132762] XFS (ublkb1): User initiated shutdown received.
+[561145.136575] XFS (ublkb1): Metadata I/O Error (0x4) detected at xfs_fs_goingdown+0x7e/0xc0 [xfs] (fs/xfs/xfs_fsops.c:462).  Shutting down filesystem.
+[561145.136996] XFS (ublkb1): Please unmount the filesystem and rectify the problem(s)
+[561147.142023] XFS (ublkb1): Unmounting Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.152639] XFS (ublkb1): Mounting V5 Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.275624] XFS (ublkb1): Starting recovery (logdev: internal)
+[561147.297349] XFS (ublkb1): Ending recovery (logdev: internal)
+[561147.309852] XFS (ublkb1): User initiated shutdown received.
+[561147.309995] XFS (ublkb1): Metadata I/O Error (0x4) detected at xfs_fs_goingdown+0x7e/0xc0 [xfs] (fs/xfs/xfs_fsops.c:462).  Shutting down filesystem.
+[561147.310230] XFS (ublkb1): Please unmount the filesystem and rectify the problem(s)
+[561147.313157] XFS (ublkb1): Unmounting Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.336919] XFS (ublkb1): Mounting V5 Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.469127] XFS (ublkb1): Starting recovery (logdev: internal)
+[561147.480202] XFS (ublkb1): Ending recovery (logdev: internal)
+[561147.499900] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561147.516078] XFS (ublkb1): Unmounting Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.570868] XFS (ublkb1): Mounting V5 Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.592822] XFS (ublkb1): Ending clean mount
+[561147.596772] XFS (ublkb1): Unmounting Filesystem bd1da3eb-db34-4024-9483-149cdc91d3f6
+[561147.617732] run fstests xfs/122 at 2026-11-19 23:13:40
+[561147.735238] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561147.746880] XFS (ublkb0): Ending clean mount
+[561147.784973] run fstests xfs/127 at 2026-11-19 23:13:40
+[561148.020444] XFS (ublkb1): Mounting V5 Filesystem 107ce733-8e5a-4ed6-ad79-685b3b72ea5a
+[561148.038953] XFS (ublkb1): Ending clean mount
+[561148.066737] XFS (ublkb1): Unmounting Filesystem 107ce733-8e5a-4ed6-ad79-685b3b72ea5a
+[561148.199517] XFS (ublkb1): Mounting V5 Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561148.220421] XFS (ublkb1): Ending clean mount
+[561148.433821] XFS (ublkb1): Unmounting Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561148.446755] XFS (ublkb1): Mounting V5 Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561148.621582] XFS (ublkb1): Ending clean mount
+[561148.804733] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561148.821453] XFS (ublkb1): Unmounting Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561149.053986] XFS (ublkb1): Mounting V5 Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561149.083451] XFS (ublkb1): Ending clean mount
+[561149.090097] XFS (ublkb1): Unmounting Filesystem 0e0ec519-fbc4-4891-a5fa-80f384851c5e
+[561149.112275] run fstests xfs/128 at 2026-11-19 23:13:42
+[561149.432743] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561149.450455] XFS (ublkb0): Ending clean mount
+[561149.597910] XFS (ublkb1): Mounting V5 Filesystem 5ff8c91c-bf98-4b2c-9882-5c79dcf09a67
+[561149.616819] XFS (ublkb1): Ending clean mount
+[561149.642764] XFS (ublkb1): Unmounting Filesystem 5ff8c91c-bf98-4b2c-9882-5c79dcf09a67
+[561149.779090] XFS (ublkb1): Mounting V5 Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561149.797757] XFS (ublkb1): Ending clean mount
+[561152.317808] XFS (ublkb1): Unmounting Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561152.332882] XFS (ublkb1): Mounting V5 Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561152.348994] XFS (ublkb1): Ending clean mount
+[561153.844477] XFS (ublkb1): Unmounting Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561153.856460] XFS (ublkb1): Mounting V5 Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561153.872038] XFS (ublkb1): Ending clean mount
+[561160.145141] XFS (ublkb1): Unmounting Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561160.162202] XFS (ublkb1): Mounting V5 Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561160.178965] XFS (ublkb1): Ending clean mount
+[561161.517136] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561161.538078] XFS (ublkb1): Unmounting Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561161.587269] XFS (ublkb1): Mounting V5 Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561161.607157] XFS (ublkb1): Ending clean mount
+[561161.610447] XFS (ublkb1): Unmounting Filesystem 09a13b7c-d290-4198-a76f-3275b7044f27
+[561161.632330] run fstests xfs/129 at 2026-11-19 23:13:54
+[561161.755969] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[561161.772033] XFS (ublkb0): Ending clean mount
+[561161.930935] XFS (ublkb1): Mounting V5 Filesystem 6f767ec4-cb56-418d-9c23-9224ca1098c2
+[561161.948954] XFS (ublkb1): Ending clean mount
+[561161.975080] XFS (ublkb1): Unmounting Filesystem 6f767ec4-cb56-418d-9c23-9224ca1098c2
+[561162.097049] XFS (ublkb1): Mounting V5 Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561162.115676] XFS (ublkb1): Ending clean mount
+[561163.720690] XFS (ublkb1): Unmounting Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561164.686640] set_capacity_and_notify: 10 callbacks suppressed
+[561164.686647] loop8: detected capacity change from 0 to 33554432
+[561164.690205] XFS (loop8): Mounting V5 Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561164.831149] XFS (loop8): Ending clean mount
+[561164.850956] XFS (loop8): Unmounting Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561165.005695] XFS (loop8): Mounting V5 Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561165.034488] XFS (loop8): Ending clean mount
+[561165.037354] XFS (loop8): Unmounting Filesystem a5ec06bf-5fa6-4c33-8619-f8f57ddee4c7
+[561173.954303] XFS (loop8): SB validate failed with error -5.

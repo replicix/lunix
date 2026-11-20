@@ -1,0 +1,59 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+device-mapper: remove ioctl on error-test.240  failed: No such device or address
+Command failed.
+wrote 41943040/41943040 bytes at offset 0
+40 MiB, 5 ops; 0.0035 sec (11.126 GiB/sec and 1424.0957 ops/sec)
+wrote 1/1 bytes at offset 8388608
+1.000000 bytes, 1 ops; 0.0007 sec (1.290 KiB/sec and 1321.0040 ops/sec)
+wrote 41943040/41943040 bytes at offset 0
+40 MiB, 5 ops; 0.0034 sec (11.303 GiB/sec and 1446.7593 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+Phase 1 - find and verify superblock...
+Phase 2 - using internal log
+        - zero log...
+        - scan filesystem freespace and inode maps...
+        - found root inode chunk
+Phase 3 - for each AG...
+        - scan and clear agi unlinked lists...
+        - process known inodes and perform inode discovery...
+        - agno = 0
+        - agno = 1
+        - agno = 2
+        - agno = 3
+        - process newly discovered inodes...
+Phase 4 - check for duplicate blocks...
+        - setting up duplicate extent list...
+        - check for inodes claiming duplicate blocks...
+        - agno = 1
+        - agno = 0
+        - agno = 2
+        - agno = 3
+Phase 5 - rebuild AG headers and trees...
+        - reset superblock...
+Phase 6 - check inode connectivity...
+        - resetting contents of realtime bitmap and summary inodes
+        - traversing filesystem ...
+        - traversal finished ...
+        - moving disconnected inodes to lost+found ...
+Phase 7 - verify and correct link counts...
+done
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+device-mapper: remove ioctl on error-test.240  failed: No such device or address
+Command failed.
+umount: /dev/ublkb1: not mounted.

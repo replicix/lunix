@@ -1,0 +1,42 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0008 sec (4.505 GiB/sec and 1181084.1984 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0068 sec (293.556 MiB/sec and 146.7782 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (139.509 GiB/sec and 71428.5714 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (150.240 GiB/sec and 76923.0769 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (139.509 GiB/sec and 71428.5714 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0039 sec (508.906 MiB/sec and 254.4529 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (150.240 GiB/sec and 76923.0769 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (150.240 GiB/sec and 76923.0769 ops/sec)
+linked 2097152/2097152 bytes at offset 0
+2 MiB, 1 ops; 0.0000 sec (150.240 GiB/sec and 76923.0769 ops/sec)
+linked 1048576/1048576 bytes at offset 0
+1 MiB, 1 ops; 0.0000 sec (30.518 GiB/sec and 31250.0000 ops/sec)
+linked 1048576/1048576 bytes at offset 0
+1 MiB, 1 ops; 0.0000 sec (65.104 GiB/sec and 66666.6667 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds

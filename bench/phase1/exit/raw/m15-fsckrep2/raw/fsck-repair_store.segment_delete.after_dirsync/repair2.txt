@@ -1,0 +1,14 @@
+lunix-fsck: volume 128b9cf9-756c-46fd-9b63-f98629e2d456 (integrity)
+note     gc_dry_run                 gc: a pass would condemn 0 segments and delete 0 segments, 0 packs, 0 index runs and 1 commits (212 bytes), and compact 0 segments (0 live bytes)
+repaired delete_orphans         3 segments and 0 packs deleted, 49361335 bytes freed
+chunks: 4032 of 65536 mapped, 61504 holes (93.8% hole), 4032 distinct; dedup 1.000, compression 1.000
+bytes: segments 264660726 map 167215 commits 1024 index 396960 journal 541065216 other 9358
+checked: 4 commits, 16 segments, 3 packs, 13 map nodes, 4045 extents, 63 journal records
+journal: 63 records and 0 marks to replay, flushed watermark 0
+not covered by this run:
+  journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)
+  volume.json and state/device: content that still parses (no checksum)
+  state/checkpoint: a hint; damage is a warning, never an error
+  cache/: not looked at
+  extents: tags and ids are not opened without --deep (the extent region is covered whole by seg_hash)
+result: clean

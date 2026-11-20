@@ -1,0 +1,89 @@
+*** test01() create sparse file ***
+wrote 1048576/1048576 bytes at offset 0
+1 MiB, 256 ops; 0.0002 sec (4.399 GiB/sec and 1153153.1532 ops/sec)
+wrote 1048576/1048576 bytes at offset 5242880
+1 MiB, 256 ops; 0.0002 sec (4.209 GiB/sec and 1103448.2759 ops/sec)
+wrote 1048576/1048576 bytes at offset 10485760
+1 MiB, 256 ops; 0.0002 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 1048576/1048576 bytes at offset 15728640
+1 MiB, 256 ops; 0.0002 sec (3.577 GiB/sec and 937728.9377 ops/sec)
+wrote 1048576/1048576 bytes at offset 20971520
+1 MiB, 256 ops; 0.0002 sec (4.718 GiB/sec and 1236714.9758 ops/sec)
+wrote 1048576/1048576 bytes at offset 26214400
+1 MiB, 256 ops; 0.0003 sec (2.782 GiB/sec and 729344.7293 ops/sec)
+wrote 1048576/1048576 bytes at offset 31457280
+1 MiB, 256 ops; 0.0002 sec (4.673 GiB/sec and 1224880.3828 ops/sec)
+wrote 1048576/1048576 bytes at offset 36700160
+1 MiB, 256 ops; 0.0002 sec (4.606 GiB/sec and 1207547.1698 ops/sec)
+wrote 1048576/1048576 bytes at offset 41943040
+1 MiB, 256 ops; 0.0002 sec (4.542 GiB/sec and 1190697.6744 ops/sec)
+wrote 1048576/1048576 bytes at offset 47185920
+1 MiB, 256 ops; 0.0002 sec (3.699 GiB/sec and 969696.9697 ops/sec)
+wrote 1048576/1048576 bytes at offset 52428800
+1 MiB, 256 ops; 0.0002 sec (4.103 GiB/sec and 1075630.2521 ops/sec)
+wrote 1048576/1048576 bytes at offset 57671680
+1 MiB, 256 ops; 0.0002 sec (3.538 GiB/sec and 927536.2319 ops/sec)
+wrote 1048576/1048576 bytes at offset 62914560
+1 MiB, 256 ops; 0.0002 sec (4.673 GiB/sec and 1224880.3828 ops/sec)
+wrote 1048576/1048576 bytes at offset 68157440
+1 MiB, 256 ops; 0.0002 sec (3.333 GiB/sec and 873720.1365 ops/sec)
+wrote 1048576/1048576 bytes at offset 73400320
+1 MiB, 256 ops; 0.0002 sec (4.787 GiB/sec and 1254901.9608 ops/sec)
+wrote 1048576/1048576 bytes at offset 78643200
+1 MiB, 256 ops; 0.0002 sec (4.787 GiB/sec and 1254901.9608 ops/sec)
+wrote 1048576/1048576 bytes at offset 83886080
+1 MiB, 256 ops; 0.0002 sec (4.834 GiB/sec and 1267326.7327 ops/sec)
+wrote 1048576/1048576 bytes at offset 89128960
+1 MiB, 256 ops; 0.0002 sec (4.052 GiB/sec and 1062240.6639 ops/sec)
+wrote 1048576/1048576 bytes at offset 94371840
+1 MiB, 256 ops; 0.0001 sec (5.034 GiB/sec and 1319587.6289 ops/sec)
+wrote 1048576/1048576 bytes at offset 99614720
+1 MiB, 256 ops; 0.0001 sec (5.034 GiB/sec and 1319587.6289 ops/sec)
+wrote 1048576/1048576 bytes at offset 104857600
+1 MiB, 256 ops; 0.0001 sec (5.366 GiB/sec and 1406593.4066 ops/sec)
+*** test01() create sparse file done ***
+
+*** test02() create sparse file ***
+wrote 1048576/1048576 bytes at offset 6291456
+1 MiB, 256 ops; 0.0001 sec (4.932 GiB/sec and 1292929.2929 ops/sec)
+wrote 1048576/1048576 bytes at offset 16777216
+1 MiB, 256 ops; 0.0001 sec (5.222 GiB/sec and 1368983.9572 ops/sec)
+wrote 1048576/1048576 bytes at offset 27262976
+1 MiB, 256 ops; 0.0001 sec (5.517 GiB/sec and 1446327.6836 ops/sec)
+wrote 1048576/1048576 bytes at offset 37748736
+1 MiB, 256 ops; 0.0001 sec (5.060 GiB/sec and 1326424.8705 ops/sec)
+wrote 1048576/1048576 bytes at offset 48234496
+1 MiB, 256 ops; 0.0002 sec (4.246 GiB/sec and 1113043.4783 ops/sec)
+wrote 1048576/1048576 bytes at offset 58720256
+1 MiB, 256 ops; 0.0002 sec (3.891 GiB/sec and 1019920.3187 ops/sec)
+wrote 1048576/1048576 bytes at offset 69206016
+1 MiB, 256 ops; 0.0001 sec (5.060 GiB/sec and 1326424.8705 ops/sec)
+wrote 1048576/1048576 bytes at offset 79691776
+1 MiB, 256 ops; 0.0003 sec (3.042 GiB/sec and 797507.7882 ops/sec)
+wrote 1048576/1048576 bytes at offset 90177536
+1 MiB, 256 ops; 0.0001 sec (5.167 GiB/sec and 1354497.3545 ops/sec)
+wrote 1048576/1048576 bytes at offset 100663296
+1 MiB, 256 ops; 0.0001 sec (5.060 GiB/sec and 1326424.8705 ops/sec)
+wrote 1048576/1048576 bytes at offset 111149056
+1 MiB, 256 ops; 0.0001 sec (4.932 GiB/sec and 1292929.2929 ops/sec)
+*** test02() create sparse file done ***
+
+*** test03() create sparse file ***
+wrote 10485760/10485760 bytes at offset 20971520
+10 MiB, 2560 ops; 0.0021 sec (4.484 GiB/sec and 1175390.2663 ops/sec)
+wrote 10485760/10485760 bytes at offset 83886080
+10 MiB, 2560 ops; 0.0021 sec (4.527 GiB/sec and 1186833.5651 ops/sec)
+wrote 10485760/10485760 bytes at offset 146800640
+10 MiB, 2560 ops; 0.0022 sec (4.338 GiB/sec and 1137272.3234 ops/sec)
+wrote 10485760/10485760 bytes at offset 209715200
+10 MiB, 2560 ops; 0.0020 sec (4.718 GiB/sec and 1236714.9758 ops/sec)
+*** test03() create sparse file done ***
+
+*** test04() create sparse file ***
+wrote 2097152/2097152 bytes at offset 62914560
+2 MiB, 512 ops; 0.0004 sec (4.264 GiB/sec and 1117903.9301 ops/sec)
+wrote 2097152/2097152 bytes at offset 157286400
+2 MiB, 512 ops; 0.0004 sec (4.764 GiB/sec and 1248780.4878 ops/sec)
+*** test04() create sparse file done ***
+
+umount: /dev/ublkb1: not mounted.

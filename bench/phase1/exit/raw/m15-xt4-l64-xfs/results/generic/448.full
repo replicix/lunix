@@ -1,0 +1,10 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+18. Test file with negative SEEK_{HOLE,DATA} offsets  
+18.01 SEEK_HOLE expected -1 with errno -6, got -6.                succ
+18.02 SEEK_DATA expected -1 with errno -6, got -6.                succ
+18.03 SEEK_HOLE expected -1 with errno -6, got -6.                succ
+18.04 SEEK_DATA expected -1 with errno -6, got -6.                succ
+
+umount: /dev/ublkb1: not mounted.

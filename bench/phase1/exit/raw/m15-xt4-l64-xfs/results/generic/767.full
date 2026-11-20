@@ -1,0 +1,132 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+scsi_debug options sector_size=512 physblk_exp=0 lowest_aligned=0 dev_size_mb=512 delay=0 clustering=1 atomic_wr=1
+echo '1' 2>&1 > /sys/fs/xfs/sda/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/sda/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/sda/error/metadata/EIO/retry_timeout_seconds
+scsi_debug atomic write properties
+stat.mask = 0x117ff
+stat.blksize = 512
+stat.attributes = 0x400000
+stat.nlink = 1
+stat.uid = 0
+stat.gid = 6
+stat.mode: 060660
+stat.ino = 92066
+stat.size = 0
+stat.blocks = 0
+stat.attributes_mask = 0x603070
+stat.atime.tv_sec = 1795126976
+stat.atime.tv_nsec = 816554439
+stat.btime.tv_sec = 0
+stat.btime.tv_nsec = 0
+stat.ctime.tv_sec = 1795126976
+stat.ctime.tv_nsec = 816554439
+stat.mtime.tv_sec = 1795126976
+stat.mtime.tv_nsec = 816554439
+stat.rdev_major = 8
+stat.rdev_minor = 0
+stat.dev_major = 0
+stat.dev_minor = 7
+stat.mnt_id = 0x29
+stat.dio_mem_align = 0
+stat.dio_offset_align = 0
+stat.subvol = 0x0
+stat.atomic_write_unit_min = 1024
+stat.atomic_write_unit_max = 65536
+stat.atomic_write_segments_max = 1
+stat.dio_read_offset_align = 0
+stat.atomic_write_unit_max_opt = 0
+meta-data=/dev/sda               isize=512    agcount=4, agsize=32768 blks
+         =                       sectsz=512   attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=131072, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=16384, version=2
+         =                       sectsz=512   sunit=0 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+echo '1' 2>&1 > /sys/fs/xfs/sda/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/sda/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/sda/error/metadata/EIO/retry_timeout_seconds
+filesystem atomic write properties
+stat.mask = 0x1173f
+stat.blksize = 4096
+stat.attributes = 0x400000
+stat.nlink = 1
+stat.uid = 0
+stat.gid = 0
+stat.mode: 0100644
+stat.ino = 131
+stat.size = 0
+stat.blocks = 0
+stat.attributes_mask = 0x603070
+stat.atime.tv_sec = 1795126976
+stat.atime.tv_nsec = 877554558
+stat.btime.tv_sec = 0
+stat.btime.tv_nsec = 0
+stat.ctime.tv_sec = 0
+stat.ctime.tv_nsec = 0
+stat.mtime.tv_sec = 0
+stat.mtime.tv_nsec = 0
+stat.rdev_major = 0
+stat.rdev_minor = 0
+stat.dev_major = 8
+stat.dev_minor = 0
+stat.mnt_id = 0x509
+stat.dio_mem_align = 0
+stat.dio_offset_align = 0
+stat.subvol = 0x0
+stat.atomic_write_unit_min = 4096
+stat.atomic_write_unit_max = 2097152
+stat.atomic_write_segments_max = 1
+stat.dio_read_offset_align = 0
+stat.atomic_write_unit_max_opt = 65536
+min:4096 max:2097152 opt:65536
+testing pos=2048 count=2048 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=-d
+testing pos=4194304 count=4194304 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=-d
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Invalid argument
+pwrite: Operation not supported
+pwrite: Invalid argument
+testing pos=0 count=4096 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=
+testing pos=512 count=4096 file=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile directio=-d
+umount: /dev/sda: no mount point specified.
+umount: /dev/ublkb1: not mounted.

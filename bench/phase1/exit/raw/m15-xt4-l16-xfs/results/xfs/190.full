@@ -1,0 +1,30 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 10485760/10485760 bytes at offset 0
+10 MiB, 2560 ops; 0.0019 sec (4.962 GiB/sec and 1300813.0081 ops/sec)
+Punching holes in file
+/usr/sbin/xfs_io -i -c unresvsp 4096 4096 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+/usr/sbin/xfs_io -i -c unresvsp 303104 4096 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+/usr/sbin/xfs_io -i -c unresvsp 1048576 512 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+/usr/sbin/xfs_io -i -c unresvsp 1051648 8192 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+/usr/sbin/xfs_io -i -c unresvsp 1065984 8192 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+/usr/sbin/xfs_io -i -c unresvsp 1085440 7168 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-190:
+	0: [0..7]: 192..199
+	1: [8..15]: hole
+	2: [16..591]: 208..783
+	3: [592..599]: hole
+	4: [600..2055]: 792..2247
+	5: [2056..2063]: hole
+	6: [2064..2087]: 2256..2279
+	7: [2088..2095]: hole
+	8: [2096..2119]: 2288..2311
+	9: [2120..2127]: hole
+	10: [2128..20479]: 2320..20671
+\[8..15\]
+\[592..599\]
+\[2048..2047\]
+\[2056..2063\]
+\[2088..2095\]
+\[2120..2127\]

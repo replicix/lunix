@@ -1,0 +1,76 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.5: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.6: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.7: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.8: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.9: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.10: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.11: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.12: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.13: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.14: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.15: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.16: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.17: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.18: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.19: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.20: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.21: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.22: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.23: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.24: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.25: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.26: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.27: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.28: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.29: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.30: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.31: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.32: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.33: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.34: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.35: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.36: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.37: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.38: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.39: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.40: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.41: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.42: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.43: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.44: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.45: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.46: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.47: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.48: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.49: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.50: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.51: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.52: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.53: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.54: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.55: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.56: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.57: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.58: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.59: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.60: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.61: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.62: No space left on device
+setfattr: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/103.63: No space left on device

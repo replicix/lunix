@@ -1,0 +1,1987 @@
+QA output created by 681
++ Part 1: Fix a correct unlinked list
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
++ Part 2: Fix a loop between 1 and 3
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+agi unlinked bucket 23 is 217687 in ag 0 (inode=217687)
+disconnected inode 217495, would move to lost+found
+repair returned 1?
++ Part 3: Fix a truncated bucket
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+Would clear next_unlinked in inode 217559
+Would clear next_unlinked in inode 217623
+Would clear next_unlinked in inode 217687
+Would clear next_unlinked in inode 217751
+disconnected inode 217495, would move to lost+found
+disconnected inode 217559, would move to lost+found
+disconnected inode 217623, would move to lost+found
+disconnected inode 217687, would move to lost+found
+disconnected inode 217751, would move to lost+found
+repair returned 1?
++ Part 4: Fix a loop at the end
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+rm: cannot remove '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/40': Input/output error
+rm failed on inum 217835
+agi unlinked bucket 0 is 217792 in ag 0 (inode=217792)
+agi unlinked bucket 1 is 217793 in ag 0 (inode=217793)
+agi unlinked bucket 2 is 217794 in ag 0 (inode=217794)
+agi unlinked bucket 3 is 217731 in ag 0 (inode=217731)
+agi unlinked bucket 4 is 217732 in ag 0 (inode=217732)
+agi unlinked bucket 5 is 217733 in ag 0 (inode=217733)
+agi unlinked bucket 6 is 217734 in ag 0 (inode=217734)
+agi unlinked bucket 7 is 217735 in ag 0 (inode=217735)
+agi unlinked bucket 8 is 217736 in ag 0 (inode=217736)
+agi unlinked bucket 9 is 217737 in ag 0 (inode=217737)
+agi unlinked bucket 10 is 217738 in ag 0 (inode=217738)
+agi unlinked bucket 11 is 217739 in ag 0 (inode=217739)
+agi unlinked bucket 12 is 217740 in ag 0 (inode=217740)
+agi unlinked bucket 13 is 217741 in ag 0 (inode=217741)
+agi unlinked bucket 14 is 217742 in ag 0 (inode=217742)
+agi unlinked bucket 15 is 217743 in ag 0 (inode=217743)
+agi unlinked bucket 16 is 217744 in ag 0 (inode=217744)
+agi unlinked bucket 17 is 217745 in ag 0 (inode=217745)
+agi unlinked bucket 18 is 217746 in ag 0 (inode=217746)
+agi unlinked bucket 19 is 217747 in ag 0 (inode=217747)
+agi unlinked bucket 20 is 217748 in ag 0 (inode=217748)
+agi unlinked bucket 21 is 217749 in ag 0 (inode=217749)
+agi unlinked bucket 22 is 217750 in ag 0 (inode=217750)
+agi unlinked bucket 23 is 217751 in ag 0 (inode=217751)
+agi unlinked bucket 24 is 217752 in ag 0 (inode=217752)
+agi unlinked bucket 25 is 217753 in ag 0 (inode=217753)
+agi unlinked bucket 26 is 217754 in ag 0 (inode=217754)
+agi unlinked bucket 27 is 217755 in ag 0 (inode=217755)
+agi unlinked bucket 28 is 217756 in ag 0 (inode=217756)
+agi unlinked bucket 29 is 217757 in ag 0 (inode=217757)
+agi unlinked bucket 30 is 217758 in ag 0 (inode=217758)
+agi unlinked bucket 31 is 217759 in ag 0 (inode=217759)
+agi unlinked bucket 32 is 217760 in ag 0 (inode=217760)
+agi unlinked bucket 33 is 217761 in ag 0 (inode=217761)
+agi unlinked bucket 34 is 217762 in ag 0 (inode=217762)
+agi unlinked bucket 35 is 217763 in ag 0 (inode=217763)
+agi unlinked bucket 36 is 217764 in ag 0 (inode=217764)
+agi unlinked bucket 37 is 217765 in ag 0 (inode=217765)
+agi unlinked bucket 38 is 217766 in ag 0 (inode=217766)
+agi unlinked bucket 39 is 217767 in ag 0 (inode=217767)
+agi unlinked bucket 40 is 217768 in ag 0 (inode=217768)
+agi unlinked bucket 41 is 217769 in ag 0 (inode=217769)
+agi unlinked bucket 42 is 217770 in ag 0 (inode=217770)
+agi unlinked bucket 43 is 217771 in ag 0 (inode=217771)
+agi unlinked bucket 44 is 217772 in ag 0 (inode=217772)
+agi unlinked bucket 45 is 217773 in ag 0 (inode=217773)
+agi unlinked bucket 46 is 217774 in ag 0 (inode=217774)
+agi unlinked bucket 47 is 217775 in ag 0 (inode=217775)
+agi unlinked bucket 48 is 217776 in ag 0 (inode=217776)
+agi unlinked bucket 49 is 217777 in ag 0 (inode=217777)
+agi unlinked bucket 50 is 217778 in ag 0 (inode=217778)
+agi unlinked bucket 51 is 217779 in ag 0 (inode=217779)
+agi unlinked bucket 52 is 217780 in ag 0 (inode=217780)
+agi unlinked bucket 53 is 217781 in ag 0 (inode=217781)
+agi unlinked bucket 54 is 217782 in ag 0 (inode=217782)
+agi unlinked bucket 55 is 217783 in ag 0 (inode=217783)
+agi unlinked bucket 56 is 217784 in ag 0 (inode=217784)
+agi unlinked bucket 57 is 217785 in ag 0 (inode=217785)
+agi unlinked bucket 58 is 217786 in ag 0 (inode=217786)
+agi unlinked bucket 59 is 217787 in ag 0 (inode=217787)
+agi unlinked bucket 60 is 217788 in ag 0 (inode=217788)
+agi unlinked bucket 61 is 217789 in ag 0 (inode=217789)
+agi unlinked bucket 62 is 217790 in ag 0 (inode=217790)
+agi unlinked bucket 63 is 217791 in ag 0 (inode=217791)
+Would clear next_unlinked in inode 217495
+Would clear next_unlinked in inode 217539
+Would clear next_unlinked in inode 217540
+Would clear next_unlinked in inode 217541
+Would clear next_unlinked in inode 217542
+Would clear next_unlinked in inode 217543
+Would clear next_unlinked in inode 217544
+Would clear next_unlinked in inode 217545
+Would clear next_unlinked in inode 217546
+Would clear next_unlinked in inode 217547
+Would clear next_unlinked in inode 217548
+Would clear next_unlinked in inode 217549
+Would clear next_unlinked in inode 217550
+Would clear next_unlinked in inode 217551
+Would clear next_unlinked in inode 217552
+Would clear next_unlinked in inode 217553
+Would clear next_unlinked in inode 217554
+Would clear next_unlinked in inode 217555
+Would clear next_unlinked in inode 217556
+Would clear next_unlinked in inode 217557
+Would clear next_unlinked in inode 217558
+Would clear next_unlinked in inode 217559
+Would clear next_unlinked in inode 217560
+Would clear next_unlinked in inode 217561
+Would clear next_unlinked in inode 217562
+Would clear next_unlinked in inode 217563
+Would clear next_unlinked in inode 217564
+Would clear next_unlinked in inode 217565
+Would clear next_unlinked in inode 217566
+Would clear next_unlinked in inode 217567
+Would clear next_unlinked in inode 217568
+Would clear next_unlinked in inode 217569
+Would clear next_unlinked in inode 217570
+Would clear next_unlinked in inode 217571
+Would clear next_unlinked in inode 217572
+Would clear next_unlinked in inode 217573
+Would clear next_unlinked in inode 217574
+Would clear next_unlinked in inode 217575
+Would clear next_unlinked in inode 217576
+Would clear next_unlinked in inode 217577
+Would clear next_unlinked in inode 217578
+Would clear next_unlinked in inode 217579
+Would clear next_unlinked in inode 217580
+Would clear next_unlinked in inode 217581
+Would clear next_unlinked in inode 217582
+Would clear next_unlinked in inode 217583
+Would clear next_unlinked in inode 217584
+Would clear next_unlinked in inode 217585
+Would clear next_unlinked in inode 217586
+Would clear next_unlinked in inode 217587
+Would clear next_unlinked in inode 217588
+Would clear next_unlinked in inode 217589
+Would clear next_unlinked in inode 217590
+Would clear next_unlinked in inode 217591
+Would clear next_unlinked in inode 217592
+Would clear next_unlinked in inode 217593
+Would clear next_unlinked in inode 217594
+Would clear next_unlinked in inode 217595
+Would clear next_unlinked in inode 217596
+Would clear next_unlinked in inode 217597
+Would clear next_unlinked in inode 217598
+Would clear next_unlinked in inode 217599
+Would clear next_unlinked in inode 217600
+Would clear next_unlinked in inode 217601
+Would clear next_unlinked in inode 217602
+Would clear next_unlinked in inode 217603
+Would clear next_unlinked in inode 217604
+Would clear next_unlinked in inode 217605
+Would clear next_unlinked in inode 217606
+Would clear next_unlinked in inode 217607
+Would clear next_unlinked in inode 217608
+Would clear next_unlinked in inode 217609
+Would clear next_unlinked in inode 217610
+Would clear next_unlinked in inode 217611
+Would clear next_unlinked in inode 217612
+Would clear next_unlinked in inode 217613
+Would clear next_unlinked in inode 217614
+Would clear next_unlinked in inode 217615
+Would clear next_unlinked in inode 217616
+Would clear next_unlinked in inode 217617
+Would clear next_unlinked in inode 217618
+Would clear next_unlinked in inode 217619
+Would clear next_unlinked in inode 217620
+Would clear next_unlinked in inode 217621
+Would clear next_unlinked in inode 217622
+Would clear next_unlinked in inode 217623
+Would clear next_unlinked in inode 217624
+Would clear next_unlinked in inode 217625
+Would clear next_unlinked in inode 217626
+Would clear next_unlinked in inode 217627
+Would clear next_unlinked in inode 217628
+Would clear next_unlinked in inode 217629
+Would clear next_unlinked in inode 217630
+Would clear next_unlinked in inode 217631
+Would clear next_unlinked in inode 217632
+Would clear next_unlinked in inode 217633
+Would clear next_unlinked in inode 217634
+Would clear next_unlinked in inode 217635
+Would clear next_unlinked in inode 217636
+Would clear next_unlinked in inode 217637
+Would clear next_unlinked in inode 217638
+Would clear next_unlinked in inode 217639
+Would clear next_unlinked in inode 217640
+Would clear next_unlinked in inode 217641
+Would clear next_unlinked in inode 217642
+Would clear next_unlinked in inode 217643
+Would clear next_unlinked in inode 217644
+Would clear next_unlinked in inode 217645
+Would clear next_unlinked in inode 217646
+Would clear next_unlinked in inode 217647
+Would clear next_unlinked in inode 217648
+Would clear next_unlinked in inode 217649
+Would clear next_unlinked in inode 217650
+Would clear next_unlinked in inode 217651
+Would clear next_unlinked in inode 217652
+Would clear next_unlinked in inode 217653
+Would clear next_unlinked in inode 217654
+Would clear next_unlinked in inode 217655
+Would clear next_unlinked in inode 217656
+Would clear next_unlinked in inode 217657
+Would clear next_unlinked in inode 217658
+Would clear next_unlinked in inode 217659
+Would clear next_unlinked in inode 217660
+Would clear next_unlinked in inode 217661
+Would clear next_unlinked in inode 217662
+Would clear next_unlinked in inode 217663
+Would clear next_unlinked in inode 217664
+Would clear next_unlinked in inode 217665
+Would clear next_unlinked in inode 217666
+Would clear next_unlinked in inode 217667
+Would clear next_unlinked in inode 217668
+Would clear next_unlinked in inode 217669
+Would clear next_unlinked in inode 217670
+Would clear next_unlinked in inode 217671
+Would clear next_unlinked in inode 217672
+Would clear next_unlinked in inode 217673
+Would clear next_unlinked in inode 217674
+Would clear next_unlinked in inode 217675
+Would clear next_unlinked in inode 217676
+Would clear next_unlinked in inode 217677
+Would clear next_unlinked in inode 217678
+Would clear next_unlinked in inode 217679
+Would clear next_unlinked in inode 217680
+Would clear next_unlinked in inode 217681
+Would clear next_unlinked in inode 217682
+Would clear next_unlinked in inode 217683
+Would clear next_unlinked in inode 217684
+Would clear next_unlinked in inode 217685
+Would clear next_unlinked in inode 217686
+Would clear next_unlinked in inode 217687
+Would clear next_unlinked in inode 217688
+Would clear next_unlinked in inode 217689
+Would clear next_unlinked in inode 217690
+Would clear next_unlinked in inode 217691
+Would clear next_unlinked in inode 217692
+Would clear next_unlinked in inode 217693
+Would clear next_unlinked in inode 217694
+Would clear next_unlinked in inode 217695
+Would clear next_unlinked in inode 217696
+Would clear next_unlinked in inode 217697
+Would clear next_unlinked in inode 217698
+Would clear next_unlinked in inode 217699
+Would clear next_unlinked in inode 217700
+Would clear next_unlinked in inode 217701
+Would clear next_unlinked in inode 217702
+Would clear next_unlinked in inode 217703
+Would clear next_unlinked in inode 217704
+Would clear next_unlinked in inode 217705
+Would clear next_unlinked in inode 217706
+Would clear next_unlinked in inode 217707
+Would clear next_unlinked in inode 217708
+Would clear next_unlinked in inode 217709
+Would clear next_unlinked in inode 217710
+Would clear next_unlinked in inode 217711
+Would clear next_unlinked in inode 217712
+Would clear next_unlinked in inode 217713
+Would clear next_unlinked in inode 217714
+Would clear next_unlinked in inode 217715
+Would clear next_unlinked in inode 217716
+Would clear next_unlinked in inode 217717
+Would clear next_unlinked in inode 217718
+Would clear next_unlinked in inode 217719
+Would clear next_unlinked in inode 217720
+Would clear next_unlinked in inode 217721
+Would clear next_unlinked in inode 217722
+Would clear next_unlinked in inode 217723
+Would clear next_unlinked in inode 217724
+Would clear next_unlinked in inode 217725
+Would clear next_unlinked in inode 217726
+Would clear next_unlinked in inode 217727
+Would clear next_unlinked in inode 217728
+Would clear next_unlinked in inode 217729
+Would clear next_unlinked in inode 217730
+Would clear next_unlinked in inode 217731
+Would clear next_unlinked in inode 217732
+Would clear next_unlinked in inode 217733
+Would clear next_unlinked in inode 217734
+Would clear next_unlinked in inode 217735
+Would clear next_unlinked in inode 217736
+Would clear next_unlinked in inode 217737
+Would clear next_unlinked in inode 217738
+Would clear next_unlinked in inode 217739
+Would clear next_unlinked in inode 217740
+Would clear next_unlinked in inode 217741
+Would clear next_unlinked in inode 217742
+Would clear next_unlinked in inode 217743
+Would clear next_unlinked in inode 217744
+Would clear next_unlinked in inode 217745
+Would clear next_unlinked in inode 217746
+Would clear next_unlinked in inode 217747
+Would clear next_unlinked in inode 217748
+Would clear next_unlinked in inode 217749
+Would clear next_unlinked in inode 217750
+Would clear next_unlinked in inode 217751
+Would clear next_unlinked in inode 217752
+Would clear next_unlinked in inode 217753
+Would clear next_unlinked in inode 217754
+Would clear next_unlinked in inode 217755
+Would clear next_unlinked in inode 217756
+Would clear next_unlinked in inode 217757
+Would clear next_unlinked in inode 217758
+Would clear next_unlinked in inode 217759
+Would clear next_unlinked in inode 217760
+Would clear next_unlinked in inode 217761
+Would clear next_unlinked in inode 217762
+Would clear next_unlinked in inode 217763
+Would clear next_unlinked in inode 217764
+Would clear next_unlinked in inode 217765
+Would clear next_unlinked in inode 217766
+Would clear next_unlinked in inode 217767
+Would clear next_unlinked in inode 217768
+Would clear next_unlinked in inode 217769
+Would clear next_unlinked in inode 217770
+Would clear next_unlinked in inode 217771
+Would clear next_unlinked in inode 217772
+Would clear next_unlinked in inode 217773
+Would clear next_unlinked in inode 217774
+Would clear next_unlinked in inode 217775
+Would clear next_unlinked in inode 217776
+Would clear next_unlinked in inode 217777
+Would clear next_unlinked in inode 217778
+Would clear next_unlinked in inode 217779
+Would clear next_unlinked in inode 217780
+Would clear next_unlinked in inode 217781
+Would clear next_unlinked in inode 217782
+Would clear next_unlinked in inode 217783
+Would clear next_unlinked in inode 217784
+Would clear next_unlinked in inode 217785
+Would clear next_unlinked in inode 217786
+Would clear next_unlinked in inode 217787
+Would clear next_unlinked in inode 217788
+Would clear next_unlinked in inode 217789
+Would clear next_unlinked in inode 217790
+Would clear next_unlinked in inode 217791
+Would clear next_unlinked in inode 217792
+Would clear next_unlinked in inode 217793
+Would clear next_unlinked in inode 217794
+disconnected inode 217475, would move to lost+found
+disconnected inode 217476, would move to lost+found
+disconnected inode 217477, would move to lost+found
+disconnected inode 217478, would move to lost+found
+disconnected inode 217479, would move to lost+found
+disconnected inode 217480, would move to lost+found
+disconnected inode 217481, would move to lost+found
+disconnected inode 217482, would move to lost+found
+disconnected inode 217483, would move to lost+found
+disconnected inode 217484, would move to lost+found
+disconnected inode 217485, would move to lost+found
+disconnected inode 217486, would move to lost+found
+disconnected inode 217487, would move to lost+found
+disconnected inode 217488, would move to lost+found
+disconnected inode 217489, would move to lost+found
+disconnected inode 217490, would move to lost+found
+disconnected inode 217491, would move to lost+found
+disconnected inode 217492, would move to lost+found
+disconnected inode 217493, would move to lost+found
+disconnected inode 217494, would move to lost+found
+disconnected inode 217495, would move to lost+found
+disconnected inode 217496, would move to lost+found
+disconnected inode 217497, would move to lost+found
+disconnected inode 217498, would move to lost+found
+disconnected inode 217499, would move to lost+found
+disconnected inode 217500, would move to lost+found
+disconnected inode 217501, would move to lost+found
+disconnected inode 217502, would move to lost+found
+disconnected inode 217503, would move to lost+found
+disconnected inode 217504, would move to lost+found
+disconnected inode 217505, would move to lost+found
+disconnected inode 217506, would move to lost+found
+disconnected inode 217507, would move to lost+found
+disconnected inode 217508, would move to lost+found
+disconnected inode 217509, would move to lost+found
+disconnected inode 217510, would move to lost+found
+disconnected inode 217511, would move to lost+found
+disconnected inode 217512, would move to lost+found
+disconnected inode 217513, would move to lost+found
+disconnected inode 217514, would move to lost+found
+disconnected inode 217515, would move to lost+found
+disconnected inode 217516, would move to lost+found
+disconnected inode 217517, would move to lost+found
+disconnected inode 217518, would move to lost+found
+disconnected inode 217519, would move to lost+found
+disconnected inode 217520, would move to lost+found
+disconnected inode 217521, would move to lost+found
+disconnected inode 217522, would move to lost+found
+disconnected inode 217523, would move to lost+found
+disconnected inode 217524, would move to lost+found
+disconnected inode 217525, would move to lost+found
+disconnected inode 217526, would move to lost+found
+disconnected inode 217527, would move to lost+found
+disconnected inode 217528, would move to lost+found
+disconnected inode 217529, would move to lost+found
+disconnected inode 217530, would move to lost+found
+disconnected inode 217531, would move to lost+found
+disconnected inode 217532, would move to lost+found
+disconnected inode 217533, would move to lost+found
+disconnected inode 217534, would move to lost+found
+disconnected inode 217535, would move to lost+found
+disconnected inode 217536, would move to lost+found
+disconnected inode 217537, would move to lost+found
+disconnected inode 217538, would move to lost+found
+disconnected inode 217539, would move to lost+found
+disconnected inode 217540, would move to lost+found
+disconnected inode 217541, would move to lost+found
+disconnected inode 217542, would move to lost+found
+disconnected inode 217543, would move to lost+found
+disconnected inode 217544, would move to lost+found
+disconnected inode 217545, would move to lost+found
+disconnected inode 217546, would move to lost+found
+disconnected inode 217547, would move to lost+found
+disconnected inode 217548, would move to lost+found
+disconnected inode 217549, would move to lost+found
+disconnected inode 217550, would move to lost+found
+disconnected inode 217551, would move to lost+found
+disconnected inode 217552, would move to lost+found
+disconnected inode 217553, would move to lost+found
+disconnected inode 217554, would move to lost+found
+disconnected inode 217555, would move to lost+found
+disconnected inode 217556, would move to lost+found
+disconnected inode 217557, would move to lost+found
+disconnected inode 217558, would move to lost+found
+disconnected inode 217559, would move to lost+found
+disconnected inode 217560, would move to lost+found
+disconnected inode 217561, would move to lost+found
+disconnected inode 217562, would move to lost+found
+disconnected inode 217563, would move to lost+found
+disconnected inode 217564, would move to lost+found
+disconnected inode 217565, would move to lost+found
+disconnected inode 217566, would move to lost+found
+disconnected inode 217567, would move to lost+found
+disconnected inode 217568, would move to lost+found
+disconnected inode 217569, would move to lost+found
+disconnected inode 217570, would move to lost+found
+disconnected inode 217571, would move to lost+found
+disconnected inode 217572, would move to lost+found
+disconnected inode 217573, would move to lost+found
+disconnected inode 217574, would move to lost+found
+disconnected inode 217575, would move to lost+found
+disconnected inode 217576, would move to lost+found
+disconnected inode 217577, would move to lost+found
+disconnected inode 217578, would move to lost+found
+disconnected inode 217579, would move to lost+found
+disconnected inode 217580, would move to lost+found
+disconnected inode 217581, would move to lost+found
+disconnected inode 217582, would move to lost+found
+disconnected inode 217583, would move to lost+found
+disconnected inode 217584, would move to lost+found
+disconnected inode 217585, would move to lost+found
+disconnected inode 217586, would move to lost+found
+disconnected inode 217587, would move to lost+found
+disconnected inode 217588, would move to lost+found
+disconnected inode 217589, would move to lost+found
+disconnected inode 217590, would move to lost+found
+disconnected inode 217591, would move to lost+found
+disconnected inode 217592, would move to lost+found
+disconnected inode 217593, would move to lost+found
+disconnected inode 217594, would move to lost+found
+disconnected inode 217595, would move to lost+found
+disconnected inode 217596, would move to lost+found
+disconnected inode 217597, would move to lost+found
+disconnected inode 217598, would move to lost+found
+disconnected inode 217599, would move to lost+found
+disconnected inode 217600, would move to lost+found
+disconnected inode 217601, would move to lost+found
+disconnected inode 217602, would move to lost+found
+disconnected inode 217603, would move to lost+found
+disconnected inode 217604, would move to lost+found
+disconnected inode 217605, would move to lost+found
+disconnected inode 217606, would move to lost+found
+disconnected inode 217607, would move to lost+found
+disconnected inode 217608, would move to lost+found
+disconnected inode 217609, would move to lost+found
+disconnected inode 217610, would move to lost+found
+disconnected inode 217611, would move to lost+found
+disconnected inode 217612, would move to lost+found
+disconnected inode 217613, would move to lost+found
+disconnected inode 217614, would move to lost+found
+disconnected inode 217615, would move to lost+found
+disconnected inode 217616, would move to lost+found
+disconnected inode 217617, would move to lost+found
+disconnected inode 217618, would move to lost+found
+disconnected inode 217619, would move to lost+found
+disconnected inode 217620, would move to lost+found
+disconnected inode 217621, would move to lost+found
+disconnected inode 217622, would move to lost+found
+disconnected inode 217623, would move to lost+found
+disconnected inode 217624, would move to lost+found
+disconnected inode 217625, would move to lost+found
+disconnected inode 217626, would move to lost+found
+disconnected inode 217627, would move to lost+found
+disconnected inode 217628, would move to lost+found
+disconnected inode 217629, would move to lost+found
+disconnected inode 217630, would move to lost+found
+disconnected inode 217631, would move to lost+found
+disconnected inode 217632, would move to lost+found
+disconnected inode 217633, would move to lost+found
+disconnected inode 217634, would move to lost+found
+disconnected inode 217635, would move to lost+found
+disconnected inode 217636, would move to lost+found
+disconnected inode 217637, would move to lost+found
+disconnected inode 217638, would move to lost+found
+disconnected inode 217639, would move to lost+found
+disconnected inode 217640, would move to lost+found
+disconnected inode 217641, would move to lost+found
+disconnected inode 217642, would move to lost+found
+disconnected inode 217643, would move to lost+found
+disconnected inode 217644, would move to lost+found
+disconnected inode 217645, would move to lost+found
+disconnected inode 217646, would move to lost+found
+disconnected inode 217647, would move to lost+found
+disconnected inode 217648, would move to lost+found
+disconnected inode 217649, would move to lost+found
+disconnected inode 217650, would move to lost+found
+disconnected inode 217651, would move to lost+found
+disconnected inode 217652, would move to lost+found
+disconnected inode 217653, would move to lost+found
+disconnected inode 217654, would move to lost+found
+disconnected inode 217655, would move to lost+found
+disconnected inode 217656, would move to lost+found
+disconnected inode 217657, would move to lost+found
+disconnected inode 217658, would move to lost+found
+disconnected inode 217659, would move to lost+found
+disconnected inode 217660, would move to lost+found
+disconnected inode 217661, would move to lost+found
+disconnected inode 217662, would move to lost+found
+disconnected inode 217663, would move to lost+found
+disconnected inode 217664, would move to lost+found
+disconnected inode 217665, would move to lost+found
+disconnected inode 217666, would move to lost+found
+disconnected inode 217667, would move to lost+found
+disconnected inode 217668, would move to lost+found
+disconnected inode 217669, would move to lost+found
+disconnected inode 217670, would move to lost+found
+disconnected inode 217671, would move to lost+found
+disconnected inode 217672, would move to lost+found
+disconnected inode 217673, would move to lost+found
+disconnected inode 217674, would move to lost+found
+disconnected inode 217675, would move to lost+found
+disconnected inode 217676, would move to lost+found
+disconnected inode 217677, would move to lost+found
+disconnected inode 217678, would move to lost+found
+disconnected inode 217679, would move to lost+found
+disconnected inode 217680, would move to lost+found
+disconnected inode 217681, would move to lost+found
+disconnected inode 217682, would move to lost+found
+disconnected inode 217683, would move to lost+found
+disconnected inode 217684, would move to lost+found
+disconnected inode 217685, would move to lost+found
+disconnected inode 217686, would move to lost+found
+disconnected inode 217687, would move to lost+found
+disconnected inode 217688, would move to lost+found
+disconnected inode 217689, would move to lost+found
+disconnected inode 217690, would move to lost+found
+disconnected inode 217691, would move to lost+found
+disconnected inode 217692, would move to lost+found
+disconnected inode 217693, would move to lost+found
+disconnected inode 217694, would move to lost+found
+disconnected inode 217695, would move to lost+found
+disconnected inode 217696, would move to lost+found
+disconnected inode 217697, would move to lost+found
+disconnected inode 217698, would move to lost+found
+disconnected inode 217699, would move to lost+found
+disconnected inode 217700, would move to lost+found
+disconnected inode 217701, would move to lost+found
+disconnected inode 217702, would move to lost+found
+disconnected inode 217703, would move to lost+found
+disconnected inode 217704, would move to lost+found
+disconnected inode 217705, would move to lost+found
+disconnected inode 217706, would move to lost+found
+disconnected inode 217707, would move to lost+found
+disconnected inode 217708, would move to lost+found
+disconnected inode 217709, would move to lost+found
+disconnected inode 217710, would move to lost+found
+disconnected inode 217711, would move to lost+found
+disconnected inode 217712, would move to lost+found
+disconnected inode 217713, would move to lost+found
+disconnected inode 217714, would move to lost+found
+disconnected inode 217715, would move to lost+found
+disconnected inode 217716, would move to lost+found
+disconnected inode 217717, would move to lost+found
+disconnected inode 217718, would move to lost+found
+disconnected inode 217719, would move to lost+found
+disconnected inode 217720, would move to lost+found
+disconnected inode 217721, would move to lost+found
+disconnected inode 217722, would move to lost+found
+disconnected inode 217723, would move to lost+found
+disconnected inode 217724, would move to lost+found
+disconnected inode 217725, would move to lost+found
+disconnected inode 217726, would move to lost+found
+disconnected inode 217727, would move to lost+found
+disconnected inode 217728, would move to lost+found
+disconnected inode 217729, would move to lost+found
+disconnected inode 217730, would move to lost+found
+disconnected inode 217731, would move to lost+found
+disconnected inode 217732, would move to lost+found
+disconnected inode 217733, would move to lost+found
+disconnected inode 217734, would move to lost+found
+disconnected inode 217735, would move to lost+found
+disconnected inode 217736, would move to lost+found
+disconnected inode 217737, would move to lost+found
+disconnected inode 217738, would move to lost+found
+disconnected inode 217739, would move to lost+found
+disconnected inode 217740, would move to lost+found
+disconnected inode 217741, would move to lost+found
+disconnected inode 217742, would move to lost+found
+disconnected inode 217743, would move to lost+found
+disconnected inode 217744, would move to lost+found
+disconnected inode 217745, would move to lost+found
+disconnected inode 217746, would move to lost+found
+disconnected inode 217747, would move to lost+found
+disconnected inode 217748, would move to lost+found
+disconnected inode 217749, would move to lost+found
+disconnected inode 217750, would move to lost+found
+disconnected inode 217751, would move to lost+found
+disconnected inode 217752, would move to lost+found
+disconnected inode 217753, would move to lost+found
+disconnected inode 217754, would move to lost+found
+disconnected inode 217755, would move to lost+found
+disconnected inode 217756, would move to lost+found
+disconnected inode 217757, would move to lost+found
+disconnected inode 217758, would move to lost+found
+disconnected inode 217759, would move to lost+found
+disconnected inode 217760, would move to lost+found
+disconnected inode 217761, would move to lost+found
+disconnected inode 217762, would move to lost+found
+disconnected inode 217763, would move to lost+found
+disconnected inode 217764, would move to lost+found
+disconnected inode 217765, would move to lost+found
+disconnected inode 217766, would move to lost+found
+disconnected inode 217767, would move to lost+found
+disconnected inode 217768, would move to lost+found
+disconnected inode 217769, would move to lost+found
+disconnected inode 217770, would move to lost+found
+disconnected inode 217771, would move to lost+found
+disconnected inode 217772, would move to lost+found
+disconnected inode 217773, would move to lost+found
+disconnected inode 217774, would move to lost+found
+disconnected inode 217775, would move to lost+found
+disconnected inode 217776, would move to lost+found
+disconnected inode 217777, would move to lost+found
+disconnected inode 217778, would move to lost+found
+disconnected inode 217779, would move to lost+found
+disconnected inode 217780, would move to lost+found
+disconnected inode 217781, would move to lost+found
+disconnected inode 217782, would move to lost+found
+disconnected inode 217783, would move to lost+found
+disconnected inode 217784, would move to lost+found
+disconnected inode 217785, would move to lost+found
+disconnected inode 217786, would move to lost+found
+disconnected inode 217787, would move to lost+found
+disconnected inode 217788, would move to lost+found
+disconnected inode 217789, would move to lost+found
+disconnected inode 217790, would move to lost+found
+disconnected inode 217791, would move to lost+found
+disconnected inode 217792, would move to lost+found
+disconnected inode 217793, would move to lost+found
+disconnected inode 217794, would move to lost+found
+repair returned 1?
++ Part 5: Fix an inode in the wrong bucket
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+rm: cannot remove '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/39': Input/output error
+rm failed on inum 217834
+agi unlinked bucket 0 is 217792 in ag 0 (inode=217792)
+agi unlinked bucket 1 is 217793 in ag 0 (inode=217793)
+agi unlinked bucket 2 is 217794 in ag 0 (inode=217794)
+agi unlinked bucket 3 is 217731 in ag 0 (inode=217731)
+agi unlinked bucket 4 is 217732 in ag 0 (inode=217732)
+agi unlinked bucket 5 is 217733 in ag 0 (inode=217733)
+agi unlinked bucket 6 is 217734 in ag 0 (inode=217734)
+agi unlinked bucket 7 is 217735 in ag 0 (inode=217735)
+agi unlinked bucket 8 is 217736 in ag 0 (inode=217736)
+agi unlinked bucket 9 is 217737 in ag 0 (inode=217737)
+agi unlinked bucket 10 is 217738 in ag 0 (inode=217738)
+agi unlinked bucket 11 is 217739 in ag 0 (inode=217739)
+agi unlinked bucket 12 is 217740 in ag 0 (inode=217740)
+agi unlinked bucket 13 is 217741 in ag 0 (inode=217741)
+agi unlinked bucket 14 is 217742 in ag 0 (inode=217742)
+agi unlinked bucket 15 is 217743 in ag 0 (inode=217743)
+agi unlinked bucket 16 is 217744 in ag 0 (inode=217744)
+agi unlinked bucket 17 is 217745 in ag 0 (inode=217745)
+agi unlinked bucket 18 is 217746 in ag 0 (inode=217746)
+agi unlinked bucket 19 is 217747 in ag 0 (inode=217747)
+agi unlinked bucket 20 is 217748 in ag 0 (inode=217748)
+agi unlinked bucket 21 is 217749 in ag 0 (inode=217749)
+agi unlinked bucket 22 is 217750 in ag 0 (inode=217750)
+agi unlinked bucket 23 is 217751 in ag 0 (inode=217751)
+agi unlinked bucket 24 is 217752 in ag 0 (inode=217752)
+agi unlinked bucket 25 is 217753 in ag 0 (inode=217753)
+agi unlinked bucket 26 is 217754 in ag 0 (inode=217754)
+agi unlinked bucket 27 is 217755 in ag 0 (inode=217755)
+agi unlinked bucket 28 is 217756 in ag 0 (inode=217756)
+agi unlinked bucket 29 is 217757 in ag 0 (inode=217757)
+agi unlinked bucket 30 is 217758 in ag 0 (inode=217758)
+agi unlinked bucket 31 is 217759 in ag 0 (inode=217759)
+agi unlinked bucket 32 is 217760 in ag 0 (inode=217760)
+agi unlinked bucket 33 is 217761 in ag 0 (inode=217761)
+agi unlinked bucket 34 is 217762 in ag 0 (inode=217762)
+agi unlinked bucket 35 is 217763 in ag 0 (inode=217763)
+agi unlinked bucket 36 is 217764 in ag 0 (inode=217764)
+agi unlinked bucket 37 is 217765 in ag 0 (inode=217765)
+agi unlinked bucket 38 is 217766 in ag 0 (inode=217766)
+agi unlinked bucket 39 is 217767 in ag 0 (inode=217767)
+agi unlinked bucket 40 is 217768 in ag 0 (inode=217768)
+agi unlinked bucket 41 is 217769 in ag 0 (inode=217769)
+agi unlinked bucket 42 is 217770 in ag 0 (inode=217770)
+agi unlinked bucket 43 is 217771 in ag 0 (inode=217771)
+agi unlinked bucket 44 is 217772 in ag 0 (inode=217772)
+agi unlinked bucket 45 is 217773 in ag 0 (inode=217773)
+agi unlinked bucket 46 is 217774 in ag 0 (inode=217774)
+agi unlinked bucket 47 is 217775 in ag 0 (inode=217775)
+agi unlinked bucket 48 is 217776 in ag 0 (inode=217776)
+agi unlinked bucket 49 is 217777 in ag 0 (inode=217777)
+agi unlinked bucket 50 is 217778 in ag 0 (inode=217778)
+agi unlinked bucket 51 is 217779 in ag 0 (inode=217779)
+agi unlinked bucket 52 is 217780 in ag 0 (inode=217780)
+agi unlinked bucket 53 is 217781 in ag 0 (inode=217781)
+agi unlinked bucket 54 is 217782 in ag 0 (inode=217782)
+agi unlinked bucket 55 is 217783 in ag 0 (inode=217783)
+agi unlinked bucket 56 is 217784 in ag 0 (inode=217784)
+agi unlinked bucket 57 is 217785 in ag 0 (inode=217785)
+agi unlinked bucket 58 is 217786 in ag 0 (inode=217786)
+agi unlinked bucket 59 is 217787 in ag 0 (inode=217787)
+agi unlinked bucket 60 is 217788 in ag 0 (inode=217788)
+agi unlinked bucket 61 is 217789 in ag 0 (inode=217789)
+agi unlinked bucket 62 is 217790 in ag 0 (inode=217790)
+agi unlinked bucket 63 is 217791 in ag 0 (inode=217791)
+Would clear next_unlinked in inode 217495
+Would clear next_unlinked in inode 217539
+Would clear next_unlinked in inode 217540
+Would clear next_unlinked in inode 217541
+Would clear next_unlinked in inode 217542
+Would clear next_unlinked in inode 217543
+Would clear next_unlinked in inode 217544
+Would clear next_unlinked in inode 217545
+Would clear next_unlinked in inode 217546
+Would clear next_unlinked in inode 217547
+Would clear next_unlinked in inode 217548
+Would clear next_unlinked in inode 217549
+Would clear next_unlinked in inode 217550
+Would clear next_unlinked in inode 217551
+Would clear next_unlinked in inode 217552
+Would clear next_unlinked in inode 217553
+Would clear next_unlinked in inode 217554
+Would clear next_unlinked in inode 217555
+Would clear next_unlinked in inode 217556
+Would clear next_unlinked in inode 217557
+Would clear next_unlinked in inode 217558
+Would clear next_unlinked in inode 217559
+Would clear next_unlinked in inode 217560
+Would clear next_unlinked in inode 217561
+Would clear next_unlinked in inode 217562
+Would clear next_unlinked in inode 217563
+Would clear next_unlinked in inode 217564
+Would clear next_unlinked in inode 217565
+Would clear next_unlinked in inode 217566
+Would clear next_unlinked in inode 217567
+Would clear next_unlinked in inode 217568
+Would clear next_unlinked in inode 217569
+Would clear next_unlinked in inode 217570
+Would clear next_unlinked in inode 217571
+Would clear next_unlinked in inode 217572
+Would clear next_unlinked in inode 217573
+Would clear next_unlinked in inode 217574
+Would clear next_unlinked in inode 217575
+Would clear next_unlinked in inode 217576
+Would clear next_unlinked in inode 217577
+Would clear next_unlinked in inode 217578
+Would clear next_unlinked in inode 217579
+Would clear next_unlinked in inode 217580
+Would clear next_unlinked in inode 217581
+Would clear next_unlinked in inode 217582
+Would clear next_unlinked in inode 217583
+Would clear next_unlinked in inode 217584
+Would clear next_unlinked in inode 217585
+Would clear next_unlinked in inode 217586
+Would clear next_unlinked in inode 217587
+Would clear next_unlinked in inode 217588
+Would clear next_unlinked in inode 217589
+Would clear next_unlinked in inode 217590
+Would clear next_unlinked in inode 217591
+Would clear next_unlinked in inode 217592
+Would clear next_unlinked in inode 217593
+Would clear next_unlinked in inode 217594
+Would clear next_unlinked in inode 217595
+Would clear next_unlinked in inode 217596
+Would clear next_unlinked in inode 217597
+Would clear next_unlinked in inode 217598
+Would clear next_unlinked in inode 217599
+Would clear next_unlinked in inode 217600
+Would clear next_unlinked in inode 217601
+Would clear next_unlinked in inode 217602
+Would clear next_unlinked in inode 217603
+Would clear next_unlinked in inode 217604
+Would clear next_unlinked in inode 217605
+Would clear next_unlinked in inode 217606
+Would clear next_unlinked in inode 217607
+Would clear next_unlinked in inode 217608
+Would clear next_unlinked in inode 217609
+Would clear next_unlinked in inode 217610
+Would clear next_unlinked in inode 217611
+Would clear next_unlinked in inode 217612
+Would clear next_unlinked in inode 217613
+Would clear next_unlinked in inode 217614
+Would clear next_unlinked in inode 217615
+Would clear next_unlinked in inode 217616
+Would clear next_unlinked in inode 217617
+Would clear next_unlinked in inode 217618
+Would clear next_unlinked in inode 217619
+Would clear next_unlinked in inode 217620
+Would clear next_unlinked in inode 217621
+Would clear next_unlinked in inode 217622
+Would clear next_unlinked in inode 217623
+Would clear next_unlinked in inode 217625
+Would clear next_unlinked in inode 217626
+Would clear next_unlinked in inode 217627
+Would clear next_unlinked in inode 217628
+Would clear next_unlinked in inode 217629
+Would clear next_unlinked in inode 217630
+Would clear next_unlinked in inode 217631
+Would clear next_unlinked in inode 217632
+Would clear next_unlinked in inode 217633
+Would clear next_unlinked in inode 217634
+Would clear next_unlinked in inode 217635
+Would clear next_unlinked in inode 217636
+Would clear next_unlinked in inode 217637
+Would clear next_unlinked in inode 217638
+Would clear next_unlinked in inode 217639
+Would clear next_unlinked in inode 217640
+Would clear next_unlinked in inode 217641
+Would clear next_unlinked in inode 217642
+Would clear next_unlinked in inode 217643
+Would clear next_unlinked in inode 217644
+Would clear next_unlinked in inode 217645
+Would clear next_unlinked in inode 217646
+Would clear next_unlinked in inode 217647
+Would clear next_unlinked in inode 217648
+Would clear next_unlinked in inode 217649
+Would clear next_unlinked in inode 217650
+Would clear next_unlinked in inode 217651
+Would clear next_unlinked in inode 217652
+Would clear next_unlinked in inode 217653
+Would clear next_unlinked in inode 217654
+Would clear next_unlinked in inode 217655
+Would clear next_unlinked in inode 217656
+Would clear next_unlinked in inode 217657
+Would clear next_unlinked in inode 217658
+Would clear next_unlinked in inode 217659
+Would clear next_unlinked in inode 217660
+Would clear next_unlinked in inode 217661
+Would clear next_unlinked in inode 217662
+Would clear next_unlinked in inode 217663
+Would clear next_unlinked in inode 217664
+Would clear next_unlinked in inode 217665
+Would clear next_unlinked in inode 217666
+Would clear next_unlinked in inode 217667
+Would clear next_unlinked in inode 217668
+Would clear next_unlinked in inode 217669
+Would clear next_unlinked in inode 217670
+Would clear next_unlinked in inode 217671
+Would clear next_unlinked in inode 217672
+Would clear next_unlinked in inode 217673
+Would clear next_unlinked in inode 217674
+Would clear next_unlinked in inode 217675
+Would clear next_unlinked in inode 217676
+Would clear next_unlinked in inode 217677
+Would clear next_unlinked in inode 217678
+Would clear next_unlinked in inode 217679
+Would clear next_unlinked in inode 217680
+Would clear next_unlinked in inode 217681
+Would clear next_unlinked in inode 217682
+Would clear next_unlinked in inode 217683
+Would clear next_unlinked in inode 217684
+Would clear next_unlinked in inode 217685
+Would clear next_unlinked in inode 217686
+Would clear next_unlinked in inode 217687
+Would clear next_unlinked in inode 217688
+Would clear next_unlinked in inode 217689
+Would clear next_unlinked in inode 217690
+Would clear next_unlinked in inode 217691
+Would clear next_unlinked in inode 217692
+Would clear next_unlinked in inode 217693
+Would clear next_unlinked in inode 217694
+Would clear next_unlinked in inode 217695
+Would clear next_unlinked in inode 217696
+Would clear next_unlinked in inode 217697
+Would clear next_unlinked in inode 217698
+Would clear next_unlinked in inode 217699
+Would clear next_unlinked in inode 217700
+Would clear next_unlinked in inode 217701
+Would clear next_unlinked in inode 217702
+Would clear next_unlinked in inode 217703
+Would clear next_unlinked in inode 217704
+Would clear next_unlinked in inode 217705
+Would clear next_unlinked in inode 217706
+Would clear next_unlinked in inode 217707
+Would clear next_unlinked in inode 217708
+Would clear next_unlinked in inode 217709
+Would clear next_unlinked in inode 217710
+Would clear next_unlinked in inode 217711
+Would clear next_unlinked in inode 217712
+Would clear next_unlinked in inode 217713
+Would clear next_unlinked in inode 217714
+Would clear next_unlinked in inode 217715
+Would clear next_unlinked in inode 217716
+Would clear next_unlinked in inode 217717
+Would clear next_unlinked in inode 217718
+Would clear next_unlinked in inode 217719
+Would clear next_unlinked in inode 217720
+Would clear next_unlinked in inode 217721
+Would clear next_unlinked in inode 217722
+Would clear next_unlinked in inode 217723
+Would clear next_unlinked in inode 217724
+Would clear next_unlinked in inode 217725
+Would clear next_unlinked in inode 217726
+Would clear next_unlinked in inode 217727
+Would clear next_unlinked in inode 217728
+Would clear next_unlinked in inode 217729
+Would clear next_unlinked in inode 217730
+Would clear next_unlinked in inode 217731
+Would clear next_unlinked in inode 217732
+Would clear next_unlinked in inode 217733
+Would clear next_unlinked in inode 217734
+Would clear next_unlinked in inode 217735
+Would clear next_unlinked in inode 217736
+Would clear next_unlinked in inode 217737
+Would clear next_unlinked in inode 217738
+Would clear next_unlinked in inode 217739
+Would clear next_unlinked in inode 217740
+Would clear next_unlinked in inode 217741
+Would clear next_unlinked in inode 217742
+Would clear next_unlinked in inode 217743
+Would clear next_unlinked in inode 217744
+Would clear next_unlinked in inode 217745
+Would clear next_unlinked in inode 217746
+Would clear next_unlinked in inode 217747
+Would clear next_unlinked in inode 217748
+Would clear next_unlinked in inode 217749
+Would clear next_unlinked in inode 217750
+Would clear next_unlinked in inode 217751
+Would clear next_unlinked in inode 217752
+Would clear next_unlinked in inode 217753
+Would clear next_unlinked in inode 217754
+Would clear next_unlinked in inode 217755
+Would clear next_unlinked in inode 217756
+Would clear next_unlinked in inode 217757
+Would clear next_unlinked in inode 217758
+Would clear next_unlinked in inode 217759
+Would clear next_unlinked in inode 217760
+Would clear next_unlinked in inode 217761
+Would clear next_unlinked in inode 217762
+Would clear next_unlinked in inode 217763
+Would clear next_unlinked in inode 217764
+Would clear next_unlinked in inode 217765
+Would clear next_unlinked in inode 217766
+Would clear next_unlinked in inode 217767
+Would clear next_unlinked in inode 217768
+Would clear next_unlinked in inode 217769
+Would clear next_unlinked in inode 217770
+Would clear next_unlinked in inode 217771
+Would clear next_unlinked in inode 217772
+Would clear next_unlinked in inode 217773
+Would clear next_unlinked in inode 217774
+Would clear next_unlinked in inode 217775
+Would clear next_unlinked in inode 217776
+Would clear next_unlinked in inode 217777
+Would clear next_unlinked in inode 217778
+Would clear next_unlinked in inode 217779
+Would clear next_unlinked in inode 217780
+Would clear next_unlinked in inode 217781
+Would clear next_unlinked in inode 217782
+Would clear next_unlinked in inode 217783
+Would clear next_unlinked in inode 217784
+Would clear next_unlinked in inode 217785
+Would clear next_unlinked in inode 217786
+Would clear next_unlinked in inode 217787
+Would clear next_unlinked in inode 217788
+Would clear next_unlinked in inode 217789
+Would clear next_unlinked in inode 217790
+Would clear next_unlinked in inode 217791
+Would clear next_unlinked in inode 217792
+Would clear next_unlinked in inode 217793
+Would clear next_unlinked in inode 217794
+disconnected inode 217475, would move to lost+found
+disconnected inode 217476, would move to lost+found
+disconnected inode 217477, would move to lost+found
+disconnected inode 217478, would move to lost+found
+disconnected inode 217479, would move to lost+found
+disconnected inode 217480, would move to lost+found
+disconnected inode 217481, would move to lost+found
+disconnected inode 217482, would move to lost+found
+disconnected inode 217483, would move to lost+found
+disconnected inode 217484, would move to lost+found
+disconnected inode 217485, would move to lost+found
+disconnected inode 217486, would move to lost+found
+disconnected inode 217487, would move to lost+found
+disconnected inode 217488, would move to lost+found
+disconnected inode 217489, would move to lost+found
+disconnected inode 217490, would move to lost+found
+disconnected inode 217491, would move to lost+found
+disconnected inode 217492, would move to lost+found
+disconnected inode 217493, would move to lost+found
+disconnected inode 217494, would move to lost+found
+disconnected inode 217495, would move to lost+found
+disconnected inode 217496, would move to lost+found
+disconnected inode 217497, would move to lost+found
+disconnected inode 217498, would move to lost+found
+disconnected inode 217499, would move to lost+found
+disconnected inode 217500, would move to lost+found
+disconnected inode 217501, would move to lost+found
+disconnected inode 217502, would move to lost+found
+disconnected inode 217503, would move to lost+found
+disconnected inode 217504, would move to lost+found
+disconnected inode 217505, would move to lost+found
+disconnected inode 217506, would move to lost+found
+disconnected inode 217507, would move to lost+found
+disconnected inode 217508, would move to lost+found
+disconnected inode 217509, would move to lost+found
+disconnected inode 217510, would move to lost+found
+disconnected inode 217511, would move to lost+found
+disconnected inode 217512, would move to lost+found
+disconnected inode 217513, would move to lost+found
+disconnected inode 217514, would move to lost+found
+disconnected inode 217515, would move to lost+found
+disconnected inode 217516, would move to lost+found
+disconnected inode 217517, would move to lost+found
+disconnected inode 217518, would move to lost+found
+disconnected inode 217519, would move to lost+found
+disconnected inode 217520, would move to lost+found
+disconnected inode 217521, would move to lost+found
+disconnected inode 217522, would move to lost+found
+disconnected inode 217523, would move to lost+found
+disconnected inode 217524, would move to lost+found
+disconnected inode 217525, would move to lost+found
+disconnected inode 217526, would move to lost+found
+disconnected inode 217527, would move to lost+found
+disconnected inode 217528, would move to lost+found
+disconnected inode 217529, would move to lost+found
+disconnected inode 217530, would move to lost+found
+disconnected inode 217531, would move to lost+found
+disconnected inode 217532, would move to lost+found
+disconnected inode 217533, would move to lost+found
+disconnected inode 217534, would move to lost+found
+disconnected inode 217535, would move to lost+found
+disconnected inode 217536, would move to lost+found
+disconnected inode 217537, would move to lost+found
+disconnected inode 217538, would move to lost+found
+disconnected inode 217539, would move to lost+found
+disconnected inode 217540, would move to lost+found
+disconnected inode 217541, would move to lost+found
+disconnected inode 217542, would move to lost+found
+disconnected inode 217543, would move to lost+found
+disconnected inode 217544, would move to lost+found
+disconnected inode 217545, would move to lost+found
+disconnected inode 217546, would move to lost+found
+disconnected inode 217547, would move to lost+found
+disconnected inode 217548, would move to lost+found
+disconnected inode 217549, would move to lost+found
+disconnected inode 217550, would move to lost+found
+disconnected inode 217551, would move to lost+found
+disconnected inode 217552, would move to lost+found
+disconnected inode 217553, would move to lost+found
+disconnected inode 217554, would move to lost+found
+disconnected inode 217555, would move to lost+found
+disconnected inode 217556, would move to lost+found
+disconnected inode 217557, would move to lost+found
+disconnected inode 217558, would move to lost+found
+disconnected inode 217559, would move to lost+found
+disconnected inode 217560, would move to lost+found
+disconnected inode 217561, would move to lost+found
+disconnected inode 217562, would move to lost+found
+disconnected inode 217563, would move to lost+found
+disconnected inode 217564, would move to lost+found
+disconnected inode 217565, would move to lost+found
+disconnected inode 217566, would move to lost+found
+disconnected inode 217567, would move to lost+found
+disconnected inode 217568, would move to lost+found
+disconnected inode 217569, would move to lost+found
+disconnected inode 217570, would move to lost+found
+disconnected inode 217571, would move to lost+found
+disconnected inode 217572, would move to lost+found
+disconnected inode 217573, would move to lost+found
+disconnected inode 217574, would move to lost+found
+disconnected inode 217575, would move to lost+found
+disconnected inode 217576, would move to lost+found
+disconnected inode 217577, would move to lost+found
+disconnected inode 217578, would move to lost+found
+disconnected inode 217579, would move to lost+found
+disconnected inode 217580, would move to lost+found
+disconnected inode 217581, would move to lost+found
+disconnected inode 217582, would move to lost+found
+disconnected inode 217583, would move to lost+found
+disconnected inode 217584, would move to lost+found
+disconnected inode 217585, would move to lost+found
+disconnected inode 217586, would move to lost+found
+disconnected inode 217587, would move to lost+found
+disconnected inode 217588, would move to lost+found
+disconnected inode 217589, would move to lost+found
+disconnected inode 217590, would move to lost+found
+disconnected inode 217591, would move to lost+found
+disconnected inode 217592, would move to lost+found
+disconnected inode 217593, would move to lost+found
+disconnected inode 217594, would move to lost+found
+disconnected inode 217595, would move to lost+found
+disconnected inode 217596, would move to lost+found
+disconnected inode 217597, would move to lost+found
+disconnected inode 217598, would move to lost+found
+disconnected inode 217599, would move to lost+found
+disconnected inode 217600, would move to lost+found
+disconnected inode 217601, would move to lost+found
+disconnected inode 217602, would move to lost+found
+disconnected inode 217603, would move to lost+found
+disconnected inode 217604, would move to lost+found
+disconnected inode 217605, would move to lost+found
+disconnected inode 217606, would move to lost+found
+disconnected inode 217607, would move to lost+found
+disconnected inode 217608, would move to lost+found
+disconnected inode 217609, would move to lost+found
+disconnected inode 217610, would move to lost+found
+disconnected inode 217611, would move to lost+found
+disconnected inode 217612, would move to lost+found
+disconnected inode 217613, would move to lost+found
+disconnected inode 217614, would move to lost+found
+disconnected inode 217615, would move to lost+found
+disconnected inode 217616, would move to lost+found
+disconnected inode 217617, would move to lost+found
+disconnected inode 217618, would move to lost+found
+disconnected inode 217619, would move to lost+found
+disconnected inode 217620, would move to lost+found
+disconnected inode 217621, would move to lost+found
+disconnected inode 217622, would move to lost+found
+disconnected inode 217623, would move to lost+found
+disconnected inode 217624, would move to lost+found
+disconnected inode 217625, would move to lost+found
+disconnected inode 217626, would move to lost+found
+disconnected inode 217627, would move to lost+found
+disconnected inode 217628, would move to lost+found
+disconnected inode 217629, would move to lost+found
+disconnected inode 217630, would move to lost+found
+disconnected inode 217631, would move to lost+found
+disconnected inode 217632, would move to lost+found
+disconnected inode 217633, would move to lost+found
+disconnected inode 217634, would move to lost+found
+disconnected inode 217635, would move to lost+found
+disconnected inode 217636, would move to lost+found
+disconnected inode 217637, would move to lost+found
+disconnected inode 217638, would move to lost+found
+disconnected inode 217639, would move to lost+found
+disconnected inode 217640, would move to lost+found
+disconnected inode 217641, would move to lost+found
+disconnected inode 217642, would move to lost+found
+disconnected inode 217643, would move to lost+found
+disconnected inode 217644, would move to lost+found
+disconnected inode 217645, would move to lost+found
+disconnected inode 217646, would move to lost+found
+disconnected inode 217647, would move to lost+found
+disconnected inode 217648, would move to lost+found
+disconnected inode 217649, would move to lost+found
+disconnected inode 217650, would move to lost+found
+disconnected inode 217651, would move to lost+found
+disconnected inode 217652, would move to lost+found
+disconnected inode 217653, would move to lost+found
+disconnected inode 217654, would move to lost+found
+disconnected inode 217655, would move to lost+found
+disconnected inode 217656, would move to lost+found
+disconnected inode 217657, would move to lost+found
+disconnected inode 217658, would move to lost+found
+disconnected inode 217659, would move to lost+found
+disconnected inode 217660, would move to lost+found
+disconnected inode 217661, would move to lost+found
+disconnected inode 217662, would move to lost+found
+disconnected inode 217663, would move to lost+found
+disconnected inode 217664, would move to lost+found
+disconnected inode 217665, would move to lost+found
+disconnected inode 217666, would move to lost+found
+disconnected inode 217667, would move to lost+found
+disconnected inode 217668, would move to lost+found
+disconnected inode 217669, would move to lost+found
+disconnected inode 217670, would move to lost+found
+disconnected inode 217671, would move to lost+found
+disconnected inode 217672, would move to lost+found
+disconnected inode 217673, would move to lost+found
+disconnected inode 217674, would move to lost+found
+disconnected inode 217675, would move to lost+found
+disconnected inode 217676, would move to lost+found
+disconnected inode 217677, would move to lost+found
+disconnected inode 217678, would move to lost+found
+disconnected inode 217679, would move to lost+found
+disconnected inode 217680, would move to lost+found
+disconnected inode 217681, would move to lost+found
+disconnected inode 217682, would move to lost+found
+disconnected inode 217683, would move to lost+found
+disconnected inode 217684, would move to lost+found
+disconnected inode 217685, would move to lost+found
+disconnected inode 217686, would move to lost+found
+disconnected inode 217687, would move to lost+found
+disconnected inode 217688, would move to lost+found
+disconnected inode 217689, would move to lost+found
+disconnected inode 217690, would move to lost+found
+disconnected inode 217691, would move to lost+found
+disconnected inode 217692, would move to lost+found
+disconnected inode 217693, would move to lost+found
+disconnected inode 217694, would move to lost+found
+disconnected inode 217695, would move to lost+found
+disconnected inode 217696, would move to lost+found
+disconnected inode 217697, would move to lost+found
+disconnected inode 217698, would move to lost+found
+disconnected inode 217699, would move to lost+found
+disconnected inode 217700, would move to lost+found
+disconnected inode 217701, would move to lost+found
+disconnected inode 217702, would move to lost+found
+disconnected inode 217703, would move to lost+found
+disconnected inode 217704, would move to lost+found
+disconnected inode 217705, would move to lost+found
+disconnected inode 217706, would move to lost+found
+disconnected inode 217707, would move to lost+found
+disconnected inode 217708, would move to lost+found
+disconnected inode 217709, would move to lost+found
+disconnected inode 217710, would move to lost+found
+disconnected inode 217711, would move to lost+found
+disconnected inode 217712, would move to lost+found
+disconnected inode 217713, would move to lost+found
+disconnected inode 217714, would move to lost+found
+disconnected inode 217715, would move to lost+found
+disconnected inode 217716, would move to lost+found
+disconnected inode 217717, would move to lost+found
+disconnected inode 217718, would move to lost+found
+disconnected inode 217719, would move to lost+found
+disconnected inode 217720, would move to lost+found
+disconnected inode 217721, would move to lost+found
+disconnected inode 217722, would move to lost+found
+disconnected inode 217723, would move to lost+found
+disconnected inode 217724, would move to lost+found
+disconnected inode 217725, would move to lost+found
+disconnected inode 217726, would move to lost+found
+disconnected inode 217727, would move to lost+found
+disconnected inode 217728, would move to lost+found
+disconnected inode 217729, would move to lost+found
+disconnected inode 217730, would move to lost+found
+disconnected inode 217731, would move to lost+found
+disconnected inode 217732, would move to lost+found
+disconnected inode 217733, would move to lost+found
+disconnected inode 217734, would move to lost+found
+disconnected inode 217735, would move to lost+found
+disconnected inode 217736, would move to lost+found
+disconnected inode 217737, would move to lost+found
+disconnected inode 217738, would move to lost+found
+disconnected inode 217739, would move to lost+found
+disconnected inode 217740, would move to lost+found
+disconnected inode 217741, would move to lost+found
+disconnected inode 217742, would move to lost+found
+disconnected inode 217743, would move to lost+found
+disconnected inode 217744, would move to lost+found
+disconnected inode 217745, would move to lost+found
+disconnected inode 217746, would move to lost+found
+disconnected inode 217747, would move to lost+found
+disconnected inode 217748, would move to lost+found
+disconnected inode 217749, would move to lost+found
+disconnected inode 217750, would move to lost+found
+disconnected inode 217751, would move to lost+found
+disconnected inode 217752, would move to lost+found
+disconnected inode 217753, would move to lost+found
+disconnected inode 217754, would move to lost+found
+disconnected inode 217755, would move to lost+found
+disconnected inode 217756, would move to lost+found
+disconnected inode 217757, would move to lost+found
+disconnected inode 217758, would move to lost+found
+disconnected inode 217759, would move to lost+found
+disconnected inode 217760, would move to lost+found
+disconnected inode 217761, would move to lost+found
+disconnected inode 217762, would move to lost+found
+disconnected inode 217763, would move to lost+found
+disconnected inode 217764, would move to lost+found
+disconnected inode 217765, would move to lost+found
+disconnected inode 217766, would move to lost+found
+disconnected inode 217767, would move to lost+found
+disconnected inode 217768, would move to lost+found
+disconnected inode 217769, would move to lost+found
+disconnected inode 217770, would move to lost+found
+disconnected inode 217771, would move to lost+found
+disconnected inode 217772, would move to lost+found
+disconnected inode 217773, would move to lost+found
+disconnected inode 217774, would move to lost+found
+disconnected inode 217775, would move to lost+found
+disconnected inode 217776, would move to lost+found
+disconnected inode 217777, would move to lost+found
+disconnected inode 217778, would move to lost+found
+disconnected inode 217779, would move to lost+found
+disconnected inode 217780, would move to lost+found
+disconnected inode 217781, would move to lost+found
+disconnected inode 217782, would move to lost+found
+disconnected inode 217783, would move to lost+found
+disconnected inode 217784, would move to lost+found
+disconnected inode 217785, would move to lost+found
+disconnected inode 217786, would move to lost+found
+disconnected inode 217787, would move to lost+found
+disconnected inode 217788, would move to lost+found
+disconnected inode 217789, would move to lost+found
+disconnected inode 217790, would move to lost+found
+disconnected inode 217791, would move to lost+found
+disconnected inode 217792, would move to lost+found
+disconnected inode 217793, would move to lost+found
+disconnected inode 217794, would move to lost+found
+repair returned 1?
++ Part 6: Fix an inode that isn't free and truncates list
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+agi unlinked bucket 23 is 217472 in ag 0 (inode=217472)
+Would clear next_unlinked in inode 217559
+disconnected inode 217495, would move to lost+found
+disconnected inode 217559, would move to lost+found
+repair returned 1?
++ Part 7: Fix an inode that isn't free
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+agi unlinked bucket 23 is 217472 in ag 0 (inode=217472)
+Would clear next_unlinked in inode 217472
+Would clear next_unlinked in inode 217559
+disconnected inode 217495, would move to lost+found
+disconnected inode 217559, would move to lost+found
+repair returned 1?
++ Part 8: Fix a totally unallocated inode
+scrub: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+repair: Inappropriate ioctl for device
+rm: cannot remove '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/35': Input/output error
+rm failed on inum 217830
+agi unlinked bucket 0 is 217792 in ag 0 (inode=217792)
+agi unlinked bucket 1 is 217793 in ag 0 (inode=217793)
+agi unlinked bucket 2 is 217794 in ag 0 (inode=217794)
+agi unlinked bucket 3 is 217731 in ag 0 (inode=217731)
+agi unlinked bucket 4 is 217732 in ag 0 (inode=217732)
+agi unlinked bucket 5 is 217733 in ag 0 (inode=217733)
+agi unlinked bucket 6 is 217734 in ag 0 (inode=217734)
+agi unlinked bucket 7 is 217735 in ag 0 (inode=217735)
+agi unlinked bucket 8 is 217736 in ag 0 (inode=217736)
+agi unlinked bucket 9 is 217737 in ag 0 (inode=217737)
+agi unlinked bucket 10 is 217738 in ag 0 (inode=217738)
+agi unlinked bucket 11 is 217739 in ag 0 (inode=217739)
+agi unlinked bucket 12 is 217740 in ag 0 (inode=217740)
+agi unlinked bucket 13 is 217741 in ag 0 (inode=217741)
+agi unlinked bucket 14 is 217742 in ag 0 (inode=217742)
+agi unlinked bucket 15 is 217743 in ag 0 (inode=217743)
+agi unlinked bucket 16 is 217744 in ag 0 (inode=217744)
+agi unlinked bucket 17 is 217745 in ag 0 (inode=217745)
+agi unlinked bucket 18 is 217746 in ag 0 (inode=217746)
+agi unlinked bucket 19 is 217747 in ag 0 (inode=217747)
+agi unlinked bucket 20 is 217748 in ag 0 (inode=217748)
+agi unlinked bucket 21 is 217749 in ag 0 (inode=217749)
+agi unlinked bucket 22 is 217750 in ag 0 (inode=217750)
+agi unlinked bucket 23 is 217751 in ag 0 (inode=217751)
+agi unlinked bucket 24 is 217752 in ag 0 (inode=217752)
+agi unlinked bucket 25 is 217753 in ag 0 (inode=217753)
+agi unlinked bucket 26 is 217754 in ag 0 (inode=217754)
+agi unlinked bucket 27 is 217755 in ag 0 (inode=217755)
+agi unlinked bucket 28 is 217756 in ag 0 (inode=217756)
+agi unlinked bucket 29 is 217757 in ag 0 (inode=217757)
+agi unlinked bucket 30 is 217758 in ag 0 (inode=217758)
+agi unlinked bucket 31 is 217759 in ag 0 (inode=217759)
+agi unlinked bucket 32 is 217760 in ag 0 (inode=217760)
+agi unlinked bucket 33 is 217761 in ag 0 (inode=217761)
+agi unlinked bucket 34 is 217762 in ag 0 (inode=217762)
+agi unlinked bucket 35 is 217763 in ag 0 (inode=217763)
+agi unlinked bucket 36 is 217764 in ag 0 (inode=217764)
+agi unlinked bucket 37 is 217765 in ag 0 (inode=217765)
+agi unlinked bucket 38 is 217766 in ag 0 (inode=217766)
+agi unlinked bucket 39 is 217767 in ag 0 (inode=217767)
+agi unlinked bucket 40 is 217768 in ag 0 (inode=217768)
+agi unlinked bucket 41 is 217769 in ag 0 (inode=217769)
+agi unlinked bucket 42 is 217770 in ag 0 (inode=217770)
+agi unlinked bucket 43 is 217771 in ag 0 (inode=217771)
+agi unlinked bucket 44 is 217772 in ag 0 (inode=217772)
+agi unlinked bucket 45 is 217773 in ag 0 (inode=217773)
+agi unlinked bucket 46 is 217774 in ag 0 (inode=217774)
+agi unlinked bucket 47 is 217775 in ag 0 (inode=217775)
+agi unlinked bucket 48 is 217776 in ag 0 (inode=217776)
+agi unlinked bucket 49 is 217777 in ag 0 (inode=217777)
+agi unlinked bucket 50 is 217778 in ag 0 (inode=217778)
+agi unlinked bucket 51 is 217779 in ag 0 (inode=217779)
+agi unlinked bucket 52 is 217780 in ag 0 (inode=217780)
+agi unlinked bucket 53 is 217781 in ag 0 (inode=217781)
+agi unlinked bucket 54 is 217782 in ag 0 (inode=217782)
+agi unlinked bucket 55 is 217783 in ag 0 (inode=217783)
+agi unlinked bucket 56 is 217784 in ag 0 (inode=217784)
+agi unlinked bucket 57 is 217785 in ag 0 (inode=217785)
+agi unlinked bucket 58 is 217786 in ag 0 (inode=217786)
+agi unlinked bucket 59 is 217787 in ag 0 (inode=217787)
+agi unlinked bucket 60 is 217788 in ag 0 (inode=217788)
+agi unlinked bucket 61 is 217789 in ag 0 (inode=217789)
+agi unlinked bucket 62 is 217790 in ag 0 (inode=217790)
+agi unlinked bucket 63 is 217791 in ag 0 (inode=217791)
+Would clear next_unlinked in inode 217539
+Would clear next_unlinked in inode 217540
+Would clear next_unlinked in inode 217541
+Would clear next_unlinked in inode 217542
+Would clear next_unlinked in inode 217543
+Would clear next_unlinked in inode 217544
+Would clear next_unlinked in inode 217545
+Would clear next_unlinked in inode 217546
+Would clear next_unlinked in inode 217547
+Would clear next_unlinked in inode 217548
+Would clear next_unlinked in inode 217549
+Would clear next_unlinked in inode 217550
+Would clear next_unlinked in inode 217551
+Would clear next_unlinked in inode 217552
+Would clear next_unlinked in inode 217553
+Would clear next_unlinked in inode 217554
+Would clear next_unlinked in inode 217555
+Would clear next_unlinked in inode 217556
+Would clear next_unlinked in inode 217557
+Would clear next_unlinked in inode 217558
+Would clear next_unlinked in inode 217559
+Would clear next_unlinked in inode 217560
+Would clear next_unlinked in inode 217561
+Would clear next_unlinked in inode 217562
+Would clear next_unlinked in inode 217563
+Would clear next_unlinked in inode 217564
+Would clear next_unlinked in inode 217565
+Would clear next_unlinked in inode 217566
+Would clear next_unlinked in inode 217567
+Would clear next_unlinked in inode 217568
+Would clear next_unlinked in inode 217569
+Would clear next_unlinked in inode 217570
+Would clear next_unlinked in inode 217571
+Would clear next_unlinked in inode 217572
+Would clear next_unlinked in inode 217573
+Would clear next_unlinked in inode 217574
+Would clear next_unlinked in inode 217575
+Would clear next_unlinked in inode 217576
+Would clear next_unlinked in inode 217577
+Would clear next_unlinked in inode 217578
+Would clear next_unlinked in inode 217579
+Would clear next_unlinked in inode 217580
+Would clear next_unlinked in inode 217581
+Would clear next_unlinked in inode 217582
+Would clear next_unlinked in inode 217583
+Would clear next_unlinked in inode 217584
+Would clear next_unlinked in inode 217585
+Would clear next_unlinked in inode 217586
+Would clear next_unlinked in inode 217587
+Would clear next_unlinked in inode 217588
+Would clear next_unlinked in inode 217589
+Would clear next_unlinked in inode 217590
+Would clear next_unlinked in inode 217591
+Would clear next_unlinked in inode 217592
+Would clear next_unlinked in inode 217593
+Would clear next_unlinked in inode 217594
+Would clear next_unlinked in inode 217595
+Would clear next_unlinked in inode 217596
+Would clear next_unlinked in inode 217597
+Would clear next_unlinked in inode 217598
+Would clear next_unlinked in inode 217599
+Would clear next_unlinked in inode 217600
+Would clear next_unlinked in inode 217601
+Would clear next_unlinked in inode 217602
+Would clear next_unlinked in inode 217603
+Would clear next_unlinked in inode 217604
+Would clear next_unlinked in inode 217605
+Would clear next_unlinked in inode 217606
+Would clear next_unlinked in inode 217607
+Would clear next_unlinked in inode 217608
+Would clear next_unlinked in inode 217609
+Would clear next_unlinked in inode 217610
+Would clear next_unlinked in inode 217611
+Would clear next_unlinked in inode 217612
+Would clear next_unlinked in inode 217613
+Would clear next_unlinked in inode 217614
+Would clear next_unlinked in inode 217615
+Would clear next_unlinked in inode 217616
+Would clear next_unlinked in inode 217617
+Would clear next_unlinked in inode 217618
+Would clear next_unlinked in inode 217619
+Would clear next_unlinked in inode 217620
+Would clear next_unlinked in inode 217621
+Would clear next_unlinked in inode 217622
+Would clear next_unlinked in inode 217623
+Would clear next_unlinked in inode 217624
+Would clear next_unlinked in inode 217625
+Would clear next_unlinked in inode 217626
+Would clear next_unlinked in inode 217627
+Would clear next_unlinked in inode 217628
+Would clear next_unlinked in inode 217629
+Would clear next_unlinked in inode 217630
+Would clear next_unlinked in inode 217631
+Would clear next_unlinked in inode 217632
+Would clear next_unlinked in inode 217633
+Would clear next_unlinked in inode 217634
+Would clear next_unlinked in inode 217635
+Would clear next_unlinked in inode 217636
+Would clear next_unlinked in inode 217637
+Would clear next_unlinked in inode 217638
+Would clear next_unlinked in inode 217639
+Would clear next_unlinked in inode 217640
+Would clear next_unlinked in inode 217641
+Would clear next_unlinked in inode 217642
+Would clear next_unlinked in inode 217643
+Would clear next_unlinked in inode 217644
+Would clear next_unlinked in inode 217645
+Would clear next_unlinked in inode 217646
+Would clear next_unlinked in inode 217647
+Would clear next_unlinked in inode 217648
+Would clear next_unlinked in inode 217649
+Would clear next_unlinked in inode 217650
+Would clear next_unlinked in inode 217651
+Would clear next_unlinked in inode 217652
+Would clear next_unlinked in inode 217653
+Would clear next_unlinked in inode 217654
+Would clear next_unlinked in inode 217655
+Would clear next_unlinked in inode 217656
+Would clear next_unlinked in inode 217657
+Would clear next_unlinked in inode 217658
+Would clear next_unlinked in inode 217659
+Would clear next_unlinked in inode 217660
+Would clear next_unlinked in inode 217661
+Would clear next_unlinked in inode 217662
+Would clear next_unlinked in inode 217663
+Would clear next_unlinked in inode 217664
+Would clear next_unlinked in inode 217665
+Would clear next_unlinked in inode 217666
+Would clear next_unlinked in inode 217667
+Would clear next_unlinked in inode 217668
+Would clear next_unlinked in inode 217669
+Would clear next_unlinked in inode 217670
+Would clear next_unlinked in inode 217671
+Would clear next_unlinked in inode 217672
+Would clear next_unlinked in inode 217673
+Would clear next_unlinked in inode 217674
+Would clear next_unlinked in inode 217675
+Would clear next_unlinked in inode 217676
+Would clear next_unlinked in inode 217677
+Would clear next_unlinked in inode 217678
+Would clear next_unlinked in inode 217679
+Would clear next_unlinked in inode 217680
+Would clear next_unlinked in inode 217681
+Would clear next_unlinked in inode 217682
+Would clear next_unlinked in inode 217683
+Would clear next_unlinked in inode 217684
+Would clear next_unlinked in inode 217685
+Would clear next_unlinked in inode 217686
+Would clear next_unlinked in inode 217687
+Would clear next_unlinked in inode 217688
+Would clear next_unlinked in inode 217689
+Would clear next_unlinked in inode 217690
+Would clear next_unlinked in inode 217691
+Would clear next_unlinked in inode 217692
+Would clear next_unlinked in inode 217693
+Would clear next_unlinked in inode 217694
+Would clear next_unlinked in inode 217695
+Would clear next_unlinked in inode 217696
+Would clear next_unlinked in inode 217697
+Would clear next_unlinked in inode 217698
+Would clear next_unlinked in inode 217699
+Would clear next_unlinked in inode 217700
+Would clear next_unlinked in inode 217701
+Would clear next_unlinked in inode 217702
+Would clear next_unlinked in inode 217703
+Would clear next_unlinked in inode 217704
+Would clear next_unlinked in inode 217705
+Would clear next_unlinked in inode 217706
+Would clear next_unlinked in inode 217707
+Would clear next_unlinked in inode 217708
+Would clear next_unlinked in inode 217709
+Would clear next_unlinked in inode 217710
+Would clear next_unlinked in inode 217711
+Would clear next_unlinked in inode 217712
+Would clear next_unlinked in inode 217713
+Would clear next_unlinked in inode 217714
+Would clear next_unlinked in inode 217715
+Would clear next_unlinked in inode 217716
+Would clear next_unlinked in inode 217717
+Would clear next_unlinked in inode 217718
+Would clear next_unlinked in inode 217719
+Would clear next_unlinked in inode 217720
+Would clear next_unlinked in inode 217721
+Would clear next_unlinked in inode 217722
+Would clear next_unlinked in inode 217723
+Would clear next_unlinked in inode 217724
+Would clear next_unlinked in inode 217725
+Would clear next_unlinked in inode 217726
+Would clear next_unlinked in inode 217727
+Would clear next_unlinked in inode 217728
+Would clear next_unlinked in inode 217729
+Would clear next_unlinked in inode 217730
+Would clear next_unlinked in inode 217731
+Would clear next_unlinked in inode 217732
+Would clear next_unlinked in inode 217733
+Would clear next_unlinked in inode 217734
+Would clear next_unlinked in inode 217735
+Would clear next_unlinked in inode 217736
+Would clear next_unlinked in inode 217737
+Would clear next_unlinked in inode 217738
+Would clear next_unlinked in inode 217739
+Would clear next_unlinked in inode 217740
+Would clear next_unlinked in inode 217741
+Would clear next_unlinked in inode 217742
+Would clear next_unlinked in inode 217743
+Would clear next_unlinked in inode 217744
+Would clear next_unlinked in inode 217745
+Would clear next_unlinked in inode 217746
+Would clear next_unlinked in inode 217747
+Would clear next_unlinked in inode 217748
+Would clear next_unlinked in inode 217749
+Would clear next_unlinked in inode 217750
+Would clear next_unlinked in inode 217751
+Would clear next_unlinked in inode 217752
+Would clear next_unlinked in inode 217753
+Would clear next_unlinked in inode 217754
+Would clear next_unlinked in inode 217755
+Would clear next_unlinked in inode 217756
+Would clear next_unlinked in inode 217757
+Would clear next_unlinked in inode 217758
+Would clear next_unlinked in inode 217759
+Would clear next_unlinked in inode 217760
+Would clear next_unlinked in inode 217761
+Would clear next_unlinked in inode 217762
+Would clear next_unlinked in inode 217763
+Would clear next_unlinked in inode 217764
+Would clear next_unlinked in inode 217765
+Would clear next_unlinked in inode 217766
+Would clear next_unlinked in inode 217767
+Would clear next_unlinked in inode 217768
+Would clear next_unlinked in inode 217769
+Would clear next_unlinked in inode 217770
+Would clear next_unlinked in inode 217771
+Would clear next_unlinked in inode 217772
+Would clear next_unlinked in inode 217773
+Would clear next_unlinked in inode 217774
+Would clear next_unlinked in inode 217775
+Would clear next_unlinked in inode 217776
+Would clear next_unlinked in inode 217777
+Would clear next_unlinked in inode 217778
+Would clear next_unlinked in inode 217779
+Would clear next_unlinked in inode 217780
+Would clear next_unlinked in inode 217781
+Would clear next_unlinked in inode 217782
+Would clear next_unlinked in inode 217783
+Would clear next_unlinked in inode 217784
+Would clear next_unlinked in inode 217785
+Would clear next_unlinked in inode 217786
+Would clear next_unlinked in inode 217787
+Would clear next_unlinked in inode 217788
+Would clear next_unlinked in inode 217789
+Would clear next_unlinked in inode 217790
+Would clear next_unlinked in inode 217791
+Would clear next_unlinked in inode 217792
+Would clear next_unlinked in inode 217793
+Would clear next_unlinked in inode 217794
+disconnected inode 217475, would move to lost+found
+disconnected inode 217476, would move to lost+found
+disconnected inode 217477, would move to lost+found
+disconnected inode 217478, would move to lost+found
+disconnected inode 217479, would move to lost+found
+disconnected inode 217480, would move to lost+found
+disconnected inode 217481, would move to lost+found
+disconnected inode 217482, would move to lost+found
+disconnected inode 217483, would move to lost+found
+disconnected inode 217484, would move to lost+found
+disconnected inode 217485, would move to lost+found
+disconnected inode 217486, would move to lost+found
+disconnected inode 217487, would move to lost+found
+disconnected inode 217488, would move to lost+found
+disconnected inode 217489, would move to lost+found
+disconnected inode 217490, would move to lost+found
+disconnected inode 217491, would move to lost+found
+disconnected inode 217492, would move to lost+found
+disconnected inode 217493, would move to lost+found
+disconnected inode 217494, would move to lost+found
+disconnected inode 217495, would move to lost+found
+disconnected inode 217496, would move to lost+found
+disconnected inode 217497, would move to lost+found
+disconnected inode 217498, would move to lost+found
+disconnected inode 217499, would move to lost+found
+disconnected inode 217500, would move to lost+found
+disconnected inode 217501, would move to lost+found
+disconnected inode 217502, would move to lost+found
+disconnected inode 217503, would move to lost+found
+disconnected inode 217504, would move to lost+found
+disconnected inode 217505, would move to lost+found
+disconnected inode 217506, would move to lost+found
+disconnected inode 217507, would move to lost+found
+disconnected inode 217508, would move to lost+found
+disconnected inode 217509, would move to lost+found
+disconnected inode 217510, would move to lost+found
+disconnected inode 217511, would move to lost+found
+disconnected inode 217512, would move to lost+found
+disconnected inode 217513, would move to lost+found
+disconnected inode 217514, would move to lost+found
+disconnected inode 217515, would move to lost+found
+disconnected inode 217516, would move to lost+found
+disconnected inode 217517, would move to lost+found
+disconnected inode 217518, would move to lost+found
+disconnected inode 217519, would move to lost+found
+disconnected inode 217520, would move to lost+found
+disconnected inode 217521, would move to lost+found
+disconnected inode 217522, would move to lost+found
+disconnected inode 217523, would move to lost+found
+disconnected inode 217524, would move to lost+found
+disconnected inode 217525, would move to lost+found
+disconnected inode 217526, would move to lost+found
+disconnected inode 217527, would move to lost+found
+disconnected inode 217528, would move to lost+found
+disconnected inode 217529, would move to lost+found
+disconnected inode 217530, would move to lost+found
+disconnected inode 217531, would move to lost+found
+disconnected inode 217532, would move to lost+found
+disconnected inode 217533, would move to lost+found
+disconnected inode 217534, would move to lost+found
+disconnected inode 217535, would move to lost+found
+disconnected inode 217536, would move to lost+found
+disconnected inode 217537, would move to lost+found
+disconnected inode 217538, would move to lost+found
+disconnected inode 217539, would move to lost+found
+disconnected inode 217540, would move to lost+found
+disconnected inode 217541, would move to lost+found
+disconnected inode 217542, would move to lost+found
+disconnected inode 217543, would move to lost+found
+disconnected inode 217544, would move to lost+found
+disconnected inode 217545, would move to lost+found
+disconnected inode 217546, would move to lost+found
+disconnected inode 217547, would move to lost+found
+disconnected inode 217548, would move to lost+found
+disconnected inode 217549, would move to lost+found
+disconnected inode 217550, would move to lost+found
+disconnected inode 217551, would move to lost+found
+disconnected inode 217552, would move to lost+found
+disconnected inode 217553, would move to lost+found
+disconnected inode 217554, would move to lost+found
+disconnected inode 217555, would move to lost+found
+disconnected inode 217556, would move to lost+found
+disconnected inode 217557, would move to lost+found
+disconnected inode 217558, would move to lost+found
+disconnected inode 217559, would move to lost+found
+disconnected inode 217560, would move to lost+found
+disconnected inode 217561, would move to lost+found
+disconnected inode 217562, would move to lost+found
+disconnected inode 217563, would move to lost+found
+disconnected inode 217564, would move to lost+found
+disconnected inode 217565, would move to lost+found
+disconnected inode 217566, would move to lost+found
+disconnected inode 217567, would move to lost+found
+disconnected inode 217568, would move to lost+found
+disconnected inode 217569, would move to lost+found
+disconnected inode 217570, would move to lost+found
+disconnected inode 217571, would move to lost+found
+disconnected inode 217572, would move to lost+found
+disconnected inode 217573, would move to lost+found
+disconnected inode 217574, would move to lost+found
+disconnected inode 217575, would move to lost+found
+disconnected inode 217576, would move to lost+found
+disconnected inode 217577, would move to lost+found
+disconnected inode 217578, would move to lost+found
+disconnected inode 217579, would move to lost+found
+disconnected inode 217580, would move to lost+found
+disconnected inode 217581, would move to lost+found
+disconnected inode 217582, would move to lost+found
+disconnected inode 217583, would move to lost+found
+disconnected inode 217584, would move to lost+found
+disconnected inode 217585, would move to lost+found
+disconnected inode 217586, would move to lost+found
+disconnected inode 217587, would move to lost+found
+disconnected inode 217588, would move to lost+found
+disconnected inode 217589, would move to lost+found
+disconnected inode 217590, would move to lost+found
+disconnected inode 217591, would move to lost+found
+disconnected inode 217592, would move to lost+found
+disconnected inode 217593, would move to lost+found
+disconnected inode 217594, would move to lost+found
+disconnected inode 217595, would move to lost+found
+disconnected inode 217596, would move to lost+found
+disconnected inode 217597, would move to lost+found
+disconnected inode 217598, would move to lost+found
+disconnected inode 217599, would move to lost+found
+disconnected inode 217600, would move to lost+found
+disconnected inode 217601, would move to lost+found
+disconnected inode 217602, would move to lost+found
+disconnected inode 217603, would move to lost+found
+disconnected inode 217604, would move to lost+found
+disconnected inode 217605, would move to lost+found
+disconnected inode 217606, would move to lost+found
+disconnected inode 217607, would move to lost+found
+disconnected inode 217608, would move to lost+found
+disconnected inode 217609, would move to lost+found
+disconnected inode 217610, would move to lost+found
+disconnected inode 217611, would move to lost+found
+disconnected inode 217612, would move to lost+found
+disconnected inode 217613, would move to lost+found
+disconnected inode 217614, would move to lost+found
+disconnected inode 217615, would move to lost+found
+disconnected inode 217616, would move to lost+found
+disconnected inode 217617, would move to lost+found
+disconnected inode 217618, would move to lost+found
+disconnected inode 217619, would move to lost+found
+disconnected inode 217620, would move to lost+found
+disconnected inode 217621, would move to lost+found
+disconnected inode 217622, would move to lost+found
+disconnected inode 217623, would move to lost+found
+disconnected inode 217624, would move to lost+found
+disconnected inode 217625, would move to lost+found
+disconnected inode 217626, would move to lost+found
+disconnected inode 217627, would move to lost+found
+disconnected inode 217628, would move to lost+found
+disconnected inode 217629, would move to lost+found
+disconnected inode 217630, would move to lost+found
+disconnected inode 217631, would move to lost+found
+disconnected inode 217632, would move to lost+found
+disconnected inode 217633, would move to lost+found
+disconnected inode 217634, would move to lost+found
+disconnected inode 217635, would move to lost+found
+disconnected inode 217636, would move to lost+found
+disconnected inode 217637, would move to lost+found
+disconnected inode 217638, would move to lost+found
+disconnected inode 217639, would move to lost+found
+disconnected inode 217640, would move to lost+found
+disconnected inode 217641, would move to lost+found
+disconnected inode 217642, would move to lost+found
+disconnected inode 217643, would move to lost+found
+disconnected inode 217644, would move to lost+found
+disconnected inode 217645, would move to lost+found
+disconnected inode 217646, would move to lost+found
+disconnected inode 217647, would move to lost+found
+disconnected inode 217648, would move to lost+found
+disconnected inode 217649, would move to lost+found
+disconnected inode 217650, would move to lost+found
+disconnected inode 217651, would move to lost+found
+disconnected inode 217652, would move to lost+found
+disconnected inode 217653, would move to lost+found
+disconnected inode 217654, would move to lost+found
+disconnected inode 217655, would move to lost+found
+disconnected inode 217656, would move to lost+found
+disconnected inode 217657, would move to lost+found
+disconnected inode 217658, would move to lost+found
+disconnected inode 217659, would move to lost+found
+disconnected inode 217660, would move to lost+found
+disconnected inode 217661, would move to lost+found
+disconnected inode 217662, would move to lost+found
+disconnected inode 217663, would move to lost+found
+disconnected inode 217664, would move to lost+found
+disconnected inode 217665, would move to lost+found
+disconnected inode 217666, would move to lost+found
+disconnected inode 217667, would move to lost+found
+disconnected inode 217668, would move to lost+found
+disconnected inode 217669, would move to lost+found
+disconnected inode 217670, would move to lost+found
+disconnected inode 217671, would move to lost+found
+disconnected inode 217672, would move to lost+found
+disconnected inode 217673, would move to lost+found
+disconnected inode 217674, would move to lost+found
+disconnected inode 217675, would move to lost+found
+disconnected inode 217676, would move to lost+found
+disconnected inode 217677, would move to lost+found
+disconnected inode 217678, would move to lost+found
+disconnected inode 217679, would move to lost+found
+disconnected inode 217680, would move to lost+found
+disconnected inode 217681, would move to lost+found
+disconnected inode 217682, would move to lost+found
+disconnected inode 217683, would move to lost+found
+disconnected inode 217684, would move to lost+found
+disconnected inode 217685, would move to lost+found
+disconnected inode 217686, would move to lost+found
+disconnected inode 217687, would move to lost+found
+disconnected inode 217688, would move to lost+found
+disconnected inode 217689, would move to lost+found
+disconnected inode 217690, would move to lost+found
+disconnected inode 217691, would move to lost+found
+disconnected inode 217692, would move to lost+found
+disconnected inode 217693, would move to lost+found
+disconnected inode 217694, would move to lost+found
+disconnected inode 217695, would move to lost+found
+disconnected inode 217696, would move to lost+found
+disconnected inode 217697, would move to lost+found
+disconnected inode 217698, would move to lost+found
+disconnected inode 217699, would move to lost+found
+disconnected inode 217700, would move to lost+found
+disconnected inode 217701, would move to lost+found
+disconnected inode 217702, would move to lost+found
+disconnected inode 217703, would move to lost+found
+disconnected inode 217704, would move to lost+found
+disconnected inode 217705, would move to lost+found
+disconnected inode 217706, would move to lost+found
+disconnected inode 217707, would move to lost+found
+disconnected inode 217708, would move to lost+found
+disconnected inode 217709, would move to lost+found
+disconnected inode 217710, would move to lost+found
+disconnected inode 217711, would move to lost+found
+disconnected inode 217712, would move to lost+found
+disconnected inode 217713, would move to lost+found
+disconnected inode 217714, would move to lost+found
+disconnected inode 217715, would move to lost+found
+disconnected inode 217716, would move to lost+found
+disconnected inode 217717, would move to lost+found
+disconnected inode 217718, would move to lost+found
+disconnected inode 217719, would move to lost+found
+disconnected inode 217720, would move to lost+found
+disconnected inode 217721, would move to lost+found
+disconnected inode 217722, would move to lost+found
+disconnected inode 217723, would move to lost+found
+disconnected inode 217724, would move to lost+found
+disconnected inode 217725, would move to lost+found
+disconnected inode 217726, would move to lost+found
+disconnected inode 217727, would move to lost+found
+disconnected inode 217728, would move to lost+found
+disconnected inode 217729, would move to lost+found
+disconnected inode 217730, would move to lost+found
+disconnected inode 217731, would move to lost+found
+disconnected inode 217732, would move to lost+found
+disconnected inode 217733, would move to lost+found
+disconnected inode 217734, would move to lost+found
+disconnected inode 217735, would move to lost+found
+disconnected inode 217736, would move to lost+found
+disconnected inode 217737, would move to lost+found
+disconnected inode 217738, would move to lost+found
+disconnected inode 217739, would move to lost+found
+disconnected inode 217740, would move to lost+found
+disconnected inode 217741, would move to lost+found
+disconnected inode 217742, would move to lost+found
+disconnected inode 217743, would move to lost+found
+disconnected inode 217744, would move to lost+found
+disconnected inode 217745, would move to lost+found
+disconnected inode 217746, would move to lost+found
+disconnected inode 217747, would move to lost+found
+disconnected inode 217748, would move to lost+found
+disconnected inode 217749, would move to lost+found
+disconnected inode 217750, would move to lost+found
+disconnected inode 217751, would move to lost+found
+disconnected inode 217752, would move to lost+found
+disconnected inode 217753, would move to lost+found
+disconnected inode 217754, would move to lost+found
+disconnected inode 217755, would move to lost+found
+disconnected inode 217756, would move to lost+found
+disconnected inode 217757, would move to lost+found
+disconnected inode 217758, would move to lost+found
+disconnected inode 217759, would move to lost+found
+disconnected inode 217760, would move to lost+found
+disconnected inode 217761, would move to lost+found
+disconnected inode 217762, would move to lost+found
+disconnected inode 217763, would move to lost+found
+disconnected inode 217764, would move to lost+found
+disconnected inode 217765, would move to lost+found
+disconnected inode 217766, would move to lost+found
+disconnected inode 217767, would move to lost+found
+disconnected inode 217768, would move to lost+found
+disconnected inode 217769, would move to lost+found
+disconnected inode 217770, would move to lost+found
+disconnected inode 217771, would move to lost+found
+disconnected inode 217772, would move to lost+found
+disconnected inode 217773, would move to lost+found
+disconnected inode 217774, would move to lost+found
+disconnected inode 217775, would move to lost+found
+disconnected inode 217776, would move to lost+found
+disconnected inode 217777, would move to lost+found
+disconnected inode 217778, would move to lost+found
+disconnected inode 217779, would move to lost+found
+disconnected inode 217780, would move to lost+found
+disconnected inode 217781, would move to lost+found
+disconnected inode 217782, would move to lost+found
+disconnected inode 217783, would move to lost+found
+disconnected inode 217784, would move to lost+found
+disconnected inode 217785, would move to lost+found
+disconnected inode 217786, would move to lost+found
+disconnected inode 217787, would move to lost+found
+disconnected inode 217788, would move to lost+found
+disconnected inode 217789, would move to lost+found
+disconnected inode 217790, would move to lost+found
+disconnected inode 217791, would move to lost+found
+disconnected inode 217792, would move to lost+found
+disconnected inode 217793, would move to lost+found
+disconnected inode 217794, would move to lost+found
+repair returned 1?

@@ -1,0 +1,33 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+13. Test file with unwritten extents, only have pagevec dirty pages
+13.01 SEEK_HOLE expected 57344 or 4194304, got 57344.             succ
+13.02 SEEK_HOLE expected 57344 or 4194304, got 57344.             succ
+13.03 SEEK_DATA expected 0 or 0, got 0.                           succ
+13.04 SEEK_DATA expected 1 or 1, got 1.                           succ
+
+14. Test file with unwritten extents, small hole after pagevec dirty pages
+14.01 SEEK_HOLE expected 57344 or 4194304, got 57344.             succ
+14.02 SEEK_HOLE expected 57344 or 4194304, got 57344.             succ
+14.03 SEEK_HOLE expected 229376 or 4194304, got 229376.           succ
+14.04 SEEK_DATA expected 0 or 0, got 0.                           succ
+14.05 SEEK_DATA expected 1 or 1, got 1.                           succ
+14.06 SEEK_DATA expected 172032 or 172032, got 172032.            succ
+
+15. Test file with unwritten extents, page after unwritten extent
+15.01 SEEK_HOLE expected 4096 or 4198400, got 4096.               succ
+15.02 SEEK_HOLE expected 4096 or 4198400, got 4096.               succ
+15.03 SEEK_DATA expected 0 or 0, got 0.                           succ
+15.04 SEEK_DATA expected 1 or 1, got 1.                           succ
+15.05 SEEK_DATA expected 4194304 or 4194304, got 4194304.         succ
+
+16. Test file with unwritten extents, non-contiguous dirty pages
+16.01 SEEK_HOLE expected 4096 or 4194304, got 4096.               succ
+16.02 SEEK_HOLE expected 4096 or 4194304, got 4096.               succ
+16.03 SEEK_DATA expected 0 or 0, got 0.                           succ
+16.04 SEEK_DATA expected 1 or 1, got 1.                           succ
+16.05 SEEK_DATA expected 2097152 or 2097152, got 2097152.         succ
+16.06 SEEK_HOLE expected 2101248 or 4194304, got 2101248.         succ
+
+umount: /dev/ublkb1: not mounted.

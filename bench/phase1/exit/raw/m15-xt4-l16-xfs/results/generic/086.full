@@ -1,0 +1,7 @@
+wrote 2048/2048 bytes at offset 4096
+2 KiB, 1 ops; 0.0000 sec (88.778 MiB/sec and 45454.5455 ops/sec)
+wrote 2048/2048 bytes at offset 65536
+2 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 500000.0000 ops/sec)
+wrote 2048/2048 bytes at offset 67584
+2 KiB, 1 ops; 0.0006 sec (3.223 MiB/sec and 1650.1650 ops/sec)
+umount: /dev/ublkb1: not mounted.

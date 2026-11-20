@@ -1,0 +1,531 @@
+umount: /dev/ublkb1: not mounted.
+*** MKFS ***
+
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+fsstress iteration: 0
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 1
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 2
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 3
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 4
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 5
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 6
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 7
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 8
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+fsstress iteration: 9
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+-z -s 1122413794 -m 31 -n 1000 -p 1 \
+-f attr_remove=100 \
+-f attr_set=100 \
+-f chown=3 \
+-f creat=4 \
+-f dread=4 \
+-f dwrite=4 \
+-f fdatasync=1 \
+-f fsync=1 \
+-f getdents=1 \
+-f link=1 \
+-f mkdir=2 \
+-f mknod=2 \
+-f read=1 \
+-f readlink=1 \
+-f rename=2 \
+-f rmdir=1 \
+-f setxattr=1 \
+-f stat=1 \
+-f symlink=2 \
+-f sync=1 \
+-f truncate=2 \
+-f unlink=1 \
+-f write=4 \
+
+umount: /dev/ublkb1: not mounted.

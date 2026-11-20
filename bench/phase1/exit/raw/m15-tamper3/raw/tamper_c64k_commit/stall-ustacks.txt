@@ -1,0 +1,491 @@
+[New LWP 3029779]
+[New LWP 3029778]
+[New LWP 3029777]
+[New LWP 3029776]
+[New LWP 3029763]
+[New LWP 3029762]
+[New LWP 3029761]
+[New LWP 3029760]
+[New LWP 3029759]
+[New LWP 3029756]
+[New LWP 3029755]
+[New LWP 3029754]
+[New LWP 3029749]
+[New LWP 3029748]
+[New LWP 3029747]
+[New LWP 3029746]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+
+warning: 38	../sysdeps/unix/sysv/linux/x86_64/syscall.S: No such file or directory
+
+Thread 17 (Thread 0x7319157ff6c0 (LWP 3029746) "lunixd-trim"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007319158a827c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x00007319158f7c02 in __GI___clock_nanosleep (clock_id=<optimized out>, flags=<optimized out>, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+#3  0x0000629c9a22d817 in std::sys::thread::unix::sleep::nanosleep () at library/std/src/sys/thread/unix.rs:566
+#4  std::sys::thread::unix::sleep () at library/std/src/sys/thread/unix.rs:592
+#5  std::thread::functions::sleep () at library/std/src/thread/functions.rs:293
+#6  0x0000629c99d0854f in lunixd::daemon::{impl#2}::spawn_idle_trim::{closure#0} () at crates/lunixd/src/daemon.rs:1651
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99d0aa24 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunixd::daemon::{impl#2}::spawn_idle_trim::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 16 (Thread 0x7319155fe6c0 (LWP 3029747) "lunixd-ctl"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007319158a830c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x000073191593f7b5 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x0000629c99e1e7ec in mio::sys::unix::selector::Selector::select () at src/sys/unix/mod.rs:8
+#5  mio::poll::Poll::poll () at src/poll.rs:439
+#6  0x0000629c99e11beb in tokio::runtime::io::driver::Driver::turn () at src/runtime/io/driver.rs:199
+#7  0x0000629c99dff3b8 in tokio::runtime::time::Driver::park_internal () at src/runtime/io/driver.rs:167
+#8  0x0000629c99e0cb1a in tokio::runtime::scheduler::multi_thread::park::Inner::park_driver () at src/runtime/scheduler/multi_thread/park.rs:265
+#9  tokio::runtime::scheduler::multi_thread::park::Inner::park () at src/runtime/scheduler/multi_thread/park.rs:144
+#10 tokio::runtime::scheduler::multi_thread::park::Parker::park () at src/runtime/scheduler/multi_thread/park.rs:77
+#11 tokio::runtime::scheduler::multi_thread::worker::Context::park_internal () at src/runtime/scheduler/multi_thread/worker.rs:903
+#12 0x0000629c99e0d814 in tokio::runtime::scheduler::multi_thread::worker::Context::park () at src/runtime/scheduler/multi_thread/worker.rs:851
+#13 tokio::runtime::scheduler::multi_thread::worker::Context::run () at src/runtime/scheduler/multi_thread/worker.rs:619
+#14 0x0000629c99e162a2 in tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:560
+#15 tokio::runtime::context::scoped::Scoped::set<tokio::runtime::scheduler::Context, tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}, ()> () at src/runtime/context/scoped.rs:40
+#16 0x0000629c99e17c54 in tokio::runtime::context::set_scheduler::{closure#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}> () at src/runtime/context.rs:186
+#17 std::thread::local::LocalKey::try_with<tokio::runtime::context::Context, tokio::runtime::context::set_scheduler::{closure_env#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#18 std::thread::local::LocalKey::with<tokio::runtime::context::Context, tokio::runtime::context::set_scheduler::{closure_env#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#19 tokio::runtime::context::set_scheduler<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}> () at src/runtime/context.rs:186
+#20 tokio::runtime::scheduler::multi_thread::worker::run::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:557
+#21 tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::worker::run::{closure_env#0}, ()> () at src/runtime/context/runtime.rs:65
+#22 0x0000629c99e0e22d in tokio::runtime::scheduler::multi_thread::worker::run () at src/runtime/scheduler/multi_thread/worker.rs:549
+#23 0x0000629c99e0b38b in tokio::runtime::scheduler::multi_thread::worker::maybe_move_runtime::{closure#0}::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:506
+#24 tokio::runtime::blocking::task::{impl#2}::poll<tokio::runtime::scheduler::multi_thread::worker::maybe_move_runtime::{closure#0}::{closure_env#0}, ()> () at src/runtime/blocking/task.rs:42
+#25 0x0000629c99e15875 in tokio::runtime::task::core::{impl#6}::poll::{closure#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/core.rs:380
+#26 tokio::loom::std::unsafe_cell::UnsafeCell::with_mut<tokio::runtime::task::core::Stage<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>>, core::task::poll::Poll<()>, tokio::runtime::task::core::{impl#6}::poll::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>> () at src/loom/std/unsafe_cell.rs:16
+#27 tokio::runtime::task::core::Core::poll<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/core.rs:369
+#28 0x0000629c99dfb651 in tokio::runtime::task::harness::poll_future::{closure#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:537
+#29 core::panic::unwind_safe::{impl#23}::call_once<core::task::poll::Poll<()>, tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#30 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>, core::task::poll::Poll<()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#31 std::panicking::catch_unwind<core::task::poll::Poll<()>, core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#32 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>, core::task::poll::Poll<()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#33 tokio::runtime::task::harness::poll_future<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:525
+#34 tokio::runtime::task::harness::Harness::poll_inner<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:210
+#35 tokio::runtime::task::harness::Harness::poll<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:155
+#36 0x0000629c99e0873b in tokio::runtime::task::raw::RawTask::poll () at src/runtime/task/raw.rs:267
+#37 tokio::runtime::task::UnownedTask::run<tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/mod.rs:560
+#38 tokio::runtime::blocking::pool::Task::run () at src/runtime/blocking/pool.rs:220
+#39 tokio::runtime::blocking::pool::LockedImpl::run_worker () at src/runtime/blocking/pool.rs:660
+#40 tokio::runtime::blocking::pool::InnerImpl::run_worker () at src/runtime/blocking/pool.rs:571
+#41 tokio::runtime::blocking::pool::Inner::run () at src/runtime/blocking/pool.rs:764
+#42 tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure#0} () at src/runtime/blocking/pool.rs:525
+#43 std::sys::backtrace::__rust_begin_short_backtrace<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#44 0x0000629c99e04f23 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#45 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#46 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#47 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#48 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#49 std::thread::lifecycle::spawn_unchecked::{closure#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#50 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#51 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#52 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#53 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#54 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 15 (Thread 0x7319153fd6c0 (LWP 3029748) "lunixd-ctl"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99e1cd79 in std::sync::poison::condvar::Condvar::wait<()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  tokio::runtime::scheduler::multi_thread::park::Inner::park_condvar () at src/runtime/scheduler/multi_thread/park.rs:203
+#6  0x0000629c99e0cb59 in tokio::runtime::scheduler::multi_thread::park::Inner::park () at src/runtime/scheduler/multi_thread/park.rs:146
+#7  tokio::runtime::scheduler::multi_thread::park::Parker::park () at src/runtime/scheduler/multi_thread/park.rs:77
+#8  tokio::runtime::scheduler::multi_thread::worker::Context::park_internal () at src/runtime/scheduler/multi_thread/worker.rs:903
+#9  0x0000629c99e0d814 in tokio::runtime::scheduler::multi_thread::worker::Context::park () at src/runtime/scheduler/multi_thread/worker.rs:851
+#10 tokio::runtime::scheduler::multi_thread::worker::Context::run () at src/runtime/scheduler/multi_thread/worker.rs:619
+#11 0x0000629c99e162a2 in tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:560
+#12 tokio::runtime::context::scoped::Scoped::set<tokio::runtime::scheduler::Context, tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}, ()> () at src/runtime/context/scoped.rs:40
+#13 0x0000629c99e17c54 in tokio::runtime::context::set_scheduler::{closure#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}> () at src/runtime/context.rs:186
+#14 std::thread::local::LocalKey::try_with<tokio::runtime::context::Context, tokio::runtime::context::set_scheduler::{closure_env#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#15 std::thread::local::LocalKey::with<tokio::runtime::context::Context, tokio::runtime::context::set_scheduler::{closure_env#0}<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#16 tokio::runtime::context::set_scheduler<(), tokio::runtime::scheduler::multi_thread::worker::run::{closure#0}::{closure_env#0}> () at src/runtime/context.rs:186
+#17 tokio::runtime::scheduler::multi_thread::worker::run::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:557
+#18 tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::worker::run::{closure_env#0}, ()> () at src/runtime/context/runtime.rs:65
+#19 0x0000629c99e0e22d in tokio::runtime::scheduler::multi_thread::worker::run () at src/runtime/scheduler/multi_thread/worker.rs:549
+#20 0x0000629c99e0b38b in tokio::runtime::scheduler::multi_thread::worker::maybe_move_runtime::{closure#0}::{closure#0} () at src/runtime/scheduler/multi_thread/worker.rs:506
+#21 tokio::runtime::blocking::task::{impl#2}::poll<tokio::runtime::scheduler::multi_thread::worker::maybe_move_runtime::{closure#0}::{closure_env#0}, ()> () at src/runtime/blocking/task.rs:42
+#22 0x0000629c99e15875 in tokio::runtime::task::core::{impl#6}::poll::{closure#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/core.rs:380
+#23 tokio::loom::std::unsafe_cell::UnsafeCell::with_mut<tokio::runtime::task::core::Stage<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>>, core::task::poll::Poll<()>, tokio::runtime::task::core::{impl#6}::poll::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>> () at src/loom/std/unsafe_cell.rs:16
+#24 tokio::runtime::task::core::Core::poll<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/core.rs:369
+#25 0x0000629c99dfb651 in tokio::runtime::task::harness::poll_future::{closure#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:537
+#26 core::panic::unwind_safe::{impl#23}::call_once<core::task::poll::Poll<()>, tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#27 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>, core::task::poll::Poll<()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#28 std::panicking::catch_unwind<core::task::poll::Poll<()>, core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#29 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<tokio::runtime::task::harness::poll_future::{closure_env#0}<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule>>, core::task::poll::Poll<()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#30 tokio::runtime::task::harness::poll_future<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:525
+#31 tokio::runtime::task::harness::Harness::poll_inner<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:210
+#32 tokio::runtime::task::harness::Harness::poll<tokio::runtime::blocking::task::BlockingTask<tokio::runtime::scheduler::multi_thread::worker::{impl#0}::launch::{closure_env#0}>, tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/harness.rs:155
+#33 0x0000629c99e0873b in tokio::runtime::task::raw::RawTask::poll () at src/runtime/task/raw.rs:267
+#34 tokio::runtime::task::UnownedTask::run<tokio::runtime::blocking::schedule::BlockingSchedule> () at src/runtime/task/mod.rs:560
+#35 tokio::runtime::blocking::pool::Task::run () at src/runtime/blocking/pool.rs:220
+#36 tokio::runtime::blocking::pool::LockedImpl::run_worker () at src/runtime/blocking/pool.rs:660
+#37 tokio::runtime::blocking::pool::InnerImpl::run_worker () at src/runtime/blocking/pool.rs:571
+#38 tokio::runtime::blocking::pool::Inner::run () at src/runtime/blocking/pool.rs:764
+#39 tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure#0} () at src/runtime/blocking/pool.rs:525
+#40 std::sys::backtrace::__rust_begin_short_backtrace<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#41 0x0000629c99e04f23 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#42 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#43 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#44 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#45 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#46 std::thread::lifecycle::spawn_unchecked::{closure#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#47 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#48 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#49 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#50 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#51 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 14 (Thread 0x7319151fc6c0 (LWP 3029749) "lunixd-ctl"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a2189ab in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  0x0000629c99e0863d in std::sync::poison::condvar::Condvar::wait_timeout<tokio::runtime::blocking::pool::LockedInner> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:330
+#4  tokio::runtime::blocking::pool::LockedImpl::run_worker () at src/runtime/blocking/pool.rs:671
+#5  tokio::runtime::blocking::pool::InnerImpl::run_worker () at src/runtime/blocking/pool.rs:571
+#6  tokio::runtime::blocking::pool::Inner::run () at src/runtime/blocking/pool.rs:764
+#7  tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure#0} () at src/runtime/blocking/pool.rs:525
+#8  std::sys::backtrace::__rust_begin_short_backtrace<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#9  0x0000629c99e04f23 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#10 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#11 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#12 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#13 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#14 std::thread::lifecycle::spawn_unchecked::{closure#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#15 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<tokio::runtime::blocking::pool::{impl#7}::spawn_thread::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#16 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#17 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#18 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#19 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 13 (Thread 0x731914ffb6c0 (LWP 3029754) "lunix-journal-f"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99da9cd6 in std::sync::poison::condvar::Condvar::wait<lunix_journal::shared::CoordQ> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_journal::coord::run () at crates/lunix-journal/src/coord.rs:78
+#6  0x0000629c99dbcc14 in lunix_journal::journal::{impl#0}::open::{closure#1} () at crates/lunix-journal/src/journal.rs:99
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99db2684 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_journal::journal::{impl#0}::open::{closure_env#1}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 12 (Thread 0x731914dfa6c0 (LWP 3029755) "lunix-space-lad"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99d7a56f in std::sync::poison::condvar::Condvar::wait<lunix_space::gate::State> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_space::gate::Shared::ladder_main () at crates/lunix-space/src/gate.rs:217
+#6  0x0000629c99d7ee84 in lunix_space::gate::{impl#2}::new::{closure#0} () at crates/lunix-space/src/gate.rs:317
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99d7d950 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_space::gate::{impl#2}::new::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 11 (Thread 0x731914bf96c0 (LWP 3029756) "lunix-space-tim"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a2189ab in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  0x0000629c99d7a213 in std::sync::poison::condvar::Condvar::wait_timeout<lunix_space::gate::State> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:330
+#4  lunix_space::gate::Shared::timer_main () at crates/lunix-space/src/gate.rs:255
+#5  0x0000629c99d7eed4 in lunix_space::gate::{impl#2}::new::{closure#1} () at crates/lunix-space/src/gate.rs:324
+#6  std::sys::backtrace::__rust_begin_short_backtrace<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#7  0x0000629c99d7dac0 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#8  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#9  std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#10 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#11 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#12 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#13 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_space::gate::{impl#2}::new::{closure_env#1}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#14 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#15 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#16 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#17 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x7319149f86c0 (LWP 3029759) "lunix-read-0"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99ffcacc in std::sync::poison::condvar::Condvar::wait<lunix_engine::read::PoolState> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_engine::read::helper () at crates/lunix-engine/src/read.rs:282
+#6  0x0000629c99ff7ce1 in lunix_engine::read::{impl#3}::new::{closure#0}::{closure#0} () at crates/lunix-engine/src/read.rs:245
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99ff8cd6 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 9 (Thread 0x7319147f76c0 (LWP 3029760) "lunix-read-1"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99ffcacc in std::sync::poison::condvar::Condvar::wait<lunix_engine::read::PoolState> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_engine::read::helper () at crates/lunix-engine/src/read.rs:282
+#6  0x0000629c99ff7ce1 in lunix_engine::read::{impl#3}::new::{closure#0}::{closure#0} () at crates/lunix-engine/src/read.rs:245
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99ff8cd6 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x7319145f66c0 (LWP 3029761) "lunix-read-2"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99ffcacc in std::sync::poison::condvar::Condvar::wait<lunix_engine::read::PoolState> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_engine::read::helper () at crates/lunix-engine/src/read.rs:282
+#6  0x0000629c99ff7ce1 in lunix_engine::read::{impl#3}::new::{closure#0}::{closure#0} () at crates/lunix-engine/src/read.rs:245
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99ff8cd6 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x7319143f56c0 (LWP 3029762) "lunix-read-3"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99ffcacc in std::sync::poison::condvar::Condvar::wait<lunix_engine::read::PoolState> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  lunix_engine::read::helper () at crates/lunix-engine/src/read.rs:282
+#6  0x0000629c99ff7ce1 in lunix_engine::read::{impl#3}::new::{closure#0}::{closure#0} () at crates/lunix-engine/src/read.rs:245
+#7  std::sys::backtrace::__rust_begin_short_backtrace<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#8  0x0000629c99ff8cd6 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#9  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#10 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#11 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#12 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#13 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#14 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_engine::read::{impl#3}::new::{closure#0}::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#15 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#16 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#17 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x7318f7fff6c0 (LWP 3029763) "lunix-coord"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a2189ab in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  0x0000629c99ff7e53 in std::sync::poison::condvar::Condvar::wait_timeout<bool> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:330
+#4  lunix_engine::engine::{impl#5}::start_background::{closure#0} () at crates/lunix-engine/src/engine.rs:425
+#5  std::sys::backtrace::__rust_begin_short_backtrace<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#6  0x0000629c99ff8e92 in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#7  core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#8  std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#9  std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#10 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#11 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#12 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_engine::engine::{impl#5}::start_background::{closure_env#0}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#13 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#14 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#15 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#16 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x7318f7dfe6c0 (LWP 3029776) "lunix-q0"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a0961e3 in io_uring::sys::io_uring_enter () at src/sys/mod.rs:132
+#2  io_uring::submit::Submitter::enter<io_uring::types::SubmitArgs> () at src/submit.rs:160
+#3  io_uring::submit::Submitter::submit_with_args_and_flags () at src/submit.rs:278
+#4  0x0000629c9a06111d in libublk::io::{impl#10}::__wait_ios::{closure#1}::{closure#0} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2829
+#5  libublk::io::{impl#10}::__wait_ios::{closure#1} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:272
+#6  std::thread::local::LocalKey::try_with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#7  std::thread::local::LocalKey::with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#8  0x0000629c9a082177 in libublk::io::UblkQueue::__wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:269
+#9  libublk::io::UblkQueue::wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2851
+#10 0x0000629c9a0810c0 in libublk::io::UblkQueue::flush_and_wake_io_tasks<lunix_ublk::queue::run_queue::{closure_env#5}> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2983
+#11 0x0000629c9a054e67 in lunix_ublk::queue::run_queue () at crates/lunix-ublk/src/queue.rs:480
+#12 lunix_ublk::queue::queue_thread::{closure#0} () at crates/lunix-ublk/src/queue.rs:290
+#13 core::panic::unwind_safe::{impl#23}::call_once<(), lunix_ublk::queue::queue_thread::{closure_env#0}> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#14 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#15 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#16 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#17 lunix_ublk::queue::queue_thread () at crates/lunix-ublk/src/queue.rs:290
+#18 0x0000629c9a07dc26 in lunix_ublk::device::{impl#4}::start::{closure#6} () at crates/lunix-ublk/src/device.rs:536
+#19 std::sys::backtrace::__rust_begin_short_backtrace<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#20 0x0000629c9a05e0dd in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#21 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#22 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#23 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#24 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#25 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#26 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#27 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#28 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#29 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#30 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x7318f7bfd6c0 (LWP 3029777) "lunix-q1"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a0961e3 in io_uring::sys::io_uring_enter () at src/sys/mod.rs:132
+#2  io_uring::submit::Submitter::enter<io_uring::types::SubmitArgs> () at src/submit.rs:160
+#3  io_uring::submit::Submitter::submit_with_args_and_flags () at src/submit.rs:278
+#4  0x0000629c9a06111d in libublk::io::{impl#10}::__wait_ios::{closure#1}::{closure#0} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2829
+#5  libublk::io::{impl#10}::__wait_ios::{closure#1} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:272
+#6  std::thread::local::LocalKey::try_with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#7  std::thread::local::LocalKey::with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#8  0x0000629c9a082177 in libublk::io::UblkQueue::__wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:269
+#9  libublk::io::UblkQueue::wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2851
+#10 0x0000629c9a0810c0 in libublk::io::UblkQueue::flush_and_wake_io_tasks<lunix_ublk::queue::run_queue::{closure_env#5}> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2983
+#11 0x0000629c9a054e67 in lunix_ublk::queue::run_queue () at crates/lunix-ublk/src/queue.rs:480
+#12 lunix_ublk::queue::queue_thread::{closure#0} () at crates/lunix-ublk/src/queue.rs:290
+#13 core::panic::unwind_safe::{impl#23}::call_once<(), lunix_ublk::queue::queue_thread::{closure_env#0}> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#14 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#15 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#16 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#17 lunix_ublk::queue::queue_thread () at crates/lunix-ublk/src/queue.rs:290
+#18 0x0000629c9a07dc26 in lunix_ublk::device::{impl#4}::start::{closure#6} () at crates/lunix-ublk/src/device.rs:536
+#19 std::sys::backtrace::__rust_begin_short_backtrace<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#20 0x0000629c9a05e0dd in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#21 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#22 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#23 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#24 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#25 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#26 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#27 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#28 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#29 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#30 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x7318f79fc6c0 (LWP 3029778) "lunix-q2"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a0961e3 in io_uring::sys::io_uring_enter () at src/sys/mod.rs:132
+#2  io_uring::submit::Submitter::enter<io_uring::types::SubmitArgs> () at src/submit.rs:160
+#3  io_uring::submit::Submitter::submit_with_args_and_flags () at src/submit.rs:278
+#4  0x0000629c9a06111d in libublk::io::{impl#10}::__wait_ios::{closure#1}::{closure#0} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2829
+#5  libublk::io::{impl#10}::__wait_ios::{closure#1} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:272
+#6  std::thread::local::LocalKey::try_with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#7  std::thread::local::LocalKey::with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#8  0x0000629c9a082177 in libublk::io::UblkQueue::__wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:269
+#9  libublk::io::UblkQueue::wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2851
+#10 0x0000629c9a0810c0 in libublk::io::UblkQueue::flush_and_wake_io_tasks<lunix_ublk::queue::run_queue::{closure_env#5}> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2983
+#11 0x0000629c9a054e67 in lunix_ublk::queue::run_queue () at crates/lunix-ublk/src/queue.rs:480
+#12 lunix_ublk::queue::queue_thread::{closure#0} () at crates/lunix-ublk/src/queue.rs:290
+#13 core::panic::unwind_safe::{impl#23}::call_once<(), lunix_ublk::queue::queue_thread::{closure_env#0}> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#14 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#15 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#16 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#17 lunix_ublk::queue::queue_thread () at crates/lunix-ublk/src/queue.rs:290
+#18 0x0000629c9a07dc26 in lunix_ublk::device::{impl#4}::start::{closure#6} () at crates/lunix-ublk/src/device.rs:536
+#19 std::sys::backtrace::__rust_begin_short_backtrace<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#20 0x0000629c9a05e0dd in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#21 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#22 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#23 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#24 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#25 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#26 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#27 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#28 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#29 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#30 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x7318f77fb6c0 (LWP 3029779) "lunix-q3"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a0961e3 in io_uring::sys::io_uring_enter () at src/sys/mod.rs:132
+#2  io_uring::submit::Submitter::enter<io_uring::types::SubmitArgs> () at src/submit.rs:160
+#3  io_uring::submit::Submitter::submit_with_args_and_flags () at src/submit.rs:278
+#4  0x0000629c9a06111d in libublk::io::{impl#10}::__wait_ios::{closure#1}::{closure#0} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2829
+#5  libublk::io::{impl#10}::__wait_ios::{closure#1} () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:272
+#6  std::thread::local::LocalKey::try_with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:463
+#7  std::thread::local::LocalKey::with<core::cell::once::OnceCell<core::cell::RefCell<io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry>>>, libublk::io::{impl#10}::__wait_ios::{closure_env#1}, core::result::Result<i32, libublk::UblkError>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/local.rs:427
+#8  0x0000629c9a082177 in libublk::io::UblkQueue::__wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:269
+#9  libublk::io::UblkQueue::wait_ios () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2851
+#10 0x0000629c9a0810c0 in libublk::io::UblkQueue::flush_and_wake_io_tasks<lunix_ublk::queue::run_queue::{closure_env#5}> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libublk-0.4.8/src/io.rs:2983
+#11 0x0000629c9a054e67 in lunix_ublk::queue::run_queue () at crates/lunix-ublk/src/queue.rs:480
+#12 lunix_ublk::queue::queue_thread::{closure#0} () at crates/lunix-ublk/src/queue.rs:290
+#13 core::panic::unwind_safe::{impl#23}::call_once<(), lunix_ublk::queue::queue_thread::{closure_env#0}> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#14 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#15 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#16 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<lunix_ublk::queue::queue_thread::{closure_env#0}>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#17 lunix_ublk::queue::queue_thread () at crates/lunix-ublk/src/queue.rs:290
+#18 0x0000629c9a07dc26 in lunix_ublk::device::{impl#4}::start::{closure#6} () at crates/lunix-ublk/src/device.rs:536
+#19 std::sys::backtrace::__rust_begin_short_backtrace<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs:166
+#20 0x0000629c9a05e0dd in std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:70
+#21 core::panic::unwind_safe::{impl#23}::call_once<(), std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/panic/unwind_safe.rs:275
+#22 std::panicking::catch_unwind::do_call<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:576
+#23 std::panicking::catch_unwind<(), core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panicking.rs:544
+#24 std::panic::catch_unwind<core::panic::unwind_safe::AssertUnwindSafe<std::thread::lifecycle::spawn_unchecked::{closure#1}::{closure_env#0}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/panic.rs:359
+#25 std::thread::lifecycle::spawn_unchecked::{closure#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs:68
+#26 core::ops::function::FnOnce::call_once<std::thread::lifecycle::spawn_unchecked::{closure_env#1}<lunix_ublk::device::{impl#4}::start::{closure_env#6}, ()>, ()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs:250
+#27 0x0000629c9a23278f in alloc::boxed::{impl#31}::call_once<(), (dyn core::ops::function::FnOnce<(), Output=()> + core::marker::Send), alloc::alloc::Global> () at library/alloc/src/boxed.rs:2319
+#28 std::sys::thread::unix::{impl#2}::new::thread_start () at library/std/src/sys/thread/unix.rs:123
+#29 0x00007319158abdeb in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#30 0x000073191593f4dc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x731915c09f80 (LWP 3029743) "lunixd"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000629c9a218a75 in std::sys::pal::unix::futex::futex_wait () at library/std/src/sys/pal/unix/futex.rs:73
+#2  std::sys::sync::condvar::futex::Condvar::wait_optional_timeout () at library/std/src/sys/sync/condvar/futex.rs:49
+#3  std::sys::sync::condvar::futex::Condvar::wait () at library/std/src/sys/sync/condvar/futex.rs:33
+#4  0x0000629c99e1d399 in std::sync::poison::condvar::Condvar::wait<()> () at /rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sync/poison/condvar.rs:128
+#5  tokio::runtime::park::Inner::park () at src/runtime/park.rs:117
+#6  0x0000629c99c96778 in tokio::runtime::park::CachedParkThread::block_on<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/park.rs:380
+#7  0x0000629c99caafd8 in tokio::runtime::context::blocking::BlockingRegionGuard::block_on<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/context/blocking.rs:66
+#8  tokio::runtime::scheduler::multi_thread::{impl#0}::block_on::{closure#0}<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/scheduler/multi_thread/mod.rs:90
+#9  tokio::runtime::context::runtime::enter_runtime<tokio::runtime::scheduler::multi_thread::{impl#0}::block_on::{closure_env#0}<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>>, core::result::Result<i32, core::io::error::Error>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/context/runtime.rs:65
+#10 tokio::runtime::scheduler::multi_thread::MultiThread::block_on<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/scheduler/multi_thread/mod.rs:89
+#11 tokio::runtime::runtime::Runtime::block_on_inner<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/runtime.rs:381
+#12 tokio::runtime::runtime::Runtime::block_on<lunixd::server::run::{async_block_env#0}<lunixd::serve::{closure_env#2}>> () at <home>/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.54.1/src/runtime/runtime.rs:348
+#13 lunixd::server::run<lunixd::serve::{closure_env#2}> () at crates/lunixd/src/server.rs:268
+#14 0x0000629c99c86f8e in lunixd::serve () at crates/lunixd/src/main.rs:167
+#15 lunixd::main () at crates/lunixd/src/main.rs:233
+[Inferior 1 (process 3029743) detached]

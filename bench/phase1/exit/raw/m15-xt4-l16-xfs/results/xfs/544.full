@@ -1,0 +1,10 @@
+*** dump with bind-mounted test ***
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 0 dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/dest.544
+/usr/sbin/xfsdump: dump date: Thu Nov 19 23:22:48 2026
+/usr/sbin/xfsdump: session id: 8df787bd-490f-461e-b504-d1e55aa17376
+/usr/sbin/xfsdump: session label: "session"
+/usr/sbin/xfsdump: ERROR: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/dest.544 is not the root of the filesystem (bind mount?) - use primary mountpoint
+/usr/sbin/xfsdump: Dump Status: ERROR
+umount: /dev/ublkb1: not mounted.

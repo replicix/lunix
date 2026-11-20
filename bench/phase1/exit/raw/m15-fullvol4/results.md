@@ -1,0 +1,27 @@
+# M15 full-volume cell (2026-11-20T00:35:43Z, kernel 7.0.0): cap 8G, working set 16 GiB, full_timeout 5s
+- PASS create volume fullv (32 GiB, chunk 65536, integrity)
+- PASS attach fullv (4 queues)
+- device /dev/ublkb0
+- PASS set cache_max 8G, on_full wait, full_timeout 5s
+- fill: fio rc 1, errors 1, longest write completion 5006 ms
+- PASS fio saw write errors (ENOSPC) once the cap was reached
+- PASS no write completed later than full_timeout + 5 s (5006 ms)
+- PASS the errors are ENOSPC
+- gate state after the fill: full-by-ledger
+- PASS the status shows the gate full (got full-by-ledger)
+- PASS no hung-task line after the fill
+- PASS blkdiscard of half the device (rc 0)
+- writes after the discard: ok=1 after 42 s
+- PASS writes came back within 90 s of the discard (42 s)
+- state with writes parked: open, waiters 1
+- PASS writes are parked at the cap
+- PASS SIGTERM with writes parked: the daemon exited in 2s (quiesce_timeout_ms 30 s)
+- PASS wrote space.on_full = error to volume.json
+- fio after the restart: rc 1
+- PASS fio ended after the kill -9 and the restart with on_full = error
+- PASS the device answers after the restart (a write succeeds or fails with ENOSPC, rc 1)
+- PASS a read succeeds
+- PASS no hung-task line in the whole cell
+- PASS detach fullv
+- PASS lunix fsck --deep clean after detach (exit 0) [fullvol]
+overall FAIL=0

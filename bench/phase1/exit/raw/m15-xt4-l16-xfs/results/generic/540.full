@@ -1,0 +1,337 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0007 sec (4.920 GiB/sec and 1289672.5441 ops/sec)
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0007 sec (4.976 GiB/sec and 1304458.5987 ops/sec)
+wrote 4194304/4194304 bytes at offset 0
+4 MiB, 1024 ops; 0.0008 sec (4.639 GiB/sec and 1216152.0190 ops/sec)
+linked 65536/65536 bytes at offset 0
+64 KiB, 1 ops; 0.0049 sec (12.528 MiB/sec and 200.4410 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0000 sec (5.549 GiB/sec and 1454545.4545 ops/sec)
+linked 65536/65536 bytes at offset 327680
+64 KiB, 1 ops; 0.0018 sec (34.511 MiB/sec and 552.1811 ops/sec)
+wrote 65536/65536 bytes at offset 327680
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 655360
+64 KiB, 1 ops; 0.0015 sec (41.227 MiB/sec and 659.6306 ops/sec)
+wrote 65536/65536 bytes at offset 655360
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 983040
+64 KiB, 1 ops; 0.0015 sec (39.557 MiB/sec and 632.9114 ops/sec)
+wrote 65536/65536 bytes at offset 983040
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 1310720
+64 KiB, 1 ops; 0.0015 sec (39.683 MiB/sec and 634.9206 ops/sec)
+wrote 65536/65536 bytes at offset 1310720
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 1638400
+64 KiB, 1 ops; 0.0015 sec (39.733 MiB/sec and 635.7279 ops/sec)
+wrote 65536/65536 bytes at offset 1638400
+64 KiB, 16 ops; 0.0000 sec (5.086 GiB/sec and 1333333.3333 ops/sec)
+linked 65536/65536 bytes at offset 1966080
+64 KiB, 1 ops; 0.0015 sec (41.091 MiB/sec and 657.4622 ops/sec)
+wrote 65536/65536 bytes at offset 1966080
+64 KiB, 16 ops; 0.0000 sec (2.543 GiB/sec and 666666.6667 ops/sec)
+linked 65536/65536 bytes at offset 2293760
+64 KiB, 1 ops; 0.0016 sec (38.748 MiB/sec and 619.9628 ops/sec)
+wrote 65536/65536 bytes at offset 2293760
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 2621440
+64 KiB, 1 ops; 0.0016 sec (38.868 MiB/sec and 621.8905 ops/sec)
+wrote 65536/65536 bytes at offset 2621440
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 2949120
+64 KiB, 1 ops; 0.0015 sec (40.558 MiB/sec and 648.9293 ops/sec)
+wrote 65536/65536 bytes at offset 2949120
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 3276800
+64 KiB, 1 ops; 0.0015 sec (39.557 MiB/sec and 632.9114 ops/sec)
+wrote 65536/65536 bytes at offset 3276800
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+linked 65536/65536 bytes at offset 3604480
+64 KiB, 1 ops; 0.0017 sec (35.694 MiB/sec and 571.1022 ops/sec)
+wrote 65536/65536 bytes at offset 3604480
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+linked 65536/65536 bytes at offset 3932160
+64 KiB, 1 ops; 0.0015 sec (39.407 MiB/sec and 630.5170 ops/sec)
+wrote 65536/65536 bytes at offset 3932160
+64 KiB, 16 ops; 0.0000 sec (2.906 GiB/sec and 761904.7619 ops/sec)
+wrote 65536/65536 bytes at offset 65536
+64 KiB, 16 ops; 0.0000 sec (3.391 GiB/sec and 888888.8889 ops/sec)
+wrote 65536/65536 bytes at offset 393216
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 720896
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 1048576
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 1376256
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 1703936
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2031616
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2359296
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2686976
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3014656
+64 KiB, 16 ops; 0.0000 sec (5.086 GiB/sec and 1333333.3333 ops/sec)
+wrote 65536/65536 bytes at offset 3342336
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 3670016
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3997696
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 131072
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 458752
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 786432
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 1114112
+64 KiB, 16 ops; 0.0000 sec (2.441 GiB/sec and 640000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 1441792
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 1769472
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 2097152
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 2424832
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 2752512
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 3080192
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 3407872
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3735552
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 4063232
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 196608
+64 KiB, 16 ops; 0.0000 sec (1.695 GiB/sec and 444444.4444 ops/sec)
+wrote 65536/65536 bytes at offset 196608
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 524288
+64 KiB, 16 ops; 0.0000 sec (2.441 GiB/sec and 640000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 524288
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 851968
+64 KiB, 16 ops; 0.0000 sec (2.441 GiB/sec and 640000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 851968
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 1179648
+64 KiB, 16 ops; 0.0000 sec (2.774 GiB/sec and 727272.7273 ops/sec)
+wrote 65536/65536 bytes at offset 1179648
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 1507328
+64 KiB, 16 ops; 0.0000 sec (2.035 GiB/sec and 533333.3333 ops/sec)
+wrote 65536/65536 bytes at offset 1507328
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 1835008
+64 KiB, 16 ops; 0.0000 sec (2.261 GiB/sec and 592592.5926 ops/sec)
+wrote 65536/65536 bytes at offset 1835008
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 2162688
+64 KiB, 16 ops; 0.0000 sec (2.654 GiB/sec and 695652.1739 ops/sec)
+wrote 65536/65536 bytes at offset 2162688
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 2490368
+64 KiB, 16 ops; 0.0000 sec (2.906 GiB/sec and 761904.7619 ops/sec)
+wrote 65536/65536 bytes at offset 2490368
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2818048
+64 KiB, 16 ops; 0.0000 sec (2.774 GiB/sec and 727272.7273 ops/sec)
+wrote 65536/65536 bytes at offset 2818048
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 3145728
+64 KiB, 16 ops; 0.0000 sec (2.774 GiB/sec and 727272.7273 ops/sec)
+wrote 65536/65536 bytes at offset 3145728
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 3473408
+64 KiB, 16 ops; 0.0000 sec (3.052 GiB/sec and 800000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 3473408
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3801088
+64 KiB, 16 ops; 0.0000 sec (3.052 GiB/sec and 800000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 3801088
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 4128768
+64 KiB, 16 ops; 0.0000 sec (3.391 GiB/sec and 888888.8889 ops/sec)
+wrote 65536/65536 bytes at offset 4128768
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 65536/65536 bytes at offset 262144
+64 KiB, 16 ops; 0.0000 sec (1.650 GiB/sec and 432432.4324 ops/sec)
+wrote 65536/65536 bytes at offset 262144
+64 KiB, 16 ops; 0.0000 sec (3.391 GiB/sec and 888888.8889 ops/sec)
+wrote 65536/65536 bytes at offset 589824
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 589824
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 917504
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 917504
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 1245184
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 1245184
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 1572864
+64 KiB, 16 ops; 0.0000 sec (3.391 GiB/sec and 888888.8889 ops/sec)
+wrote 65536/65536 bytes at offset 1572864
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 1900544
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 1900544
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 2228224
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 2228224
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2555904
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 2555904
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 2883584
+64 KiB, 16 ops; 0.0000 sec (4.360 GiB/sec and 1142857.1429 ops/sec)
+wrote 65536/65536 bytes at offset 2883584
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3211264
+64 KiB, 16 ops; 0.0000 sec (3.590 GiB/sec and 941176.4706 ops/sec)
+wrote 65536/65536 bytes at offset 3211264
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3538944
+64 KiB, 16 ops; 0.0000 sec (4.069 GiB/sec and 1066666.6667 ops/sec)
+wrote 65536/65536 bytes at offset 3538944
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+wrote 65536/65536 bytes at offset 3866624
+64 KiB, 16 ops; 0.0000 sec (3.815 GiB/sec and 1000000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 3866624
+64 KiB, 16 ops; 0.0000 sec (4.695 GiB/sec and 1230769.2308 ops/sec)
+before reflink
+Filesystem type is: 58465342
+File size of <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file2 is 4194304 (1024 blocks of 4096 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..    1023:       1258..      2281:   1024:             last,eof
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file2: 1 extent found
+Filesystem type is: 58465342
+File size of <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file3 is 4194304 (1024 blocks of 4096 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..      15:         24..        39:     16:             shared
+   1:       16..      31:       1050..      1065:     16:         40: unwritten
+   2:       48..      63:       3306..      3321:     16:       1082:
+   3:       64..      79:          0..         0:      0:             unknown_loc,delalloc
+   4:       80..      95:        104..       119:     16:         16: shared
+   5:       96..     111:       1066..      1081:     16:        120: unwritten
+   6:      128..     143:       3322..      3337:     16:       1098:
+   7:      144..     159:          0..         0:      0:             unknown_loc,delalloc
+   8:      160..     175:        184..       199:     16:         16: shared
+   9:      176..     191:       1082..      1097:     16:        200: unwritten
+  10:      208..     223:       3338..      3353:     16:       1114:
+  11:      224..     239:          0..         0:      0:             unknown_loc,delalloc
+  12:      240..     255:        264..       279:     16:         16: shared
+  13:      256..     271:       1098..      1113:     16:        280: unwritten
+  14:      288..     303:       3354..      3369:     16:       1130:
+  15:      304..     319:          0..         0:      0:             unknown_loc,delalloc
+  16:      320..     335:        344..       359:     16:         16: shared
+  17:      336..     351:       1114..      1129:     16:        360: unwritten
+  18:      368..     383:       3370..      3385:     16:       1146:
+  19:      384..     399:          0..         0:      0:             unknown_loc,delalloc
+  20:      400..     415:        424..       439:     16:         16: shared
+  21:      416..     431:       1130..      1145:     16:        440: unwritten
+  22:      448..     463:       3386..      3401:     16:       1162:
+  23:      464..     479:          0..         0:      0:             unknown_loc,delalloc
+  24:      480..     495:        504..       519:     16:         16: shared
+  25:      496..     511:       1146..      1161:     16:        520: unwritten
+  26:      528..     543:       3402..      3417:     16:       1178:
+  27:      544..     559:          0..         0:      0:             unknown_loc,delalloc
+  28:      560..     575:        584..       599:     16:         16: shared
+  29:      576..     591:       1162..      1177:     16:        600: unwritten
+  30:      608..     623:       3418..      3433:     16:       1194:
+  31:      624..     639:          0..         0:      0:             unknown_loc,delalloc
+  32:      640..     655:        664..       679:     16:         16: shared
+  33:      656..     671:       1178..      1193:     16:        680: unwritten
+  34:      688..     703:       3434..      3449:     16:       1210:
+  35:      704..     719:          0..         0:      0:             unknown_loc,delalloc
+  36:      720..     735:        744..       759:     16:         16: shared
+  37:      736..     751:       1194..      1209:     16:        760: unwritten
+  38:      768..     783:       3450..      3465:     16:       1226:
+  39:      784..     799:          0..         0:      0:             unknown_loc,delalloc
+  40:      800..     815:        824..       839:     16:         16: shared
+  41:      816..     831:       1210..      1225:     16:        840: unwritten
+  42:      848..     863:       3466..      3481:     16:       1242:
+  43:      864..     879:          0..         0:      0:             unknown_loc,delalloc
+  44:      880..     895:        904..       919:     16:         16: shared
+  45:      896..     911:       1226..      1241:     16:        920: unwritten
+  46:      928..     943:       3482..      3497:     16:       1258:
+  47:      944..     959:          0..         0:      0:             unknown_loc,delalloc
+  48:      960..     975:        984..       999:     16:         16: shared
+  49:      976..     991:       1242..      1257:     16:       1000: unwritten
+  50:     1008..    1023:       3498..      3513:     16:       1274: last,eof
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file3: 51 extents found
+linked 2097152/2097152 bytes at offset 1048576
+2 MiB, 1 ops; 0.0080 sec (247.647 MiB/sec and 123.8237 ops/sec)
+wrote 2097152/2097152 bytes at offset 1048576
+2 MiB, 512 ops; 0.0002 sec (8.276 GiB/sec and 2169491.5254 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+after reflink
+Filesystem type is: 58465342
+File size of <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file2 is 4194304 (1024 blocks of 4096 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..     255:       1258..      1513:    256:            
+   1:      256..     767:       1514..      2025:    512:             shared
+   2:      768..    1023:       2026..      2281:    256:             last,eof
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file2: 1 extent found
+Filesystem type is: 58465342
+File size of <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file3 is 4194304 (1024 blocks of 4096 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..      15:         24..        39:     16:             shared
+   1:       16..      31:       1050..      1065:     16:         40: unwritten
+   2:       48..      63:       3306..      3321:     16:       1082:
+   3:       64..      79:       3354..      3369:     16:       3322:
+   4:       80..      95:        104..       119:     16:       3370: shared
+   5:       96..     111:       1066..      1081:     16:        120: unwritten
+   6:      128..     143:       3322..      3337:     16:       1098:
+   7:      144..     159:       3370..      3385:     16:       3338:
+   8:      160..     175:        184..       199:     16:       3386: shared
+   9:      176..     191:       1082..      1097:     16:        200: unwritten
+  10:      208..     223:       3338..      3353:     16:       1114:
+  11:      224..     239:       3386..      3401:     16:       3354:
+  12:      240..     255:        264..       279:     16:       3402: shared
+  13:      256..     767:       1514..      2025:    512:        280: shared
+  14:      768..     783:       3450..      3465:     16:       2026:
+  15:      784..     799:       3514..      3529:     16:       3466:
+  16:      800..     815:        824..       839:     16:       3530: shared
+  17:      816..     831:       1210..      1225:     16:        840: unwritten
+  18:      848..     863:       3466..      3481:     16:       1242:
+  19:      864..     879:       3530..      3545:     16:       3482:
+  20:      880..     895:        904..       919:     16:       3546: shared
+  21:      896..     911:       1226..      1241:     16:        920: unwritten
+  22:      928..     943:       3482..      3497:     16:       1258:
+  23:      944..     959:       3546..      3561:     16:       3498:
+  24:      960..     975:        984..       999:     16:       3562: shared
+  25:      976..     991:       1242..      1257:     16:       1000: unwritten
+  26:     1008..    1023:       3498..      3513:     16:       1274: last,eof
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test-540/file3: 27 extents found

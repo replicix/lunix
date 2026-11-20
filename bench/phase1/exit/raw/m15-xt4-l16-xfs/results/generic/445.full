@@ -1,0 +1,7 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+17. Test file with unwritten extents, data-hole-data inside page
+Test skipped as page size (4096) is less than four times allocation size (4096).
+
+umount: /dev/ublkb1: not mounted.

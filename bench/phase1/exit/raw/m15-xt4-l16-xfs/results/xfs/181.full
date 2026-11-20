@@ -1,0 +1,3794 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Opening "<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch"
+Calling XFS_IOC_GOINGDOWN
+xfs_logprint:
+    data device: 0x10306
+    log device: 0x10306 daddr: 16777296 length: 217296
+
+    log tail: 8 head: 1832 state: <DIRTY>
+
+
+LOG REC AT LSN cycle 1 block 8 (0x1, 0x8)
+
+LOG REC AT LSN cycle 1 block 72 (0x1, 0x48)
+
+LOG REC AT LSN cycle 1 block 136 (0x1, 0x88)
+
+LOG REC AT LSN cycle 1 block 200 (0x1, 0xc8)
+
+LOG REC AT LSN cycle 1 block 264 (0x1, 0x108)
+
+LOG REC AT LSN cycle 1 block 328 (0x1, 0x148)
+
+LOG REC AT LSN cycle 1 block 392 (0x1, 0x188)
+
+LOG REC AT LSN cycle 1 block 456 (0x1, 0x1c8)
+
+LOG REC AT LSN cycle 1 block 520 (0x1, 0x208)
+
+LOG REC AT LSN cycle 1 block 584 (0x1, 0x248)
+
+LOG REC AT LSN cycle 1 block 648 (0x1, 0x288)
+
+LOG REC AT LSN cycle 1 block 712 (0x1, 0x2c8)
+
+LOG REC AT LSN cycle 1 block 776 (0x1, 0x308)
+
+LOG REC AT LSN cycle 1 block 840 (0x1, 0x348)
+
+LOG REC AT LSN cycle 1 block 904 (0x1, 0x388)
+
+LOG REC AT LSN cycle 1 block 968 (0x1, 0x3c8)
+
+LOG REC AT LSN cycle 1 block 1032 (0x1, 0x408)
+
+LOG REC AT LSN cycle 1 block 1096 (0x1, 0x448)
+
+LOG REC AT LSN cycle 1 block 1160 (0x1, 0x488)
+
+LOG REC AT LSN cycle 1 block 1224 (0x1, 0x4c8)
+
+LOG REC AT LSN cycle 1 block 1288 (0x1, 0x508)
+
+LOG REC AT LSN cycle 1 block 1352 (0x1, 0x548)
+
+LOG REC AT LSN cycle 1 block 1416 (0x1, 0x588)
+
+LOG REC AT LSN cycle 1 block 1480 (0x1, 0x5c8)
+
+LOG REC AT LSN cycle 1 block 1544 (0x1, 0x608)
+
+LOG REC AT LSN cycle 1 block 1608 (0x1, 0x648)
+
+LOG REC AT LSN cycle 1 block 1672 (0x1, 0x688)
+
+LOG REC AT LSN cycle 1 block 1736 (0x1, 0x6c8)
+
+LOG REC AT LSN cycle 1 block 1800 (0x1, 0x708)
+============================================================================
+TRANS: tid:0x104771da  #items:1170  trans:0x104771da  q:0x595ba6b565f0
+BUF: cnt:2 total:2 a:0x595ba6b43060 len:24 a:0x595ba6b56670 len:384 
+	BUF:  #regs:2   start blkno:0x0   len:8   bmap size:1   flags:0x9000
+	SUPER Block Buffer:
+BUF: cnt:2 total:2 a:0x595ba6b43080 len:24 a:0x595ba6b62010 len:4096 
+	BUF:  #regs:2   start blkno:0xc0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b56860 len:56 a:0x595ba6b56910 len:176 a:0x595ba6b569d0 len:16 
+	INODE: #regs:3   ino:0x83  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b569f0 len:24 a:0x595ba6b63020 len:4096 
+	BUF:  #regs:2   start blkno:0x110   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b56a70 len:56 a:0x595ba6b56b20 len:176 a:0x595ba6b56be0 len:16 
+	INODE: #regs:3   ino:0x84  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b56c00 len:24 a:0x595ba6b64030 len:4096 
+	BUF:  #regs:2   start blkno:0x160   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b56c80 len:56 a:0x595ba6b56d30 len:176 a:0x595ba6b56df0 len:16 
+	INODE: #regs:3   ino:0x85  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b56e10 len:24 a:0x595ba6b65040 len:4096 
+	BUF:  #regs:2   start blkno:0x1b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b56e90 len:56 a:0x595ba6b56f40 len:176 a:0x595ba6b58010 len:16 
+	INODE: #regs:3   ino:0x86  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58030 len:24 a:0x595ba6b66050 len:4096 
+	BUF:  #regs:2   start blkno:0x200   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b580b0 len:56 a:0x595ba6b58160 len:176 a:0x595ba6b58220 len:16 
+	INODE: #regs:3   ino:0x87  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58240 len:24 a:0x595ba6b67060 len:4096 
+	BUF:  #regs:2   start blkno:0x250   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b582c0 len:56 a:0x595ba6b58370 len:176 a:0x595ba6b58430 len:16 
+	INODE: #regs:3   ino:0x88  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58450 len:24 a:0x595ba6b68070 len:4096 
+	BUF:  #regs:2   start blkno:0x2a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b584d0 len:56 a:0x595ba6b58580 len:176 a:0x595ba6b58640 len:16 
+	INODE: #regs:3   ino:0x89  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58660 len:24 a:0x595ba6b69080 len:4096 
+	BUF:  #regs:2   start blkno:0x2f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b586e0 len:56 a:0x595ba6b58790 len:176 a:0x595ba6b589f0 len:16 
+	INODE: #regs:3   ino:0x8a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b589d0 len:24 a:0x595ba6b6a090 len:4096 
+	BUF:  #regs:2   start blkno:0x340   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b588b0 len:56 a:0x595ba6b58a10 len:176 a:0x595ba6b58ad0 len:16 
+	INODE: #regs:3   ino:0x8b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58af0 len:24 a:0x595ba6b6b0a0 len:4096 
+	BUF:  #regs:2   start blkno:0x390   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b58960 len:56 a:0x595ba6b58bb0 len:176 a:0x595ba6b58c70 len:16 
+	INODE: #regs:3   ino:0x8c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58c90 len:24 a:0x595ba6b6c0b0 len:4096 
+	BUF:  #regs:2   start blkno:0x3e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b58d10 len:56 a:0x595ba6b58dc0 len:176 a:0x595ba6b58e80 len:16 
+	INODE: #regs:3   ino:0x8d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b58ea0 len:24 a:0x595ba6b6d0c0 len:4096 
+	BUF:  #regs:2   start blkno:0x430   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b58f20 len:56 a:0x595ba6b6e0d0 len:176 a:0x595ba6b58fd0 len:16 
+	INODE: #regs:3   ino:0x8e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b6e190 len:24 a:0x595ba6b6e210 len:4096 
+	BUF:  #regs:2   start blkno:0x480   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b6f220 len:56 a:0x595ba6b6f2d0 len:176 a:0x595ba6b6f390 len:16 
+	INODE: #regs:3   ino:0x8f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b6f3b0 len:24 a:0x595ba6b6f430 len:4096 
+	BUF:  #regs:2   start blkno:0x4d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b70440 len:56 a:0x595ba6b704f0 len:176 a:0x595ba6b705b0 len:16 
+	INODE: #regs:3   ino:0x90  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b705d0 len:24 a:0x595ba6b70e60 len:4096 
+	BUF:  #regs:2   start blkno:0x520   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b70650 len:56 a:0x595ba6b70700 len:176 a:0x595ba6b70e40 len:16 
+	INODE: #regs:3   ino:0x91  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b70e20 len:24 a:0x595ba6b71e70 len:4096 
+	BUF:  #regs:2   start blkno:0x570   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b70820 len:56 a:0x595ba6b708d0 len:176 a:0x595ba6b70990 len:16 
+	INODE: #regs:3   ino:0x92  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b709b0 len:24 a:0x595ba6b72e80 len:4096 
+	BUF:  #regs:2   start blkno:0x5c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b70a30 len:56 a:0x595ba6b70ae0 len:176 a:0x595ba6b70ba0 len:16 
+	INODE: #regs:3   ino:0x93  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b70bc0 len:24 a:0x595ba6b73e90 len:4096 
+	BUF:  #regs:2   start blkno:0x610   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b70c40 len:56 a:0x595ba6b70cf0 len:176 a:0x595ba6b70db0 len:16 
+	INODE: #regs:3   ino:0x94  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b70dd0 len:24 a:0x595ba6b74ed0 len:4096 
+	BUF:  #regs:2   start blkno:0x660   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b75ee0 len:56 a:0x595ba6b75f90 len:176 a:0x595ba6b76050 len:16 
+	INODE: #regs:3   ino:0x95  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b76070 len:24 a:0x595ba6b760f0 len:4096 
+	BUF:  #regs:2   start blkno:0x6b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b77100 len:56 a:0x595ba6b771b0 len:176 a:0x595ba6b77270 len:16 
+	INODE: #regs:3   ino:0x96  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b77290 len:24 a:0x595ba6b77310 len:4096 
+	BUF:  #regs:2   start blkno:0x700   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78320 len:56 a:0x595ba6b783d0 len:176 a:0x595ba6b78490 len:16 
+	INODE: #regs:3   ino:0x97  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b784b0 len:24 a:0x595ba6b79220 len:4096 
+	BUF:  #regs:2   start blkno:0x750   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78530 len:56 a:0x595ba6b785e0 len:176 a:0x595ba6b79200 len:16 
+	INODE: #regs:3   ino:0x98  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b791e0 len:24 a:0x595ba6b7a230 len:4096 
+	BUF:  #regs:2   start blkno:0x7a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78700 len:56 a:0x595ba6b787b0 len:176 a:0x595ba6b78870 len:16 
+	INODE: #regs:3   ino:0x99  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b78890 len:24 a:0x595ba6b7b240 len:4096 
+	BUF:  #regs:2   start blkno:0x7f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78910 len:56 a:0x595ba6b789c0 len:176 a:0x595ba6b78a80 len:16 
+	INODE: #regs:3   ino:0x9a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b78aa0 len:24 a:0x595ba6b7c250 len:4096 
+	BUF:  #regs:2   start blkno:0x840   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78b20 len:56 a:0x595ba6b78bd0 len:176 a:0x595ba6b78c90 len:16 
+	INODE: #regs:3   ino:0x9b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b78cb0 len:24 a:0x595ba6b7d260 len:4096 
+	BUF:  #regs:2   start blkno:0x890   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78d30 len:56 a:0x595ba6b78de0 len:176 a:0x595ba6b78ea0 len:16 
+	INODE: #regs:3   ino:0x9c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b78ec0 len:24 a:0x595ba6b7e270 len:4096 
+	BUF:  #regs:2   start blkno:0x8e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b78f40 len:56 a:0x595ba6b78ff0 len:176 a:0x595ba6b790b0 len:16 
+	INODE: #regs:3   ino:0x9d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b790d0 len:24 a:0x595ba6b7f280 len:4096 
+	BUF:  #regs:2   start blkno:0x930   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b79150 len:56 a:0x595ba6b802d0 len:176 a:0x595ba6b791c0 len:16 
+	INODE: #regs:3   ino:0x9e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b80390 len:24 a:0x595ba6b80410 len:4096 
+	BUF:  #regs:2   start blkno:0x980   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b81420 len:56 a:0x595ba6b814d0 len:176 a:0x595ba6b81590 len:16 
+	INODE: #regs:3   ino:0x9f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b815b0 len:24 a:0x595ba6b816b0 len:4096 
+	BUF:  #regs:2   start blkno:0x9d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b81630 len:56 a:0x595ba6b82730 len:176 a:0x595ba6b81690 len:16 
+	INODE: #regs:3   ino:0xa0  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b81670 len:24 a:0x595ba6b82850 len:4096 
+	BUF:  #regs:2   start blkno:0xa20   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b83860 len:56 a:0x595ba6b83910 len:176 a:0x595ba6b839d0 len:16 
+	INODE: #regs:3   ino:0xa1  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b839f0 len:24 a:0x595ba6b83a70 len:4096 
+	BUF:  #regs:2   start blkno:0xa70   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b84a80 len:56 a:0x595ba6b84b30 len:176 a:0x595ba6b84bf0 len:16 
+	INODE: #regs:3   ino:0xa2  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b84c10 len:24 a:0x595ba6b84c90 len:4096 
+	BUF:  #regs:2   start blkno:0xac0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b85ca0 len:56 a:0x595ba6b85d50 len:176 a:0x595ba6b85e10 len:16 
+	INODE: #regs:3   ino:0xa3  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b85e30 len:24 a:0x595ba6b85eb0 len:4096 
+	BUF:  #regs:2   start blkno:0xb10   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b86ec0 len:56 a:0x595ba6b86f70 len:176 a:0x595ba6b87030 len:16 
+	INODE: #regs:3   ino:0xa4  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b87050 len:24 a:0x595ba6b870d0 len:4096 
+	BUF:  #regs:2   start blkno:0xb60   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b880e0 len:56 a:0x595ba6b88190 len:176 a:0x595ba6b88250 len:16 
+	INODE: #regs:3   ino:0xa5  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b88270 len:24 a:0x595ba6b882f0 len:4096 
+	BUF:  #regs:2   start blkno:0xbb0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b89300 len:56 a:0x595ba6b893b0 len:176 a:0x595ba6b89470 len:16 
+	INODE: #regs:3   ino:0xa6  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b89490 len:24 a:0x595ba6b89a70 len:4096 
+	BUF:  #regs:2   start blkno:0xc00   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b89510 len:56 a:0x595ba6b895c0 len:176 a:0x595ba6b89a50 len:16 
+	INODE: #regs:3   ino:0xa7  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b89a30 len:24 a:0x595ba6b8aa80 len:4096 
+	BUF:  #regs:2   start blkno:0xc50   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b896e0 len:56 a:0x595ba6b89790 len:176 a:0x595ba6b89850 len:16 
+	INODE: #regs:3   ino:0xa8  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b89870 len:24 a:0x595ba6b8ba90 len:4096 
+	BUF:  #regs:2   start blkno:0xca0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b898f0 len:56 a:0x595ba6b8caa0 len:176 a:0x595ba6b899a0 len:16 
+	INODE: #regs:3   ino:0xa9  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b899c0 len:24 a:0x595ba6b8cb90 len:4096 
+	BUF:  #regs:2   start blkno:0xcf0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b8dba0 len:56 a:0x595ba6b8dc50 len:176 a:0x595ba6b89a10 len:16 
+	INODE: #regs:3   ino:0xaa  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b8dd10 len:24 a:0x595ba6b8dd90 len:4096 
+	BUF:  #regs:2   start blkno:0xd40   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b8eda0 len:56 a:0x595ba6b8ee50 len:176 a:0x595ba6b8ef10 len:16 
+	INODE: #regs:3   ino:0xab  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b8ef30 len:24 a:0x595ba6b8efb0 len:4096 
+	BUF:  #regs:2   start blkno:0xd90   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b8ffc0 len:56 a:0x595ba6b90070 len:176 a:0x595ba6b90130 len:16 
+	INODE: #regs:3   ino:0xac  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b90150 len:24 a:0x595ba6b901d0 len:4096 
+	BUF:  #regs:2   start blkno:0xde0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b911e0 len:56 a:0x595ba6b91290 len:176 a:0x595ba6b91350 len:16 
+	INODE: #regs:3   ino:0xad  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91370 len:24 a:0x595ba6b91e30 len:4096 
+	BUF:  #regs:2   start blkno:0xe30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b913f0 len:56 a:0x595ba6b914a0 len:176 a:0x595ba6b91e10 len:16 
+	INODE: #regs:3   ino:0xae  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91df0 len:24 a:0x595ba6b92e40 len:4096 
+	BUF:  #regs:2   start blkno:0xe80   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b915c0 len:56 a:0x595ba6b91670 len:176 a:0x595ba6b91730 len:16 
+	INODE: #regs:3   ino:0xaf  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91750 len:24 a:0x595ba6b93e50 len:4096 
+	BUF:  #regs:2   start blkno:0xed0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b917d0 len:56 a:0x595ba6b91880 len:176 a:0x595ba6b91940 len:16 
+	INODE: #regs:3   ino:0xb0  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91960 len:24 a:0x595ba6b94e60 len:4096 
+	BUF:  #regs:2   start blkno:0xf20   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b919e0 len:56 a:0x595ba6b91a90 len:176 a:0x595ba6b91b50 len:16 
+	INODE: #regs:3   ino:0xb1  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91b70 len:24 a:0x595ba6b95e70 len:4096 
+	BUF:  #regs:2   start blkno:0xf70   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b91bf0 len:56 a:0x595ba6b91ca0 len:176 a:0x595ba6b91d60 len:16 
+	INODE: #regs:3   ino:0xb2  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b91d80 len:24 a:0x595ba6b96eb0 len:4096 
+	BUF:  #regs:2   start blkno:0xfc0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b97ec0 len:56 a:0x595ba6b97f70 len:176 a:0x595ba6b91dd0 len:16 
+	INODE: #regs:3   ino:0xb3  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b98030 len:24 a:0x595ba6b980b0 len:4096 
+	BUF:  #regs:2   start blkno:0x1010   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b990c0 len:56 a:0x595ba6b99170 len:176 a:0x595ba6b99230 len:16 
+	INODE: #regs:3   ino:0xb4  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99250 len:24 a:0x595ba6b9a1f0 len:4096 
+	BUF:  #regs:2   start blkno:0x1060   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b992d0 len:56 a:0x595ba6b99380 len:176 a:0x595ba6b9a1d0 len:16 
+	INODE: #regs:3   ino:0xb5  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b9a1b0 len:24 a:0x595ba6b9b200 len:4096 
+	BUF:  #regs:2   start blkno:0x10b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b994a0 len:56 a:0x595ba6b99550 len:176 a:0x595ba6b99610 len:16 
+	INODE: #regs:3   ino:0xb6  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99630 len:24 a:0x595ba6b9c210 len:4096 
+	BUF:  #regs:2   start blkno:0x1100   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b996b0 len:56 a:0x595ba6b99760 len:176 a:0x595ba6b99820 len:16 
+	INODE: #regs:3   ino:0xb7  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99840 len:24 a:0x595ba6b9d220 len:4096 
+	BUF:  #regs:2   start blkno:0x1150   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b998c0 len:56 a:0x595ba6b99970 len:176 a:0x595ba6b99a30 len:16 
+	INODE: #regs:3   ino:0xb8  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99a50 len:24 a:0x595ba6b9e230 len:4096 
+	BUF:  #regs:2   start blkno:0x11a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b99ad0 len:56 a:0x595ba6b99b80 len:176 a:0x595ba6b99c40 len:16 
+	INODE: #regs:3   ino:0xb9  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99c60 len:24 a:0x595ba6b9f240 len:4096 
+	BUF:  #regs:2   start blkno:0x11f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b99ce0 len:56 a:0x595ba6b99d90 len:176 a:0x595ba6b99e50 len:16 
+	INODE: #regs:3   ino:0xba  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b99e70 len:24 a:0x595ba6ba0250 len:4096 
+	BUF:  #regs:2   start blkno:0x1240   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b99ef0 len:56 a:0x595ba6b99fa0 len:176 a:0x595ba6b9a060 len:16 
+	INODE: #regs:3   ino:0xbb  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6b9a080 len:24 a:0x595ba6ba1260 len:4096 
+	BUF:  #regs:2   start blkno:0x1290   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6b9a100 len:56 a:0x595ba6ba2270 len:176 a:0x595ba6ba2330 len:16 
+	INODE: #regs:3   ino:0xbc  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba2350 len:24 a:0x595ba6ba2690 len:4096 
+	BUF:  #regs:2   start blkno:0x12e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba23d0 len:56 a:0x595ba6ba2480 len:176 a:0x595ba6ba2670 len:16 
+	INODE: #regs:3   ino:0xbd  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba2650 len:24 a:0x595ba6ba36a0 len:4096 
+	BUF:  #regs:2   start blkno:0x1330   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba25a0 len:56 a:0x595ba6ba46b0 len:176 a:0x595ba6ba4770 len:16 
+	INODE: #regs:3   ino:0xbe  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba4790 len:24 a:0x595ba6ba4810 len:4096 
+	BUF:  #regs:2   start blkno:0x1380   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba5820 len:56 a:0x595ba6ba58d0 len:176 a:0x595ba6ba5990 len:16 
+	INODE: #regs:3   ino:0xbf  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+ICR: cnt:1 total:1 a:0x595ba6ba59b0 len:28 
+	ICR:  #ag: 0  agbno: 0x280  len: 8
+	      cnt: 64  isize: 512    gen: 0xf89cc112
+BUF: cnt:2 total:2 a:0x595ba6ba5a30 len:24 a:0x595ba6ba5ab0 len:4096 
+	BUF:  #regs:2   start blkno:0x13f8   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba6ac0 len:56 a:0x595ba6ba6b70 len:176 a:0x595ba6ba6c30 len:32 
+	INODE: #regs:3   ino:0x1400  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba6c60 len:24 a:0x595ba6ba6ce0 len:4096 
+	BUF:  #regs:2   start blkno:0x13f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba7cf0 len:56 a:0x595ba6ba7da0 len:176 a:0x595ba6ba7e60 len:32 
+	INODE: #regs:3   ino:0x1401  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba7e90 len:24 a:0x595ba6ba7f10 len:4096 
+	BUF:  #regs:2   start blkno:0x13e8   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6ba8f20 len:56 a:0x595ba6ba8fd0 len:176 a:0x595ba6ba9090 len:32 
+	INODE: #regs:3   ino:0x1402  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6ba90c0 len:24 a:0x595ba6ba9140 len:4096 
+	BUF:  #regs:2   start blkno:0x13e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6baa150 len:56 a:0x595ba6baa200 len:176 a:0x595ba6baa2c0 len:32 
+	INODE: #regs:3   ino:0x1403  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6baa2f0 len:24 a:0x595ba6baaaa0 len:4096 
+	BUF:  #regs:2   start blkno:0x13d8   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6baa370 len:56 a:0x595ba6baa420 len:176 a:0x595ba6baa4e0 len:32 
+	INODE: #regs:3   ino:0x1404  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6baaa80 len:24 a:0x595ba6babab0 len:4096 
+	BUF:  #regs:2   start blkno:0x13d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6baa570 len:56 a:0x595ba6baa620 len:176 a:0x595ba6baa6e0 len:32 
+	INODE: #regs:3   ino:0x1405  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6baaa60 len:24 a:0x595ba6bacac0 len:4096 
+	BUF:  #regs:2   start blkno:0x15f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6baa770 len:56 a:0x595ba6baa820 len:176 a:0x595ba6baa8e0 len:16 
+	INODE: #regs:3   ino:0x1406  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6baa900 len:24 a:0x595ba6badad0 len:4096 
+	BUF:  #regs:2   start blkno:0x1640   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6baa980 len:56 a:0x595ba6baeae0 len:176 a:0x595ba6baaa30 len:16 
+	INODE: #regs:3   ino:0x1407  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6baeba0 len:24 a:0x595ba6baec20 len:4096 
+	BUF:  #regs:2   start blkno:0x1690   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bafc30 len:56 a:0x595ba6bafce0 len:176 a:0x595ba6bafda0 len:16 
+	INODE: #regs:3   ino:0x1408  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bafdc0 len:24 a:0x595ba6bafe40 len:4096 
+	BUF:  #regs:2   start blkno:0x16e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb0e50 len:56 a:0x595ba6bb0f00 len:176 a:0x595ba6bb0fc0 len:16 
+	INODE: #regs:3   ino:0x1409  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb0fe0 len:24 a:0x595ba6bb1060 len:4096 
+	BUF:  #regs:2   start blkno:0x1730   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2070 len:56 a:0x595ba6bb2120 len:176 a:0x595ba6bb21e0 len:16 
+	INODE: #regs:3   ino:0x140a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb2200 len:24 a:0x595ba6bb2e70 len:4096 
+	BUF:  #regs:2   start blkno:0x1780   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2280 len:56 a:0x595ba6bb2330 len:176 a:0x595ba6bb2e50 len:16 
+	INODE: #regs:3   ino:0x140b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb2e30 len:24 a:0x595ba6bb3e80 len:4096 
+	BUF:  #regs:2   start blkno:0x17d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2450 len:56 a:0x595ba6bb2500 len:176 a:0x595ba6bb25c0 len:16 
+	INODE: #regs:3   ino:0x140c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb25e0 len:24 a:0x595ba6bb4e90 len:4096 
+	BUF:  #regs:2   start blkno:0x1820   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2660 len:56 a:0x595ba6bb2710 len:176 a:0x595ba6bb27d0 len:16 
+	INODE: #regs:3   ino:0x140d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb27f0 len:24 a:0x595ba6bb5ea0 len:4096 
+	BUF:  #regs:2   start blkno:0x1870   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2870 len:56 a:0x595ba6bb2920 len:176 a:0x595ba6bb29e0 len:16 
+	INODE: #regs:3   ino:0x140e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb2a00 len:24 a:0x595ba6bb6eb0 len:4096 
+	BUF:  #regs:2   start blkno:0x18c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2a80 len:56 a:0x595ba6bb2b30 len:176 a:0x595ba6bb2bf0 len:16 
+	INODE: #regs:3   ino:0x140f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb2c10 len:24 a:0x595ba6bb7ec0 len:4096 
+	BUF:  #regs:2   start blkno:0x1910   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb2c90 len:56 a:0x595ba6bb2d40 len:176 a:0x595ba6bb2e00 len:16 
+	INODE: #regs:3   ino:0x1410  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bb8ed0 len:24 a:0x595ba6bb8f50 len:4096 
+	BUF:  #regs:2   start blkno:0x1960   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bb9f60 len:56 a:0x595ba6bba010 len:176 a:0x595ba6bba0d0 len:16 
+	INODE: #regs:3   ino:0x1411  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bba0f0 len:24 a:0x595ba6bba170 len:4096 
+	BUF:  #regs:2   start blkno:0x19b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bbb180 len:56 a:0x595ba6bbb2b0 len:176 a:0x595ba6bbb290 len:16 
+	INODE: #regs:3   ino:0x1412  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bbb270 len:24 a:0x595ba6bbb3a0 len:4096 
+	BUF:  #regs:2   start blkno:0x1a00   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bbc3b0 len:56 a:0x595ba6bbc460 len:176 a:0x595ba6bbc520 len:16 
+	INODE: #regs:3   ino:0x1413  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bbc540 len:24 a:0x595ba6bbc5c0 len:4096 
+	BUF:  #regs:2   start blkno:0x1a50   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bbd5d0 len:56 a:0x595ba6bbd680 len:176 a:0x595ba6bbd740 len:16 
+	INODE: #regs:3   ino:0x1414  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bbd760 len:24 a:0x595ba6bbd7e0 len:4096 
+	BUF:  #regs:2   start blkno:0x1aa0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bbe7f0 len:56 a:0x595ba6bbe8a0 len:176 a:0x595ba6bbe960 len:16 
+	INODE: #regs:3   ino:0x1415  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bbe980 len:24 a:0x595ba6bbea00 len:4096 
+	BUF:  #regs:2   start blkno:0x1af0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bbfa10 len:56 a:0x595ba6bbfac0 len:176 a:0x595ba6bbfb80 len:16 
+	INODE: #regs:3   ino:0x1416  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bbfba0 len:24 a:0x595ba6bbfc20 len:4096 
+	BUF:  #regs:2   start blkno:0x1b40   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc0c30 len:56 a:0x595ba6bc0ce0 len:176 a:0x595ba6bc0da0 len:16 
+	INODE: #regs:3   ino:0x1417  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc0dc0 len:24 a:0x595ba6bc0e40 len:4096 
+	BUF:  #regs:2   start blkno:0x1b90   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc1e50 len:56 a:0x595ba6bc1f00 len:176 a:0x595ba6bc1fc0 len:16 
+	INODE: #regs:3   ino:0x1418  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc1fe0 len:24 a:0x595ba6bc2060 len:4096 
+	BUF:  #regs:2   start blkno:0x1be0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc3070 len:56 a:0x595ba6bc3120 len:176 a:0x595ba6bc31e0 len:16 
+	INODE: #regs:3   ino:0x1419  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc3200 len:24 a:0x595ba6bc36e0 len:4096 
+	BUF:  #regs:2   start blkno:0x1c30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc3280 len:56 a:0x595ba6bc3330 len:176 a:0x595ba6bc36c0 len:16 
+	INODE: #regs:3   ino:0x141a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc36a0 len:24 a:0x595ba6bc46f0 len:4096 
+	BUF:  #regs:2   start blkno:0x1c80   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc3450 len:56 a:0x595ba6bc3500 len:176 a:0x595ba6bc35c0 len:16 
+	INODE: #regs:3   ino:0x141b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc35e0 len:24 a:0x595ba6bc5700 len:4096 
+	BUF:  #regs:2   start blkno:0x1cd0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc3660 len:56 a:0x595ba6bc6780 len:176 a:0x595ba6bc6840 len:16 
+	INODE: #regs:3   ino:0x141c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc6860 len:24 a:0x595ba6bc68e0 len:4096 
+	BUF:  #regs:2   start blkno:0x1d20   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc78f0 len:56 a:0x595ba6bc79a0 len:176 a:0x595ba6bc7a60 len:16 
+	INODE: #regs:3   ino:0x141d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc7a80 len:24 a:0x595ba6bc7b00 len:4096 
+	BUF:  #regs:2   start blkno:0x1d70   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bc8b10 len:56 a:0x595ba6bc8bc0 len:176 a:0x595ba6bc8c80 len:16 
+	INODE: #regs:3   ino:0x141e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bc8ca0 len:24 a:0x595ba6bc8d20 len:4096 
+	BUF:  #regs:2   start blkno:0x1dc0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:30 total:30 a:0x595ba6bc9d30 len:36 a:0x595ba6bc9f80 len:128 a:0x595ba6bca010 len:128 a:0x595ba6bca0a0 len:128 a:0x595ba6bca130 len:128 a:0x595ba6bca1c0 len:128 a:0x595ba6bca250 len:128 a:0x595ba6bca2e0 len:128 a:0x595ba6bca370 len:128 a:0x595ba6bca400 len:128 a:0x595ba6bca490 len:128 a:0x595ba6bca520 len:128 a:0x595ba6bca5b0 len:128 a:0x595ba6bca640 len:128 a:0x595ba6bca6d0 len:128 a:0x595ba6bca760 len:128 a:0x595ba6bca7f0 len:128 a:0x595ba6bca880 len:128 a:0x595ba6bca910 len:128 a:0x595ba6bca9a0 len:128 a:0x595ba6bcaa30 len:128 a:0x595ba6bcaac0 len:128 a:0x595ba6bcab50 len:128 a:0x595ba6bcabe0 len:128 a:0x595ba6bcac70 len:128 a:0x595ba6bcad00 len:128 a:0x595ba6bcad90 len:128 a:0x595ba6bcae20 len:128 a:0x595ba6bcaeb0 len:128 a:0x595ba6bcaf40 len:128 
+	BUF:  #regs:30   start blkno:0x1400   len:32   bmap size:4   flags:0x4001
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcafd0 len:56 a:0x595ba6bcb080 len:176 a:0x595ba6bcb140 len:16 
+	INODE: #regs:3   ino:0x141f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcb160 len:24 a:0x595ba6bcbc60 len:4096 
+	BUF:  #regs:2   start blkno:0x1e10   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcb1e0 len:56 a:0x595ba6bcb290 len:176 a:0x595ba6bcbc40 len:16 
+	INODE: #regs:3   ino:0x1420  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcbc20 len:24 a:0x595ba6bccc70 len:4096 
+	BUF:  #regs:2   start blkno:0x1e60   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcb3b0 len:56 a:0x595ba6bcb460 len:176 a:0x595ba6bcb520 len:16 
+	INODE: #regs:3   ino:0x1421  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcb540 len:24 a:0x595ba6bcdc80 len:4096 
+	BUF:  #regs:2   start blkno:0x1eb0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcb5c0 len:56 a:0x595ba6bcb670 len:176 a:0x595ba6bcb730 len:16 
+	INODE: #regs:3   ino:0x1422  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcb750 len:24 a:0x595ba6bcec90 len:4096 
+	BUF:  #regs:2   start blkno:0x1f00   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcb7d0 len:56 a:0x595ba6bcb880 len:176 a:0x595ba6bcb940 len:16 
+	INODE: #regs:3   ino:0x1423  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcb960 len:24 a:0x595ba6bcfca0 len:4096 
+	BUF:  #regs:2   start blkno:0x1f50   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bcb9e0 len:56 a:0x595ba6bcba90 len:176 a:0x595ba6bcbb50 len:16 
+	INODE: #regs:3   ino:0x1424  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bcbb70 len:24 a:0x595ba6bd0cb0 len:4096 
+	BUF:  #regs:2   start blkno:0x1fa0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd1cc0 len:56 a:0x595ba6bd1d40 len:176 a:0x595ba6bd1e00 len:16 
+	INODE: #regs:3   ino:0x1425  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd1e20 len:24 a:0x595ba6bd1ea0 len:4096 
+	BUF:  #regs:2   start blkno:0x1ff0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd2eb0 len:56 a:0x595ba6bd2f60 len:176 a:0x595ba6bd3020 len:16 
+	INODE: #regs:3   ino:0x1426  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3040 len:24 a:0x595ba6bd4020 len:4096 
+	BUF:  #regs:2   start blkno:0x2040   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd30c0 len:56 a:0x595ba6bd3170 len:176 a:0x595ba6bd4000 len:16 
+	INODE: #regs:3   ino:0x1427  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3fe0 len:24 a:0x595ba6bd5030 len:4096 
+	BUF:  #regs:2   start blkno:0x2090   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd3290 len:56 a:0x595ba6bd3340 len:176 a:0x595ba6bd3400 len:16 
+	INODE: #regs:3   ino:0x1428  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3420 len:24 a:0x595ba6bd6040 len:4096 
+	BUF:  #regs:2   start blkno:0x20e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd34a0 len:56 a:0x595ba6bd3550 len:176 a:0x595ba6bd3610 len:16 
+	INODE: #regs:3   ino:0x1429  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3630 len:24 a:0x595ba6bd7050 len:4096 
+	BUF:  #regs:2   start blkno:0x2130   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd36b0 len:56 a:0x595ba6bd3760 len:176 a:0x595ba6bd3820 len:16 
+	INODE: #regs:3   ino:0x142a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3840 len:24 a:0x595ba6bd8060 len:4096 
+	BUF:  #regs:2   start blkno:0x2180   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd38c0 len:56 a:0x595ba6bd3970 len:176 a:0x595ba6bd3a30 len:16 
+	INODE: #regs:3   ino:0x142b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3a50 len:24 a:0x595ba6bd9070 len:4096 
+	BUF:  #regs:2   start blkno:0x21d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd3ad0 len:56 a:0x595ba6bd3b80 len:176 a:0x595ba6bd3c40 len:16 
+	INODE: #regs:3   ino:0x142c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3c60 len:24 a:0x595ba6bda080 len:4096 
+	BUF:  #regs:2   start blkno:0x2220   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd3ce0 len:56 a:0x595ba6bd3d90 len:176 a:0x595ba6bd3e50 len:16 
+	INODE: #regs:3   ino:0x142d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3e70 len:24 a:0x595ba6bdb090 len:4096 
+	BUF:  #regs:2   start blkno:0x2270   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bd3ef0 len:56 a:0x595ba6bdc0a0 len:176 a:0x595ba6bd3fa0 len:16 
+	INODE: #regs:3   ino:0x142e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bd3fc0 len:24 a:0x595ba6bdc4c0 len:4096 
+	BUF:  #regs:2   start blkno:0x22c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bdc1c0 len:56 a:0x595ba6bdc270 len:176 a:0x595ba6bdc4a0 len:16 
+	INODE: #regs:3   ino:0x142f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bdc480 len:24 a:0x595ba6bdd4d0 len:4096 
+	BUF:  #regs:2   start blkno:0x2310   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bdc390 len:56 a:0x595ba6bde4e0 len:176 a:0x595ba6bdc440 len:16 
+	INODE: #regs:3   ino:0x1430  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bdc460 len:24 a:0x595ba6bde600 len:4096 
+	BUF:  #regs:2   start blkno:0x2360   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bdf610 len:56 a:0x595ba6bdf6c0 len:176 a:0x595ba6bdf780 len:16 
+	INODE: #regs:3   ino:0x1431  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bdf7a0 len:24 a:0x595ba6bdf820 len:4096 
+	BUF:  #regs:2   start blkno:0x23b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be0830 len:56 a:0x595ba6be08e0 len:176 a:0x595ba6be09a0 len:16 
+	INODE: #regs:3   ino:0x1432  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be09c0 len:24 a:0x595ba6be0a40 len:4096 
+	BUF:  #regs:2   start blkno:0x2400   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be1a50 len:56 a:0x595ba6be1b00 len:176 a:0x595ba6be1bc0 len:16 
+	INODE: #regs:3   ino:0x1433  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be1be0 len:24 a:0x595ba6be1c60 len:4096 
+	BUF:  #regs:2   start blkno:0x2450   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be2c70 len:56 a:0x595ba6be2d20 len:176 a:0x595ba6be2de0 len:16 
+	INODE: #regs:3   ino:0x1434  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be2e00 len:24 a:0x595ba6be2e80 len:4096 
+	BUF:  #regs:2   start blkno:0x24a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be3e90 len:56 a:0x595ba6be3f40 len:176 a:0x595ba6be4000 len:16 
+	INODE: #regs:3   ino:0x1435  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be4020 len:24 a:0x595ba6be4880 len:4096 
+	BUF:  #regs:2   start blkno:0x24f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be40a0 len:56 a:0x595ba6be4150 len:176 a:0x595ba6be4860 len:16 
+	INODE: #regs:3   ino:0x1436  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be4840 len:24 a:0x595ba6be5890 len:4096 
+	BUF:  #regs:2   start blkno:0x2540   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be4270 len:56 a:0x595ba6be4320 len:176 a:0x595ba6be43e0 len:16 
+	INODE: #regs:3   ino:0x1437  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be4400 len:24 a:0x595ba6be68a0 len:4096 
+	BUF:  #regs:2   start blkno:0x2590   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be4480 len:56 a:0x595ba6be4530 len:176 a:0x595ba6be45f0 len:16 
+	INODE: #regs:3   ino:0x1438  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be4610 len:24 a:0x595ba6be78b0 len:4096 
+	BUF:  #regs:2   start blkno:0x25e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be4690 len:56 a:0x595ba6be4740 len:176 a:0x595ba6be4800 len:16 
+	INODE: #regs:3   ino:0x1439  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be4820 len:24 a:0x595ba6be8920 len:4096 
+	BUF:  #regs:2   start blkno:0x2630   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6be9930 len:56 a:0x595ba6be99e0 len:176 a:0x595ba6be9aa0 len:16 
+	INODE: #regs:3   ino:0x143a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6be9ac0 len:24 a:0x595ba6be9b40 len:4096 
+	BUF:  #regs:2   start blkno:0x2680   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6beab50 len:56 a:0x595ba6beac00 len:176 a:0x595ba6beacc0 len:16 
+	INODE: #regs:3   ino:0x143b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6beace0 len:24 a:0x595ba6bead60 len:4096 
+	BUF:  #regs:2   start blkno:0x26d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bebd70 len:56 a:0x595ba6bebe20 len:176 a:0x595ba6bebee0 len:16 
+	INODE: #regs:3   ino:0x143c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bebf00 len:24 a:0x595ba6becc40 len:4096 
+	BUF:  #regs:2   start blkno:0x2720   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bebf80 len:56 a:0x595ba6bec030 len:176 a:0x595ba6becc20 len:16 
+	INODE: #regs:3   ino:0x143d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6becc00 len:24 a:0x595ba6bedc50 len:4096 
+	BUF:  #regs:2   start blkno:0x2770   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bec150 len:56 a:0x595ba6bec200 len:176 a:0x595ba6bec2c0 len:16 
+	INODE: #regs:3   ino:0x143e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bec2e0 len:24 a:0x595ba6beec60 len:4096 
+	BUF:  #regs:2   start blkno:0x27c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:33 total:33 a:0x595ba6bec360 len:36 a:0x595ba6bec5e0 len:128 a:0x595ba6bec670 len:128 a:0x595ba6bec700 len:128 a:0x595ba6bec790 len:128 a:0x595ba6bec820 len:128 a:0x595ba6bec8b0 len:128 a:0x595ba6bec940 len:128 a:0x595ba6bec9d0 len:128 a:0x595ba6beca60 len:128 a:0x595ba6becaf0 len:128 a:0x595ba6befc70 len:128 a:0x595ba6befd00 len:128 a:0x595ba6befd90 len:128 a:0x595ba6befe20 len:128 a:0x595ba6befeb0 len:128 a:0x595ba6beff40 len:128 a:0x595ba6beffd0 len:128 a:0x595ba6bf0060 len:128 a:0x595ba6bf00f0 len:128 a:0x595ba6bf0180 len:128 a:0x595ba6bf0210 len:128 a:0x595ba6bf02a0 len:128 a:0x595ba6bf0330 len:128 a:0x595ba6bf03c0 len:128 a:0x595ba6bf0450 len:128 a:0x595ba6bf04e0 len:128 a:0x595ba6bf0570 len:128 a:0x595ba6bf0600 len:128 a:0x595ba6bf0690 len:128 a:0x595ba6bf0720 len:128 a:0x595ba6bf07b0 len:128 a:0x595ba6bf0840 len:128 
+	BUF:  #regs:33   start blkno:0x1420   len:32   bmap size:4   flags:0x4001
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6becb80 len:56 a:0x595ba6bf0910 len:176 a:0x595ba6bf09d0 len:16 
+	INODE: #regs:3   ino:0x143f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+ICR: cnt:1 total:1 a:0x595ba6bf09f0 len:28 
+	ICR:  #ag: 0  agbno: 0x508  len: 8
+	      cnt: 64  isize: 512    gen: 0xc1d794e
+BUF: cnt:2 total:2 a:0x595ba6bf0a70 len:24 a:0x595ba6bf0af0 len:4096 
+	BUF:  #regs:2   start blkno:0x2838   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf1b00 len:56 a:0x595ba6bf1bb0 len:176 a:0x595ba6bf1c70 len:32 
+	INODE: #regs:3   ino:0x2840  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf1ca0 len:24 a:0x595ba6bf1d20 len:4096 
+	BUF:  #regs:2   start blkno:0x2830   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf2d30 len:56 a:0x595ba6bf2de0 len:176 a:0x595ba6bf2ea0 len:32 
+	INODE: #regs:3   ino:0x2841  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf2ed0 len:24 a:0x595ba6bf2f50 len:4096 
+	BUF:  #regs:2   start blkno:0x2828   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf3f60 len:56 a:0x595ba6bf4010 len:176 a:0x595ba6bf40d0 len:32 
+	INODE: #regs:3   ino:0x2842  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf4100 len:24 a:0x595ba6bf4180 len:4096 
+	BUF:  #regs:2   start blkno:0x2820   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf5190 len:56 a:0x595ba6bf52d0 len:176 a:0x595ba6bf5240 len:32 
+	INODE: #regs:3   ino:0x2843  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf52b0 len:24 a:0x595ba6bf53f0 len:4096 
+	BUF:  #regs:2   start blkno:0x2818   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf6400 len:56 a:0x595ba6bf64b0 len:176 a:0x595ba6bf6570 len:32 
+	INODE: #regs:3   ino:0x2844  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf5290 len:24 a:0x595ba6bf6600 len:4096 
+	BUF:  #regs:2   start blkno:0x2810   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf7610 len:56 a:0x595ba6bf76c0 len:176 a:0x595ba6bf7780 len:32 
+	INODE: #regs:3   ino:0x2845  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf5270 len:24 a:0x595ba6bf7810 len:4096 
+	BUF:  #regs:2   start blkno:0x2a30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf8820 len:56 a:0x595ba6bf88d0 len:176 a:0x595ba6bf8990 len:16 
+	INODE: #regs:3   ino:0x2846  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf89b0 len:24 a:0x595ba6bf8a30 len:4096 
+	BUF:  #regs:2   start blkno:0x2a80   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bf9a40 len:56 a:0x595ba6bf9af0 len:176 a:0x595ba6bf9bb0 len:16 
+	INODE: #regs:3   ino:0x2847  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bf9bd0 len:24 a:0x595ba6bf9c50 len:4096 
+	BUF:  #regs:2   start blkno:0x2ad0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bfac60 len:56 a:0x595ba6bfad10 len:176 a:0x595ba6bfadd0 len:16 
+	INODE: #regs:3   ino:0x2848  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bfadf0 len:24 a:0x595ba6bfae70 len:4096 
+	BUF:  #regs:2   start blkno:0x2b20   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bfbe80 len:56 a:0x595ba6bfbf30 len:176 a:0x595ba6bfbff0 len:16 
+	INODE: #regs:3   ino:0x2849  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bfc010 len:24 a:0x595ba6bfc090 len:4096 
+	BUF:  #regs:2   start blkno:0x2b70   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bfd0a0 len:56 a:0x595ba6bfd150 len:176 a:0x595ba6bfd210 len:16 
+	INODE: #regs:3   ino:0x284a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bfd230 len:24 a:0x595ba6bfd6f0 len:4096 
+	BUF:  #regs:2   start blkno:0x2bc0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bfd2b0 len:56 a:0x595ba6bfd360 len:176 a:0x595ba6bfd6d0 len:16 
+	INODE: #regs:3   ino:0x284b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bfd6b0 len:24 a:0x595ba6bfe700 len:4096 
+	BUF:  #regs:2   start blkno:0x2c10   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6bfd480 len:56 a:0x595ba6bfd530 len:176 a:0x595ba6bfd5f0 len:16 
+	INODE: #regs:3   ino:0x284c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6bfd610 len:24 a:0x595ba6bff710 len:4096 
+	BUF:  #regs:2   start blkno:0x2c60   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c00720 len:56 a:0x595ba6c007d0 len:176 a:0x595ba6bfd690 len:16 
+	INODE: #regs:3   ino:0x284d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c00890 len:24 a:0x595ba6c00910 len:4096 
+	BUF:  #regs:2   start blkno:0x2cb0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c01920 len:56 a:0x595ba6c019d0 len:176 a:0x595ba6c01a90 len:16 
+	INODE: #regs:3   ino:0x284e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c01ab0 len:24 a:0x595ba6c01b30 len:4096 
+	BUF:  #regs:2   start blkno:0x2d00   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c02b40 len:56 a:0x595ba6c02bf0 len:176 a:0x595ba6c02cb0 len:16 
+	INODE: #regs:3   ino:0x284f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c02cd0 len:24 a:0x595ba6c02d50 len:4096 
+	BUF:  #regs:2   start blkno:0x2d50   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c03d60 len:56 a:0x595ba6c03e10 len:176 a:0x595ba6c03ed0 len:16 
+	INODE: #regs:3   ino:0x2850  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c03ef0 len:24 a:0x595ba6c03f70 len:4096 
+	BUF:  #regs:2   start blkno:0x2da0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c04f80 len:56 a:0x595ba6c05030 len:176 a:0x595ba6c050f0 len:16 
+	INODE: #regs:3   ino:0x2851  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c05110 len:24 a:0x595ba6c05ab0 len:4096 
+	BUF:  #regs:2   start blkno:0x2df0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c05190 len:56 a:0x595ba6c05240 len:176 a:0x595ba6c05a90 len:16 
+	INODE: #regs:3   ino:0x2852  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c05a70 len:24 a:0x595ba6c06ac0 len:4096 
+	BUF:  #regs:2   start blkno:0x2e40   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c05360 len:56 a:0x595ba6c05410 len:176 a:0x595ba6c054d0 len:16 
+	INODE: #regs:3   ino:0x2853  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c054f0 len:24 a:0x595ba6c07ad0 len:4096 
+	BUF:  #regs:2   start blkno:0x2e90   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c05570 len:56 a:0x595ba6c05620 len:176 a:0x595ba6c056e0 len:16 
+	INODE: #regs:3   ino:0x2854  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c05700 len:24 a:0x595ba6c08ae0 len:4096 
+	BUF:  #regs:2   start blkno:0x2ee0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c05780 len:56 a:0x595ba6c05830 len:176 a:0x595ba6c058f0 len:16 
+	INODE: #regs:3   ino:0x2855  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c05910 len:24 a:0x595ba6c09af0 len:4096 
+	BUF:  #regs:2   start blkno:0x40   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c05990 len:24 a:0x595ba6c0ab00 len:4096 
+	BUF:  #regs:2   start blkno:0x2f30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c05a10 len:24 a:0x595ba6c0bb40 len:128 
+	BUF:  #regs:2   start blkno:0x18   len:8   bmap size:1   flags:0x3000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0bbd0 len:56 a:0x595ba6c0bc80 len:176 a:0x595ba6c0bd40 len:32 
+	INODE: #regs:3   ino:0x2856  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0bd70 len:24 a:0x595ba6c0bdf0 len:4096 
+	BUF:  #regs:2   start blkno:0x2fa0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0ce00 len:56 a:0x595ba6c0ceb0 len:176 a:0x595ba6c0cf70 len:16 
+	INODE: #regs:3   ino:0x2857  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0cf90 len:24 a:0x595ba6c0de70 len:4096 
+	BUF:  #regs:2   start blkno:0x2ff0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0d010 len:56 a:0x595ba6c0d0c0 len:176 a:0x595ba6c0de50 len:16 
+	INODE: #regs:3   ino:0x2858  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0de30 len:24 a:0x595ba6c0ee80 len:4096 
+	BUF:  #regs:2   start blkno:0x3040   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0d1e0 len:56 a:0x595ba6c0d290 len:176 a:0x595ba6c0d350 len:16 
+	INODE: #regs:3   ino:0x2859  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0d370 len:24 a:0x595ba6c0fe90 len:4096 
+	BUF:  #regs:2   start blkno:0x3090   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0d3f0 len:56 a:0x595ba6c0d4a0 len:176 a:0x595ba6c0d560 len:16 
+	INODE: #regs:3   ino:0x285a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0d580 len:24 a:0x595ba6c10ea0 len:4096 
+	BUF:  #regs:2   start blkno:0x30e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0d600 len:56 a:0x595ba6c0d6b0 len:176 a:0x595ba6c0d770 len:16 
+	INODE: #regs:3   ino:0x285b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0d790 len:24 a:0x595ba6c11eb0 len:4096 
+	BUF:  #regs:2   start blkno:0x3130   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0d810 len:56 a:0x595ba6c0d8c0 len:176 a:0x595ba6c0d980 len:16 
+	INODE: #regs:3   ino:0x285c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0d9a0 len:24 a:0x595ba6c12ec0 len:4096 
+	BUF:  #regs:2   start blkno:0x3180   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0da20 len:56 a:0x595ba6c0dad0 len:176 a:0x595ba6c0db90 len:16 
+	INODE: #regs:3   ino:0x285d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0dbb0 len:24 a:0x595ba6c13ed0 len:4096 
+	BUF:  #regs:2   start blkno:0x31d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c0dc30 len:56 a:0x595ba6c0dce0 len:176 a:0x595ba6c0dda0 len:16 
+	INODE: #regs:3   ino:0x285e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0ddc0 len:24 a:0x595ba6c14f10 len:4096 
+	BUF:  #regs:2   start blkno:0x3220   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:33 total:33 a:0x595ba6c15f20 len:36 a:0x595ba6c161a0 len:128 a:0x595ba6c16230 len:128 a:0x595ba6c162c0 len:128 a:0x595ba6c16350 len:128 a:0x595ba6c163e0 len:128 a:0x595ba6c16490 len:128 a:0x595ba6c16520 len:128 a:0x595ba6c165b0 len:128 a:0x595ba6c16640 len:128 a:0x595ba6c166d0 len:128 a:0x595ba6c16760 len:128 a:0x595ba6c167f0 len:128 a:0x595ba6c16880 len:128 a:0x595ba6c16910 len:128 a:0x595ba6c169a0 len:128 a:0x595ba6c16a30 len:128 a:0x595ba6c16ac0 len:128 a:0x595ba6c16b50 len:128 a:0x595ba6c16be0 len:128 a:0x595ba6c16c70 len:128 a:0x595ba6c16d00 len:128 a:0x595ba6c16d90 len:128 a:0x595ba6c16e20 len:128 a:0x595ba6c16eb0 len:128 a:0x595ba6c16f40 len:128 a:0x595ba6c16fd0 len:128 a:0x595ba6c17060 len:128 a:0x595ba6c170f0 len:128 a:0x595ba6c17180 len:128 a:0x595ba6c17210 len:128 a:0x595ba6c172a0 len:128 a:0x595ba6c17330 len:128 
+	BUF:  #regs:33   start blkno:0x2840   len:32   bmap size:4   flags:0x4001
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c173c0 len:56 a:0x595ba6c17470 len:176 a:0x595ba6c16470 len:16 
+	INODE: #regs:3   ino:0x285f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c0de10 len:24 a:0x595ba6c17590 len:4096 
+	BUF:  #regs:2   start blkno:0x3270   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c185a0 len:56 a:0x595ba6c18650 len:176 a:0x595ba6c18710 len:16 
+	INODE: #regs:3   ino:0x2860  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c18730 len:24 a:0x595ba6c187b0 len:4096 
+	BUF:  #regs:2   start blkno:0x32c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c197c0 len:56 a:0x595ba6c19870 len:176 a:0x595ba6c19930 len:16 
+	INODE: #regs:3   ino:0x2861  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c19950 len:24 a:0x595ba6c199d0 len:4096 
+	BUF:  #regs:2   start blkno:0x3310   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1a9e0 len:56 a:0x595ba6c1aa90 len:176 a:0x595ba6c1ab50 len:16 
+	INODE: #regs:3   ino:0x2862  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1ab70 len:24 a:0x595ba6c1abf0 len:4096 
+	BUF:  #regs:2   start blkno:0x3360   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1bc00 len:56 a:0x595ba6c1bcb0 len:176 a:0x595ba6c1bd70 len:16 
+	INODE: #regs:3   ino:0x2863  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1bd90 len:24 a:0x595ba6c1be10 len:4096 
+	BUF:  #regs:2   start blkno:0x33b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1ce20 len:56 a:0x595ba6c1ced0 len:176 a:0x595ba6c1cf90 len:16 
+	INODE: #regs:3   ino:0x2864  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1cfb0 len:24 a:0x595ba6c1d030 len:4096 
+	BUF:  #regs:2   start blkno:0x3400   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1e040 len:56 a:0x595ba6c1e0f0 len:176 a:0x595ba6c1e1b0 len:16 
+	INODE: #regs:3   ino:0x2865  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1e1d0 len:24 a:0x595ba6c1e8c0 len:4096 
+	BUF:  #regs:2   start blkno:0x3450   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1e250 len:56 a:0x595ba6c1e300 len:176 a:0x595ba6c1e8a0 len:16 
+	INODE: #regs:3   ino:0x2866  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1e880 len:24 a:0x595ba6c1f8d0 len:4096 
+	BUF:  #regs:2   start blkno:0x34a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1e420 len:56 a:0x595ba6c1e4d0 len:176 a:0x595ba6c1e590 len:16 
+	INODE: #regs:3   ino:0x2867  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1e5b0 len:24 a:0x595ba6c208e0 len:4096 
+	BUF:  #regs:2   start blkno:0x34f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1e630 len:56 a:0x595ba6c1e6e0 len:176 a:0x595ba6c1e7a0 len:16 
+	INODE: #regs:3   ino:0x2868  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c1e7c0 len:24 a:0x595ba6c218f0 len:4096 
+	BUF:  #regs:2   start blkno:0x3540   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c1e840 len:56 a:0x595ba6c22970 len:176 a:0x595ba6c22a30 len:16 
+	INODE: #regs:3   ino:0x2869  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c22a50 len:24 a:0x595ba6c22ad0 len:4096 
+	BUF:  #regs:2   start blkno:0x3590   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c23ae0 len:56 a:0x595ba6c23b90 len:176 a:0x595ba6c23c50 len:16 
+	INODE: #regs:3   ino:0x286a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c23c70 len:24 a:0x595ba6c23cf0 len:4096 
+	BUF:  #regs:2   start blkno:0x35e0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c24d00 len:56 a:0x595ba6c24db0 len:176 a:0x595ba6c24e70 len:16 
+	INODE: #regs:3   ino:0x286b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c24e90 len:24 a:0x595ba6c24f10 len:4096 
+	BUF:  #regs:2   start blkno:0x3630   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c25f20 len:56 a:0x595ba6c25fd0 len:176 a:0x595ba6c26090 len:16 
+	INODE: #regs:3   ino:0x286c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c260b0 len:24 a:0x595ba6c26c80 len:4096 
+	BUF:  #regs:2   start blkno:0x3680   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26130 len:56 a:0x595ba6c261e0 len:176 a:0x595ba6c26c60 len:16 
+	INODE: #regs:3   ino:0x286d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c26c40 len:24 a:0x595ba6c27c90 len:4096 
+	BUF:  #regs:2   start blkno:0x36d0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26300 len:56 a:0x595ba6c263b0 len:176 a:0x595ba6c26470 len:16 
+	INODE: #regs:3   ino:0x286e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c26490 len:24 a:0x595ba6c28ca0 len:4096 
+	BUF:  #regs:2   start blkno:0x3720   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26510 len:56 a:0x595ba6c265c0 len:176 a:0x595ba6c26680 len:16 
+	INODE: #regs:3   ino:0x286f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c266a0 len:24 a:0x595ba6c29cb0 len:4096 
+	BUF:  #regs:2   start blkno:0x3770   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26720 len:56 a:0x595ba6c267d0 len:176 a:0x595ba6c26890 len:16 
+	INODE: #regs:3   ino:0x2870  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c268b0 len:24 a:0x595ba6c2acc0 len:4096 
+	BUF:  #regs:2   start blkno:0x37c0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26930 len:56 a:0x595ba6c269e0 len:176 a:0x595ba6c26aa0 len:16 
+	INODE: #regs:3   ino:0x2871  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c26ac0 len:24 a:0x595ba6c2bcd0 len:4096 
+	BUF:  #regs:2   start blkno:0x3810   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c26b40 len:56 a:0x595ba6c2cce0 len:176 a:0x595ba6c26bf0 len:16 
+	INODE: #regs:3   ino:0x2872  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c26c10 len:24 a:0x595ba6c2ce00 len:4096 
+	BUF:  #regs:2   start blkno:0x3860   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2de10 len:56 a:0x595ba6c2dec0 len:176 a:0x595ba6c2df80 len:16 
+	INODE: #regs:3   ino:0x2873  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2dfa0 len:24 a:0x595ba6c2f050 len:4096 
+	BUF:  #regs:2   start blkno:0x38b0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2e020 len:56 a:0x595ba6c2e0d0 len:176 a:0x595ba6c2f030 len:16 
+	INODE: #regs:3   ino:0x2874  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2f010 len:24 a:0x595ba6c30060 len:4096 
+	BUF:  #regs:2   start blkno:0x3900   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2e1f0 len:56 a:0x595ba6c2e2a0 len:176 a:0x595ba6c2e360 len:16 
+	INODE: #regs:3   ino:0x2875  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2e380 len:24 a:0x595ba6c31070 len:4096 
+	BUF:  #regs:2   start blkno:0x3950   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2e400 len:56 a:0x595ba6c2e4b0 len:176 a:0x595ba6c2e570 len:16 
+	INODE: #regs:3   ino:0x2876  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2e590 len:24 a:0x595ba6c32080 len:4096 
+	BUF:  #regs:2   start blkno:0x39a0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2e610 len:56 a:0x595ba6c2e6c0 len:176 a:0x595ba6c2e780 len:16 
+	INODE: #regs:3   ino:0x2877  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2e7a0 len:24 a:0x595ba6c33090 len:4096 
+	BUF:  #regs:2   start blkno:0x39f0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2e820 len:56 a:0x595ba6c2e8d0 len:176 a:0x595ba6c2e990 len:16 
+	INODE: #regs:3   ino:0x2878  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2e9b0 len:24 a:0x595ba6c340a0 len:4096 
+	BUF:  #regs:2   start blkno:0x3a40   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2ea30 len:56 a:0x595ba6c2eae0 len:176 a:0x595ba6c2eba0 len:16 
+	INODE: #regs:3   ino:0x2879  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2ebc0 len:24 a:0x595ba6c350b0 len:4096 
+	BUF:  #regs:2   start blkno:0x3a90   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2ec40 len:56 a:0x595ba6c2ecf0 len:176 a:0x595ba6c2edb0 len:16 
+	INODE: #regs:3   ino:0x287a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2edd0 len:24 a:0x595ba6c360c0 len:4096 
+	BUF:  #regs:2   start blkno:0x3ae0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c2ee50 len:56 a:0x595ba6c2ef00 len:176 a:0x595ba6c2efc0 len:16 
+	INODE: #regs:3   ino:0x287b  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c2efe0 len:24 a:0x595ba6c37500 len:4096 
+	BUF:  #regs:2   start blkno:0x3b30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c37130 len:56 a:0x595ba6c371e0 len:176 a:0x595ba6c374e0 len:16 
+	INODE: #regs:3   ino:0x287c  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c374c0 len:24 a:0x595ba6c38510 len:4096 
+	BUF:  #regs:2   start blkno:0x3b80   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c37300 len:56 a:0x595ba6c373b0 len:176 a:0x595ba6c37470 len:16 
+	INODE: #regs:3   ino:0x287d  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c37490 len:24 a:0x595ba6c39580 len:4096 
+	BUF:  #regs:2   start blkno:0x3bd0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3a590 len:56 a:0x595ba6c3a640 len:176 a:0x595ba6c3a700 len:16 
+	INODE: #regs:3   ino:0x287e  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3a720 len:24 a:0x595ba6c3a7a0 len:4096 
+	BUF:  #regs:2   start blkno:0x3c20   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:33 total:33 a:0x595ba6c3b7b0 len:36 a:0x595ba6c3ba30 len:128 a:0x595ba6c3bac0 len:128 a:0x595ba6c3bb50 len:128 a:0x595ba6c3bbe0 len:128 a:0x595ba6c3bc70 len:128 a:0x595ba6c3bd00 len:128 a:0x595ba6c3bd90 len:128 a:0x595ba6c3be20 len:128 a:0x595ba6c3beb0 len:128 a:0x595ba6c3bf40 len:128 a:0x595ba6c3bfd0 len:128 a:0x595ba6c3c060 len:128 a:0x595ba6c3c0f0 len:128 a:0x595ba6c3c180 len:128 a:0x595ba6c3c210 len:128 a:0x595ba6c3c2a0 len:128 a:0x595ba6c3c330 len:128 a:0x595ba6c3c3c0 len:128 a:0x595ba6c3c450 len:128 a:0x595ba6c3c4e0 len:128 a:0x595ba6c3c570 len:128 a:0x595ba6c3c600 len:128 a:0x595ba6c3c690 len:128 a:0x595ba6c3c720 len:128 a:0x595ba6c3c7b0 len:128 a:0x595ba6c3c840 len:128 a:0x595ba6c3c8d0 len:128 a:0x595ba6c3c960 len:128 a:0x595ba6c3c9f0 len:128 a:0x595ba6c3ca80 len:128 a:0x595ba6c3cb10 len:128 a:0x595ba6c3cba0 len:128 
+	BUF:  #regs:33   start blkno:0x2860   len:32   bmap size:4   flags:0x4001
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3cc30 len:56 a:0x595ba6c3cce0 len:176 a:0x595ba6c3cda0 len:16 
+	INODE: #regs:3   ino:0x287f  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+ICR: cnt:1 total:1 a:0x595ba6c3cdc0 len:28 
+	ICR:  #ag: 0  agbno: 0x790  len: 8
+	      cnt: 64  isize: 512    gen: 0x828a69b3
+BUF: cnt:2 total:2 a:0x595ba6c3ce40 len:24 a:0x595ba6c3cec0 len:4096 
+	BUF:  #regs:2   start blkno:0x3c78   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3ded0 len:56 a:0x595ba6c3df80 len:176 a:0x595ba6c3e040 len:32 
+	INODE: #regs:3   ino:0x3c80  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3e070 len:24 a:0x595ba6c3e0f0 len:4096 
+	BUF:  #regs:2   start blkno:0x3c70   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3f100 len:56 a:0x595ba6c3f1b0 len:176 a:0x595ba6c3f270 len:32 
+	INODE: #regs:3   ino:0x3c81  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3f2a0 len:24 a:0x595ba6c3fb20 len:4096 
+	BUF:  #regs:2   start blkno:0x3d50   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3f320 len:56 a:0x595ba6c3f3d0 len:176 a:0x595ba6c3fb00 len:16 
+	INODE: #regs:3   ino:0x3c82  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3fae0 len:24 a:0x595ba6c40b30 len:4096 
+	BUF:  #regs:2   start blkno:0x3da0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3f4f0 len:56 a:0x595ba6c3f5a0 len:176 a:0x595ba6c3f660 len:16 
+	INODE: #regs:3   ino:0x3c83  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3f680 len:24 a:0x595ba6c41b40 len:4096 
+	BUF:  #regs:2   start blkno:0x3df0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3f700 len:56 a:0x595ba6c3f7b0 len:176 a:0x595ba6c3f870 len:16 
+	INODE: #regs:3   ino:0x3c84  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3f890 len:24 a:0x595ba6c42b50 len:4096 
+	BUF:  #regs:2   start blkno:0x3e40   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c3f910 len:56 a:0x595ba6c3f9c0 len:176 a:0x595ba6c3fa80 len:16 
+	INODE: #regs:3   ino:0x3c85  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c3faa0 len:24 a:0x595ba6c43bc0 len:4096 
+	BUF:  #regs:2   start blkno:0x3e90   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c44bd0 len:56 a:0x595ba6c44c80 len:176 a:0x595ba6c3fac0 len:16 
+	INODE: #regs:3   ino:0x3c86  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c44d40 len:24 a:0x595ba6c44dc0 len:4096 
+	BUF:  #regs:2   start blkno:0x3ee0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c45dd0 len:56 a:0x595ba6c45e80 len:176 a:0x595ba6c45f40 len:16 
+	INODE: #regs:3   ino:0x3c87  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c45f60 len:24 a:0x595ba6c45fe0 len:4096 
+	BUF:  #regs:2   start blkno:0x3f30   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c46ff0 len:56 a:0x595ba6c470a0 len:176 a:0x595ba6c47160 len:16 
+	INODE: #regs:3   ino:0x3c88  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c47180 len:24 a:0x595ba6c47ee0 len:4096 
+	BUF:  #regs:2   start blkno:0x3f80   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c47200 len:56 a:0x595ba6c472b0 len:176 a:0x595ba6c47ec0 len:16 
+	INODE: #regs:3   ino:0x3c89  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+BUF: cnt:2 total:2 a:0x595ba6c47ea0 len:24 a:0x595ba6c473d0 len:128 
+	BUF:  #regs:2   start blkno:0x38   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c47460 len:24 a:0x595ba6c474e0 len:128 
+	BUF:  #regs:2   start blkno:0x30   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c47570 len:24 a:0x595ba6c475f0 len:128 
+	BUF:  #regs:2   start blkno:0x8   len:8   bmap size:1   flags:0x2800
+	AGF Buffer: (XAGF)
+BUF: cnt:2 total:2 a:0x595ba6c47680 len:24 a:0x595ba6c47700 len:128 
+	BUF:  #regs:2   start blkno:0x28   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c47790 len:24 a:0x595ba6c47810 len:128 
+	BUF:  #regs:2   start blkno:0x20   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c478a0 len:24 a:0x595ba6c48ef0 len:4096 
+	BUF:  #regs:2   start blkno:0x3fd0   len:8   bmap size:1   flags:0x8000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x595ba6c47920 len:24 a:0x595ba6c49f00 len:3584 
+	BUF:  #regs:2   start blkno:0x50   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:3 total:3 a:0x595ba6c479a0 len:24 a:0x595ba6c47a30 len:256 a:0x595ba6c47b40 len:128 
+	BUF:  #regs:3   start blkno:0x58   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c47bd0 len:56 a:0x595ba6c47c80 len:176 a:0x595ba6c47d40 len:8 
+	INODE: #regs:3   ino:0x80  flags:0x3   dsize:6
+	CORE inode:
+		DATA FORK LOCAL inode data:
+BUF: cnt:2 total:2 a:0x595ba6c47d60 len:24 a:0x595ba6c4ad10 len:384 
+	BUF:  #regs:2   start blkno:0x10   len:8   bmap size:1   flags:0x3800
+	AGI Buffer: (XAGI)
+BUF: cnt:12 total:12 a:0x595ba6c47de0 len:36 a:0x595ba6c4af70 len:128 a:0x595ba6c4b000 len:128 a:0x595ba6c4b090 len:128 a:0x595ba6c4b120 len:128 a:0x595ba6c4b1b0 len:128 a:0x595ba6c4b240 len:128 a:0x595ba6c4b2d0 len:128 a:0x595ba6c4b360 len:128 a:0x595ba6c4b3f0 len:128 a:0x595ba6c4b480 len:128 a:0x595ba6c4b510 len:128 
+	BUF:  #regs:12   start blkno:0x3c80   len:32   bmap size:4   flags:0x4001
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+	BUF DATA
+INO: cnt:3 total:3 a:0x595ba6c47e40 len:56 a:0x595ba6c4b610 len:176 a:0x595ba6c47e80 len:16 
+	INODE: #regs:3   ino:0x3c8a  flags:0x81   dsize:0
+	CORE inode:
+		ATTR FORK EXTENTS inode data:
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Opening "<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch"
+Calling XFS_IOC_GOINGDOWN
+xfs_logprint:
+    data device: 0x10306
+    log device: 0x10306 daddr: 16777296 length: 217296
+
+    log tail: 1800 head: 1960 state: <DIRTY>
+
+
+LOG REC AT LSN cycle 1 block 1800 (0x1, 0x708)
+
+LOG REC AT LSN cycle 1 block 1832 (0x1, 0x728)
+
+LOG REC AT LSN cycle 1 block 1896 (0x1, 0x768)
+============================================================================
+TRANS: tid:0x2d801211  #items:624  trans:0x2d801211  q:0x5bf35e0aa5f0
+BUF: cnt:1 total:1 a:0x5bf35e097080 len:24 
+	BUF:  #regs:1   start blkno:0x3c78   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aa640 len:56 a:0x5bf35e0aa6e0 len:176 
+	INODE: #regs:2   ino:0x3c80  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0aa7a0 len:24 
+	BUF:  #regs:1   start blkno:0x2838   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aa810 len:56 a:0x5bf35e0aa8b0 len:176 
+	INODE: #regs:2   ino:0x2840  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0aa970 len:24 
+	BUF:  #regs:1   start blkno:0x13f8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aa9e0 len:56 a:0x5bf35e0aaa80 len:176 
+	INODE: #regs:2   ino:0x1400  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0aab40 len:24 
+	BUF:  #regs:1   start blkno:0x3c70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aabb0 len:56 a:0x5bf35e0aac50 len:176 
+	INODE: #regs:2   ino:0x3c81  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0aad10 len:24 
+	BUF:  #regs:1   start blkno:0x2830   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aad80 len:56 a:0x5bf35e0aae20 len:176 
+	INODE: #regs:2   ino:0x2841  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0aaee0 len:24 
+	BUF:  #regs:1   start blkno:0x13f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aaf50 len:56 a:0x5bf35e0ac010 len:176 
+	INODE: #regs:2   ino:0x1401  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac0d0 len:24 
+	BUF:  #regs:1   start blkno:0x3d50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ac140 len:56 a:0x5bf35e0ac1e0 len:176 
+	INODE: #regs:2   ino:0x3c82  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac2a0 len:24 
+	BUF:  #regs:1   start blkno:0x2828   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ac310 len:56 a:0x5bf35e0ac3b0 len:176 
+	INODE: #regs:2   ino:0x2842  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac470 len:24 
+	BUF:  #regs:1   start blkno:0x13e8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ac4e0 len:56 a:0x5bf35e0ac580 len:176 
+	INODE: #regs:2   ino:0x1402  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac640 len:24 
+	BUF:  #regs:1   start blkno:0x3da0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ac6b0 len:56 a:0x5bf35e0ac750 len:176 
+	INODE: #regs:2   ino:0x3c83  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac810 len:24 
+	BUF:  #regs:1   start blkno:0x2820   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ac880 len:56 a:0x5bf35e0ac920 len:176 
+	INODE: #regs:2   ino:0x2843  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ac9e0 len:24 
+	BUF:  #regs:1   start blkno:0x13e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0aca50 len:56 a:0x5bf35e0acaf0 len:176 
+	INODE: #regs:2   ino:0x1403  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0acbb0 len:24 
+	BUF:  #regs:1   start blkno:0xc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0acc20 len:56 a:0x5bf35e0accc0 len:176 
+	INODE: #regs:2   ino:0x83  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0acd80 len:24 
+	BUF:  #regs:1   start blkno:0x3df0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0acdf0 len:56 a:0x5bf35e0ace90 len:176 
+	INODE: #regs:2   ino:0x3c84  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0acf50 len:24 
+	BUF:  #regs:1   start blkno:0x2818   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0acfc0 len:56 a:0x5bf35e0b6070 len:176 
+	INODE: #regs:2   ino:0x2844  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6130 len:24 
+	BUF:  #regs:1   start blkno:0x13d8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b61a0 len:56 a:0x5bf35e0b6240 len:176 
+	INODE: #regs:2   ino:0x1404  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6300 len:24 
+	BUF:  #regs:1   start blkno:0x110   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6370 len:56 a:0x5bf35e0b6410 len:176 
+	INODE: #regs:2   ino:0x84  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b64d0 len:24 
+	BUF:  #regs:1   start blkno:0x3e40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6540 len:56 a:0x5bf35e0b65e0 len:176 
+	INODE: #regs:2   ino:0x3c85  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b66a0 len:24 
+	BUF:  #regs:1   start blkno:0x2810   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6710 len:56 a:0x5bf35e0b67b0 len:176 
+	INODE: #regs:2   ino:0x2845  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6870 len:24 
+	BUF:  #regs:1   start blkno:0x13d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b68e0 len:56 a:0x5bf35e0b6980 len:176 
+	INODE: #regs:2   ino:0x1405  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6a40 len:24 
+	BUF:  #regs:1   start blkno:0x160   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6ab0 len:56 a:0x5bf35e0b6b50 len:176 
+	INODE: #regs:2   ino:0x85  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6c10 len:24 
+	BUF:  #regs:1   start blkno:0x3e90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6c80 len:56 a:0x5bf35e0b6d20 len:176 
+	INODE: #regs:2   ino:0x3c86  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6de0 len:24 
+	BUF:  #regs:1   start blkno:0x2a30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b6e50 len:56 a:0x5bf35e0b6ef0 len:176 
+	INODE: #regs:2   ino:0x2846  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b6fb0 len:24 
+	BUF:  #regs:1   start blkno:0x15f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7020 len:56 a:0x5bf35e0b70c0 len:176 
+	INODE: #regs:2   ino:0x1406  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7180 len:24 
+	BUF:  #regs:1   start blkno:0x1b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b71f0 len:56 a:0x5bf35e0b7290 len:176 
+	INODE: #regs:2   ino:0x86  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7350 len:24 
+	BUF:  #regs:1   start blkno:0x3ee0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b73c0 len:56 a:0x5bf35e0b7460 len:176 
+	INODE: #regs:2   ino:0x3c87  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7520 len:24 
+	BUF:  #regs:1   start blkno:0x2a80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7590 len:56 a:0x5bf35e0b7630 len:176 
+	INODE: #regs:2   ino:0x2847  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b76f0 len:24 
+	BUF:  #regs:1   start blkno:0x1640   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7760 len:56 a:0x5bf35e0b7800 len:176 
+	INODE: #regs:2   ino:0x1407  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b78c0 len:24 
+	BUF:  #regs:1   start blkno:0x200   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7930 len:56 a:0x5bf35e0b79d0 len:176 
+	INODE: #regs:2   ino:0x87  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7a90 len:24 
+	BUF:  #regs:1   start blkno:0x3f30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7b00 len:56 a:0x5bf35e0b7ba0 len:176 
+	INODE: #regs:2   ino:0x3c88  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7c60 len:24 
+	BUF:  #regs:1   start blkno:0x2ad0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7cd0 len:56 a:0x5bf35e0b7d70 len:176 
+	INODE: #regs:2   ino:0x2848  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b7e30 len:24 
+	BUF:  #regs:1   start blkno:0x1690   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b7ea0 len:56 a:0x5bf35e0b7f40 len:176 
+	INODE: #regs:2   ino:0x1408  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8000 len:24 
+	BUF:  #regs:1   start blkno:0x250   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8070 len:56 a:0x5bf35e0b8110 len:176 
+	INODE: #regs:2   ino:0x88  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b81d0 len:24 
+	BUF:  #regs:1   start blkno:0x3f80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8240 len:56 a:0x5bf35e0b82e0 len:176 
+	INODE: #regs:2   ino:0x3c89  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b83a0 len:24 
+	BUF:  #regs:1   start blkno:0x2b20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8410 len:56 a:0x5bf35e0b84b0 len:176 
+	INODE: #regs:2   ino:0x2849  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8570 len:24 
+	BUF:  #regs:1   start blkno:0x16e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b85e0 len:56 a:0x5bf35e0b8680 len:176 
+	INODE: #regs:2   ino:0x1409  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8740 len:24 
+	BUF:  #regs:1   start blkno:0x2a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b87b0 len:56 a:0x5bf35e0b8850 len:176 
+	INODE: #regs:2   ino:0x89  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8910 len:24 
+	BUF:  #regs:1   start blkno:0x3fd0   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0b8980 len:36 
+	BUF:  #regs:1   start blkno:0x3c80   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8a00 len:56 a:0x5bf35e0b8aa0 len:176 
+	INODE: #regs:2   ino:0x3c8a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8b60 len:36 
+	BUF:  #regs:1   start blkno:0x3ca0   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0b8be0 len:24 
+	BUF:  #regs:1   start blkno:0x2b70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8c50 len:56 a:0x5bf35e0b8cf0 len:176 
+	INODE: #regs:2   ino:0x284a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8db0 len:24 
+	BUF:  #regs:1   start blkno:0x1730   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8e20 len:56 a:0x5bf35e0b8ec0 len:176 
+	INODE: #regs:2   ino:0x140a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b8f80 len:24 
+	BUF:  #regs:1   start blkno:0x2f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b8ff0 len:56 a:0x5bf35e0b9090 len:176 
+	INODE: #regs:2   ino:0x8a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9150 len:24 
+	BUF:  #regs:1   start blkno:0x2bc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b91c0 len:56 a:0x5bf35e0b9260 len:176 
+	INODE: #regs:2   ino:0x284b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9320 len:24 
+	BUF:  #regs:1   start blkno:0x1780   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b9390 len:56 a:0x5bf35e0b9430 len:176 
+	INODE: #regs:2   ino:0x140b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b94f0 len:24 
+	BUF:  #regs:1   start blkno:0x340   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0b9560 len:24 
+	BUF:  #regs:1   start blkno:0x50   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0b95d0 len:24 
+	BUF:  #regs:1   start blkno:0x58   len:8   bmap size:1   flags:0x2
+BUF: cnt:2 total:2 a:0x5bf35e0b9640 len:24 a:0x5bf35e0b96c0 len:128 
+	BUF:  #regs:2   start blkno:0x18   len:8   bmap size:1   flags:0x3000
+	BUF DATA
+INO: cnt:2 total:2 a:0x5bf35e0b9750 len:56 a:0x5bf35e0b97f0 len:176 
+	INODE: #regs:2   ino:0x8b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b98b0 len:24 
+	BUF:  #regs:1   start blkno:0x2c10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b9920 len:56 a:0x5bf35e0b99c0 len:176 
+	INODE: #regs:2   ino:0x284c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9a80 len:24 
+	BUF:  #regs:1   start blkno:0x17d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b9af0 len:56 a:0x5bf35e0b9b90 len:176 
+	INODE: #regs:2   ino:0x140c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9c50 len:24 
+	BUF:  #regs:1   start blkno:0x390   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b9cc0 len:56 a:0x5bf35e0b9d60 len:176 
+	INODE: #regs:2   ino:0x8c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9e20 len:24 
+	BUF:  #regs:1   start blkno:0x2c60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0b9e90 len:56 a:0x5bf35e0b9f30 len:176 
+	INODE: #regs:2   ino:0x284d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0b9ff0 len:24 
+	BUF:  #regs:1   start blkno:0x1820   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba060 len:56 a:0x5bf35e0ba100 len:176 
+	INODE: #regs:2   ino:0x140d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ba1c0 len:24 
+	BUF:  #regs:1   start blkno:0x3e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba230 len:56 a:0x5bf35e0ba2d0 len:176 
+	INODE: #regs:2   ino:0x8d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ba390 len:24 
+	BUF:  #regs:1   start blkno:0x2cb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba400 len:56 a:0x5bf35e0ba4a0 len:176 
+	INODE: #regs:2   ino:0x284e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ba560 len:24 
+	BUF:  #regs:1   start blkno:0x1870   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba5d0 len:56 a:0x5bf35e0ba670 len:176 
+	INODE: #regs:2   ino:0x140e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ba730 len:24 
+	BUF:  #regs:1   start blkno:0x430   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba7a0 len:56 a:0x5bf35e0ba840 len:176 
+	INODE: #regs:2   ino:0x8e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ba900 len:24 
+	BUF:  #regs:1   start blkno:0x2d00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ba970 len:56 a:0x5bf35e0baa10 len:176 
+	INODE: #regs:2   ino:0x284f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0baad0 len:24 
+	BUF:  #regs:1   start blkno:0x18c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bab40 len:56 a:0x5bf35e0babe0 len:176 
+	INODE: #regs:2   ino:0x140f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0baca0 len:24 
+	BUF:  #regs:1   start blkno:0x480   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bad10 len:56 a:0x5bf35e0badb0 len:176 
+	INODE: #regs:2   ino:0x8f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bae70 len:24 
+	BUF:  #regs:1   start blkno:0x2d50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0baee0 len:56 a:0x5bf35e0baf80 len:176 
+	INODE: #regs:2   ino:0x2850  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb040 len:24 
+	BUF:  #regs:1   start blkno:0x1910   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb0b0 len:56 a:0x5bf35e0bb150 len:176 
+	INODE: #regs:2   ino:0x1410  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb210 len:24 
+	BUF:  #regs:1   start blkno:0x4d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb280 len:56 a:0x5bf35e0bb320 len:176 
+	INODE: #regs:2   ino:0x90  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb3e0 len:24 
+	BUF:  #regs:1   start blkno:0x2da0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb450 len:56 a:0x5bf35e0bb4f0 len:176 
+	INODE: #regs:2   ino:0x2851  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb5b0 len:24 
+	BUF:  #regs:1   start blkno:0x1960   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb620 len:56 a:0x5bf35e0bb6c0 len:176 
+	INODE: #regs:2   ino:0x1411  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb780 len:24 
+	BUF:  #regs:1   start blkno:0x520   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb7f0 len:56 a:0x5bf35e0bb890 len:176 
+	INODE: #regs:2   ino:0x91  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bb950 len:24 
+	BUF:  #regs:1   start blkno:0x2df0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bb9c0 len:56 a:0x5bf35e0bba60 len:176 
+	INODE: #regs:2   ino:0x2852  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bbb20 len:24 
+	BUF:  #regs:1   start blkno:0x19b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bbb90 len:56 a:0x5bf35e0bbc30 len:176 
+	INODE: #regs:2   ino:0x1412  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bbcf0 len:24 
+	BUF:  #regs:1   start blkno:0x570   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bbd60 len:56 a:0x5bf35e0bbe00 len:176 
+	INODE: #regs:2   ino:0x92  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bbec0 len:24 
+	BUF:  #regs:1   start blkno:0x2e40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bbf30 len:56 a:0x5bf35e0bbfd0 len:176 
+	INODE: #regs:2   ino:0x2853  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc090 len:24 
+	BUF:  #regs:1   start blkno:0x1a00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bc100 len:56 a:0x5bf35e0bc1a0 len:176 
+	INODE: #regs:2   ino:0x1413  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc260 len:24 
+	BUF:  #regs:1   start blkno:0x5c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bc2d0 len:56 a:0x5bf35e0bc370 len:176 
+	INODE: #regs:2   ino:0x93  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc430 len:24 
+	BUF:  #regs:1   start blkno:0x2e90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bc4a0 len:56 a:0x5bf35e0bc540 len:176 
+	INODE: #regs:2   ino:0x2854  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc600 len:24 
+	BUF:  #regs:1   start blkno:0x1a50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bc670 len:56 a:0x5bf35e0bc710 len:176 
+	INODE: #regs:2   ino:0x1414  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc7d0 len:24 
+	BUF:  #regs:1   start blkno:0x610   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bc840 len:56 a:0x5bf35e0bc8e0 len:176 
+	INODE: #regs:2   ino:0x94  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bc9a0 len:24 
+	BUF:  #regs:1   start blkno:0x2ee0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bca10 len:56 a:0x5bf35e0bcab0 len:176 
+	INODE: #regs:2   ino:0x2855  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bcb70 len:24 
+	BUF:  #regs:1   start blkno:0x1aa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bcbe0 len:56 a:0x5bf35e0bcc80 len:176 
+	INODE: #regs:2   ino:0x1415  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bcd40 len:24 
+	BUF:  #regs:1   start blkno:0x660   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bcdb0 len:56 a:0x5bf35e0bce50 len:176 
+	INODE: #regs:2   ino:0x95  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bcf10 len:24 
+	BUF:  #regs:1   start blkno:0x2f30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bcf80 len:56 a:0x5bf35e0bd020 len:176 
+	INODE: #regs:2   ino:0x2856  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd0e0 len:24 
+	BUF:  #regs:1   start blkno:0x1af0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bd150 len:56 a:0x5bf35e0bd1f0 len:176 
+	INODE: #regs:2   ino:0x1416  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd2b0 len:24 
+	BUF:  #regs:1   start blkno:0x6b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bd320 len:56 a:0x5bf35e0bd3c0 len:176 
+	INODE: #regs:2   ino:0x96  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd480 len:24 
+	BUF:  #regs:1   start blkno:0x2fa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bd4f0 len:56 a:0x5bf35e0bd590 len:176 
+	INODE: #regs:2   ino:0x2857  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd650 len:24 
+	BUF:  #regs:1   start blkno:0x1b40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bd6c0 len:56 a:0x5bf35e0bd760 len:176 
+	INODE: #regs:2   ino:0x1417  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd820 len:24 
+	BUF:  #regs:1   start blkno:0x700   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bd890 len:56 a:0x5bf35e0bd930 len:176 
+	INODE: #regs:2   ino:0x97  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bd9f0 len:24 
+	BUF:  #regs:1   start blkno:0x2ff0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bda60 len:56 a:0x5bf35e0bdb00 len:176 
+	INODE: #regs:2   ino:0x2858  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bdbc0 len:24 
+	BUF:  #regs:1   start blkno:0x1b90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bdc30 len:56 a:0x5bf35e0bdcd0 len:176 
+	INODE: #regs:2   ino:0x1418  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bdd90 len:24 
+	BUF:  #regs:1   start blkno:0x750   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bde00 len:56 a:0x5bf35e0bdea0 len:176 
+	INODE: #regs:2   ino:0x98  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bdf60 len:24 
+	BUF:  #regs:1   start blkno:0x3040   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bdfd0 len:56 a:0x5bf35e0be070 len:176 
+	INODE: #regs:2   ino:0x2859  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0be130 len:24 
+	BUF:  #regs:1   start blkno:0x1be0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0be1a0 len:56 a:0x5bf35e0be240 len:176 
+	INODE: #regs:2   ino:0x1419  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0be300 len:24 
+	BUF:  #regs:1   start blkno:0x7a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0be370 len:56 a:0x5bf35e0be410 len:176 
+	INODE: #regs:2   ino:0x99  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0be4d0 len:24 
+	BUF:  #regs:1   start blkno:0x3090   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0be540 len:56 a:0x5bf35e0be5e0 len:176 
+	INODE: #regs:2   ino:0x285a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0be6a0 len:24 
+	BUF:  #regs:1   start blkno:0x1c30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0be710 len:56 a:0x5bf35e0be7b0 len:176 
+	INODE: #regs:2   ino:0x141a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0be870 len:24 
+	BUF:  #regs:1   start blkno:0x7f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0be8e0 len:56 a:0x5bf35e0be980 len:176 
+	INODE: #regs:2   ino:0x9a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bea40 len:24 
+	BUF:  #regs:1   start blkno:0x30e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0beab0 len:56 a:0x5bf35e0beb50 len:176 
+	INODE: #regs:2   ino:0x285b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bec10 len:24 
+	BUF:  #regs:1   start blkno:0x1c80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bec80 len:56 a:0x5bf35e0bed20 len:176 
+	INODE: #regs:2   ino:0x141b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bede0 len:24 
+	BUF:  #regs:1   start blkno:0x840   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bee50 len:56 a:0x5bf35e0beef0 len:176 
+	INODE: #regs:2   ino:0x9b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0befb0 len:24 
+	BUF:  #regs:1   start blkno:0x3130   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf020 len:56 a:0x5bf35e0bf0c0 len:176 
+	INODE: #regs:2   ino:0x285c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bf180 len:24 
+	BUF:  #regs:1   start blkno:0x1cd0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf1f0 len:56 a:0x5bf35e0bf290 len:176 
+	INODE: #regs:2   ino:0x141c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bf350 len:24 
+	BUF:  #regs:1   start blkno:0x890   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf3c0 len:56 a:0x5bf35e0bf460 len:176 
+	INODE: #regs:2   ino:0x9c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bf520 len:24 
+	BUF:  #regs:1   start blkno:0x3180   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf590 len:56 a:0x5bf35e0bf630 len:176 
+	INODE: #regs:2   ino:0x285d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bf6f0 len:24 
+	BUF:  #regs:1   start blkno:0x1d20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf760 len:56 a:0x5bf35e0bf800 len:176 
+	INODE: #regs:2   ino:0x141d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bf8c0 len:24 
+	BUF:  #regs:1   start blkno:0x8e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bf930 len:56 a:0x5bf35e0bf9d0 len:176 
+	INODE: #regs:2   ino:0x9d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bfa90 len:24 
+	BUF:  #regs:1   start blkno:0x31d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bfb00 len:56 a:0x5bf35e0bfba0 len:176 
+	INODE: #regs:2   ino:0x285e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bfc60 len:24 
+	BUF:  #regs:1   start blkno:0x1d70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bfcd0 len:56 a:0x5bf35e0bfd70 len:176 
+	INODE: #regs:2   ino:0x141e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0bfe30 len:24 
+	BUF:  #regs:1   start blkno:0x930   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0bfea0 len:56 a:0x5bf35e0bff40 len:176 
+	INODE: #regs:2   ino:0x9e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0000 len:24 
+	BUF:  #regs:1   start blkno:0x3220   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0070 len:56 a:0x5bf35e0c0110 len:176 
+	INODE: #regs:2   ino:0x285f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c01d0 len:24 
+	BUF:  #regs:1   start blkno:0x1dc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0240 len:56 a:0x5bf35e0c02e0 len:176 
+	INODE: #regs:2   ino:0x141f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c03a0 len:24 
+	BUF:  #regs:1   start blkno:0x980   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0410 len:56 a:0x5bf35e0c04b0 len:176 
+	INODE: #regs:2   ino:0x9f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0570 len:24 
+	BUF:  #regs:1   start blkno:0x3270   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c05e0 len:56 a:0x5bf35e0c0680 len:176 
+	INODE: #regs:2   ino:0x2860  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0740 len:24 
+	BUF:  #regs:1   start blkno:0x1e10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c07b0 len:56 a:0x5bf35e0c0850 len:176 
+	INODE: #regs:2   ino:0x1420  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0910 len:24 
+	BUF:  #regs:1   start blkno:0x9d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0980 len:56 a:0x5bf35e0c0a20 len:176 
+	INODE: #regs:2   ino:0xa0  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0ae0 len:24 
+	BUF:  #regs:1   start blkno:0x32c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0b50 len:56 a:0x5bf35e0c0bf0 len:176 
+	INODE: #regs:2   ino:0x2861  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0cb0 len:24 
+	BUF:  #regs:1   start blkno:0x1e60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0d20 len:56 a:0x5bf35e0c0dc0 len:176 
+	INODE: #regs:2   ino:0x1421  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0e80 len:24 
+	BUF:  #regs:1   start blkno:0xa20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c0f30 len:56 a:0x5bf35e0c0fd0 len:176 
+	INODE: #regs:2   ino:0xa1  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c0f10 len:24 
+	BUF:  #regs:1   start blkno:0x3310   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c10c0 len:56 a:0x5bf35e0c1160 len:176 
+	INODE: #regs:2   ino:0x2862  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1220 len:24 
+	BUF:  #regs:1   start blkno:0x1eb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1290 len:56 a:0x5bf35e0c1330 len:176 
+	INODE: #regs:2   ino:0x1422  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c13f0 len:24 
+	BUF:  #regs:1   start blkno:0xa70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1460 len:56 a:0x5bf35e0c1500 len:176 
+	INODE: #regs:2   ino:0xa2  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c15c0 len:24 
+	BUF:  #regs:1   start blkno:0x3360   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1630 len:56 a:0x5bf35e0c16d0 len:176 
+	INODE: #regs:2   ino:0x2863  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1790 len:24 
+	BUF:  #regs:1   start blkno:0x1f00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1800 len:56 a:0x5bf35e0c18a0 len:176 
+	INODE: #regs:2   ino:0x1423  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1960 len:24 
+	BUF:  #regs:1   start blkno:0xac0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c19d0 len:56 a:0x5bf35e0c1a70 len:176 
+	INODE: #regs:2   ino:0xa3  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1b30 len:24 
+	BUF:  #regs:1   start blkno:0x33b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1ba0 len:56 a:0x5bf35e0c1c40 len:176 
+	INODE: #regs:2   ino:0x2864  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1d00 len:24 
+	BUF:  #regs:1   start blkno:0x1f50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1d70 len:56 a:0x5bf35e0c1e10 len:176 
+	INODE: #regs:2   ino:0x1424  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c1ed0 len:24 
+	BUF:  #regs:1   start blkno:0xb10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c1f40 len:56 a:0x5bf35e0c1fe0 len:176 
+	INODE: #regs:2   ino:0xa4  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c20a0 len:24 
+	BUF:  #regs:1   start blkno:0x3400   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2110 len:56 a:0x5bf35e0c21b0 len:176 
+	INODE: #regs:2   ino:0x2865  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2270 len:24 
+	BUF:  #regs:1   start blkno:0x1fa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c22e0 len:56 a:0x5bf35e0c2380 len:176 
+	INODE: #regs:2   ino:0x1425  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2440 len:24 
+	BUF:  #regs:1   start blkno:0xb60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c24b0 len:56 a:0x5bf35e0c2550 len:176 
+	INODE: #regs:2   ino:0xa5  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2610 len:24 
+	BUF:  #regs:1   start blkno:0x3450   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2680 len:56 a:0x5bf35e0c2720 len:176 
+	INODE: #regs:2   ino:0x2866  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c27e0 len:24 
+	BUF:  #regs:1   start blkno:0x1ff0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2850 len:56 a:0x5bf35e0c28f0 len:176 
+	INODE: #regs:2   ino:0x1426  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c29b0 len:24 
+	BUF:  #regs:1   start blkno:0xbb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2a20 len:56 a:0x5bf35e0c2ac0 len:176 
+	INODE: #regs:2   ino:0xa6  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2b80 len:24 
+	BUF:  #regs:1   start blkno:0x34a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2bf0 len:56 a:0x5bf35e0c2c90 len:176 
+	INODE: #regs:2   ino:0x2867  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2d50 len:24 
+	BUF:  #regs:1   start blkno:0x2040   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2dc0 len:56 a:0x5bf35e0c2e60 len:176 
+	INODE: #regs:2   ino:0x1427  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c2f20 len:24 
+	BUF:  #regs:1   start blkno:0xc00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c2f90 len:56 a:0x5bf35e0c3030 len:176 
+	INODE: #regs:2   ino:0xa7  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c30f0 len:24 
+	BUF:  #regs:1   start blkno:0x34f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3160 len:56 a:0x5bf35e0c3200 len:176 
+	INODE: #regs:2   ino:0x2868  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c32c0 len:24 
+	BUF:  #regs:1   start blkno:0x2090   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3330 len:56 a:0x5bf35e0c33d0 len:176 
+	INODE: #regs:2   ino:0x1428  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3490 len:24 
+	BUF:  #regs:1   start blkno:0xc50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3500 len:56 a:0x5bf35e0c35a0 len:176 
+	INODE: #regs:2   ino:0xa8  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3660 len:24 
+	BUF:  #regs:1   start blkno:0x3540   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c36d0 len:56 a:0x5bf35e0c3770 len:176 
+	INODE: #regs:2   ino:0x2869  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3830 len:24 
+	BUF:  #regs:1   start blkno:0x20e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c38a0 len:56 a:0x5bf35e0c3940 len:176 
+	INODE: #regs:2   ino:0x1429  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3a00 len:24 
+	BUF:  #regs:1   start blkno:0xca0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3a70 len:56 a:0x5bf35e0c3b10 len:176 
+	INODE: #regs:2   ino:0xa9  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3bd0 len:24 
+	BUF:  #regs:1   start blkno:0x3590   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3c40 len:56 a:0x5bf35e0c3ce0 len:176 
+	INODE: #regs:2   ino:0x286a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3da0 len:24 
+	BUF:  #regs:1   start blkno:0x2130   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3e10 len:56 a:0x5bf35e0c3eb0 len:176 
+	INODE: #regs:2   ino:0x142a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c3f70 len:24 
+	BUF:  #regs:1   start blkno:0xcf0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c3fe0 len:56 a:0x5bf35e0c4080 len:176 
+	INODE: #regs:2   ino:0xaa  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4140 len:24 
+	BUF:  #regs:1   start blkno:0x35e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c41b0 len:56 a:0x5bf35e0c4250 len:176 
+	INODE: #regs:2   ino:0x286b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4310 len:24 
+	BUF:  #regs:1   start blkno:0x2180   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4380 len:56 a:0x5bf35e0c4420 len:176 
+	INODE: #regs:2   ino:0x142b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c44e0 len:24 
+	BUF:  #regs:1   start blkno:0xd40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4550 len:56 a:0x5bf35e0c45f0 len:176 
+	INODE: #regs:2   ino:0xab  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c46b0 len:24 
+	BUF:  #regs:1   start blkno:0x3630   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4720 len:56 a:0x5bf35e0c47c0 len:176 
+	INODE: #regs:2   ino:0x286c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4880 len:24 
+	BUF:  #regs:1   start blkno:0x21d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c48f0 len:56 a:0x5bf35e0c4990 len:176 
+	INODE: #regs:2   ino:0x142c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4a50 len:24 
+	BUF:  #regs:1   start blkno:0xd90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4ac0 len:56 a:0x5bf35e0c4b60 len:176 
+	INODE: #regs:2   ino:0xac  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4c20 len:24 
+	BUF:  #regs:1   start blkno:0x3680   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4c90 len:56 a:0x5bf35e0c4d30 len:176 
+	INODE: #regs:2   ino:0x286d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4df0 len:24 
+	BUF:  #regs:1   start blkno:0x2220   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c4e60 len:56 a:0x5bf35e0c4f00 len:176 
+	INODE: #regs:2   ino:0x142d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c4fc0 len:24 
+	BUF:  #regs:1   start blkno:0xde0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5030 len:56 a:0x5bf35e0c50d0 len:176 
+	INODE: #regs:2   ino:0xad  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5190 len:24 
+	BUF:  #regs:1   start blkno:0x36d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5200 len:56 a:0x5bf35e0c52a0 len:176 
+	INODE: #regs:2   ino:0x286e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5360 len:24 
+	BUF:  #regs:1   start blkno:0x2270   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c53d0 len:56 a:0x5bf35e0c5470 len:176 
+	INODE: #regs:2   ino:0x142e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5530 len:24 
+	BUF:  #regs:1   start blkno:0xe30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c55a0 len:56 a:0x5bf35e0c5640 len:176 
+	INODE: #regs:2   ino:0xae  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5700 len:24 
+	BUF:  #regs:1   start blkno:0x3720   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5770 len:56 a:0x5bf35e0c5810 len:176 
+	INODE: #regs:2   ino:0x286f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c58d0 len:24 
+	BUF:  #regs:1   start blkno:0x22c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5940 len:56 a:0x5bf35e0c59e0 len:176 
+	INODE: #regs:2   ino:0x142f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5aa0 len:24 
+	BUF:  #regs:1   start blkno:0xe80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5b10 len:56 a:0x5bf35e0c5bb0 len:176 
+	INODE: #regs:2   ino:0xaf  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5c70 len:24 
+	BUF:  #regs:1   start blkno:0x3770   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5ce0 len:56 a:0x5bf35e0c5d80 len:176 
+	INODE: #regs:2   ino:0x2870  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c5e40 len:24 
+	BUF:  #regs:1   start blkno:0x2310   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c5eb0 len:56 a:0x5bf35e0c5f50 len:176 
+	INODE: #regs:2   ino:0x1430  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6010 len:24 
+	BUF:  #regs:1   start blkno:0xed0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6080 len:56 a:0x5bf35e0c6120 len:176 
+	INODE: #regs:2   ino:0xb0  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c61e0 len:24 
+	BUF:  #regs:1   start blkno:0x37c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6250 len:56 a:0x5bf35e0c62f0 len:176 
+	INODE: #regs:2   ino:0x2871  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c63b0 len:24 
+	BUF:  #regs:1   start blkno:0x2360   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6420 len:56 a:0x5bf35e0c64c0 len:176 
+	INODE: #regs:2   ino:0x1431  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6580 len:24 
+	BUF:  #regs:1   start blkno:0xf20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c65f0 len:56 a:0x5bf35e0c6690 len:176 
+	INODE: #regs:2   ino:0xb1  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6750 len:24 
+	BUF:  #regs:1   start blkno:0x3810   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c67c0 len:56 a:0x5bf35e0c6860 len:176 
+	INODE: #regs:2   ino:0x2872  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6920 len:24 
+	BUF:  #regs:1   start blkno:0x23b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6990 len:56 a:0x5bf35e0c6a30 len:176 
+	INODE: #regs:2   ino:0x1432  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6af0 len:24 
+	BUF:  #regs:1   start blkno:0xf70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6b60 len:56 a:0x5bf35e0c6c00 len:176 
+	INODE: #regs:2   ino:0xb2  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6cc0 len:24 
+	BUF:  #regs:1   start blkno:0x3860   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6d30 len:56 a:0x5bf35e0c6dd0 len:176 
+	INODE: #regs:2   ino:0x2873  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c6e90 len:24 
+	BUF:  #regs:1   start blkno:0x2400   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c6f00 len:56 a:0x5bf35e0c6fa0 len:176 
+	INODE: #regs:2   ino:0x1433  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7060 len:24 
+	BUF:  #regs:1   start blkno:0xfc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c70d0 len:56 a:0x5bf35e0c7170 len:176 
+	INODE: #regs:2   ino:0xb3  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7230 len:24 
+	BUF:  #regs:1   start blkno:0x38b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c72a0 len:56 a:0x5bf35e0c7340 len:176 
+	INODE: #regs:2   ino:0x2874  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7400 len:24 
+	BUF:  #regs:1   start blkno:0x2450   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7470 len:56 a:0x5bf35e0c7510 len:176 
+	INODE: #regs:2   ino:0x1434  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c75d0 len:24 
+	BUF:  #regs:1   start blkno:0x1010   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7640 len:56 a:0x5bf35e0c76e0 len:176 
+	INODE: #regs:2   ino:0xb4  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c77a0 len:24 
+	BUF:  #regs:1   start blkno:0x3900   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7810 len:56 a:0x5bf35e0c78b0 len:176 
+	INODE: #regs:2   ino:0x2875  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7970 len:24 
+	BUF:  #regs:1   start blkno:0x24a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c79e0 len:56 a:0x5bf35e0c7a80 len:176 
+	INODE: #regs:2   ino:0x1435  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7b40 len:24 
+	BUF:  #regs:1   start blkno:0x1060   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7bb0 len:56 a:0x5bf35e0c7c50 len:176 
+	INODE: #regs:2   ino:0xb5  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7d10 len:24 
+	BUF:  #regs:1   start blkno:0x3950   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7d80 len:56 a:0x5bf35e0c7e20 len:176 
+	INODE: #regs:2   ino:0x2876  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c7ee0 len:24 
+	BUF:  #regs:1   start blkno:0x24f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c7f50 len:56 a:0x5bf35e0c7ff0 len:176 
+	INODE: #regs:2   ino:0x1436  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c80b0 len:24 
+	BUF:  #regs:1   start blkno:0x10b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8120 len:56 a:0x5bf35e0c81c0 len:176 
+	INODE: #regs:2   ino:0xb6  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8280 len:24 
+	BUF:  #regs:1   start blkno:0x39a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c82f0 len:56 a:0x5bf35e0c8390 len:176 
+	INODE: #regs:2   ino:0x2877  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8450 len:24 
+	BUF:  #regs:1   start blkno:0x2540   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c84c0 len:56 a:0x5bf35e0c8560 len:176 
+	INODE: #regs:2   ino:0x1437  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8620 len:24 
+	BUF:  #regs:1   start blkno:0x1100   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8690 len:56 a:0x5bf35e0c8730 len:176 
+	INODE: #regs:2   ino:0xb7  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c87f0 len:24 
+	BUF:  #regs:1   start blkno:0x39f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8860 len:56 a:0x5bf35e0c8900 len:176 
+	INODE: #regs:2   ino:0x2878  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c89c0 len:24 
+	BUF:  #regs:1   start blkno:0x2590   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8a30 len:56 a:0x5bf35e0c8ad0 len:176 
+	INODE: #regs:2   ino:0x1438  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8b90 len:24 
+	BUF:  #regs:1   start blkno:0x1150   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8c00 len:56 a:0x5bf35e0c8ca0 len:176 
+	INODE: #regs:2   ino:0xb8  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8d60 len:24 
+	BUF:  #regs:1   start blkno:0x3a40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8dd0 len:56 a:0x5bf35e0c8e70 len:176 
+	INODE: #regs:2   ino:0x2879  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c8f30 len:24 
+	BUF:  #regs:1   start blkno:0x25e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c8fa0 len:56 a:0x5bf35e0c9040 len:176 
+	INODE: #regs:2   ino:0x1439  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9100 len:24 
+	BUF:  #regs:1   start blkno:0x11a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9170 len:56 a:0x5bf35e0c9210 len:176 
+	INODE: #regs:2   ino:0xb9  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c92d0 len:24 
+	BUF:  #regs:1   start blkno:0x3a90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9340 len:56 a:0x5bf35e0c93e0 len:176 
+	INODE: #regs:2   ino:0x287a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c94a0 len:24 
+	BUF:  #regs:1   start blkno:0x2630   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9510 len:56 a:0x5bf35e0c95b0 len:176 
+	INODE: #regs:2   ino:0x143a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9670 len:24 
+	BUF:  #regs:1   start blkno:0x11f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c96e0 len:56 a:0x5bf35e0c9780 len:176 
+	INODE: #regs:2   ino:0xba  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9840 len:24 
+	BUF:  #regs:1   start blkno:0x3ae0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c98b0 len:56 a:0x5bf35e0c9950 len:176 
+	INODE: #regs:2   ino:0x287b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9a10 len:24 
+	BUF:  #regs:1   start blkno:0x2680   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9a80 len:56 a:0x5bf35e0c9b20 len:176 
+	INODE: #regs:2   ino:0x143b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9be0 len:24 
+	BUF:  #regs:1   start blkno:0x1240   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9c50 len:56 a:0x5bf35e0c9cf0 len:176 
+	INODE: #regs:2   ino:0xbb  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9db0 len:24 
+	BUF:  #regs:1   start blkno:0x3b30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9e20 len:56 a:0x5bf35e0c9ec0 len:176 
+	INODE: #regs:2   ino:0x287c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0c9f80 len:24 
+	BUF:  #regs:1   start blkno:0x26d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0c9ff0 len:56 a:0x5bf35e0ca090 len:176 
+	INODE: #regs:2   ino:0x143c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ca150 len:24 
+	BUF:  #regs:1   start blkno:0x1290   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ca1c0 len:56 a:0x5bf35e0ca260 len:176 
+	INODE: #regs:2   ino:0xbc  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ca320 len:24 
+	BUF:  #regs:1   start blkno:0x3b80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ca390 len:56 a:0x5bf35e0ca430 len:176 
+	INODE: #regs:2   ino:0x287d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ca4f0 len:24 
+	BUF:  #regs:1   start blkno:0x2720   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ca560 len:56 a:0x5bf35e0ca600 len:176 
+	INODE: #regs:2   ino:0x143d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ca6c0 len:24 
+	BUF:  #regs:1   start blkno:0x12e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ca730 len:56 a:0x5bf35e0ca7d0 len:176 
+	INODE: #regs:2   ino:0xbd  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0ca890 len:24 
+	BUF:  #regs:1   start blkno:0x3bd0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0ca900 len:56 a:0x5bf35e0ca9a0 len:176 
+	INODE: #regs:2   ino:0x287e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0caa60 len:24 
+	BUF:  #regs:1   start blkno:0x2770   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0caad0 len:56 a:0x5bf35e0cab70 len:176 
+	INODE: #regs:2   ino:0x143e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0cac30 len:24 
+	BUF:  #regs:1   start blkno:0x1330   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0caca0 len:56 a:0x5bf35e0cad40 len:176 
+	INODE: #regs:2   ino:0xbe  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0cae00 len:24 
+	BUF:  #regs:1   start blkno:0x3c20   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0cae70 len:36 
+	BUF:  #regs:1   start blkno:0x2840   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0caef0 len:36 
+	BUF:  #regs:1   start blkno:0x2860   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0caf70 len:56 a:0x5bf35e0cb010 len:176 
+	INODE: #regs:2   ino:0x287f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0cb0d0 len:24 
+	BUF:  #regs:1   start blkno:0x27c0   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0cb140 len:36 
+	BUF:  #regs:1   start blkno:0x1400   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x5bf35e0cb1c0 len:36 
+	BUF:  #regs:1   start blkno:0x1420   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x5bf35e0cb240 len:56 a:0x5bf35e0cb2e0 len:176 
+	INODE: #regs:2   ino:0x143f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x5bf35e0cb3a0 len:24 
+	BUF:  #regs:1   start blkno:0x1380   len:8   bmap size:1   flags:0x2
+BUF: cnt:2 total:2 a:0x5bf35e0cb410 len:24 a:0x5bf35e0cb490 len:4096 
+	BUF:  #regs:2   start blkno:0x40   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x5bf35e0cc4a0 len:24 a:0x5bf35e0cc520 len:128 
+	BUF:  #regs:2   start blkno:0x8   len:8   bmap size:1   flags:0x2800
+	AGF Buffer: (XAGF)
+BUF: cnt:2 total:2 a:0x5bf35e0cc5b0 len:24 a:0x5bf35e0cc630 len:128 
+	BUF:  #regs:2   start blkno:0x20   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x5bf35e0cc6c0 len:24 a:0x5bf35e0cc740 len:128 
+	BUF:  #regs:2   start blkno:0x28   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x5bf35e0cc7d0 len:24 a:0x5bf35e0cc850 len:384 
+	BUF:  #regs:2   start blkno:0x10   len:8   bmap size:1   flags:0x3800
+	AGI Buffer: (XAGI)
+BUF: cnt:2 total:2 a:0x5bf35e0cc9e0 len:24 a:0x5bf35e0cca60 len:128 
+	BUF:  #regs:2   start blkno:0x30   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x5bf35e0ccaf0 len:24 a:0x5bf35e0ccb70 len:128 
+	BUF:  #regs:2   start blkno:0x38   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+INO: cnt:2 total:2 a:0x5bf35e0ccc00 len:56 a:0x5bf35e0ccca0 len:176 
+	INODE: #regs:2   ino:0xbf  flags:0x1   dsize:0
+	CORE inode:
+xfs_logprint:
+    data device: 0x10306
+    log device: 0x10306 daddr: 16777296 length: 217296
+
+    log tail: 1800 head: 1960 state: <DIRTY>
+
+
+LOG REC AT LSN cycle 1 block 1800 (0x1, 0x708)
+
+LOG REC AT LSN cycle 1 block 1832 (0x1, 0x728)
+
+LOG REC AT LSN cycle 1 block 1896 (0x1, 0x768)
+============================================================================
+TRANS: tid:0x2d801211  #items:624  trans:0x2d801211  q:0x626a46b365f0
+BUF: cnt:1 total:1 a:0x626a46b23080 len:24 
+	BUF:  #regs:1   start blkno:0x3c78   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b36640 len:56 a:0x626a46b366e0 len:176 
+	INODE: #regs:2   ino:0x3c80  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b367a0 len:24 
+	BUF:  #regs:1   start blkno:0x2838   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b36810 len:56 a:0x626a46b368b0 len:176 
+	INODE: #regs:2   ino:0x2840  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b36970 len:24 
+	BUF:  #regs:1   start blkno:0x13f8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b369e0 len:56 a:0x626a46b36a80 len:176 
+	INODE: #regs:2   ino:0x1400  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b36b40 len:24 
+	BUF:  #regs:1   start blkno:0x3c70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b36bb0 len:56 a:0x626a46b36c50 len:176 
+	INODE: #regs:2   ino:0x3c81  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b36d10 len:24 
+	BUF:  #regs:1   start blkno:0x2830   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b36d80 len:56 a:0x626a46b36e20 len:176 
+	INODE: #regs:2   ino:0x2841  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b36ee0 len:24 
+	BUF:  #regs:1   start blkno:0x13f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b36f50 len:56 a:0x626a46b38010 len:176 
+	INODE: #regs:2   ino:0x1401  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b380d0 len:24 
+	BUF:  #regs:1   start blkno:0x3d50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38140 len:56 a:0x626a46b381e0 len:176 
+	INODE: #regs:2   ino:0x3c82  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b382a0 len:24 
+	BUF:  #regs:1   start blkno:0x2828   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38310 len:56 a:0x626a46b383b0 len:176 
+	INODE: #regs:2   ino:0x2842  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38470 len:24 
+	BUF:  #regs:1   start blkno:0x13e8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b384e0 len:56 a:0x626a46b38580 len:176 
+	INODE: #regs:2   ino:0x1402  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38640 len:24 
+	BUF:  #regs:1   start blkno:0x3da0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b386b0 len:56 a:0x626a46b38750 len:176 
+	INODE: #regs:2   ino:0x3c83  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38810 len:24 
+	BUF:  #regs:1   start blkno:0x2820   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38880 len:56 a:0x626a46b38920 len:176 
+	INODE: #regs:2   ino:0x2843  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b389e0 len:24 
+	BUF:  #regs:1   start blkno:0x13e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38a50 len:56 a:0x626a46b38af0 len:176 
+	INODE: #regs:2   ino:0x1403  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38bb0 len:24 
+	BUF:  #regs:1   start blkno:0xc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38c20 len:56 a:0x626a46b38cc0 len:176 
+	INODE: #regs:2   ino:0x83  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38d80 len:24 
+	BUF:  #regs:1   start blkno:0x3df0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38df0 len:56 a:0x626a46b38e90 len:176 
+	INODE: #regs:2   ino:0x3c84  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b38f50 len:24 
+	BUF:  #regs:1   start blkno:0x2818   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b38fc0 len:56 a:0x626a46b42070 len:176 
+	INODE: #regs:2   ino:0x2844  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42130 len:24 
+	BUF:  #regs:1   start blkno:0x13d8   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b421a0 len:56 a:0x626a46b42240 len:176 
+	INODE: #regs:2   ino:0x1404  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42300 len:24 
+	BUF:  #regs:1   start blkno:0x110   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42370 len:56 a:0x626a46b42410 len:176 
+	INODE: #regs:2   ino:0x84  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b424d0 len:24 
+	BUF:  #regs:1   start blkno:0x3e40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42540 len:56 a:0x626a46b425e0 len:176 
+	INODE: #regs:2   ino:0x3c85  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b426a0 len:24 
+	BUF:  #regs:1   start blkno:0x2810   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42710 len:56 a:0x626a46b427b0 len:176 
+	INODE: #regs:2   ino:0x2845  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42870 len:24 
+	BUF:  #regs:1   start blkno:0x13d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b428e0 len:56 a:0x626a46b42980 len:176 
+	INODE: #regs:2   ino:0x1405  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42a40 len:24 
+	BUF:  #regs:1   start blkno:0x160   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42ab0 len:56 a:0x626a46b42b50 len:176 
+	INODE: #regs:2   ino:0x85  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42c10 len:24 
+	BUF:  #regs:1   start blkno:0x3e90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42c80 len:56 a:0x626a46b42d20 len:176 
+	INODE: #regs:2   ino:0x3c86  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42de0 len:24 
+	BUF:  #regs:1   start blkno:0x2a30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b42e50 len:56 a:0x626a46b42ef0 len:176 
+	INODE: #regs:2   ino:0x2846  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b42fb0 len:24 
+	BUF:  #regs:1   start blkno:0x15f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43020 len:56 a:0x626a46b430c0 len:176 
+	INODE: #regs:2   ino:0x1406  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43180 len:24 
+	BUF:  #regs:1   start blkno:0x1b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b431f0 len:56 a:0x626a46b43290 len:176 
+	INODE: #regs:2   ino:0x86  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43350 len:24 
+	BUF:  #regs:1   start blkno:0x3ee0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b433c0 len:56 a:0x626a46b43460 len:176 
+	INODE: #regs:2   ino:0x3c87  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43520 len:24 
+	BUF:  #regs:1   start blkno:0x2a80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43590 len:56 a:0x626a46b43630 len:176 
+	INODE: #regs:2   ino:0x2847  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b436f0 len:24 
+	BUF:  #regs:1   start blkno:0x1640   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43760 len:56 a:0x626a46b43800 len:176 
+	INODE: #regs:2   ino:0x1407  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b438c0 len:24 
+	BUF:  #regs:1   start blkno:0x200   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43930 len:56 a:0x626a46b439d0 len:176 
+	INODE: #regs:2   ino:0x87  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43a90 len:24 
+	BUF:  #regs:1   start blkno:0x3f30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43b00 len:56 a:0x626a46b43ba0 len:176 
+	INODE: #regs:2   ino:0x3c88  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43c60 len:24 
+	BUF:  #regs:1   start blkno:0x2ad0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43cd0 len:56 a:0x626a46b43d70 len:176 
+	INODE: #regs:2   ino:0x2848  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b43e30 len:24 
+	BUF:  #regs:1   start blkno:0x1690   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b43ea0 len:56 a:0x626a46b43f40 len:176 
+	INODE: #regs:2   ino:0x1408  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44000 len:24 
+	BUF:  #regs:1   start blkno:0x250   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44070 len:56 a:0x626a46b44110 len:176 
+	INODE: #regs:2   ino:0x88  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b441d0 len:24 
+	BUF:  #regs:1   start blkno:0x3f80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44240 len:56 a:0x626a46b442e0 len:176 
+	INODE: #regs:2   ino:0x3c89  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b443a0 len:24 
+	BUF:  #regs:1   start blkno:0x2b20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44410 len:56 a:0x626a46b444b0 len:176 
+	INODE: #regs:2   ino:0x2849  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44570 len:24 
+	BUF:  #regs:1   start blkno:0x16e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b445e0 len:56 a:0x626a46b44680 len:176 
+	INODE: #regs:2   ino:0x1409  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44740 len:24 
+	BUF:  #regs:1   start blkno:0x2a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b447b0 len:56 a:0x626a46b44850 len:176 
+	INODE: #regs:2   ino:0x89  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44910 len:24 
+	BUF:  #regs:1   start blkno:0x3fd0   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b44980 len:36 
+	BUF:  #regs:1   start blkno:0x3c80   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44a00 len:56 a:0x626a46b44aa0 len:176 
+	INODE: #regs:2   ino:0x3c8a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44b60 len:36 
+	BUF:  #regs:1   start blkno:0x3ca0   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b44be0 len:24 
+	BUF:  #regs:1   start blkno:0x2b70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44c50 len:56 a:0x626a46b44cf0 len:176 
+	INODE: #regs:2   ino:0x284a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44db0 len:24 
+	BUF:  #regs:1   start blkno:0x1730   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44e20 len:56 a:0x626a46b44ec0 len:176 
+	INODE: #regs:2   ino:0x140a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b44f80 len:24 
+	BUF:  #regs:1   start blkno:0x2f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b44ff0 len:56 a:0x626a46b45090 len:176 
+	INODE: #regs:2   ino:0x8a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45150 len:24 
+	BUF:  #regs:1   start blkno:0x2bc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b451c0 len:56 a:0x626a46b45260 len:176 
+	INODE: #regs:2   ino:0x284b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45320 len:24 
+	BUF:  #regs:1   start blkno:0x1780   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b45390 len:56 a:0x626a46b45430 len:176 
+	INODE: #regs:2   ino:0x140b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b454f0 len:24 
+	BUF:  #regs:1   start blkno:0x340   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b45560 len:24 
+	BUF:  #regs:1   start blkno:0x50   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b455d0 len:24 
+	BUF:  #regs:1   start blkno:0x58   len:8   bmap size:1   flags:0x2
+BUF: cnt:2 total:2 a:0x626a46b45640 len:24 a:0x626a46b456c0 len:128 
+	BUF:  #regs:2   start blkno:0x18   len:8   bmap size:1   flags:0x3000
+	BUF DATA
+INO: cnt:2 total:2 a:0x626a46b45750 len:56 a:0x626a46b457f0 len:176 
+	INODE: #regs:2   ino:0x8b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b458b0 len:24 
+	BUF:  #regs:1   start blkno:0x2c10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b45920 len:56 a:0x626a46b459c0 len:176 
+	INODE: #regs:2   ino:0x284c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45a80 len:24 
+	BUF:  #regs:1   start blkno:0x17d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b45af0 len:56 a:0x626a46b45b90 len:176 
+	INODE: #regs:2   ino:0x140c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45c50 len:24 
+	BUF:  #regs:1   start blkno:0x390   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b45cc0 len:56 a:0x626a46b45d60 len:176 
+	INODE: #regs:2   ino:0x8c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45e20 len:24 
+	BUF:  #regs:1   start blkno:0x2c60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b45e90 len:56 a:0x626a46b45f30 len:176 
+	INODE: #regs:2   ino:0x284d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b45ff0 len:24 
+	BUF:  #regs:1   start blkno:0x1820   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46060 len:56 a:0x626a46b46100 len:176 
+	INODE: #regs:2   ino:0x140d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b461c0 len:24 
+	BUF:  #regs:1   start blkno:0x3e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46230 len:56 a:0x626a46b462d0 len:176 
+	INODE: #regs:2   ino:0x8d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46390 len:24 
+	BUF:  #regs:1   start blkno:0x2cb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46400 len:56 a:0x626a46b464a0 len:176 
+	INODE: #regs:2   ino:0x284e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46560 len:24 
+	BUF:  #regs:1   start blkno:0x1870   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b465d0 len:56 a:0x626a46b46670 len:176 
+	INODE: #regs:2   ino:0x140e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46730 len:24 
+	BUF:  #regs:1   start blkno:0x430   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b467a0 len:56 a:0x626a46b46840 len:176 
+	INODE: #regs:2   ino:0x8e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46900 len:24 
+	BUF:  #regs:1   start blkno:0x2d00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46970 len:56 a:0x626a46b46a10 len:176 
+	INODE: #regs:2   ino:0x284f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46ad0 len:24 
+	BUF:  #regs:1   start blkno:0x18c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46b40 len:56 a:0x626a46b46be0 len:176 
+	INODE: #regs:2   ino:0x140f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46ca0 len:24 
+	BUF:  #regs:1   start blkno:0x480   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46d10 len:56 a:0x626a46b46db0 len:176 
+	INODE: #regs:2   ino:0x8f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b46e70 len:24 
+	BUF:  #regs:1   start blkno:0x2d50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b46ee0 len:56 a:0x626a46b46f80 len:176 
+	INODE: #regs:2   ino:0x2850  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47040 len:24 
+	BUF:  #regs:1   start blkno:0x1910   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b470b0 len:56 a:0x626a46b47150 len:176 
+	INODE: #regs:2   ino:0x1410  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47210 len:24 
+	BUF:  #regs:1   start blkno:0x4d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47280 len:56 a:0x626a46b47320 len:176 
+	INODE: #regs:2   ino:0x90  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b473e0 len:24 
+	BUF:  #regs:1   start blkno:0x2da0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47450 len:56 a:0x626a46b474f0 len:176 
+	INODE: #regs:2   ino:0x2851  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b475b0 len:24 
+	BUF:  #regs:1   start blkno:0x1960   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47620 len:56 a:0x626a46b476c0 len:176 
+	INODE: #regs:2   ino:0x1411  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47780 len:24 
+	BUF:  #regs:1   start blkno:0x520   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b477f0 len:56 a:0x626a46b47890 len:176 
+	INODE: #regs:2   ino:0x91  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47950 len:24 
+	BUF:  #regs:1   start blkno:0x2df0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b479c0 len:56 a:0x626a46b47a60 len:176 
+	INODE: #regs:2   ino:0x2852  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47b20 len:24 
+	BUF:  #regs:1   start blkno:0x19b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47b90 len:56 a:0x626a46b47c30 len:176 
+	INODE: #regs:2   ino:0x1412  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47cf0 len:24 
+	BUF:  #regs:1   start blkno:0x570   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47d60 len:56 a:0x626a46b47e00 len:176 
+	INODE: #regs:2   ino:0x92  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b47ec0 len:24 
+	BUF:  #regs:1   start blkno:0x2e40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b47f30 len:56 a:0x626a46b47fd0 len:176 
+	INODE: #regs:2   ino:0x2853  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48090 len:24 
+	BUF:  #regs:1   start blkno:0x1a00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48100 len:56 a:0x626a46b481a0 len:176 
+	INODE: #regs:2   ino:0x1413  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48260 len:24 
+	BUF:  #regs:1   start blkno:0x5c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b482d0 len:56 a:0x626a46b48370 len:176 
+	INODE: #regs:2   ino:0x93  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48430 len:24 
+	BUF:  #regs:1   start blkno:0x2e90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b484a0 len:56 a:0x626a46b48540 len:176 
+	INODE: #regs:2   ino:0x2854  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48600 len:24 
+	BUF:  #regs:1   start blkno:0x1a50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48670 len:56 a:0x626a46b48710 len:176 
+	INODE: #regs:2   ino:0x1414  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b487d0 len:24 
+	BUF:  #regs:1   start blkno:0x610   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48840 len:56 a:0x626a46b488e0 len:176 
+	INODE: #regs:2   ino:0x94  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b489a0 len:24 
+	BUF:  #regs:1   start blkno:0x2ee0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48a10 len:56 a:0x626a46b48ab0 len:176 
+	INODE: #regs:2   ino:0x2855  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48b70 len:24 
+	BUF:  #regs:1   start blkno:0x1aa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48be0 len:56 a:0x626a46b48c80 len:176 
+	INODE: #regs:2   ino:0x1415  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48d40 len:24 
+	BUF:  #regs:1   start blkno:0x660   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48db0 len:56 a:0x626a46b48e50 len:176 
+	INODE: #regs:2   ino:0x95  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b48f10 len:24 
+	BUF:  #regs:1   start blkno:0x2f30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b48f80 len:56 a:0x626a46b49020 len:176 
+	INODE: #regs:2   ino:0x2856  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b490e0 len:24 
+	BUF:  #regs:1   start blkno:0x1af0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49150 len:56 a:0x626a46b491f0 len:176 
+	INODE: #regs:2   ino:0x1416  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b492b0 len:24 
+	BUF:  #regs:1   start blkno:0x6b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49320 len:56 a:0x626a46b493c0 len:176 
+	INODE: #regs:2   ino:0x96  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49480 len:24 
+	BUF:  #regs:1   start blkno:0x2fa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b494f0 len:56 a:0x626a46b49590 len:176 
+	INODE: #regs:2   ino:0x2857  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49650 len:24 
+	BUF:  #regs:1   start blkno:0x1b40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b496c0 len:56 a:0x626a46b49760 len:176 
+	INODE: #regs:2   ino:0x1417  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49820 len:24 
+	BUF:  #regs:1   start blkno:0x700   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49890 len:56 a:0x626a46b49930 len:176 
+	INODE: #regs:2   ino:0x97  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b499f0 len:24 
+	BUF:  #regs:1   start blkno:0x2ff0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49a60 len:56 a:0x626a46b49b00 len:176 
+	INODE: #regs:2   ino:0x2858  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49bc0 len:24 
+	BUF:  #regs:1   start blkno:0x1b90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49c30 len:56 a:0x626a46b49cd0 len:176 
+	INODE: #regs:2   ino:0x1418  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49d90 len:24 
+	BUF:  #regs:1   start blkno:0x750   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49e00 len:56 a:0x626a46b49ea0 len:176 
+	INODE: #regs:2   ino:0x98  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b49f60 len:24 
+	BUF:  #regs:1   start blkno:0x3040   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b49fd0 len:56 a:0x626a46b4a070 len:176 
+	INODE: #regs:2   ino:0x2859  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4a130 len:24 
+	BUF:  #regs:1   start blkno:0x1be0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4a1a0 len:56 a:0x626a46b4a240 len:176 
+	INODE: #regs:2   ino:0x1419  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4a300 len:24 
+	BUF:  #regs:1   start blkno:0x7a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4a370 len:56 a:0x626a46b4a410 len:176 
+	INODE: #regs:2   ino:0x99  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4a4d0 len:24 
+	BUF:  #regs:1   start blkno:0x3090   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4a540 len:56 a:0x626a46b4a5e0 len:176 
+	INODE: #regs:2   ino:0x285a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4a6a0 len:24 
+	BUF:  #regs:1   start blkno:0x1c30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4a710 len:56 a:0x626a46b4a7b0 len:176 
+	INODE: #regs:2   ino:0x141a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4a870 len:24 
+	BUF:  #regs:1   start blkno:0x7f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4a8e0 len:56 a:0x626a46b4a980 len:176 
+	INODE: #regs:2   ino:0x9a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4aa40 len:24 
+	BUF:  #regs:1   start blkno:0x30e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4aab0 len:56 a:0x626a46b4ab50 len:176 
+	INODE: #regs:2   ino:0x285b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ac10 len:24 
+	BUF:  #regs:1   start blkno:0x1c80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ac80 len:56 a:0x626a46b4ad20 len:176 
+	INODE: #regs:2   ino:0x141b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ade0 len:24 
+	BUF:  #regs:1   start blkno:0x840   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ae50 len:56 a:0x626a46b4aef0 len:176 
+	INODE: #regs:2   ino:0x9b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4afb0 len:24 
+	BUF:  #regs:1   start blkno:0x3130   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b020 len:56 a:0x626a46b4b0c0 len:176 
+	INODE: #regs:2   ino:0x285c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4b180 len:24 
+	BUF:  #regs:1   start blkno:0x1cd0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b1f0 len:56 a:0x626a46b4b290 len:176 
+	INODE: #regs:2   ino:0x141c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4b350 len:24 
+	BUF:  #regs:1   start blkno:0x890   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b3c0 len:56 a:0x626a46b4b460 len:176 
+	INODE: #regs:2   ino:0x9c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4b520 len:24 
+	BUF:  #regs:1   start blkno:0x3180   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b590 len:56 a:0x626a46b4b630 len:176 
+	INODE: #regs:2   ino:0x285d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4b6f0 len:24 
+	BUF:  #regs:1   start blkno:0x1d20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b760 len:56 a:0x626a46b4b800 len:176 
+	INODE: #regs:2   ino:0x141d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4b8c0 len:24 
+	BUF:  #regs:1   start blkno:0x8e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4b930 len:56 a:0x626a46b4b9d0 len:176 
+	INODE: #regs:2   ino:0x9d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ba90 len:24 
+	BUF:  #regs:1   start blkno:0x31d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4bb00 len:56 a:0x626a46b4bba0 len:176 
+	INODE: #regs:2   ino:0x285e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4bc60 len:24 
+	BUF:  #regs:1   start blkno:0x1d70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4bcd0 len:56 a:0x626a46b4bd70 len:176 
+	INODE: #regs:2   ino:0x141e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4be30 len:24 
+	BUF:  #regs:1   start blkno:0x930   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4bea0 len:56 a:0x626a46b4bf40 len:176 
+	INODE: #regs:2   ino:0x9e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c000 len:24 
+	BUF:  #regs:1   start blkno:0x3220   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c070 len:56 a:0x626a46b4c110 len:176 
+	INODE: #regs:2   ino:0x285f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c1d0 len:24 
+	BUF:  #regs:1   start blkno:0x1dc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c240 len:56 a:0x626a46b4c2e0 len:176 
+	INODE: #regs:2   ino:0x141f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c3a0 len:24 
+	BUF:  #regs:1   start blkno:0x980   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c410 len:56 a:0x626a46b4c4b0 len:176 
+	INODE: #regs:2   ino:0x9f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c570 len:24 
+	BUF:  #regs:1   start blkno:0x3270   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c5e0 len:56 a:0x626a46b4c680 len:176 
+	INODE: #regs:2   ino:0x2860  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c740 len:24 
+	BUF:  #regs:1   start blkno:0x1e10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c7b0 len:56 a:0x626a46b4c850 len:176 
+	INODE: #regs:2   ino:0x1420  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4c910 len:24 
+	BUF:  #regs:1   start blkno:0x9d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4c980 len:56 a:0x626a46b4ca20 len:176 
+	INODE: #regs:2   ino:0xa0  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4cae0 len:24 
+	BUF:  #regs:1   start blkno:0x32c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4cb50 len:56 a:0x626a46b4cbf0 len:176 
+	INODE: #regs:2   ino:0x2861  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ccb0 len:24 
+	BUF:  #regs:1   start blkno:0x1e60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4cd20 len:56 a:0x626a46b4cdc0 len:176 
+	INODE: #regs:2   ino:0x1421  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ce80 len:24 
+	BUF:  #regs:1   start blkno:0xa20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4cf30 len:56 a:0x626a46b4cfd0 len:176 
+	INODE: #regs:2   ino:0xa1  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4cf10 len:24 
+	BUF:  #regs:1   start blkno:0x3310   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d0c0 len:56 a:0x626a46b4d160 len:176 
+	INODE: #regs:2   ino:0x2862  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4d220 len:24 
+	BUF:  #regs:1   start blkno:0x1eb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d290 len:56 a:0x626a46b4d330 len:176 
+	INODE: #regs:2   ino:0x1422  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4d3f0 len:24 
+	BUF:  #regs:1   start blkno:0xa70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d460 len:56 a:0x626a46b4d500 len:176 
+	INODE: #regs:2   ino:0xa2  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4d5c0 len:24 
+	BUF:  #regs:1   start blkno:0x3360   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d630 len:56 a:0x626a46b4d6d0 len:176 
+	INODE: #regs:2   ino:0x2863  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4d790 len:24 
+	BUF:  #regs:1   start blkno:0x1f00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d800 len:56 a:0x626a46b4d8a0 len:176 
+	INODE: #regs:2   ino:0x1423  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4d960 len:24 
+	BUF:  #regs:1   start blkno:0xac0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4d9d0 len:56 a:0x626a46b4da70 len:176 
+	INODE: #regs:2   ino:0xa3  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4db30 len:24 
+	BUF:  #regs:1   start blkno:0x33b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4dba0 len:56 a:0x626a46b4dc40 len:176 
+	INODE: #regs:2   ino:0x2864  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4dd00 len:24 
+	BUF:  #regs:1   start blkno:0x1f50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4dd70 len:56 a:0x626a46b4de10 len:176 
+	INODE: #regs:2   ino:0x1424  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ded0 len:24 
+	BUF:  #regs:1   start blkno:0xb10   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4df40 len:56 a:0x626a46b4dfe0 len:176 
+	INODE: #regs:2   ino:0xa4  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e0a0 len:24 
+	BUF:  #regs:1   start blkno:0x3400   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4e110 len:56 a:0x626a46b4e1b0 len:176 
+	INODE: #regs:2   ino:0x2865  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e270 len:24 
+	BUF:  #regs:1   start blkno:0x1fa0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4e2e0 len:56 a:0x626a46b4e380 len:176 
+	INODE: #regs:2   ino:0x1425  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e440 len:24 
+	BUF:  #regs:1   start blkno:0xb60   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4e4b0 len:56 a:0x626a46b4e550 len:176 
+	INODE: #regs:2   ino:0xa5  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e610 len:24 
+	BUF:  #regs:1   start blkno:0x3450   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4e680 len:56 a:0x626a46b4e720 len:176 
+	INODE: #regs:2   ino:0x2866  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e7e0 len:24 
+	BUF:  #regs:1   start blkno:0x1ff0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4e850 len:56 a:0x626a46b4e8f0 len:176 
+	INODE: #regs:2   ino:0x1426  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4e9b0 len:24 
+	BUF:  #regs:1   start blkno:0xbb0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ea20 len:56 a:0x626a46b4eac0 len:176 
+	INODE: #regs:2   ino:0xa6  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4eb80 len:24 
+	BUF:  #regs:1   start blkno:0x34a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ebf0 len:56 a:0x626a46b4ec90 len:176 
+	INODE: #regs:2   ino:0x2867  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ed50 len:24 
+	BUF:  #regs:1   start blkno:0x2040   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4edc0 len:56 a:0x626a46b4ee60 len:176 
+	INODE: #regs:2   ino:0x1427  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ef20 len:24 
+	BUF:  #regs:1   start blkno:0xc00   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ef90 len:56 a:0x626a46b4f030 len:176 
+	INODE: #regs:2   ino:0xa7  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4f0f0 len:24 
+	BUF:  #regs:1   start blkno:0x34f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4f160 len:56 a:0x626a46b4f200 len:176 
+	INODE: #regs:2   ino:0x2868  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4f2c0 len:24 
+	BUF:  #regs:1   start blkno:0x2090   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4f330 len:56 a:0x626a46b4f3d0 len:176 
+	INODE: #regs:2   ino:0x1428  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4f490 len:24 
+	BUF:  #regs:1   start blkno:0xc50   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4f500 len:56 a:0x626a46b4f5a0 len:176 
+	INODE: #regs:2   ino:0xa8  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4f660 len:24 
+	BUF:  #regs:1   start blkno:0x3540   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4f6d0 len:56 a:0x626a46b4f770 len:176 
+	INODE: #regs:2   ino:0x2869  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4f830 len:24 
+	BUF:  #regs:1   start blkno:0x20e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4f8a0 len:56 a:0x626a46b4f940 len:176 
+	INODE: #regs:2   ino:0x1429  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4fa00 len:24 
+	BUF:  #regs:1   start blkno:0xca0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4fa70 len:56 a:0x626a46b4fb10 len:176 
+	INODE: #regs:2   ino:0xa9  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4fbd0 len:24 
+	BUF:  #regs:1   start blkno:0x3590   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4fc40 len:56 a:0x626a46b4fce0 len:176 
+	INODE: #regs:2   ino:0x286a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4fda0 len:24 
+	BUF:  #regs:1   start blkno:0x2130   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4fe10 len:56 a:0x626a46b4feb0 len:176 
+	INODE: #regs:2   ino:0x142a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b4ff70 len:24 
+	BUF:  #regs:1   start blkno:0xcf0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b4ffe0 len:56 a:0x626a46b50080 len:176 
+	INODE: #regs:2   ino:0xaa  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50140 len:24 
+	BUF:  #regs:1   start blkno:0x35e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b501b0 len:56 a:0x626a46b50250 len:176 
+	INODE: #regs:2   ino:0x286b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50310 len:24 
+	BUF:  #regs:1   start blkno:0x2180   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50380 len:56 a:0x626a46b50420 len:176 
+	INODE: #regs:2   ino:0x142b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b504e0 len:24 
+	BUF:  #regs:1   start blkno:0xd40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50550 len:56 a:0x626a46b505f0 len:176 
+	INODE: #regs:2   ino:0xab  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b506b0 len:24 
+	BUF:  #regs:1   start blkno:0x3630   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50720 len:56 a:0x626a46b507c0 len:176 
+	INODE: #regs:2   ino:0x286c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50880 len:24 
+	BUF:  #regs:1   start blkno:0x21d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b508f0 len:56 a:0x626a46b50990 len:176 
+	INODE: #regs:2   ino:0x142c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50a50 len:24 
+	BUF:  #regs:1   start blkno:0xd90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50ac0 len:56 a:0x626a46b50b60 len:176 
+	INODE: #regs:2   ino:0xac  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50c20 len:24 
+	BUF:  #regs:1   start blkno:0x3680   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50c90 len:56 a:0x626a46b50d30 len:176 
+	INODE: #regs:2   ino:0x286d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50df0 len:24 
+	BUF:  #regs:1   start blkno:0x2220   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b50e60 len:56 a:0x626a46b50f00 len:176 
+	INODE: #regs:2   ino:0x142d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b50fc0 len:24 
+	BUF:  #regs:1   start blkno:0xde0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51030 len:56 a:0x626a46b510d0 len:176 
+	INODE: #regs:2   ino:0xad  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51190 len:24 
+	BUF:  #regs:1   start blkno:0x36d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51200 len:56 a:0x626a46b512a0 len:176 
+	INODE: #regs:2   ino:0x286e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51360 len:24 
+	BUF:  #regs:1   start blkno:0x2270   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b513d0 len:56 a:0x626a46b51470 len:176 
+	INODE: #regs:2   ino:0x142e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51530 len:24 
+	BUF:  #regs:1   start blkno:0xe30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b515a0 len:56 a:0x626a46b51640 len:176 
+	INODE: #regs:2   ino:0xae  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51700 len:24 
+	BUF:  #regs:1   start blkno:0x3720   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51770 len:56 a:0x626a46b51810 len:176 
+	INODE: #regs:2   ino:0x286f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b518d0 len:24 
+	BUF:  #regs:1   start blkno:0x22c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51940 len:56 a:0x626a46b519e0 len:176 
+	INODE: #regs:2   ino:0x142f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51aa0 len:24 
+	BUF:  #regs:1   start blkno:0xe80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51b10 len:56 a:0x626a46b51bb0 len:176 
+	INODE: #regs:2   ino:0xaf  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51c70 len:24 
+	BUF:  #regs:1   start blkno:0x3770   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51ce0 len:56 a:0x626a46b51d80 len:176 
+	INODE: #regs:2   ino:0x2870  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b51e40 len:24 
+	BUF:  #regs:1   start blkno:0x2310   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b51eb0 len:56 a:0x626a46b51f50 len:176 
+	INODE: #regs:2   ino:0x1430  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52010 len:24 
+	BUF:  #regs:1   start blkno:0xed0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52080 len:56 a:0x626a46b52120 len:176 
+	INODE: #regs:2   ino:0xb0  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b521e0 len:24 
+	BUF:  #regs:1   start blkno:0x37c0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52250 len:56 a:0x626a46b522f0 len:176 
+	INODE: #regs:2   ino:0x2871  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b523b0 len:24 
+	BUF:  #regs:1   start blkno:0x2360   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52420 len:56 a:0x626a46b524c0 len:176 
+	INODE: #regs:2   ino:0x1431  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52580 len:24 
+	BUF:  #regs:1   start blkno:0xf20   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b525f0 len:56 a:0x626a46b52690 len:176 
+	INODE: #regs:2   ino:0xb1  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52750 len:24 
+	BUF:  #regs:1   start blkno:0x3810   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b527c0 len:56 a:0x626a46b52860 len:176 
+	INODE: #regs:2   ino:0x2872  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52920 len:24 
+	BUF:  #regs:1   start blkno:0x23b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52990 len:56 a:0x626a46b52a30 len:176 
+	INODE: #regs:2   ino:0x1432  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52af0 len:24 
+	BUF:  #regs:1   start blkno:0xf70   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52b60 len:56 a:0x626a46b52c00 len:176 
+	INODE: #regs:2   ino:0xb2  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52cc0 len:24 
+	BUF:  #regs:1   start blkno:0x3860   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52d30 len:56 a:0x626a46b52dd0 len:176 
+	INODE: #regs:2   ino:0x2873  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b52e90 len:24 
+	BUF:  #regs:1   start blkno:0x2400   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b52f00 len:56 a:0x626a46b52fa0 len:176 
+	INODE: #regs:2   ino:0x1433  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53060 len:24 
+	BUF:  #regs:1   start blkno:0xfc0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b530d0 len:56 a:0x626a46b53170 len:176 
+	INODE: #regs:2   ino:0xb3  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53230 len:24 
+	BUF:  #regs:1   start blkno:0x38b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b532a0 len:56 a:0x626a46b53340 len:176 
+	INODE: #regs:2   ino:0x2874  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53400 len:24 
+	BUF:  #regs:1   start blkno:0x2450   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53470 len:56 a:0x626a46b53510 len:176 
+	INODE: #regs:2   ino:0x1434  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b535d0 len:24 
+	BUF:  #regs:1   start blkno:0x1010   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53640 len:56 a:0x626a46b536e0 len:176 
+	INODE: #regs:2   ino:0xb4  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b537a0 len:24 
+	BUF:  #regs:1   start blkno:0x3900   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53810 len:56 a:0x626a46b538b0 len:176 
+	INODE: #regs:2   ino:0x2875  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53970 len:24 
+	BUF:  #regs:1   start blkno:0x24a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b539e0 len:56 a:0x626a46b53a80 len:176 
+	INODE: #regs:2   ino:0x1435  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53b40 len:24 
+	BUF:  #regs:1   start blkno:0x1060   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53bb0 len:56 a:0x626a46b53c50 len:176 
+	INODE: #regs:2   ino:0xb5  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53d10 len:24 
+	BUF:  #regs:1   start blkno:0x3950   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53d80 len:56 a:0x626a46b53e20 len:176 
+	INODE: #regs:2   ino:0x2876  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b53ee0 len:24 
+	BUF:  #regs:1   start blkno:0x24f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b53f50 len:56 a:0x626a46b53ff0 len:176 
+	INODE: #regs:2   ino:0x1436  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b540b0 len:24 
+	BUF:  #regs:1   start blkno:0x10b0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54120 len:56 a:0x626a46b541c0 len:176 
+	INODE: #regs:2   ino:0xb6  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54280 len:24 
+	BUF:  #regs:1   start blkno:0x39a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b542f0 len:56 a:0x626a46b54390 len:176 
+	INODE: #regs:2   ino:0x2877  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54450 len:24 
+	BUF:  #regs:1   start blkno:0x2540   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b544c0 len:56 a:0x626a46b54560 len:176 
+	INODE: #regs:2   ino:0x1437  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54620 len:24 
+	BUF:  #regs:1   start blkno:0x1100   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54690 len:56 a:0x626a46b54730 len:176 
+	INODE: #regs:2   ino:0xb7  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b547f0 len:24 
+	BUF:  #regs:1   start blkno:0x39f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54860 len:56 a:0x626a46b54900 len:176 
+	INODE: #regs:2   ino:0x2878  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b549c0 len:24 
+	BUF:  #regs:1   start blkno:0x2590   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54a30 len:56 a:0x626a46b54ad0 len:176 
+	INODE: #regs:2   ino:0x1438  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54b90 len:24 
+	BUF:  #regs:1   start blkno:0x1150   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54c00 len:56 a:0x626a46b54ca0 len:176 
+	INODE: #regs:2   ino:0xb8  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54d60 len:24 
+	BUF:  #regs:1   start blkno:0x3a40   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54dd0 len:56 a:0x626a46b54e70 len:176 
+	INODE: #regs:2   ino:0x2879  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b54f30 len:24 
+	BUF:  #regs:1   start blkno:0x25e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b54fa0 len:56 a:0x626a46b55040 len:176 
+	INODE: #regs:2   ino:0x1439  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55100 len:24 
+	BUF:  #regs:1   start blkno:0x11a0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55170 len:56 a:0x626a46b55210 len:176 
+	INODE: #regs:2   ino:0xb9  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b552d0 len:24 
+	BUF:  #regs:1   start blkno:0x3a90   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55340 len:56 a:0x626a46b553e0 len:176 
+	INODE: #regs:2   ino:0x287a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b554a0 len:24 
+	BUF:  #regs:1   start blkno:0x2630   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55510 len:56 a:0x626a46b555b0 len:176 
+	INODE: #regs:2   ino:0x143a  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55670 len:24 
+	BUF:  #regs:1   start blkno:0x11f0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b556e0 len:56 a:0x626a46b55780 len:176 
+	INODE: #regs:2   ino:0xba  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55840 len:24 
+	BUF:  #regs:1   start blkno:0x3ae0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b558b0 len:56 a:0x626a46b55950 len:176 
+	INODE: #regs:2   ino:0x287b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55a10 len:24 
+	BUF:  #regs:1   start blkno:0x2680   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55a80 len:56 a:0x626a46b55b20 len:176 
+	INODE: #regs:2   ino:0x143b  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55be0 len:24 
+	BUF:  #regs:1   start blkno:0x1240   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55c50 len:56 a:0x626a46b55cf0 len:176 
+	INODE: #regs:2   ino:0xbb  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55db0 len:24 
+	BUF:  #regs:1   start blkno:0x3b30   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55e20 len:56 a:0x626a46b55ec0 len:176 
+	INODE: #regs:2   ino:0x287c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b55f80 len:24 
+	BUF:  #regs:1   start blkno:0x26d0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b55ff0 len:56 a:0x626a46b56090 len:176 
+	INODE: #regs:2   ino:0x143c  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56150 len:24 
+	BUF:  #regs:1   start blkno:0x1290   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b561c0 len:56 a:0x626a46b56260 len:176 
+	INODE: #regs:2   ino:0xbc  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56320 len:24 
+	BUF:  #regs:1   start blkno:0x3b80   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56390 len:56 a:0x626a46b56430 len:176 
+	INODE: #regs:2   ino:0x287d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b564f0 len:24 
+	BUF:  #regs:1   start blkno:0x2720   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56560 len:56 a:0x626a46b56600 len:176 
+	INODE: #regs:2   ino:0x143d  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b566c0 len:24 
+	BUF:  #regs:1   start blkno:0x12e0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56730 len:56 a:0x626a46b567d0 len:176 
+	INODE: #regs:2   ino:0xbd  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56890 len:24 
+	BUF:  #regs:1   start blkno:0x3bd0   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56900 len:56 a:0x626a46b569a0 len:176 
+	INODE: #regs:2   ino:0x287e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56a60 len:24 
+	BUF:  #regs:1   start blkno:0x2770   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56ad0 len:56 a:0x626a46b56b70 len:176 
+	INODE: #regs:2   ino:0x143e  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56c30 len:24 
+	BUF:  #regs:1   start blkno:0x1330   len:8   bmap size:1   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56ca0 len:56 a:0x626a46b56d40 len:176 
+	INODE: #regs:2   ino:0xbe  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b56e00 len:24 
+	BUF:  #regs:1   start blkno:0x3c20   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b56e70 len:36 
+	BUF:  #regs:1   start blkno:0x2840   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b56ef0 len:36 
+	BUF:  #regs:1   start blkno:0x2860   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b56f70 len:56 a:0x626a46b57010 len:176 
+	INODE: #regs:2   ino:0x287f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b570d0 len:24 
+	BUF:  #regs:1   start blkno:0x27c0   len:8   bmap size:1   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b57140 len:36 
+	BUF:  #regs:1   start blkno:0x1400   len:32   bmap size:4   flags:0x2
+BUF: cnt:1 total:1 a:0x626a46b571c0 len:36 
+	BUF:  #regs:1   start blkno:0x1420   len:32   bmap size:4   flags:0x2
+INO: cnt:2 total:2 a:0x626a46b57240 len:56 a:0x626a46b572e0 len:176 
+	INODE: #regs:2   ino:0x143f  flags:0x1   dsize:0
+	CORE inode:
+BUF: cnt:1 total:1 a:0x626a46b573a0 len:24 
+	BUF:  #regs:1   start blkno:0x1380   len:8   bmap size:1   flags:0x2
+BUF: cnt:2 total:2 a:0x626a46b57410 len:24 a:0x626a46b57490 len:4096 
+	BUF:  #regs:2   start blkno:0x40   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x626a46b584a0 len:24 a:0x626a46b58520 len:128 
+	BUF:  #regs:2   start blkno:0x8   len:8   bmap size:1   flags:0x2800
+	AGF Buffer: (XAGF)
+BUF: cnt:2 total:2 a:0x626a46b585b0 len:24 a:0x626a46b58630 len:128 
+	BUF:  #regs:2   start blkno:0x20   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x626a46b586c0 len:24 a:0x626a46b58740 len:128 
+	BUF:  #regs:2   start blkno:0x28   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x626a46b587d0 len:24 a:0x626a46b58850 len:384 
+	BUF:  #regs:2   start blkno:0x10   len:8   bmap size:1   flags:0x3800
+	AGI Buffer: (XAGI)
+BUF: cnt:2 total:2 a:0x626a46b589e0 len:24 a:0x626a46b58a60 len:128 
+	BUF:  #regs:2   start blkno:0x30   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+BUF: cnt:2 total:2 a:0x626a46b58af0 len:24 a:0x626a46b58b70 len:128 
+	BUF:  #regs:2   start blkno:0x38   len:8   bmap size:1   flags:0x2000
+	BUF DATA
+INO: cnt:2 total:2 a:0x626a46b58c00 len:56 a:0x626a46b58ca0 len:176 
+	INODE: #regs:2   ino:0xbf  flags:0x1   dsize:0
+	CORE inode:
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds

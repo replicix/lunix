@@ -1,0 +1,10 @@
+---------- 1 500 users 0 Nov 19 22:40 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, 0) returns 0
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, R_OK) returns 0
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, W_OK) returns 0
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, X_OK) returns -1
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, R_OK | W_OK) returns 0
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, R_OK | X_OK) returns -1
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, W_OK | X_OK) returns -1
+access(<scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/t_access, R_OK | W_OK | X_OK) returns -1
+umount: /dev/ublkb1: not mounted.

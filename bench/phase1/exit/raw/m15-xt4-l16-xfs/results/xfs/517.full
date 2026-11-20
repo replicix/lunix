@@ -1,0 +1,9 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Cleaning up scrub stress run at Thu Nov 19 23:22:40 UTC 2026
+Killing stressor processes at Thu Nov 19 23:22:40 UTC 2026
+Waiting for children to exit at Thu Nov 19 23:22:40 UTC 2026
+Children exited as of Thu Nov 19 23:22:40 UTC 2026
+Cleanup finished at Thu Nov 19 23:22:40 UTC 2026
+umount: /dev/ublkb1: not mounted.

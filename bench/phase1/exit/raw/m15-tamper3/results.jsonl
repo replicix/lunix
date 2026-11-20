@@ -1,0 +1,1 @@
+{"cell":"tamper/c64k/segment","status":"pass","t":"2026-11-20T01:18:20Z","variant":"segment","chunk":"65536","fsck_exit":"2","fsck_codes":"extent_auth,seg_hash","attach_refused":"no","read_errors":"1","mismatches":"0"}

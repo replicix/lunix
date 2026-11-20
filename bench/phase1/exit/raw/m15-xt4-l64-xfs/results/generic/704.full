@@ -1,0 +1,7 @@
+scsi_debug options sector_size=512 physblk_exp=3 lowest_aligned=0 dev_size_mb=600 delay=0 clustering=1
+# _mount /dev/sda <scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/scsi_debug_704
+wrote 512/512 bytes at offset 0
+512.000000 bytes, 1 ops; 0.0001 sec (4.741 MiB/sec and 9708.7379 ops/sec)
+read 512/512 bytes at offset 0
+512.000000 bytes, 1 ops; 0.0000 sec (20 MiB/sec and 40000.0000 ops/sec)
+umount: /dev/ublkb1: not mounted.

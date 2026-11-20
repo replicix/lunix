@@ -1,0 +1,204 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+fsstress killed (pid 772351)
+fsstress killed (pid 772353)
+fsstress killed (pid 772354)
+               aread 1/100  
+              awrite 1/100 write op
+            bulkstat 1/100  
+           bulkstat1 1/100  
+               chown 3/100 write op
+          clonerange 4/100 write op
+           copyrange 4/100 write op
+               creat 4/100 write op
+         deduperange 4/100 write op
+               dread 4/100  
+              dwrite 4/100 write op
+           fallocate 1/100 write op
+           fdatasync 1/100 write op
+              fiemap 1/100 write op
+               fsync 1/100 write op
+             getattr 1/100  
+            getdents 1/100  
+            getfattr 1/100  
+                link 1/100 write op
+           listfattr 1/100  
+               mkdir 2/100 write op
+               mknod 2/100 write op
+               mread 2/100  
+              mwrite 2/100 write op
+               punch 1/100 write op
+                zero 1/100 write op
+        write_zeroes 1/100 write op
+            collapse 1/100 write op
+              insert 1/100 write op
+                read 1/100  
+      read_dontcache 1/100  
+            readlink 1/100  
+               readv 1/100  
+         removefattr 1/100 write op
+              rename 2/100 write op
+          rnoreplace 2/100 write op
+           rexchange 2/100 write op
+           rwhiteout 2/100 write op
+              resvsp 1/100 write op
+               rmdir 1/100 write op
+            setfattr 2/100 write op
+            setxattr 1/100 write op
+            snapshot 1/100 write op
+              splice 1/100 write op
+                stat 1/100  
+       subvol_create 1/100 write op
+       subvol_delete 1/100 write op
+             symlink 2/100 write op
+                sync 1/100 write op
+            truncate 2/100 write op
+              unlink 1/100 write op
+            unresvsp 1/100 write op
+             unshare 1/100 write op
+          uring_read 1/100  
+         uring_write 1/100 write op
+               write 4/100 write op
+     write_dontcache 4/100 write op
+              writev 4/100 write op
+       exchangerange 2/100 write op
+
+seed = 1794470178
+               aread 1/100  
+              awrite 1/100 write op
+            bulkstat 1/100  
+           bulkstat1 1/100  
+               chown 3/100 write op
+          clonerange 4/100 write op
+           copyrange 4/100 write op
+               creat 4/100 write op
+         deduperange 4/100 write op
+               dread 4/100  
+              dwrite 4/100 write op
+           fallocate 1/100 write op
+           fdatasync 1/100 write op
+              fiemap 1/100 write op
+               fsync 1/100 write op
+             getattr 1/100  
+            getdents 1/100  
+            getfattr 1/100  
+                link 1/100 write op
+           listfattr 1/100  
+               mkdir 2/100 write op
+               mknod 2/100 write op
+               mread 2/100  
+              mwrite 2/100 write op
+               punch 1/100 write op
+                zero 1/100 write op
+        write_zeroes 1/100 write op
+            collapse 1/100 write op
+              insert 1/100 write op
+                read 1/100  
+      read_dontcache 1/100  
+            readlink 1/100  
+               readv 1/100  
+         removefattr 1/100 write op
+              rename 2/100 write op
+          rnoreplace 2/100 write op
+           rexchange 2/100 write op
+           rwhiteout 2/100 write op
+              resvsp 1/100 write op
+               rmdir 1/100 write op
+            setfattr 2/100 write op
+            setxattr 1/100 write op
+            snapshot 1/100 write op
+              splice 1/100 write op
+                stat 1/100  
+       subvol_create 1/100 write op
+       subvol_delete 1/100 write op
+             symlink 2/100 write op
+                sync 1/100 write op
+            truncate 2/100 write op
+              unlink 1/100 write op
+            unresvsp 1/100 write op
+             unshare 1/100 write op
+          uring_read 1/100  
+         uring_write 1/100 write op
+               write 4/100 write op
+     write_dontcache 4/100 write op
+              writev 4/100 write op
+       exchangerange 2/100 write op
+
+seed = 1794470178
+               aread 1/100  
+              awrite 1/100 write op
+            bulkstat 1/100  
+           bulkstat1 1/100  
+               chown 3/100 write op
+          clonerange 4/100 write op
+           copyrange 4/100 write op
+               creat 4/100 write op
+         deduperange 4/100 write op
+               dread 4/100  
+              dwrite 4/100 write op
+           fallocate 1/100 write op
+           fdatasync 1/100 write op
+              fiemap 1/100 write op
+               fsync 1/100 write op
+             getattr 1/100  
+            getdents 1/100  
+            getfattr 1/100  
+                link 1/100 write op
+           listfattr 1/100  
+               mkdir 2/100 write op
+               mknod 2/100 write op
+               mread 2/100  
+              mwrite 2/100 write op
+               punch 1/100 write op
+                zero 1/100 write op
+        write_zeroes 1/100 write op
+            collapse 1/100 write op
+              insert 1/100 write op
+                read 1/100  
+      read_dontcache 1/100  
+            readlink 1/100  
+               readv 1/100  
+         removefattr 1/100 write op
+              rename 2/100 write op
+          rnoreplace 2/100 write op
+           rexchange 2/100 write op
+           rwhiteout 2/100 write op
+              resvsp 1/100 write op
+               rmdir 1/100 write op
+            setfattr 2/100 write op
+            setxattr 1/100 write op
+            snapshot 1/100 write op
+              splice 1/100 write op
+                stat 1/100  
+       subvol_create 1/100 write op
+       subvol_delete 1/100 write op
+             symlink 2/100 write op
+                sync 1/100 write op
+            truncate 2/100 write op
+              unlink 1/100 write op
+            unresvsp 1/100 write op
+             unshare 1/100 write op
+          uring_read 1/100  
+         uring_write 1/100 write op
+               write 4/100 write op
+     write_dontcache 4/100 write op
+              writev 4/100 write op
+       exchangerange 2/100 write op
+
+seed = 1794470178
+umount: /dev/ublkb1: not mounted.

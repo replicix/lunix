@@ -1,0 +1,71 @@
+MOUNT_OPTIONS = -o nosuid,nodev -o uquota
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/foo bs=4096 count=220dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/foo': Permission denied
+===quota output
+diskdq.magic = 0x4451
+diskdq.version = 0x1
+diskdq.type = 0x81
+diskdq.id = 65534
+diskdq.blk_hardlimit = 251
+diskdq.blk_softlimit = 251
+diskdq.ino_hardlimit = 10
+diskdq.ino_softlimit = 10
+diskdq.bcount = 0
+diskdq.icount = 0
+diskdq.itimer = 0
+diskdq.btimer = 0
+diskdq.iwarns = 0
+diskdq.bwarns = 0
+diskdq.rtb_hardlimit = 0
+diskdq.rtb_softlimit = 0
+diskdq.rtbcount = 0
+diskdq.rtbtimer = 0
+diskdq.rtbwarns = 0
+crc = 0x6bdab5ce (correct)
+lsn = 0x100000020
+uuid = d89e18e9-3ead-48e8-b51f-f7441e78b750
+===xfs_db output
+hard_blocks=1004
+soft_blocks=1004
+used_blocks=0
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb1: not mounted.

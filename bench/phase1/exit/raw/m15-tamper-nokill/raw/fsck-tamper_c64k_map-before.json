@@ -1,0 +1,69 @@
+{
+  "exit": 0,
+  "volume": "dcad4e1c-387f-4e37-83be-647bd913f831",
+  "mode": "integrity",
+  "tip": 32,
+  "deep": true,
+  "findings": [
+    {
+      "code": "gc_dry_run",
+      "severity": "note",
+      "object": "gc",
+      "message": "a pass would condemn 0 segments and delete 0 segments, 0 packs, 27 index runs and 30 commits (1398320 bytes), and compact 0 segments (0 live bytes)"
+    }
+  ],
+  "counts": {
+    "gc_dry_run": 1
+  },
+  "ratios": {
+    "chunk_size": 65536,
+    "chunk_count": 131072,
+    "mapped_chunks": 32768,
+    "hole_chunks": 98304,
+    "unique_chunks": 32768,
+    "unresolved_entries": 0,
+    "dedup_ratio": 1.0,
+    "unique_ulen": 2147483648,
+    "unique_clen": 2147483648,
+    "compression_ratio": 1.0,
+    "hole_share": 0.75,
+    "bytes": {
+      "segments": 2150894161,
+      "map_packs": 1546357,
+      "commits": 9572,
+      "index": 2993272,
+      "journal": 541065216,
+      "other": 9239
+    }
+  },
+  "gc_dry_run": {
+    "pass": 0,
+    "dry_run": true,
+    "segments_condemned": 0,
+    "segments_deleted": 0,
+    "packs_deleted": 0,
+    "runs_deleted": 27,
+    "commits_deleted": 30,
+    "segments_compacted": 0,
+    "bytes_freed": 1398320,
+    "bytes_moved": 0
+  },
+  "stats": {
+    "commits": 33,
+    "segments": 130,
+    "packs": 32,
+    "extents": 32894,
+    "map_nodes": 68,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 2048
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "peak_rss_kib": 88992
+}

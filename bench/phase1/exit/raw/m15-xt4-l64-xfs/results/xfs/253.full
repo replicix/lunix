@@ -1,0 +1,156 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+.:
+lost+found
+test_253
+
+./lost+found:
+25165953
+__should_be_obfuscated__
+
+./test_253:
+bcdc
+!bcda
+1bcd`
+Abcdg
+Pbcde
+Qbcdf
+QbceÊ
+R”ØNE
+aÉde
+a.„de
+ab‰e
+abb‰e
+abcd
+abcd)
+abcde
+abcdefghijklmnopqrstuvwxyz
+abcÄe
+abeØe
+acØde
+f
+foo
+gh
+ijk
+lmno
+longer_directory_name
+pqrstu
+qbcdd
+
+./test_253/foo:
+longer_file_name_1
+longer_file_name_2
+longer_file_name_3
+
+./test_253/longer_directory_name:
+f1
+f2
+f3
+0000000   .   :  \n   l   o   s   t   +   f   o   u   n   d  \n   t   e
+0000020   s   t   _   2   5   3  \n  \n   .   /   l   o   s   t   +   f
+0000040   o   u   n   d   :  \n   2   5   1   6   5   9   5   3  \n   _
+0000060   _   s   h   o   u   l   d   _   b   e   _   o   b   f   u   s
+0000100   c   a   t   e   d   _   _  \n  \n   .   /   t   e   s   t   _
+0000120   2   5   3   :  \n 001   b   c   d   c  \n   !   b   c   d   a
+0000140  \n   1   b   c   d   `  \n   A   b   c   d   g  \n   P   b   c
+0000160   d   e  \n   Q   b   c   d   f  \n   Q   b   c   e 346  \n   R
+0000200 323 257   N   E  \n   a 001 203   d   e  \n   a   . 343   d   e
+0000220  \n   a   b 001 344   e  \n   a   b   b 344   e  \n   a   b   c
+0000240   d 006  \n   a   b   c   d   )  \n   a   b   c   d   e  \n   a
+0000260   b   c   d   e   f   g   h   i   j   k   l   m   n   o   p   q
+0000300   r   s   t   u   v   w   x   y   z  \n   a   b   c 200   e  \n
+0000320   a   b   e 257   e  \n   a   c 257   d   e  \n   f  \n   f   o
+0000340   o  \n   g   h  \n   i   j   k  \n   l   m   n   o  \n   l   o
+0000360   n   g   e   r   _   d   i   r   e   c   t   o   r   y   _   n
+0000400   a   m   e  \n   p   q   r   s   t   u  \n   q   b   c   d   d
+0000420  \n  \n   .   /   t   e   s   t   _   2   5   3   /   f   o   o
+0000440   :  \n   l   o   n   g   e   r   _   f   i   l   e   _   n   a
+0000460   m   e   _   1  \n   l   o   n   g   e   r   _   f   i   l   e
+0000500   _   n   a   m   e   _   2  \n   l   o   n   g   e   r   _   f
+0000520   i   l   e   _   n   a   m   e   _   3  \n  \n   .   /   t   e
+0000540   s   t   _   2   5   3   /   l   o   n   g   e   r   _   d   i
+0000560   r   e   c   t   o   r   y   _   n   a   m   e   :  \n   f   1
+0000600  \n   f   2  \n   f   3  \n
+0000607
+echo '1' 2>&1 > /sys/fs/xfs/loop8/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/retry_timeout_seconds
+Metadump v1
+.:
+lost+found
+nGp^`%,
+
+./lost+found:
+25165953
+P4cqsw77yv8UsYbcCa-!i7
+
+./nGp^`%,:
+Édc
+.„dc
+b‰c
+b.‰c
+bb„
+bcdc
+bce„
+bd.„
+‚cd`
+R.Œ@
+bcd
+bcd.
+!bcda
+Abcdg
+AbceÁ
+R_KspN6ry7jG8CU4bonN2ovd
+aujzfJamyN3xYjal:X|
+f
+foo
+gh
+ijk
+lmno
+zrst"
+Åbcdk
+ÅbceÎ
+¡bcdo
+¡bceÔ
+
+./nGp^`%,/aujzfJamyN3xYjal:X|:
+f1
+f2
+f3
+
+./nGp^`%,/foo:
+UROC0Bh9cHwp-qI{
+dFXYpeUryNGb0	a7
+hBh8n-B-XqcrW{-KY
+0000000   .   :  \n   l   o   s   t   +   f   o   u   n   d  \n   n   G
+0000020   p 004   ^   `   %   ,  \n  \n   .   /   l   o   s   t   +   f
+0000040   o   u   n   d   :  \n   2   5   1   6   5   9   5   3  \n   P
+0000060   4   c   q   s   w   7   7   y   v   8   U   s   Y   b   c   C
+0000100   a   -  \v 031   !   i   7  \n  \n   .   /   n   G   p 004   ^
+0000120   `   %   ,   :  \n 001 001 203   d   c  \n 001   . 343   d   c
+0000140  \n 001   b 001 344   c  \n 001   b   . 344   c  \n 001   b   b
+0000160 001 343  \n 001   b   c   d   c  \n 001   b   c   e 343  \n 001
+0000200   b   d   . 343  \n 001 342   c   d   `  \n 003   R   . 316   @
+0000220  \n 021   b   c   d 001  \n 021   b   c   d   .  \n   !   b   c
+0000240   d   a  \n   A   b   c   d   g  \n   A   b   c   e 347  \n   R
+0000260   _   K   s   p   N   6   r   y   7   j   G   8   C   U   4   b
+0000300   o   n   N   2  \b   o   v   d 024  \n   a   u   j   z   f   J
+0000320   a   m   y   N   3   x   Y   j   a   l 001   :   X 030   |  \n
+0000340   f  \n   f   o   o  \n   g   h  \n   i   j   k  \n   l   m   n
+0000360   o  \n   z 001   r   s   t   "  \n 201   b   c   d   k  \n 201
+0000400   b   c   e 353  \n 301   b   c   d   o  \n 301   b   c   e 357
+0000420  \n  \n   .   /   n   G   p 004   ^   `   %   ,   /   a   u   j
+0000440   z   f   J   a   m   y   N   3   x   Y   j   a   l 001   :   X
+0000460 030   |   :  \n   f   1  \n   f   2  \n   f   3  \n  \n   .   /
+0000500   n   G   p 004   ^   `   %   ,   /   f   o   o   :  \n   U   R
+0000520   O   C   0   B   h   9   c   H   w   p   -  \b   q 031   I   {
+0000540  \n   d   F   X   Y   p   e   U   r   y   N   G   b   0  \t 025
+0000560 026   a   7  \n   h   B   h   8   n   -   B   -   X   q   c   r
+0000600   W  \r   {   -   K   Y  \n
+0000607
+mount -o nosuid,nodev /dev/loop8 /home/ubuntu/lunix-p1/m15/scratch/mnt/m15-xfstests-lunix-xfs-64k-scratch failed
+umount: /dev/loop8: not mounted.
+umount: /dev/loop8: not mounted.
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb1: not mounted.

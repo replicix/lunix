@@ -1,0 +1,36 @@
+{
+  "exit": 2,
+  "volume": "6f702f62-f8da-4365-a384-610d6ccdac8f",
+  "mode": "integrity",
+  "deep": true,
+  "findings": [
+    {
+      "code": "tip_auth",
+      "severity": "error",
+      "object": "state/commits/0000000000000020",
+      "message": "the tip does not authenticate; mount refuses and never falls back (repair: --repair --truncate-tip)"
+    }
+  ],
+  "counts": {
+    "tip_auth": 1
+  },
+  "stats": {
+    "commits": 0,
+    "segments": 130,
+    "packs": 32,
+    "extents": 32894,
+    "map_nodes": 0,
+    "journal_records": 0,
+    "journal_marks": 0,
+    "journal_flushed": 0
+  },
+  "repairs": [],
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at",
+    "journal: not classified, the tip did not authenticate"
+  ],
+  "peak_rss_kib": 89092
+}

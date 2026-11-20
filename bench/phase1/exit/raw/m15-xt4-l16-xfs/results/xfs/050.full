@@ -1,0 +1,599 @@
+MOUNT_OPTIONS = -o nosuid,nodev -o uquota
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o uquota
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=u id=65534
+Using type=u id=65534
+*** report no quota settings
+*** report initial settings
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmetouch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initme': Permission denied
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+*** push past the soft inode limit
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=1200dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o gquota -o gquota
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=g id=65534
+Using type=g id=65534
+*** report no quota settings
+*** report initial settings
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmels -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+-rw-r--r-- 1 root nogroup 0 Nov 19 23:11 initme
+*** push past the soft inode limit
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300300+0 records in
+300+0 records out
+1228800 bytes (1.2 MB, 1.2 MiB) copied, 0.000300351 s, 4.1 GB/s
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11': Disk quota exceeded
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12touch: cannot touch '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12': Disk quota exceeded
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=1200dd: error writing '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Disk quota exceeded
+1001+0 records in
+1000+0 records out
+4096000 bytes (4.1 MB, 3.9 MiB) copied, 0.00113999 s, 3.6 GB/s
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 4000
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard1
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard2
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard3
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard4
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 initme
+-rw-r--r-- 1 root nogroup 4096000 Nov 19 23:11 softie
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie1
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie2
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie3
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie4
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o uqnoenforce -o uqnoenforce -o uqnoenforce
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=u id=65534
+Using type=u id=65534
+*** report no quota settings
+*** report initial settings
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmetouch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initme': Permission denied
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+*** push past the soft inode limit
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11': Permission denied
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12': Permission denied
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=1200dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o gqnoenforce -o gqnoenforce -o gqnoenforce -o gqnoenforce
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=g id=65534
+Using type=g id=65534
+*** report no quota settings
+*** report initial settings
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmels -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+-rw-r--r-- 1 root nogroup 0 Nov 19 23:11 initme
+*** push past the soft inode limit
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300300+0 records in
+300+0 records out
+1228800 bytes (1.2 MB, 1.2 MiB) copied, 0.000276551 s, 4.4 GB/s
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=12001200+0 records in
+1200+0 records out
+4915200 bytes (4.9 MB, 4.7 MiB) copied, 0.00136121 s, 3.6 GB/s
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 4800
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard1
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard10
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard11
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard12
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard2
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard3
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard4
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard5
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard6
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard7
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard8
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 hard9
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 initme
+-rw-r--r-- 1 root nogroup 4915200 Nov 19 23:11 softie
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie1
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie2
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie3
+-rw-r--r-- 1 root nogroup       0 Nov 19 23:11 softie4
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o pquota -o pquota -o pquota -o pquota -o pquota
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=p id=1
+Using type=p id=1
+*** report no quota settings
+*** report initial settings
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmetouch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initme': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+*** push past the soft inode limit
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=1200dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+MOUNT_OPTIONS = -o nosuid,nodev -o pqnoenforce -o pqnoenforce -o pqnoenforce -o pqnoenforce -o pqnoenforce -o pqnoenforce
+_fs_has_crcs=0
+ddev=/dev/ublkb1
+isize=512
+agcount=4
+agsize=1048576
+sectsz=4096
+attr=2
+_fs_has_crcs=1
+exchange=0
+metadir=0
+
+dbsize=4096
+dblocks=4194304
+imaxpct=25
+sunit=0
+swidth=0
+unwritten=1
+dirversion=2
+dirbsize=4096
+parent=0
+ldev="internal log"
+lbsize=4096
+lblocks=27162
+lversion=2
+logsectsz=4096
+logsunit=1
+
+rtdev=none
+rtextsz=4096
+rtblocks=0
+rtextents=0
+rgcount=0
+rgextents=0
+zoned=0
+rtstart=0
+rtreserved=0
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+Using type=p id=1
+Using type=p id=1
+*** report no quota settings
+*** report initial settings
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initmetouch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/initme': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+*** push past the soft inode limit
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie1': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie2': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie3': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie4': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the soft block limit
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=300dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard inode limit (expect EDQUOT)
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard1': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard2': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard3': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard4': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard5': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard6': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard7': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard8': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard9': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard10': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard11': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+touch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12touch: setting times of '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/hard12': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+*** push past the hard block limit (expect EDQUOT)
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 1 -c chattr +P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+dd if=/dev/zero of=<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie bs=4096 count=1200dd: failed to open '<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/softie': Permission denied
+PARENT: /usr/sbin/xfs_io -i -r -c chproj 0 -c chattr -P <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+ls -l <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+total 0
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb1: not mounted.

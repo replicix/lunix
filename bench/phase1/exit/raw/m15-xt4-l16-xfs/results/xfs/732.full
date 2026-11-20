@@ -1,0 +1,6 @@
+Cleaning up scrub stress run at Thu Nov 19 23:23:23 UTC 2026
+Killing stressor processes at Thu Nov 19 23:23:23 UTC 2026
+Waiting for children to exit at Thu Nov 19 23:23:23 UTC 2026
+Children exited as of Thu Nov 19 23:23:23 UTC 2026
+Cleanup finished at Thu Nov 19 23:23:23 UTC 2026
+umount: /dev/ublkb1: not mounted.

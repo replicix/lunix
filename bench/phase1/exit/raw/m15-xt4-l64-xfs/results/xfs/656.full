@@ -1,0 +1,4 @@
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch: not mounted.
+device-mapper: remove ioctl on error-test.656  failed: No such device or address
+Command failed.
+umount: /dev/ublkb1: not mounted.

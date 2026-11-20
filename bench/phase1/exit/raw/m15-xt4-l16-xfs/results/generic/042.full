@@ -1,0 +1,12 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 629145600/629145600 bytes at offset 0
+600 MiB, 153600 ops; 0.1181 sec (4.960 GiB/sec and 1300141.3565 ops/sec)
+wrote 629145600/629145600 bytes at offset 0
+600 MiB, 153600 ops; 0.1193 sec (4.909 GiB/sec and 1286884.8339 ops/sec)
+wrote 629145600/629145600 bytes at offset 0
+600 MiB, 153600 ops; 0.1184 sec (4.949 GiB/sec and 1297220.6035 ops/sec)

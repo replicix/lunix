@@ -1,0 +1,9 @@
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 32 ops; 0.0018 sec (16.622 GiB/sec and 17021.2766 ops/sec)
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 32 ops; 0.0053 sec (5.895 GiB/sec and 6036.5969 ops/sec)
+Setting up swapspace version 1, size = 32 MiB (33550336 bytes)
+no label, UUID=cfd9603e-95b4-4c05-8803-5d8235cd93d2
+wrote 33554432/33554432 bytes at offset 0
+32 MiB, 32 ops; 0.0018 sec (17.114 GiB/sec and 17524.6440 ops/sec)
+umount: /dev/ublkb1: not mounted.

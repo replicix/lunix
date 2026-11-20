@@ -1,0 +1,1382 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+wrote 5591040/5591040 bytes at offset 0
+5 MiB, 1365 ops; 0.0013 sec (3.773 GiB/sec and 989130.4348 ops/sec)
+linked 4096/4096 bytes at offset 4096
+4 KiB, 1 ops; 0.0043 sec (927.214 KiB/sec and 231.8034 ops/sec)
+linked 4096/4096 bytes at offset 12288
+4 KiB, 1 ops; 0.0018 sec (2.107 MiB/sec and 539.3743 ops/sec)
+linked 4096/4096 bytes at offset 20480
+4 KiB, 1 ops; 0.0011 sec (3.439 MiB/sec and 880.2817 ops/sec)
+linked 4096/4096 bytes at offset 28672
+4 KiB, 1 ops; 0.0010 sec (3.675 MiB/sec and 940.7338 ops/sec)
+linked 4096/4096 bytes at offset 36864
+4 KiB, 1 ops; 0.0008 sec (4.374 MiB/sec and 1119.8208 ops/sec)
+linked 4096/4096 bytes at offset 45056
+4 KiB, 1 ops; 0.0010 sec (3.830 MiB/sec and 980.3922 ops/sec)
+linked 4096/4096 bytes at offset 53248
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 61440
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 69632
+4 KiB, 1 ops; 0.0009 sec (4.147 MiB/sec and 1061.5711 ops/sec)
+linked 4096/4096 bytes at offset 77824
+4 KiB, 1 ops; 0.0008 sec (4.365 MiB/sec and 1117.3184 ops/sec)
+linked 4096/4096 bytes at offset 86016
+4 KiB, 1 ops; 0.0008 sec (4.701 MiB/sec and 1203.3694 ops/sec)
+linked 4096/4096 bytes at offset 94208
+4 KiB, 1 ops; 0.0017 sec (2.287 MiB/sec and 585.4801 ops/sec)
+linked 4096/4096 bytes at offset 102400
+4 KiB, 1 ops; 0.0010 sec (3.675 MiB/sec and 940.7338 ops/sec)
+linked 4096/4096 bytes at offset 110592
+4 KiB, 1 ops; 0.0008 sec (4.414 MiB/sec and 1129.9435 ops/sec)
+linked 4096/4096 bytes at offset 118784
+4 KiB, 1 ops; 0.0009 sec (4.293 MiB/sec and 1098.9011 ops/sec)
+linked 4096/4096 bytes at offset 126976
+4 KiB, 1 ops; 0.0039 sec (1006.036 KiB/sec and 251.5091 ops/sec)
+linked 4096/4096 bytes at offset 135168
+4 KiB, 1 ops; 0.0010 sec (3.713 MiB/sec and 950.5703 ops/sec)
+linked 4096/4096 bytes at offset 143360
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 151552
+4 KiB, 1 ops; 0.0010 sec (3.796 MiB/sec and 971.8173 ops/sec)
+linked 4096/4096 bytes at offset 159744
+4 KiB, 1 ops; 0.0010 sec (3.771 MiB/sec and 965.2510 ops/sec)
+linked 4096/4096 bytes at offset 167936
+4 KiB, 1 ops; 0.0010 sec (3.752 MiB/sec and 960.6148 ops/sec)
+linked 4096/4096 bytes at offset 176128
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 184320
+4 KiB, 1 ops; 0.0010 sec (3.833 MiB/sec and 981.3543 ops/sec)
+linked 4096/4096 bytes at offset 192512
+4 KiB, 1 ops; 0.0010 sec (3.727 MiB/sec and 954.1985 ops/sec)
+linked 4096/4096 bytes at offset 200704
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 208896
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 217088
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 225280
+4 KiB, 1 ops; 0.0010 sec (3.871 MiB/sec and 991.0803 ops/sec)
+linked 4096/4096 bytes at offset 233472
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 241664
+4 KiB, 1 ops; 0.0010 sec (3.826 MiB/sec and 979.4319 ops/sec)
+linked 4096/4096 bytes at offset 249856
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 258048
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 266240
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 274432
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 282624
+4 KiB, 1 ops; 0.0009 sec (3.978 MiB/sec and 1018.3299 ops/sec)
+linked 4096/4096 bytes at offset 290816
+4 KiB, 1 ops; 0.0010 sec (3.833 MiB/sec and 981.3543 ops/sec)
+linked 4096/4096 bytes at offset 299008
+4 KiB, 1 ops; 0.0009 sec (4.052 MiB/sec and 1037.3444 ops/sec)
+linked 4096/4096 bytes at offset 307200
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 315392
+4 KiB, 1 ops; 0.0009 sec (3.934 MiB/sec and 1007.0493 ops/sec)
+linked 4096/4096 bytes at offset 323584
+4 KiB, 1 ops; 0.0009 sec (4.142 MiB/sec and 1060.4454 ops/sec)
+linked 4096/4096 bytes at offset 331776
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 339968
+4 KiB, 1 ops; 0.0009 sec (3.942 MiB/sec and 1009.0817 ops/sec)
+linked 4096/4096 bytes at offset 348160
+4 KiB, 1 ops; 0.0010 sec (3.898 MiB/sec and 998.0040 ops/sec)
+linked 4096/4096 bytes at offset 356352
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 364544
+4 KiB, 1 ops; 0.0010 sec (3.883 MiB/sec and 994.0358 ops/sec)
+linked 4096/4096 bytes at offset 372736
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 380928
+4 KiB, 1 ops; 0.0010 sec (3.692 MiB/sec and 945.1796 ops/sec)
+linked 4096/4096 bytes at offset 389120
+4 KiB, 1 ops; 0.0009 sec (4.099 MiB/sec and 1049.3179 ops/sec)
+linked 4096/4096 bytes at offset 397312
+4 KiB, 1 ops; 0.0009 sec (4.160 MiB/sec and 1064.9627 ops/sec)
+linked 4096/4096 bytes at offset 405504
+4 KiB, 1 ops; 0.0009 sec (4.278 MiB/sec and 1095.2903 ops/sec)
+linked 4096/4096 bytes at offset 413696
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 421888
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 430080
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 438272
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 446464
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 454656
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 462848
+4 KiB, 1 ops; 0.0009 sec (4.086 MiB/sec and 1046.0251 ops/sec)
+linked 4096/4096 bytes at offset 471040
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 479232
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 487424
+4 KiB, 1 ops; 0.0009 sec (4.164 MiB/sec and 1066.0981 ops/sec)
+linked 4096/4096 bytes at offset 495616
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 503808
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 512000
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 520192
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 528384
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 536576
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 544768
+4 KiB, 1 ops; 0.0009 sec (4.044 MiB/sec and 1035.1967 ops/sec)
+linked 4096/4096 bytes at offset 552960
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 561152
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 569344
+4 KiB, 1 ops; 0.0009 sec (4.331 MiB/sec and 1108.6475 ops/sec)
+linked 4096/4096 bytes at offset 577536
+4 KiB, 1 ops; 0.0009 sec (4.255 MiB/sec and 1089.3246 ops/sec)
+linked 4096/4096 bytes at offset 585728
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 593920
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 602112
+4 KiB, 1 ops; 0.0010 sec (3.879 MiB/sec and 993.0487 ops/sec)
+linked 4096/4096 bytes at offset 610304
+4 KiB, 1 ops; 0.0009 sec (4.178 MiB/sec and 1069.5187 ops/sec)
+linked 4096/4096 bytes at offset 618496
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 626688
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 634880
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 643072
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 651264
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 659456
+4 KiB, 1 ops; 0.0008 sec (4.419 MiB/sec and 1131.2217 ops/sec)
+linked 4096/4096 bytes at offset 667648
+4 KiB, 1 ops; 0.0010 sec (3.756 MiB/sec and 961.5385 ops/sec)
+linked 4096/4096 bytes at offset 675840
+4 KiB, 1 ops; 0.0010 sec (3.860 MiB/sec and 988.1423 ops/sec)
+linked 4096/4096 bytes at offset 684032
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 692224
+4 KiB, 1 ops; 0.0009 sec (4.251 MiB/sec and 1088.1393 ops/sec)
+linked 4096/4096 bytes at offset 700416
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 708608
+4 KiB, 1 ops; 0.0009 sec (3.938 MiB/sec and 1008.0645 ops/sec)
+linked 4096/4096 bytes at offset 716800
+4 KiB, 1 ops; 0.0010 sec (3.624 MiB/sec and 927.6438 ops/sec)
+linked 4096/4096 bytes at offset 724992
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 733184
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 741376
+4 KiB, 1 ops; 0.0010 sec (3.774 MiB/sec and 966.1836 ops/sec)
+linked 4096/4096 bytes at offset 749568
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 757760
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 765952
+4 KiB, 1 ops; 0.0010 sec (3.883 MiB/sec and 994.0358 ops/sec)
+linked 4096/4096 bytes at offset 774144
+4 KiB, 1 ops; 0.0010 sec (3.778 MiB/sec and 967.1180 ops/sec)
+linked 4096/4096 bytes at offset 782336
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 790528
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 798720
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 806912
+4 KiB, 1 ops; 0.0009 sec (4.129 MiB/sec and 1057.0825 ops/sec)
+linked 4096/4096 bytes at offset 815104
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 823296
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 831488
+4 KiB, 1 ops; 0.0011 sec (3.460 MiB/sec and 885.7396 ops/sec)
+linked 4096/4096 bytes at offset 839680
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 847872
+4 KiB, 1 ops; 0.0010 sec (3.778 MiB/sec and 967.1180 ops/sec)
+linked 4096/4096 bytes at offset 856064
+4 KiB, 1 ops; 0.0010 sec (3.644 MiB/sec and 932.8358 ops/sec)
+linked 4096/4096 bytes at offset 864256
+4 KiB, 1 ops; 0.0009 sec (4.044 MiB/sec and 1035.1967 ops/sec)
+linked 4096/4096 bytes at offset 872448
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 880640
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 888832
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 897024
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 905216
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 913408
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 921600
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 929792
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 937984
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 946176
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 954368
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 962560
+4 KiB, 1 ops; 0.0009 sec (4.112 MiB/sec and 1052.6316 ops/sec)
+linked 4096/4096 bytes at offset 970752
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 978944
+4 KiB, 1 ops; 0.0009 sec (3.946 MiB/sec and 1010.1010 ops/sec)
+linked 4096/4096 bytes at offset 987136
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 995328
+4 KiB, 1 ops; 0.0009 sec (3.946 MiB/sec and 1010.1010 ops/sec)
+linked 4096/4096 bytes at offset 1003520
+4 KiB, 1 ops; 0.0010 sec (3.833 MiB/sec and 981.3543 ops/sec)
+linked 4096/4096 bytes at offset 1011712
+4 KiB, 1 ops; 0.0010 sec (3.852 MiB/sec and 986.1933 ops/sec)
+linked 4096/4096 bytes at offset 1019904
+4 KiB, 1 ops; 0.0009 sec (4.278 MiB/sec and 1095.2903 ops/sec)
+linked 4096/4096 bytes at offset 1028096
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 976.5625 ops/sec)
+linked 4096/4096 bytes at offset 1036288
+4 KiB, 1 ops; 0.0010 sec (3.617 MiB/sec and 925.9259 ops/sec)
+linked 4096/4096 bytes at offset 1044480
+4 KiB, 1 ops; 0.0009 sec (4.040 MiB/sec and 1034.1262 ops/sec)
+linked 4096/4096 bytes at offset 1052672
+4 KiB, 1 ops; 0.0010 sec (3.574 MiB/sec and 914.9131 ops/sec)
+linked 4096/4096 bytes at offset 1060864
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 1069056
+4 KiB, 1 ops; 0.0010 sec (3.830 MiB/sec and 980.3922 ops/sec)
+linked 4096/4096 bytes at offset 1077248
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 1085440
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 1093632
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 1101824
+4 KiB, 1 ops; 0.0009 sec (4.160 MiB/sec and 1064.9627 ops/sec)
+linked 4096/4096 bytes at offset 1110016
+4 KiB, 1 ops; 0.0009 sec (4.086 MiB/sec and 1046.0251 ops/sec)
+linked 4096/4096 bytes at offset 1118208
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 1126400
+4 KiB, 1 ops; 0.0010 sec (3.822 MiB/sec and 978.4736 ops/sec)
+linked 4096/4096 bytes at offset 1134592
+4 KiB, 1 ops; 0.0009 sec (4.173 MiB/sec and 1068.3761 ops/sec)
+linked 4096/4096 bytes at offset 1142784
+4 KiB, 1 ops; 0.0009 sec (4.112 MiB/sec and 1052.6316 ops/sec)
+linked 4096/4096 bytes at offset 1150976
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 1159168
+4 KiB, 1 ops; 0.0009 sec (4.086 MiB/sec and 1046.0251 ops/sec)
+linked 4096/4096 bytes at offset 1167360
+4 KiB, 1 ops; 0.0009 sec (4.142 MiB/sec and 1060.4454 ops/sec)
+linked 4096/4096 bytes at offset 1175552
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 1183744
+4 KiB, 1 ops; 0.0009 sec (3.914 MiB/sec and 1002.0040 ops/sec)
+linked 4096/4096 bytes at offset 1191936
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 1200128
+4 KiB, 1 ops; 0.0009 sec (3.978 MiB/sec and 1018.3299 ops/sec)
+linked 4096/4096 bytes at offset 1208320
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 1216512
+4 KiB, 1 ops; 0.0009 sec (4.099 MiB/sec and 1049.3179 ops/sec)
+linked 4096/4096 bytes at offset 1224704
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 1232896
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 1241088
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 1249280
+4 KiB, 1 ops; 0.0009 sec (4.160 MiB/sec and 1064.9627 ops/sec)
+linked 4096/4096 bytes at offset 1257472
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 1265664
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 1273856
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 1282048
+4 KiB, 1 ops; 0.0010 sec (3.818 MiB/sec and 977.5171 ops/sec)
+linked 4096/4096 bytes at offset 1290240
+4 KiB, 1 ops; 0.0009 sec (3.938 MiB/sec and 1008.0645 ops/sec)
+linked 4096/4096 bytes at offset 1298432
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 1306624
+4 KiB, 1 ops; 0.0010 sec (3.742 MiB/sec and 957.8544 ops/sec)
+linked 4096/4096 bytes at offset 1314816
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 1323008
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 1331200
+4 KiB, 1 ops; 0.0010 sec (3.891 MiB/sec and 996.0159 ops/sec)
+linked 4096/4096 bytes at offset 1339392
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 1347584
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 1355776
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 1363968
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 1372160
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 1380352
+4 KiB, 1 ops; 0.0009 sec (4.011 MiB/sec and 1026.6940 ops/sec)
+linked 4096/4096 bytes at offset 1388544
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 1396736
+4 KiB, 1 ops; 0.0009 sec (4.095 MiB/sec and 1048.2180 ops/sec)
+linked 4096/4096 bytes at offset 1404928
+4 KiB, 1 ops; 0.0009 sec (4.099 MiB/sec and 1049.3179 ops/sec)
+linked 4096/4096 bytes at offset 1413120
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 1421312
+4 KiB, 1 ops; 0.0009 sec (4.331 MiB/sec and 1108.6475 ops/sec)
+linked 4096/4096 bytes at offset 1429504
+4 KiB, 1 ops; 0.0009 sec (4.040 MiB/sec and 1034.1262 ops/sec)
+linked 4096/4096 bytes at offset 1437696
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 1445888
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 1454080
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 1462272
+4 KiB, 1 ops; 0.0009 sec (4.147 MiB/sec and 1061.5711 ops/sec)
+linked 4096/4096 bytes at offset 1470464
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 1478656
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 1486848
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 1495040
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 1503232
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 1511424
+4 KiB, 1 ops; 0.0009 sec (4.241 MiB/sec and 1085.7763 ops/sec)
+linked 4096/4096 bytes at offset 1519616
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 1527808
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 1536000
+4 KiB, 1 ops; 0.0010 sec (3.749 MiB/sec and 959.6929 ops/sec)
+linked 4096/4096 bytes at offset 1544192
+4 KiB, 1 ops; 0.0009 sec (4.103 MiB/sec and 1050.4202 ops/sec)
+linked 4096/4096 bytes at offset 1552384
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 1560576
+4 KiB, 1 ops; 0.0010 sec (3.617 MiB/sec and 925.9259 ops/sec)
+linked 4096/4096 bytes at offset 1568768
+4 KiB, 1 ops; 0.0009 sec (4.048 MiB/sec and 1036.2694 ops/sec)
+linked 4096/4096 bytes at offset 1576960
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 1585152
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 1593344
+4 KiB, 1 ops; 0.0009 sec (4.073 MiB/sec and 1042.7529 ops/sec)
+linked 4096/4096 bytes at offset 1601536
+4 KiB, 1 ops; 0.0009 sec (4.209 MiB/sec and 1077.5862 ops/sec)
+linked 4096/4096 bytes at offset 1609728
+4 KiB, 1 ops; 0.0010 sec (3.756 MiB/sec and 961.5385 ops/sec)
+linked 4096/4096 bytes at offset 1617920
+4 KiB, 1 ops; 0.0009 sec (4.052 MiB/sec and 1037.3444 ops/sec)
+linked 4096/4096 bytes at offset 1626112
+4 KiB, 1 ops; 0.0010 sec (3.774 MiB/sec and 966.1836 ops/sec)
+linked 4096/4096 bytes at offset 1634304
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 1642496
+4 KiB, 1 ops; 0.0010 sec (3.879 MiB/sec and 993.0487 ops/sec)
+linked 4096/4096 bytes at offset 1650688
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 1658880
+4 KiB, 1 ops; 0.0010 sec (3.807 MiB/sec and 974.6589 ops/sec)
+linked 4096/4096 bytes at offset 1667072
+4 KiB, 1 ops; 0.0009 sec (3.938 MiB/sec and 1008.0645 ops/sec)
+linked 4096/4096 bytes at offset 1675264
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 1683456
+4 KiB, 1 ops; 0.0010 sec (3.875 MiB/sec and 992.0635 ops/sec)
+linked 4096/4096 bytes at offset 1691648
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 1699840
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 1708032
+4 KiB, 1 ops; 0.0009 sec (3.942 MiB/sec and 1009.0817 ops/sec)
+linked 4096/4096 bytes at offset 1716224
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 1724416
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 1732608
+4 KiB, 1 ops; 0.0010 sec (3.671 MiB/sec and 939.8496 ops/sec)
+linked 4096/4096 bytes at offset 1740800
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 1748992
+4 KiB, 1 ops; 0.0010 sec (3.833 MiB/sec and 981.3543 ops/sec)
+linked 4096/4096 bytes at offset 1757184
+4 KiB, 1 ops; 0.0010 sec (3.789 MiB/sec and 969.9321 ops/sec)
+linked 4096/4096 bytes at offset 1765376
+4 KiB, 1 ops; 0.0009 sec (4.090 MiB/sec and 1047.1204 ops/sec)
+linked 4096/4096 bytes at offset 1773568
+4 KiB, 1 ops; 0.0010 sec (3.875 MiB/sec and 992.0635 ops/sec)
+linked 4096/4096 bytes at offset 1781760
+4 KiB, 1 ops; 0.0010 sec (3.752 MiB/sec and 960.6148 ops/sec)
+linked 4096/4096 bytes at offset 1789952
+4 KiB, 1 ops; 0.0009 sec (3.914 MiB/sec and 1002.0040 ops/sec)
+linked 4096/4096 bytes at offset 1798144
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 976.5625 ops/sec)
+linked 4096/4096 bytes at offset 1806336
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 1814528
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 1822720
+4 KiB, 1 ops; 0.0009 sec (4.069 MiB/sec and 1041.6667 ops/sec)
+linked 4096/4096 bytes at offset 1830912
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 1839104
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 1847296
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 1855488
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 1863680
+4 KiB, 1 ops; 0.0010 sec (3.830 MiB/sec and 980.3922 ops/sec)
+linked 4096/4096 bytes at offset 1871872
+4 KiB, 1 ops; 0.0010 sec (3.852 MiB/sec and 986.1933 ops/sec)
+linked 4096/4096 bytes at offset 1880064
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 1888256
+4 KiB, 1 ops; 0.0010 sec (3.651 MiB/sec and 934.5794 ops/sec)
+linked 4096/4096 bytes at offset 1896448
+4 KiB, 1 ops; 0.0010 sec (3.731 MiB/sec and 955.1098 ops/sec)
+linked 4096/4096 bytes at offset 1904640
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 1912832
+4 KiB, 1 ops; 0.0011 sec (3.356 MiB/sec and 859.1065 ops/sec)
+linked 4096/4096 bytes at offset 1921024
+4 KiB, 1 ops; 0.0019 sec (2.010 MiB/sec and 514.6680 ops/sec)
+linked 4096/4096 bytes at offset 1929216
+4 KiB, 1 ops; 0.0009 sec (4.237 MiB/sec and 1084.5987 ops/sec)
+linked 4096/4096 bytes at offset 1937408
+4 KiB, 1 ops; 0.0019 sec (1.982 MiB/sec and 507.3567 ops/sec)
+linked 4096/4096 bytes at offset 1945600
+4 KiB, 1 ops; 0.0016 sec (2.405 MiB/sec and 615.7635 ops/sec)
+linked 4096/4096 bytes at offset 1953792
+4 KiB, 1 ops; 0.0009 sec (4.269 MiB/sec and 1092.8962 ops/sec)
+linked 4096/4096 bytes at offset 1961984
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 1970176
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 1978368
+4 KiB, 1 ops; 0.0010 sec (3.833 MiB/sec and 981.3543 ops/sec)
+linked 4096/4096 bytes at offset 1986560
+4 KiB, 1 ops; 0.0010 sec (3.713 MiB/sec and 950.5703 ops/sec)
+linked 4096/4096 bytes at offset 1994752
+4 KiB, 1 ops; 0.0010 sec (3.610 MiB/sec and 924.2144 ops/sec)
+linked 4096/4096 bytes at offset 2002944
+4 KiB, 1 ops; 0.0010 sec (3.800 MiB/sec and 972.7626 ops/sec)
+linked 4096/4096 bytes at offset 2011136
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 2019328
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 2027520
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 2035712
+4 KiB, 1 ops; 0.0009 sec (3.938 MiB/sec and 1008.0645 ops/sec)
+linked 4096/4096 bytes at offset 2043904
+4 KiB, 1 ops; 0.0010 sec (3.891 MiB/sec and 996.0159 ops/sec)
+linked 4096/4096 bytes at offset 2052096
+4 KiB, 1 ops; 0.0011 sec (3.308 MiB/sec and 846.7401 ops/sec)
+linked 4096/4096 bytes at offset 2060288
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 2068480
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 2076672
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 2084864
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 2093056
+4 KiB, 1 ops; 0.0010 sec (3.871 MiB/sec and 991.0803 ops/sec)
+linked 4096/4096 bytes at offset 2101248
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 2109440
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 2117632
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 2125824
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 2134016
+4 KiB, 1 ops; 0.0009 sec (4.173 MiB/sec and 1068.3761 ops/sec)
+linked 4096/4096 bytes at offset 2142208
+4 KiB, 1 ops; 0.0009 sec (4.048 MiB/sec and 1036.2694 ops/sec)
+linked 4096/4096 bytes at offset 2150400
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 2158592
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 2166784
+4 KiB, 1 ops; 0.0010 sec (3.807 MiB/sec and 974.6589 ops/sec)
+linked 4096/4096 bytes at offset 2174976
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 2183168
+4 KiB, 1 ops; 0.0010 sec (3.781 MiB/sec and 968.0542 ops/sec)
+linked 4096/4096 bytes at offset 2191360
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 2199552
+4 KiB, 1 ops; 0.0009 sec (3.914 MiB/sec and 1002.0040 ops/sec)
+linked 4096/4096 bytes at offset 2207744
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 2215936
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 2224128
+4 KiB, 1 ops; 0.0009 sec (3.942 MiB/sec and 1009.0817 ops/sec)
+linked 4096/4096 bytes at offset 2232320
+4 KiB, 1 ops; 0.0010 sec (3.883 MiB/sec and 994.0358 ops/sec)
+linked 4096/4096 bytes at offset 2240512
+4 KiB, 1 ops; 0.0010 sec (3.822 MiB/sec and 978.4736 ops/sec)
+linked 4096/4096 bytes at offset 2248704
+4 KiB, 1 ops; 0.0010 sec (3.837 MiB/sec and 982.3183 ops/sec)
+linked 4096/4096 bytes at offset 2256896
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 2265088
+4 KiB, 1 ops; 0.0009 sec (4.274 MiB/sec and 1094.0919 ops/sec)
+linked 4096/4096 bytes at offset 2273280
+4 KiB, 1 ops; 0.0009 sec (4.095 MiB/sec and 1048.2180 ops/sec)
+linked 4096/4096 bytes at offset 2281472
+4 KiB, 1 ops; 0.0009 sec (4.209 MiB/sec and 1077.5862 ops/sec)
+linked 4096/4096 bytes at offset 2289664
+4 KiB, 1 ops; 0.0009 sec (4.073 MiB/sec and 1042.7529 ops/sec)
+linked 4096/4096 bytes at offset 2297856
+4 KiB, 1 ops; 0.0010 sec (3.734 MiB/sec and 956.0229 ops/sec)
+linked 4096/4096 bytes at offset 2306048
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 2314240
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 2322432
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 2330624
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 2338816
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 2347008
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 2355200
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 2363392
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 2371584
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 2379776
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 2387968
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 2396160
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 2404352
+4 KiB, 1 ops; 0.0009 sec (4.048 MiB/sec and 1036.2694 ops/sec)
+linked 4096/4096 bytes at offset 2412544
+4 KiB, 1 ops; 0.0010 sec (3.785 MiB/sec and 968.9922 ops/sec)
+linked 4096/4096 bytes at offset 2420736
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 2428928
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 2437120
+4 KiB, 1 ops; 0.0009 sec (4.129 MiB/sec and 1057.0825 ops/sec)
+linked 4096/4096 bytes at offset 2445312
+4 KiB, 1 ops; 0.0009 sec (4.182 MiB/sec and 1070.6638 ops/sec)
+linked 4096/4096 bytes at offset 2453504
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 2461696
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 2469888
+4 KiB, 1 ops; 0.0008 sec (4.464 MiB/sec and 1142.8571 ops/sec)
+linked 4096/4096 bytes at offset 2478080
+4 KiB, 1 ops; 0.0010 sec (3.895 MiB/sec and 997.0090 ops/sec)
+linked 4096/4096 bytes at offset 2486272
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 2494464
+4 KiB, 1 ops; 0.0009 sec (3.946 MiB/sec and 1010.1010 ops/sec)
+linked 4096/4096 bytes at offset 2502656
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 2510848
+4 KiB, 1 ops; 0.0009 sec (4.061 MiB/sec and 1039.5010 ops/sec)
+linked 4096/4096 bytes at offset 2519040
+4 KiB, 1 ops; 0.0010 sec (3.604 MiB/sec and 922.5092 ops/sec)
+linked 4096/4096 bytes at offset 2527232
+4 KiB, 1 ops; 0.0009 sec (3.914 MiB/sec and 1002.0040 ops/sec)
+linked 4096/4096 bytes at offset 2535424
+4 KiB, 1 ops; 0.0010 sec (3.710 MiB/sec and 949.6676 ops/sec)
+linked 4096/4096 bytes at offset 2543616
+4 KiB, 1 ops; 0.0010 sec (3.818 MiB/sec and 977.5171 ops/sec)
+linked 4096/4096 bytes at offset 2551808
+4 KiB, 1 ops; 0.0011 sec (3.522 MiB/sec and 901.7133 ops/sec)
+linked 4096/4096 bytes at offset 2560000
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 2568192
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 2576384
+4 KiB, 1 ops; 0.0010 sec (3.811 MiB/sec and 975.6098 ops/sec)
+linked 4096/4096 bytes at offset 2584576
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 2592768
+4 KiB, 1 ops; 0.0010 sec (3.668 MiB/sec and 938.9671 ops/sec)
+linked 4096/4096 bytes at offset 2600960
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 2609152
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 2617344
+4 KiB, 1 ops; 0.0010 sec (3.771 MiB/sec and 965.2510 ops/sec)
+linked 4096/4096 bytes at offset 2625536
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 2633728
+4 KiB, 1 ops; 0.0010 sec (3.713 MiB/sec and 950.5703 ops/sec)
+linked 4096/4096 bytes at offset 2641920
+4 KiB, 1 ops; 0.0009 sec (4.011 MiB/sec and 1026.6940 ops/sec)
+linked 4096/4096 bytes at offset 2650112
+4 KiB, 1 ops; 0.0010 sec (3.767 MiB/sec and 964.3202 ops/sec)
+linked 4096/4096 bytes at offset 2658304
+4 KiB, 1 ops; 0.0010 sec (3.664 MiB/sec and 938.0863 ops/sec)
+linked 4096/4096 bytes at offset 2666496
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 2674688
+4 KiB, 1 ops; 0.0010 sec (3.898 MiB/sec and 998.0040 ops/sec)
+linked 4096/4096 bytes at offset 2682880
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 2691072
+4 KiB, 1 ops; 0.0010 sec (3.614 MiB/sec and 925.0694 ops/sec)
+linked 4096/4096 bytes at offset 2699264
+4 KiB, 1 ops; 0.0010 sec (3.651 MiB/sec and 934.5794 ops/sec)
+linked 4096/4096 bytes at offset 2707456
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 2715648
+4 KiB, 1 ops; 0.0009 sec (4.061 MiB/sec and 1039.5010 ops/sec)
+linked 4096/4096 bytes at offset 2723840
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 2732032
+4 KiB, 1 ops; 0.0009 sec (4.196 MiB/sec and 1074.1139 ops/sec)
+linked 4096/4096 bytes at offset 2740224
+4 KiB, 1 ops; 0.0010 sec (3.710 MiB/sec and 949.6676 ops/sec)
+linked 4096/4096 bytes at offset 2748416
+4 KiB, 1 ops; 0.0009 sec (4.061 MiB/sec and 1039.5010 ops/sec)
+linked 4096/4096 bytes at offset 2756608
+4 KiB, 1 ops; 0.0009 sec (4.019 MiB/sec and 1028.8066 ops/sec)
+linked 4096/4096 bytes at offset 2764800
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 2772992
+4 KiB, 1 ops; 0.0009 sec (4.288 MiB/sec and 1097.6948 ops/sec)
+linked 4096/4096 bytes at offset 2781184
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 2789376
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 2797568
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 2805760
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 2813952
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 2822144
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 2830336
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 2838528
+4 KiB, 1 ops; 0.0009 sec (4.052 MiB/sec and 1037.3444 ops/sec)
+linked 4096/4096 bytes at offset 2846720
+4 KiB, 1 ops; 0.0009 sec (4.205 MiB/sec and 1076.4263 ops/sec)
+linked 4096/4096 bytes at offset 2854912
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 2863104
+4 KiB, 1 ops; 0.0009 sec (4.187 MiB/sec and 1071.8114 ops/sec)
+linked 4096/4096 bytes at offset 2871296
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 2879488
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 2887680
+4 KiB, 1 ops; 0.0009 sec (4.196 MiB/sec and 1074.1139 ops/sec)
+linked 4096/4096 bytes at offset 2895872
+4 KiB, 1 ops; 0.0009 sec (4.205 MiB/sec and 1076.4263 ops/sec)
+linked 4096/4096 bytes at offset 2904064
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 2912256
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 2920448
+4 KiB, 1 ops; 0.0009 sec (4.173 MiB/sec and 1068.3761 ops/sec)
+linked 4096/4096 bytes at offset 2928640
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 2936832
+4 KiB, 1 ops; 0.0010 sec (3.887 MiB/sec and 995.0249 ops/sec)
+linked 4096/4096 bytes at offset 2945024
+4 KiB, 1 ops; 0.0009 sec (3.918 MiB/sec and 1003.0090 ops/sec)
+linked 4096/4096 bytes at offset 2953216
+4 KiB, 1 ops; 0.0010 sec (3.841 MiB/sec and 983.2842 ops/sec)
+linked 4096/4096 bytes at offset 2961408
+4 KiB, 1 ops; 0.0010 sec (3.860 MiB/sec and 988.1423 ops/sec)
+linked 4096/4096 bytes at offset 2969600
+4 KiB, 1 ops; 0.0010 sec (3.577 MiB/sec and 915.7509 ops/sec)
+linked 4096/4096 bytes at offset 2977792
+4 KiB, 1 ops; 0.0009 sec (4.129 MiB/sec and 1057.0825 ops/sec)
+linked 4096/4096 bytes at offset 2985984
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 2994176
+4 KiB, 1 ops; 0.0010 sec (3.789 MiB/sec and 969.9321 ops/sec)
+linked 4096/4096 bytes at offset 3002368
+4 KiB, 1 ops; 0.0009 sec (4.164 MiB/sec and 1066.0981 ops/sec)
+linked 4096/4096 bytes at offset 3010560
+4 KiB, 1 ops; 0.0009 sec (4.147 MiB/sec and 1061.5711 ops/sec)
+linked 4096/4096 bytes at offset 3018752
+4 KiB, 1 ops; 0.0010 sec (3.883 MiB/sec and 994.0358 ops/sec)
+linked 4096/4096 bytes at offset 3026944
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 3035136
+4 KiB, 1 ops; 0.0009 sec (4.269 MiB/sec and 1092.8962 ops/sec)
+linked 4096/4096 bytes at offset 3043328
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 3051520
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 3059712
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 3067904
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 3076096
+4 KiB, 1 ops; 0.0009 sec (4.069 MiB/sec and 1041.6667 ops/sec)
+linked 4096/4096 bytes at offset 3084288
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 3092480
+4 KiB, 1 ops; 0.0009 sec (4.019 MiB/sec and 1028.8066 ops/sec)
+linked 4096/4096 bytes at offset 3100672
+4 KiB, 1 ops; 0.0009 sec (4.316 MiB/sec and 1104.9724 ops/sec)
+linked 4096/4096 bytes at offset 3108864
+4 KiB, 1 ops; 0.0009 sec (3.938 MiB/sec and 1008.0645 ops/sec)
+linked 4096/4096 bytes at offset 3117056
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 3125248
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 3133440
+4 KiB, 1 ops; 0.0009 sec (4.073 MiB/sec and 1042.7529 ops/sec)
+linked 4096/4096 bytes at offset 3141632
+4 KiB, 1 ops; 0.0010 sec (3.837 MiB/sec and 982.3183 ops/sec)
+linked 4096/4096 bytes at offset 3149824
+4 KiB, 1 ops; 0.0009 sec (4.090 MiB/sec and 1047.1204 ops/sec)
+linked 4096/4096 bytes at offset 3158016
+4 KiB, 1 ops; 0.0009 sec (4.040 MiB/sec and 1034.1262 ops/sec)
+linked 4096/4096 bytes at offset 3166208
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 3174400
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 3182592
+4 KiB, 1 ops; 0.0009 sec (4.182 MiB/sec and 1070.6638 ops/sec)
+linked 4096/4096 bytes at offset 3190784
+4 KiB, 1 ops; 0.0009 sec (4.283 MiB/sec and 1096.4912 ops/sec)
+linked 4096/4096 bytes at offset 3198976
+4 KiB, 1 ops; 0.0009 sec (4.048 MiB/sec and 1036.2694 ops/sec)
+linked 4096/4096 bytes at offset 3207168
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 3215360
+4 KiB, 1 ops; 0.0009 sec (4.069 MiB/sec and 1041.6667 ops/sec)
+linked 4096/4096 bytes at offset 3223552
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 3231744
+4 KiB, 1 ops; 0.0009 sec (4.160 MiB/sec and 1064.9627 ops/sec)
+linked 4096/4096 bytes at offset 3239936
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 3248128
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 3256320
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 3264512
+4 KiB, 1 ops; 0.0009 sec (4.205 MiB/sec and 1076.4263 ops/sec)
+linked 4096/4096 bytes at offset 3272704
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 3280896
+4 KiB, 1 ops; 0.0009 sec (4.228 MiB/sec and 1082.2511 ops/sec)
+linked 4096/4096 bytes at offset 3289088
+4 KiB, 1 ops; 0.0009 sec (4.065 MiB/sec and 1040.5827 ops/sec)
+linked 4096/4096 bytes at offset 3297280
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 3305472
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 3313664
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 3321856
+4 KiB, 1 ops; 0.0010 sec (3.868 MiB/sec and 990.0990 ops/sec)
+linked 4096/4096 bytes at offset 3330048
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 3338240
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 3346432
+4 KiB, 1 ops; 0.0010 sec (3.756 MiB/sec and 961.5385 ops/sec)
+linked 4096/4096 bytes at offset 3354624
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 3362816
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 3371008
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 3379200
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 3387392
+4 KiB, 1 ops; 0.0009 sec (4.116 MiB/sec and 1053.7408 ops/sec)
+linked 4096/4096 bytes at offset 3395584
+4 KiB, 1 ops; 0.0009 sec (3.942 MiB/sec and 1009.0817 ops/sec)
+linked 4096/4096 bytes at offset 3403776
+4 KiB, 1 ops; 0.0010 sec (3.752 MiB/sec and 960.6148 ops/sec)
+linked 4096/4096 bytes at offset 3411968
+4 KiB, 1 ops; 0.0010 sec (3.731 MiB/sec and 955.1098 ops/sec)
+linked 4096/4096 bytes at offset 3420160
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 3428352
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 3436544
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 3444736
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 3452928
+4 KiB, 1 ops; 0.0010 sec (3.661 MiB/sec and 937.2071 ops/sec)
+linked 4096/4096 bytes at offset 3461120
+4 KiB, 1 ops; 0.0010 sec (3.668 MiB/sec and 938.9671 ops/sec)
+linked 4096/4096 bytes at offset 3469312
+4 KiB, 1 ops; 0.0010 sec (3.699 MiB/sec and 946.9697 ops/sec)
+linked 4096/4096 bytes at offset 3477504
+4 KiB, 1 ops; 0.0010 sec (3.830 MiB/sec and 980.3922 ops/sec)
+linked 4096/4096 bytes at offset 3485696
+4 KiB, 1 ops; 0.0010 sec (3.675 MiB/sec and 940.7338 ops/sec)
+linked 4096/4096 bytes at offset 3493888
+4 KiB, 1 ops; 0.0010 sec (3.682 MiB/sec and 942.5071 ops/sec)
+linked 4096/4096 bytes at offset 3502080
+4 KiB, 1 ops; 0.0009 sec (3.914 MiB/sec and 1002.0040 ops/sec)
+linked 4096/4096 bytes at offset 3510272
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 3518464
+4 KiB, 1 ops; 0.0009 sec (4.090 MiB/sec and 1047.1204 ops/sec)
+linked 4096/4096 bytes at offset 3526656
+4 KiB, 1 ops; 0.0010 sec (3.713 MiB/sec and 950.5703 ops/sec)
+linked 4096/4096 bytes at offset 3534848
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 3543040
+4 KiB, 1 ops; 0.0009 sec (4.251 MiB/sec and 1088.1393 ops/sec)
+linked 4096/4096 bytes at offset 3551232
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 3559424
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 3567616
+4 KiB, 1 ops; 0.0010 sec (3.614 MiB/sec and 925.0694 ops/sec)
+linked 4096/4096 bytes at offset 3575808
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 3584000
+4 KiB, 1 ops; 0.0010 sec (3.837 MiB/sec and 982.3183 ops/sec)
+linked 4096/4096 bytes at offset 3592192
+4 KiB, 1 ops; 0.0009 sec (4.069 MiB/sec and 1041.6667 ops/sec)
+linked 4096/4096 bytes at offset 3600384
+4 KiB, 1 ops; 0.0008 sec (4.394 MiB/sec and 1124.8594 ops/sec)
+linked 4096/4096 bytes at offset 3608576
+4 KiB, 1 ops; 0.0009 sec (4.116 MiB/sec and 1053.7408 ops/sec)
+linked 4096/4096 bytes at offset 3616768
+4 KiB, 1 ops; 0.0009 sec (3.926 MiB/sec and 1005.0251 ops/sec)
+linked 4096/4096 bytes at offset 3624960
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 3633152
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 3641344
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 3649536
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 3657728
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 3665920
+4 KiB, 1 ops; 0.0009 sec (4.209 MiB/sec and 1077.5862 ops/sec)
+linked 4096/4096 bytes at offset 3674112
+4 KiB, 1 ops; 0.0009 sec (4.288 MiB/sec and 1097.6948 ops/sec)
+linked 4096/4096 bytes at offset 3682304
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 3690496
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 3698688
+4 KiB, 1 ops; 0.0010 sec (3.875 MiB/sec and 992.0635 ops/sec)
+linked 4096/4096 bytes at offset 3706880
+4 KiB, 1 ops; 0.0010 sec (3.796 MiB/sec and 971.8173 ops/sec)
+linked 4096/4096 bytes at offset 3715072
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 3723264
+4 KiB, 1 ops; 0.0009 sec (4.048 MiB/sec and 1036.2694 ops/sec)
+linked 4096/4096 bytes at offset 3731456
+4 KiB, 1 ops; 0.0009 sec (4.073 MiB/sec and 1042.7529 ops/sec)
+linked 4096/4096 bytes at offset 3739648
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 3747840
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 3756032
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 3764224
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 3772416
+4 KiB, 1 ops; 0.0009 sec (4.160 MiB/sec and 1064.9627 ops/sec)
+linked 4096/4096 bytes at offset 3780608
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 3788800
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 3796992
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 3805184
+4 KiB, 1 ops; 0.0010 sec (3.703 MiB/sec and 947.8673 ops/sec)
+linked 4096/4096 bytes at offset 3813376
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 3821568
+4 KiB, 1 ops; 0.0010 sec (3.875 MiB/sec and 992.0635 ops/sec)
+linked 4096/4096 bytes at offset 3829760
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 3837952
+4 KiB, 1 ops; 0.0008 sec (4.485 MiB/sec and 1148.1056 ops/sec)
+linked 4096/4096 bytes at offset 3846144
+4 KiB, 1 ops; 0.0008 sec (4.394 MiB/sec and 1124.8594 ops/sec)
+linked 4096/4096 bytes at offset 3854336
+4 KiB, 1 ops; 0.0009 sec (4.142 MiB/sec and 1060.4454 ops/sec)
+linked 4096/4096 bytes at offset 3862528
+4 KiB, 1 ops; 0.0009 sec (4.164 MiB/sec and 1066.0981 ops/sec)
+linked 4096/4096 bytes at offset 3870720
+4 KiB, 1 ops; 0.0009 sec (4.178 MiB/sec and 1069.5187 ops/sec)
+linked 4096/4096 bytes at offset 3878912
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 3887104
+4 KiB, 1 ops; 0.0009 sec (4.156 MiB/sec and 1063.8298 ops/sec)
+linked 4096/4096 bytes at offset 3895296
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 3903488
+4 KiB, 1 ops; 0.0010 sec (3.818 MiB/sec and 977.5171 ops/sec)
+linked 4096/4096 bytes at offset 3911680
+4 KiB, 1 ops; 0.0010 sec (3.724 MiB/sec and 953.2888 ops/sec)
+linked 4096/4096 bytes at offset 3919872
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 3928064
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 3936256
+4 KiB, 1 ops; 0.0010 sec (3.852 MiB/sec and 986.1933 ops/sec)
+linked 4096/4096 bytes at offset 3944448
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 3952640
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 3960832
+4 KiB, 1 ops; 0.0010 sec (3.891 MiB/sec and 996.0159 ops/sec)
+linked 4096/4096 bytes at offset 3969024
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 3977216
+4 KiB, 1 ops; 0.0009 sec (4.011 MiB/sec and 1026.6940 ops/sec)
+linked 4096/4096 bytes at offset 3985408
+4 KiB, 1 ops; 0.0009 sec (3.998 MiB/sec and 1023.5415 ops/sec)
+linked 4096/4096 bytes at offset 3993600
+4 KiB, 1 ops; 0.0010 sec (3.830 MiB/sec and 980.3922 ops/sec)
+linked 4096/4096 bytes at offset 4001792
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 4009984
+4 KiB, 1 ops; 0.0010 sec (3.818 MiB/sec and 977.5171 ops/sec)
+linked 4096/4096 bytes at offset 4018176
+4 KiB, 1 ops; 0.0009 sec (4.040 MiB/sec and 1034.1262 ops/sec)
+linked 4096/4096 bytes at offset 4026368
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 4034560
+4 KiB, 1 ops; 0.0010 sec (3.898 MiB/sec and 998.0040 ops/sec)
+linked 4096/4096 bytes at offset 4042752
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 4050944
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 4059136
+4 KiB, 1 ops; 0.0009 sec (4.196 MiB/sec and 1074.1139 ops/sec)
+linked 4096/4096 bytes at offset 4067328
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 4075520
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 4083712
+4 KiB, 1 ops; 0.0009 sec (4.191 MiB/sec and 1072.9614 ops/sec)
+linked 4096/4096 bytes at offset 4091904
+4 KiB, 1 ops; 0.0009 sec (4.116 MiB/sec and 1053.7408 ops/sec)
+linked 4096/4096 bytes at offset 4100096
+4 KiB, 1 ops; 0.0008 sec (4.374 MiB/sec and 1119.8208 ops/sec)
+linked 4096/4096 bytes at offset 4108288
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 976.5625 ops/sec)
+linked 4096/4096 bytes at offset 4116480
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 4124672
+4 KiB, 1 ops; 0.0009 sec (4.293 MiB/sec and 1098.9011 ops/sec)
+linked 4096/4096 bytes at offset 4132864
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 4141056
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 4149248
+4 KiB, 1 ops; 0.0009 sec (4.200 MiB/sec and 1075.2688 ops/sec)
+linked 4096/4096 bytes at offset 4157440
+4 KiB, 1 ops; 0.0009 sec (4.073 MiB/sec and 1042.7529 ops/sec)
+linked 4096/4096 bytes at offset 4165632
+4 KiB, 1 ops; 0.0009 sec (4.112 MiB/sec and 1052.6316 ops/sec)
+linked 4096/4096 bytes at offset 4173824
+4 KiB, 1 ops; 0.0010 sec (3.837 MiB/sec and 982.3183 ops/sec)
+linked 4096/4096 bytes at offset 4182016
+4 KiB, 1 ops; 0.0010 sec (3.879 MiB/sec and 993.0487 ops/sec)
+linked 4096/4096 bytes at offset 4190208
+4 KiB, 1 ops; 0.0010 sec (3.800 MiB/sec and 972.7626 ops/sec)
+linked 4096/4096 bytes at offset 4198400
+4 KiB, 1 ops; 0.0009 sec (4.103 MiB/sec and 1050.4202 ops/sec)
+linked 4096/4096 bytes at offset 4206592
+4 KiB, 1 ops; 0.0009 sec (4.288 MiB/sec and 1097.6948 ops/sec)
+linked 4096/4096 bytes at offset 4214784
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 4222976
+4 KiB, 1 ops; 0.0009 sec (4.255 MiB/sec and 1089.3246 ops/sec)
+linked 4096/4096 bytes at offset 4231168
+4 KiB, 1 ops; 0.0009 sec (3.982 MiB/sec and 1019.3680 ops/sec)
+linked 4096/4096 bytes at offset 4239360
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 4247552
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 4255744
+4 KiB, 1 ops; 0.0009 sec (4.251 MiB/sec and 1088.1393 ops/sec)
+linked 4096/4096 bytes at offset 4263936
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 4272128
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 4280320
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 4288512
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 4296704
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 4304896
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 4313088
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 4321280
+4 KiB, 1 ops; 0.0009 sec (3.994 MiB/sec and 1022.4949 ops/sec)
+linked 4096/4096 bytes at offset 4329472
+4 KiB, 1 ops; 0.0010 sec (3.727 MiB/sec and 954.1985 ops/sec)
+linked 4096/4096 bytes at offset 4337664
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 4345856
+4 KiB, 1 ops; 0.0010 sec (3.789 MiB/sec and 969.9321 ops/sec)
+linked 4096/4096 bytes at offset 4354048
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 4362240
+4 KiB, 1 ops; 0.0009 sec (4.040 MiB/sec and 1034.1262 ops/sec)
+linked 4096/4096 bytes at offset 4370432
+4 KiB, 1 ops; 0.0009 sec (4.090 MiB/sec and 1047.1204 ops/sec)
+linked 4096/4096 bytes at offset 4378624
+4 KiB, 1 ops; 0.0009 sec (3.974 MiB/sec and 1017.2940 ops/sec)
+linked 4096/4096 bytes at offset 4386816
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 4395008
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 4403200
+4 KiB, 1 ops; 0.0009 sec (4.069 MiB/sec and 1041.6667 ops/sec)
+linked 4096/4096 bytes at offset 4411392
+4 KiB, 1 ops; 0.0009 sec (4.274 MiB/sec and 1094.0919 ops/sec)
+linked 4096/4096 bytes at offset 4419584
+4 KiB, 1 ops; 0.0009 sec (3.962 MiB/sec and 1014.1988 ops/sec)
+linked 4096/4096 bytes at offset 4427776
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 4435968
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 4444160
+4 KiB, 1 ops; 0.0009 sec (4.228 MiB/sec and 1082.2511 ops/sec)
+linked 4096/4096 bytes at offset 4452352
+4 KiB, 1 ops; 0.0010 sec (3.818 MiB/sec and 977.5171 ops/sec)
+linked 4096/4096 bytes at offset 4460544
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 4468736
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 4476928
+4 KiB, 1 ops; 0.0010 sec (3.763 MiB/sec and 963.3911 ops/sec)
+linked 4096/4096 bytes at offset 4485120
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 4493312
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 4501504
+4 KiB, 1 ops; 0.0010 sec (3.868 MiB/sec and 990.0990 ops/sec)
+linked 4096/4096 bytes at offset 4509696
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 4517888
+4 KiB, 1 ops; 0.0009 sec (4.061 MiB/sec and 1039.5010 ops/sec)
+linked 4096/4096 bytes at offset 4526080
+4 KiB, 1 ops; 0.0010 sec (3.774 MiB/sec and 966.1836 ops/sec)
+linked 4096/4096 bytes at offset 4534272
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 4542464
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 4550656
+4 KiB, 1 ops; 0.0009 sec (4.164 MiB/sec and 1066.0981 ops/sec)
+linked 4096/4096 bytes at offset 4558848
+4 KiB, 1 ops; 0.0010 sec (3.875 MiB/sec and 992.0635 ops/sec)
+linked 4096/4096 bytes at offset 4567040
+4 KiB, 1 ops; 0.0009 sec (4.196 MiB/sec and 1074.1139 ops/sec)
+linked 4096/4096 bytes at offset 4575232
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 4583424
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 4591616
+4 KiB, 1 ops; 0.0008 sec (4.345 MiB/sec and 1112.3471 ops/sec)
+linked 4096/4096 bytes at offset 4599808
+4 KiB, 1 ops; 0.0009 sec (4.078 MiB/sec and 1043.8413 ops/sec)
+linked 4096/4096 bytes at offset 4608000
+4 KiB, 1 ops; 0.0010 sec (3.856 MiB/sec and 987.1668 ops/sec)
+linked 4096/4096 bytes at offset 4616192
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 4624384
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 4632576
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 4640768
+4 KiB, 1 ops; 0.0010 sec (3.713 MiB/sec and 950.5703 ops/sec)
+linked 4096/4096 bytes at offset 4648960
+4 KiB, 1 ops; 0.0009 sec (4.251 MiB/sec and 1088.1393 ops/sec)
+linked 4096/4096 bytes at offset 4657152
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 4665344
+4 KiB, 1 ops; 0.0009 sec (3.934 MiB/sec and 1007.0493 ops/sec)
+linked 4096/4096 bytes at offset 4673536
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 4681728
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 4689920
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 4698112
+4 KiB, 1 ops; 0.0009 sec (4.156 MiB/sec and 1063.8298 ops/sec)
+linked 4096/4096 bytes at offset 4706304
+4 KiB, 1 ops; 0.0010 sec (3.671 MiB/sec and 939.8496 ops/sec)
+linked 4096/4096 bytes at offset 4714496
+4 KiB, 1 ops; 0.0009 sec (4.147 MiB/sec and 1061.5711 ops/sec)
+linked 4096/4096 bytes at offset 4722688
+4 KiB, 1 ops; 0.0010 sec (3.774 MiB/sec and 966.1836 ops/sec)
+linked 4096/4096 bytes at offset 4730880
+4 KiB, 1 ops; 0.0009 sec (3.978 MiB/sec and 1018.3299 ops/sec)
+linked 4096/4096 bytes at offset 4739072
+4 KiB, 1 ops; 0.0009 sec (4.108 MiB/sec and 1051.5247 ops/sec)
+linked 4096/4096 bytes at offset 4747264
+4 KiB, 1 ops; 0.0009 sec (3.946 MiB/sec and 1010.1010 ops/sec)
+linked 4096/4096 bytes at offset 4755456
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 4763648
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 4771840
+4 KiB, 1 ops; 0.0009 sec (3.958 MiB/sec and 1013.1712 ops/sec)
+linked 4096/4096 bytes at offset 4780032
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 4788224
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 4796416
+4 KiB, 1 ops; 0.0009 sec (4.112 MiB/sec and 1052.6316 ops/sec)
+linked 4096/4096 bytes at offset 4804608
+4 KiB, 1 ops; 0.0009 sec (4.269 MiB/sec and 1092.8962 ops/sec)
+linked 4096/4096 bytes at offset 4812800
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 4820992
+4 KiB, 1 ops; 0.0009 sec (4.241 MiB/sec and 1085.7763 ops/sec)
+linked 4096/4096 bytes at offset 4829184
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 4837376
+4 KiB, 1 ops; 0.0010 sec (3.760 MiB/sec and 962.4639 ops/sec)
+linked 4096/4096 bytes at offset 4845568
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 4853760
+4 KiB, 1 ops; 0.0009 sec (4.015 MiB/sec and 1027.7492 ops/sec)
+linked 4096/4096 bytes at offset 4861952
+4 KiB, 1 ops; 0.0010 sec (3.871 MiB/sec and 991.0803 ops/sec)
+linked 4096/4096 bytes at offset 4870144
+4 KiB, 1 ops; 0.0009 sec (4.205 MiB/sec and 1076.4263 ops/sec)
+linked 4096/4096 bytes at offset 4878336
+4 KiB, 1 ops; 0.0010 sec (3.887 MiB/sec and 995.0249 ops/sec)
+linked 4096/4096 bytes at offset 4886528
+4 KiB, 1 ops; 0.0009 sec (3.942 MiB/sec and 1009.0817 ops/sec)
+linked 4096/4096 bytes at offset 4894720
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 4902912
+4 KiB, 1 ops; 0.0009 sec (4.006 MiB/sec and 1025.6410 ops/sec)
+linked 4096/4096 bytes at offset 4911104
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 4919296
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 4927488
+4 KiB, 1 ops; 0.0010 sec (3.664 MiB/sec and 938.0863 ops/sec)
+linked 4096/4096 bytes at offset 4935680
+4 KiB, 1 ops; 0.0010 sec (3.891 MiB/sec and 996.0159 ops/sec)
+linked 4096/4096 bytes at offset 4943872
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 4952064
+4 KiB, 1 ops; 0.0009 sec (4.112 MiB/sec and 1052.6316 ops/sec)
+linked 4096/4096 bytes at offset 4960256
+4 KiB, 1 ops; 0.0010 sec (3.807 MiB/sec and 974.6589 ops/sec)
+linked 4096/4096 bytes at offset 4968448
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 4976640
+4 KiB, 1 ops; 0.0010 sec (3.763 MiB/sec and 963.3911 ops/sec)
+linked 4096/4096 bytes at offset 4984832
+4 KiB, 1 ops; 0.0009 sec (4.187 MiB/sec and 1071.8114 ops/sec)
+linked 4096/4096 bytes at offset 4993024
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 5001216
+4 KiB, 1 ops; 0.0009 sec (4.002 MiB/sec and 1024.5902 ops/sec)
+linked 4096/4096 bytes at offset 5009408
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 5017600
+4 KiB, 1 ops; 0.0009 sec (4.031 MiB/sec and 1031.9917 ops/sec)
+linked 4096/4096 bytes at offset 5025792
+4 KiB, 1 ops; 0.0009 sec (4.173 MiB/sec and 1068.3761 ops/sec)
+linked 4096/4096 bytes at offset 5033984
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 5042176
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 5050368
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 5058560
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 5066752
+4 KiB, 1 ops; 0.0009 sec (3.954 MiB/sec and 1012.1457 ops/sec)
+linked 4096/4096 bytes at offset 5074944
+4 KiB, 1 ops; 0.0009 sec (3.966 MiB/sec and 1015.2284 ops/sec)
+linked 4096/4096 bytes at offset 5083136
+4 KiB, 1 ops; 0.0009 sec (4.218 MiB/sec and 1079.9136 ops/sec)
+linked 4096/4096 bytes at offset 5091328
+4 KiB, 1 ops; 0.0009 sec (4.260 MiB/sec and 1090.5125 ops/sec)
+linked 4096/4096 bytes at offset 5099520
+4 KiB, 1 ops; 0.0009 sec (4.044 MiB/sec and 1035.1967 ops/sec)
+linked 4096/4096 bytes at offset 5107712
+4 KiB, 1 ops; 0.0008 sec (4.355 MiB/sec and 1114.8272 ops/sec)
+linked 4096/4096 bytes at offset 5115904
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 5124096
+4 KiB, 1 ops; 0.0009 sec (4.056 MiB/sec and 1038.4216 ops/sec)
+linked 4096/4096 bytes at offset 5132288
+4 KiB, 1 ops; 0.0009 sec (4.121 MiB/sec and 1054.8523 ops/sec)
+linked 4096/4096 bytes at offset 5140480
+4 KiB, 1 ops; 0.0009 sec (4.090 MiB/sec and 1047.1204 ops/sec)
+linked 4096/4096 bytes at offset 5148672
+4 KiB, 1 ops; 0.0010 sec (3.887 MiB/sec and 995.0249 ops/sec)
+linked 4096/4096 bytes at offset 5156864
+4 KiB, 1 ops; 0.0009 sec (4.288 MiB/sec and 1097.6948 ops/sec)
+linked 4096/4096 bytes at offset 5165056
+4 KiB, 1 ops; 0.0009 sec (4.241 MiB/sec and 1085.7763 ops/sec)
+linked 4096/4096 bytes at offset 5173248
+4 KiB, 1 ops; 0.0009 sec (3.970 MiB/sec and 1016.2602 ops/sec)
+linked 4096/4096 bytes at offset 5181440
+4 KiB, 1 ops; 0.0009 sec (4.142 MiB/sec and 1060.4454 ops/sec)
+linked 4096/4096 bytes at offset 5189632
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 5197824
+4 KiB, 1 ops; 0.0009 sec (4.082 MiB/sec and 1044.9321 ops/sec)
+linked 4096/4096 bytes at offset 5206016
+4 KiB, 1 ops; 0.0009 sec (4.251 MiB/sec and 1088.1393 ops/sec)
+linked 4096/4096 bytes at offset 5214208
+4 KiB, 1 ops; 0.0010 sec (3.845 MiB/sec and 984.2520 ops/sec)
+linked 4096/4096 bytes at offset 5222400
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 5230592
+4 KiB, 1 ops; 0.0009 sec (4.035 MiB/sec and 1033.0579 ops/sec)
+linked 4096/4096 bytes at offset 5238784
+4 KiB, 1 ops; 0.0010 sec (3.895 MiB/sec and 997.0090 ops/sec)
+linked 4096/4096 bytes at offset 5246976
+4 KiB, 1 ops; 0.0009 sec (4.214 MiB/sec and 1078.7487 ops/sec)
+linked 4096/4096 bytes at offset 5255168
+4 KiB, 1 ops; 0.0009 sec (3.930 MiB/sec and 1006.0362 ops/sec)
+linked 4096/4096 bytes at offset 5263360
+4 KiB, 1 ops; 0.0010 sec (3.864 MiB/sec and 989.1197 ops/sec)
+linked 4096/4096 bytes at offset 5271552
+4 KiB, 1 ops; 0.0009 sec (4.255 MiB/sec and 1089.3246 ops/sec)
+linked 4096/4096 bytes at offset 5279744
+4 KiB, 1 ops; 0.0010 sec (3.895 MiB/sec and 997.0090 ops/sec)
+linked 4096/4096 bytes at offset 5287936
+4 KiB, 1 ops; 0.0009 sec (4.232 MiB/sec and 1083.4236 ops/sec)
+linked 4096/4096 bytes at offset 5296128
+4 KiB, 1 ops; 0.0010 sec (3.849 MiB/sec and 985.2217 ops/sec)
+linked 4096/4096 bytes at offset 5304320
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 5312512
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 5320704
+4 KiB, 1 ops; 0.0009 sec (4.061 MiB/sec and 1039.5010 ops/sec)
+linked 4096/4096 bytes at offset 5328896
+4 KiB, 1 ops; 0.0009 sec (3.950 MiB/sec and 1011.1223 ops/sec)
+linked 4096/4096 bytes at offset 5337088
+4 KiB, 1 ops; 0.0010 sec (3.778 MiB/sec and 967.1180 ops/sec)
+linked 4096/4096 bytes at offset 5345280
+4 KiB, 1 ops; 0.0010 sec (3.860 MiB/sec and 988.1423 ops/sec)
+linked 4096/4096 bytes at offset 5353472
+4 KiB, 1 ops; 0.0010 sec (3.792 MiB/sec and 970.8738 ops/sec)
+linked 4096/4096 bytes at offset 5361664
+4 KiB, 1 ops; 0.0009 sec (4.151 MiB/sec and 1062.6993 ops/sec)
+linked 4096/4096 bytes at offset 5369856
+4 KiB, 1 ops; 0.0010 sec (3.804 MiB/sec and 973.7098 ops/sec)
+linked 4096/4096 bytes at offset 5378048
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 5386240
+4 KiB, 1 ops; 0.0009 sec (3.990 MiB/sec and 1021.4505 ops/sec)
+linked 4096/4096 bytes at offset 5394432
+4 KiB, 1 ops; 0.0009 sec (4.027 MiB/sec and 1030.9278 ops/sec)
+linked 4096/4096 bytes at offset 5402624
+4 KiB, 1 ops; 0.0010 sec (3.807 MiB/sec and 974.6589 ops/sec)
+linked 4096/4096 bytes at offset 5410816
+4 KiB, 1 ops; 0.0009 sec (3.910 MiB/sec and 1001.0010 ops/sec)
+linked 4096/4096 bytes at offset 5419008
+4 KiB, 1 ops; 0.0009 sec (3.922 MiB/sec and 1004.0161 ops/sec)
+linked 4096/4096 bytes at offset 5427200
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 5435392
+4 KiB, 1 ops; 0.0010 sec (3.774 MiB/sec and 966.1836 ops/sec)
+linked 4096/4096 bytes at offset 5443584
+4 KiB, 1 ops; 0.0009 sec (4.129 MiB/sec and 1057.0825 ops/sec)
+linked 4096/4096 bytes at offset 5451776
+4 KiB, 1 ops; 0.0009 sec (4.205 MiB/sec and 1076.4263 ops/sec)
+linked 4096/4096 bytes at offset 5459968
+4 KiB, 1 ops; 0.0009 sec (4.134 MiB/sec and 1058.2011 ops/sec)
+linked 4096/4096 bytes at offset 5468160
+4 KiB, 1 ops; 0.0009 sec (4.125 MiB/sec and 1055.9662 ops/sec)
+linked 4096/4096 bytes at offset 5476352
+4 KiB, 1 ops; 0.0009 sec (4.312 MiB/sec and 1103.7528 ops/sec)
+linked 4096/4096 bytes at offset 5484544
+4 KiB, 1 ops; 0.0010 sec (3.895 MiB/sec and 997.0090 ops/sec)
+linked 4096/4096 bytes at offset 5492736
+4 KiB, 1 ops; 0.0009 sec (4.023 MiB/sec and 1029.8661 ops/sec)
+linked 4096/4096 bytes at offset 5500928
+4 KiB, 1 ops; 0.0009 sec (4.138 MiB/sec and 1059.3220 ops/sec)
+linked 4096/4096 bytes at offset 5509120
+4 KiB, 1 ops; 0.0010 sec (3.902 MiB/sec and 999.0010 ops/sec)
+linked 4096/4096 bytes at offset 5517312
+4 KiB, 1 ops; 0.0009 sec (4.274 MiB/sec and 1094.0919 ops/sec)
+linked 4096/4096 bytes at offset 5525504
+4 KiB, 1 ops; 0.0010 sec (4 MiB/sec and 1000.0000 ops/sec)
+linked 4096/4096 bytes at offset 5533696
+4 KiB, 1 ops; 0.0009 sec (3.946 MiB/sec and 1010.1010 ops/sec)
+linked 4096/4096 bytes at offset 5541888
+4 KiB, 1 ops; 0.0009 sec (4.209 MiB/sec and 1077.5862 ops/sec)
+linked 4096/4096 bytes at offset 5550080
+4 KiB, 1 ops; 0.0009 sec (4.178 MiB/sec and 1069.5187 ops/sec)
+linked 4096/4096 bytes at offset 5558272
+4 KiB, 1 ops; 0.0009 sec (3.986 MiB/sec and 1020.4082 ops/sec)
+linked 4096/4096 bytes at offset 5566464
+4 KiB, 1 ops; 0.0009 sec (4.173 MiB/sec and 1068.3761 ops/sec)
+linked 4096/4096 bytes at offset 5574656
+4 KiB, 1 ops; 0.0010 sec (3.891 MiB/sec and 996.0159 ops/sec)
+linked 4096/4096 bytes at offset 5582848
+4 KiB, 1 ops; 0.0009 sec (4.196 MiB/sec and 1074.1139 ops/sec)
+echo '1' 2>&1 > /sys/fs/xfs/loop8/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/loop8/error/metadata/EIO/retry_timeout_seconds
+mount -o nosuid,nodev /dev/loop8 <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch failed
+umount: /dev/loop8: not mounted.
+umount: /dev/loop8: not mounted.
+umount: /dev/loop8: not mounted.
+umount: /dev/ublkb1: not mounted.
+umount: /dev/ublkb0: not mounted.
+umount: /dev/ublkb1: not mounted.

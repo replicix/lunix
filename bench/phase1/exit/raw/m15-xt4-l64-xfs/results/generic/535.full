@@ -1,0 +1,22 @@
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+Test chmod <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testfile
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+Test chmod <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/testdir
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/dm-0/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/dm-0/error/metadata/EIO/retry_timeout_seconds
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch: not mounted.
+umount: /dev/ublkb1: not mounted.

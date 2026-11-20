@@ -1,0 +1,2 @@
+{"cell":"tamper/c64k/map","status":"pass","t":"2026-11-20T00:35:16Z","variant":"map","chunk":"65536","fsck_exit":"2","fsck_codes":"extent_auth,map_node_auth,seg_hash","attach_refused":"no","read_errors":"2048","mismatches":"0"}
+{"cell":"tamper/c16k/map","status":"pass","t":"2026-11-20T00:35:41Z","variant":"map","chunk":"16384","fsck_exit":"2","fsck_codes":"extent_auth,map_node_auth,seg_hash","attach_refused":"no","read_errors":"2048","mismatches":"0"}

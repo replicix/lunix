@@ -1,0 +1,17 @@
+lunix-fsck: volume 9b799220-914c-4db2-833f-184b094b49b6 (integrity)
+warning  checkpoint                 state/checkpoint: the newest slot describes commit 16 above the tip: mount ignores its lane tails (D17); repair rewrites it
+warning  orphan                     segments/0000000000000060.seg: no retained commit names it, no retained root references it and the condemned list does not name it
+warning  orphan                     map/0000000000000061: no retained commit names it, no retained root reaches it and the condemned list does not name it
+note     gc_dry_run                 gc: a pass would condemn 0 segments and delete 0 segments, 0 packs, 9 index runs and 13 commits (499860 bytes), and compact 0 segments (0 live bytes)
+error    repair_refused             --truncate-tip: the chain below the previous commit does not verify
+chunks: 16128 of 65536 mapped, 49408 holes (75.4% hole), 16128 distinct; dedup 1.000, compression 1.000
+bytes: segments 1075446999 map 806210 commits 4480 index 2087424 journal 541065216 other 9433
+checked: 15 commits, 65 segments, 16 packs, 35 map nodes, 16447 extents, 16 journal records
+journal: 16 records and 1 marks to replay, flushed watermark 1024
+not covered by this run:
+  journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)
+  volume.json and state/device: content that still parses (no checksum)
+  state/checkpoint: a hint; damage is a warning, never an error
+  cache/: not looked at
+  extents: tags and ids are not opened without --deep (the extent region is covered whole by seg_hash)
+result: errors

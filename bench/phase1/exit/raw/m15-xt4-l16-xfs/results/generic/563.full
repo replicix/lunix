@@ -1,0 +1,24 @@
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0034 sec (4.590 GiB/sec and 1203290.2468 ops/sec)
+read 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0712 sec (224.697 MiB/sec and 57522.4346 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0019 sec (8.017 GiB/sec and 2101590.5593 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0019 sec (8.155 GiB/sec and 2137787.0564 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0033 sec (4.691 GiB/sec and 1229660.7625 ops/sec)
+read 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0013 sec (11.241 GiB/sec and 2946762.5899 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0018 sec (8.294 GiB/sec and 2174097.6645 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0021 sec (7.174 GiB/sec and 1880624.4261 ops/sec)
+read 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0714 sec (223.826 MiB/sec and 57299.5356 ops/sec)
+read 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0010 sec (15.578 GiB/sec and 4083748.7537 ops/sec)
+wrote 16777216/16777216 bytes at offset 0
+16 MiB, 4096 ops; 0.0018 sec (8.419 GiB/sec and 2206896.5517 ops/sec)
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch: not mounted.
+umount: /dev/ublkb1: not mounted.

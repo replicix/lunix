@@ -1,0 +1,91 @@
+xfsinvutil  -M <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch "11/19/2026 22:25:05" -F
+Processing file /var/lib/xfsdump/inventory/fstab
+   Found entry for <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+     Match on hostname and path
+      processing index file 
+       /var/lib/xfsdump/inventory/2382c22b-e368-4409-bd91-a2ef06ac2421.InvIndex
+         Checking access for
+          /var/lib/xfsdump/inventory/105eca2f-9916-4125-8877-508c22411757.StObj
+            Session 0: <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch Thu Nov 19 22:24:59 2026
+-------------------------------------------------
+Pruning this matching entry:
+UUID		:	1e68b700-880e-4907-ab67-2d0ff614226b
+MOUNT POINT	:	<host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+DEV PATH	:	<host>:/dev/ublkb1
+LABEL		:	session.0
+TIME OF DUMP	:	Thu Nov 19 22:24:59 2026
+-------------------------------------------------
+
+            Session 1: <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch Thu Nov 19 22:25:01 2026
+-------------------------------------------------
+Pruning this matching entry:
+UUID		:	d78c7120-8e78-4679-a8e2-4dd57964d0de
+MOUNT POINT	:	<host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+DEV PATH	:	<host>:/dev/ublkb1
+LABEL		:	session.1
+TIME OF DUMP	:	Thu Nov 19 22:25:01 2026
+-------------------------------------------------
+
+            Session 2: <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch Thu Nov 19 22:25:03 2026
+-------------------------------------------------
+Pruning this matching entry:
+UUID		:	9bdbab9c-05cb-494d-a527-5f8c0b83e6f9
+MOUNT POINT	:	<host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+DEV PATH	:	<host>:/dev/ublkb1
+LABEL		:	session.2
+TIME OF DUMP	:	Thu Nov 19 22:25:03 2026
+-------------------------------------------------
+
+            Session 3: <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch Thu Nov 19 22:25:07 2026
+            Session 4: <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch Thu Nov 19 22:25:09 2026
+file system 0:
+	fs id:		2382c22b-e368-4409-bd91-a2ef06ac2421
+	session 0:
+		mount point:	<host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+		device:		<host>:/dev/ublkb1
+		time:		Thu Nov 19 22:25:07 2026
+		session label:	"session.3"
+		session id:	2acdf6f9-91aa-4e4a-b21a-05da3064cdda
+		level:		0
+		resumed:	NO
+		subtree:	NO
+		streams:	1
+		stream 0:
+			pathname:	<scratch>/m15-xt4-l64-xfs/tmp/780410.dumpfile
+			start:		ino 0 offset 0
+			end:		ino 1 offset 0
+			interrupted:	NO
+			media files:	1
+			media file 0:
+				mfile index:	0
+				mfile type:	data
+				mfile size:	21016
+				mfile start:	ino 0 offset 0
+				mfile end:	ino 1 offset 0
+				media label:	"stress_tape_media"
+				media id:	8f4ccc40-da97-4980-aed4-c8cae89f18ba
+	session 1:
+		mount point:	<host>:<scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch
+		device:		<host>:/dev/ublkb1
+		time:		Thu Nov 19 22:25:09 2026
+		session label:	"session.4"
+		session id:	266d13d0-6ffb-436c-a146-353f67d25b23
+		level:		0
+		resumed:	NO
+		subtree:	NO
+		streams:	1
+		stream 0:
+			pathname:	<scratch>/m15-xt4-l64-xfs/tmp/780410.dumpfile
+			start:		ino 0 offset 0
+			end:		ino 1 offset 0
+			interrupted:	NO
+			media files:	1
+			media file 0:
+				mfile index:	0
+				mfile type:	data
+				mfile size:	21016
+				mfile start:	ino 0 offset 0
+				mfile end:	ino 1 offset 0
+				media label:	"stress_tape_media"
+				media id:	b78676c8-9a76-47fd-82a4-b2b4966bb27b
+/usr/sbin/xfsdump: Dump Status: SUCCESS

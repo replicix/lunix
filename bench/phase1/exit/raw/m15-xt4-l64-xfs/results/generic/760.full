@@ -1,0 +1,43 @@
+<m15>/xfstests/ltp/fsx -N 10000 -l 500000 -r 4096 -t 4096 -w 4096 -Z -R -W -h <scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/junk
+mapped writes DISABLED
+Seed set to 1
+main: filesystem does not support fallocate mode FALLOC_FL_WRITE_ZEROES, disabling!
+main: filesystem does not support exchange range, disabling!
+fallocating to largest ever: 0x76221
+cloning to largest ever: 0x79000
+fallocating to largest ever: 0x7a120
+skipping zero length punch hole
+skipping insert range behind EOF
+skipping collapse range behind EOF
+All 10000 operations completed A-OK!
+<m15>/xfstests/ltp/fsx -N 10000 -o 8192 -l 500000 -r 4096 -t 4096 -w 4096 -Z -R -W -h <scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/junk
+mapped writes DISABLED
+Seed set to 1
+main: filesystem does not support fallocate mode FALLOC_FL_WRITE_ZEROES, disabling!
+main: filesystem does not support exchange range, disabling!
+fallocating to largest ever: 0x72d88
+fallocating to largest ever: 0x73a46
+fallocating to largest ever: 0x781b4
+skipping zero length punch hole
+truncating to largest ever: 0x79000
+zero_range to largest ever: 0x79215
+cloning to largest ever: 0x7a000
+skipping zero length punch hole
+skipping insert range behind EOF
+skipping insert range behind EOF
+skipping zero length punch hole
+skipping collapse range behind EOF
+zero_range to largest ever: 0x7a120
+All 10000 operations completed A-OK!
+<m15>/xfstests/ltp/fsx -N 10000 -o 128000 -l 500000 -r 4096 -t 4096 -w 4096 -Z -R -W -h <scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/junk
+mapped writes DISABLED
+Seed set to 1
+main: filesystem does not support fallocate mode FALLOC_FL_WRITE_ZEROES, disabling!
+main: filesystem does not support exchange range, disabling!
+fallocating to largest ever: 0x75ba5
+zero_range to largest ever: 0x7a120
+skipping zero length punch hole
+skipping insert range behind EOF
+skipping collapse range behind EOF
+All 10000 operations completed A-OK!
+umount: /dev/ublkb1: not mounted.

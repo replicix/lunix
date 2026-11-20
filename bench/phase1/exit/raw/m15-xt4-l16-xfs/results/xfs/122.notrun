@@ -1,0 +1,1 @@
+struct size checks moved to libxfs/xfs_ondisk.h

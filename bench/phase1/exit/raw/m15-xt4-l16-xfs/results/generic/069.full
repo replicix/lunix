@@ -1,0 +1,31 @@
+umount: /dev/ublkb1: not mounted.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+total 12M
+-rw-r--r-- 1 root root   77 Nov 19 22:40 pids
+-rw------- 1 root root    4 Nov 19 22:40 testfile.1338144
+-rw------- 1 root root   80 Nov 19 22:40 testfile.1338145
+-rw------- 1 root root 1.2K Nov 19 22:40 testfile.1338146
+-rw------- 1 root root 157K Nov 19 22:40 testfile.1338147
+-rw------- 1 root root  12M Nov 19 22:40 testfile.1338148
+-rw------- 1 root root  49K Nov 19 22:40 testfile.1338149
+*** PIDs file
+1338144 1
+1338145 20
+1338146 300
+1338147 40000
+1338148 3000000
+1338149 12345
+checking pid=1338144 size=1
+status: 0
+checking pid=1338145 size=20
+status: 0
+checking pid=1338146 size=300
+status: 0
+checking pid=1338147 size=40000
+status: 0
+checking pid=1338148 size=3000000
+status: 0
+checking pid=1338149 size=12345
+status: 0

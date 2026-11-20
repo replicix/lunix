@@ -1,0 +1,8 @@
+[568525.287769] ublkb0: writeback error on inode 131, offset 13082390528, sector 46946256
+[568525.288130] ublkb0: writeback error on inode 131, offset 13087657984, sector 46956544
+[568525.288466] ublkb0: writeback error on inode 131, offset 13092671488, sector 46966336
+[568525.290689] ublkb0: writeback error on inode 131, offset 13097766912, sector 46976288
+[568525.291038] ublkb0: writeback error on inode 131, offset 13102018560, sector 46984592
+[568527.177112] XFS (ublkb0): log I/O error -28
+[568527.177372] XFS (ublkb0): Filesystem has been shut down due to log error (0x2).
+[568527.177459] XFS (ublkb0): Please unmount the filesystem and rectify the problem(s).

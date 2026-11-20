@@ -1,0 +1,31 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=38400 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=153600, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=16384, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+  Wiping xfs signature on /dev/ublkb1.
+  Wiping xfs signature on /dev/ublkb1.
+  Physical volume "/dev/ublkb1" successfully created.
+  Volume group "vg_081" successfully created
+  Rounding up size to full physical extent 512.00 MiB
+  Logical volume "base_081" created.
+  Logical volume "snap_081" created.
+fsync: Input/output error
+wrote 5242880/5242880 bytes at offset 0
+5 MiB, 1280 ops; 0.0012 sec (3.922 GiB/sec and 1028112.4498 ops/sec)
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mnt_081: not mounted.
+umount: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-test/mnt_081: not mounted.
+  Logical volume "snap_081" successfully removed.
+  Logical volume "base_081" successfully removed.
+  Volume group "vg_081" successfully removed
+  Labels on physical volume "/dev/ublkb1" successfully wiped.
+umount: /dev/ublkb1: not mounted.

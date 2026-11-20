@@ -1,0 +1,12 @@
+User names
+Attribute "attr5" had a 8 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/dir:
+dir_text
+Attribute "attr1" had a 9 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/smalll:
+some_text
+Attribute "attr3" had a 10 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/sub/smalll:
+some_text3
+Root names
+Attribute "attr2" had a 10 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/biggg:
+some_text2
+Attribute "attr4" had a 10 byte value for <scratch>/mnt/m15-xfstests-lunix-xfs-64k-scratch/dumpdir/sub/biggg:
+some_text4

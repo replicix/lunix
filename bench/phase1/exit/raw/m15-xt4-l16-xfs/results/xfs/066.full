@@ -1,0 +1,56 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+/usr/sbin/xfsdump: using file dump (drive_simple) strategy
+/usr/sbin/xfsdump: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsdump: level 0 dump of <host>:<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+/usr/sbin/xfsdump: dump date: Thu Nov 19 23:12:22 2026
+/usr/sbin/xfsdump: session id: 03fe83bd-6686-4ffa-a578-999b4f4ff7fa
+/usr/sbin/xfsdump: session label: "stress_066"
+/usr/sbin/xfsdump: ino map phase 1: constructing initial dump list
+/usr/sbin/xfsdump: ino map phase 2: skipping (no pruning necessary)
+/usr/sbin/xfsdump: ino map phase 3: skipping (only one dump stream)
+/usr/sbin/xfsdump: ino map construction complete
+/usr/sbin/xfsdump: estimated dump size: 25536 bytes
+/usr/sbin/xfsdump: /var/lib/xfsdump/inventory created
+/usr/sbin/xfsdump: creating dump session media file 0 (media 0, file 0)
+/usr/sbin/xfsdump: dumping ino map
+/usr/sbin/xfsdump: dumping directories
+/usr/sbin/xfsdump: dumping non-directory files
+/usr/sbin/xfsdump: ending media file
+/usr/sbin/xfsdump: media file size 22768 bytes
+/usr/sbin/xfsdump: dump size (non-dir files) : 576 bytes
+/usr/sbin/xfsdump: dump complete: 0 seconds elapsed
+/usr/sbin/xfsdump: Dump Summary:
+/usr/sbin/xfsdump:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2516564.dumpfile OK (success)
+/usr/sbin/xfsdump: Dump Status: SUCCESS
+/usr/sbin/xfsrestore: using file dump (drive_simple) strategy
+/usr/sbin/xfsrestore: version 3.2.0 (dump format 3.0)
+/usr/sbin/xfsrestore: using online session inventory
+/usr/sbin/xfsrestore: searching media for directory dump
+/usr/sbin/xfsrestore: examining media file 0
+/usr/sbin/xfsrestore: reading directories
+/usr/sbin/xfsrestore: 2 directories and 2 entries processed
+/usr/sbin/xfsrestore: directory post-processing
+/usr/sbin/xfsrestore: restoring non-directory files
+/usr/sbin/xfsrestore: restore complete: 0 seconds elapsed
+/usr/sbin/xfsrestore: Restore Summary:
+/usr/sbin/xfsrestore:   stream 0 <scratch>/m15-xt4-l16-xfs/tmp/2516564.dumpfile OK (success)
+/usr/sbin/xfsrestore: Restore Status: SUCCESS

@@ -1,0 +1,241 @@
+"/usr/bin/mount -t xfs -o nosuid,nodev -o remount,ro,nosuchopt /dev/ublkb1 <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch" failed at Thu Nov 19 22:40:29 UTC 2026
+[559127.636491] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559127.658443] XFS (ublkb0): Ending clean mount
+[559127.812838] XFS (ublkb1): Mounting V5 Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559127.831259] XFS (ublkb1): Ending clean mount
+[559127.905323] XFS (ublkb1): Unmounting Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559127.966707] XFS (ublkb1): Mounting V5 Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559127.992330] XFS (ublkb1): Ending clean mount
+[559128.015426] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559128.036750] XFS (ublkb1): Unmounting Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559128.101599] XFS (ublkb1): Mounting V5 Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559128.129248] XFS (ublkb1): Ending clean mount
+[559128.136515] XFS (ublkb1): Unmounting Filesystem 98c61992-db5a-4d32-988a-19b1d128e48c
+[559128.163518] run fstests generic/056 at 2026-11-19 22:40:01
+[559128.307098] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559128.328366] XFS (ublkb0): Ending clean mount
+[559128.506078] XFS (dm-0): Mounting V5 Filesystem 83dc481e-4a9c-4281-8881-274563150310
+[559128.529943] XFS (dm-0): Ending clean mount
+[559128.589338] XFS (dm-0): Unmounting Filesystem 83dc481e-4a9c-4281-8881-274563150310
+[559128.614182] XFS (dm-0): Mounting V5 Filesystem 83dc481e-4a9c-4281-8881-274563150310
+[559128.648840] XFS (dm-0): Starting recovery (logdev: internal)
+[559128.667369] XFS (dm-0): Ending recovery (logdev: internal)
+[559128.687420] XFS (dm-0): Unmounting Filesystem 83dc481e-4a9c-4281-8881-274563150310
+[559128.713489] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559128.802657] run fstests generic/057 at 2026-11-19 22:40:01
+[559128.934183] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559128.955989] XFS (ublkb0): Ending clean mount
+[559129.128294] XFS (dm-0): Mounting V5 Filesystem 41053e0a-896b-48f5-baa8-7a750b65c76a
+[559129.147719] XFS (dm-0): Ending clean mount
+[559129.209218] XFS (dm-0): Unmounting Filesystem 41053e0a-896b-48f5-baa8-7a750b65c76a
+[559129.232688] XFS (dm-0): Mounting V5 Filesystem 41053e0a-896b-48f5-baa8-7a750b65c76a
+[559129.274060] XFS (dm-0): Starting recovery (logdev: internal)
+[559129.297159] XFS (dm-0): Ending recovery (logdev: internal)
+[559129.322955] XFS (dm-0): Unmounting Filesystem 41053e0a-896b-48f5-baa8-7a750b65c76a
+[559129.360452] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559129.451791] run fstests generic/058 at 2026-11-19 22:40:02
+[559129.583538] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559129.604480] XFS (ublkb0): Ending clean mount
+[559129.791850] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559129.851726] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559129.872142] XFS (ublkb0): Ending clean mount
+[559129.879958] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559129.909497] run fstests generic/059 at 2026-11-19 22:40:02
+[559130.025230] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559130.046909] XFS (ublkb0): Ending clean mount
+[559130.231624] XFS (dm-0): Mounting V5 Filesystem 942c6f39-45da-439f-99f6-5766556ed565
+[559130.250030] XFS (dm-0): Ending clean mount
+[559131.325614] XFS (dm-0): Unmounting Filesystem 942c6f39-45da-439f-99f6-5766556ed565
+[559131.345553] XFS (dm-0): Mounting V5 Filesystem 942c6f39-45da-439f-99f6-5766556ed565
+[559131.378464] XFS (dm-0): Starting recovery (logdev: internal)
+[559131.390805] XFS (dm-0): Ending recovery (logdev: internal)
+[559131.415067] XFS (dm-0): Unmounting Filesystem 942c6f39-45da-439f-99f6-5766556ed565
+[559131.452992] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559131.534174] run fstests generic/060 at 2026-11-19 22:40:04
+[559131.665709] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559131.682433] XFS (ublkb0): Ending clean mount
+[559131.862353] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559131.919176] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559131.939661] XFS (ublkb0): Ending clean mount
+[559131.947511] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559131.976395] run fstests generic/061 at 2026-11-19 22:40:04
+[559132.091604] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559132.111367] XFS (ublkb0): Ending clean mount
+[559132.297346] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559132.352895] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559132.372486] XFS (ublkb0): Ending clean mount
+[559132.380391] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559132.408801] run fstests generic/062 at 2026-11-19 22:40:05
+[559132.522745] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559132.541674] XFS (ublkb0): Ending clean mount
+[559132.694070] XFS (ublkb1): Mounting V5 Filesystem 401a33c6-c2cf-46c4-b673-08efbf2e8ef7
+[559132.718601] XFS (ublkb1): Ending clean mount
+[559133.056077] XFS (ublkb1): Unmounting Filesystem 401a33c6-c2cf-46c4-b673-08efbf2e8ef7
+[559133.074552] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.167106] run fstests generic/063 at 2026-11-19 22:40:06
+[559133.296172] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.317215] XFS (ublkb0): Ending clean mount
+[559133.496950] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.554897] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.576015] XFS (ublkb0): Ending clean mount
+[559133.583584] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.612689] run fstests generic/064 at 2026-11-19 22:40:06
+[559133.731083] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559133.751426] XFS (ublkb0): Ending clean mount
+[559133.926621] XFS (ublkb1): Mounting V5 Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559133.945046] XFS (ublkb1): Ending clean mount
+[559134.141151] XFS (ublkb1): Unmounting Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559134.220348] XFS (ublkb1): Mounting V5 Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559134.243731] XFS (ublkb1): Ending clean mount
+[559134.424094] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559134.446015] XFS (ublkb1): Unmounting Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559134.508848] XFS (ublkb1): Mounting V5 Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559134.531677] XFS (ublkb1): Ending clean mount
+[559134.537472] XFS (ublkb1): Unmounting Filesystem 65de29aa-0c11-4e2c-bcf5-d2722fc2550f
+[559134.562797] run fstests generic/065 at 2026-11-19 22:40:07
+[559134.692204] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559134.713725] XFS (ublkb0): Ending clean mount
+[559134.888242] XFS (dm-0): Mounting V5 Filesystem fad35888-72a8-420d-b413-71d191da8efe
+[559134.906591] XFS (dm-0): Ending clean mount
+[559134.985861] XFS (dm-0): Unmounting Filesystem fad35888-72a8-420d-b413-71d191da8efe
+[559135.009782] XFS (dm-0): Mounting V5 Filesystem fad35888-72a8-420d-b413-71d191da8efe
+[559135.056154] XFS (dm-0): Starting recovery (logdev: internal)
+[559135.077695] XFS (dm-0): Ending recovery (logdev: internal)
+[559135.107474] XFS (dm-0): Unmounting Filesystem fad35888-72a8-420d-b413-71d191da8efe
+[559135.148968] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559135.239341] run fstests generic/066 at 2026-11-19 22:40:08
+[559135.370337] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559135.391464] XFS (ublkb0): Ending clean mount
+[559135.568227] XFS (dm-0): Mounting V5 Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.586517] XFS (dm-0): Ending clean mount
+[559135.643456] XFS (dm-0): Unmounting Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.662440] XFS (dm-0): Mounting V5 Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.697319] XFS (dm-0): Starting recovery (logdev: internal)
+[559135.714806] XFS (dm-0): Ending recovery (logdev: internal)
+[559135.785707] XFS (dm-0): Unmounting Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.808301] XFS (dm-0): Mounting V5 Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.842320] XFS (dm-0): Starting recovery (logdev: internal)
+[559135.857292] XFS (dm-0): Ending recovery (logdev: internal)
+[559135.878238] XFS (dm-0): Unmounting Filesystem b23fd2ab-b0c9-4c3e-a65e-c9a3820c4e53
+[559135.910319] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559135.994246] run fstests generic/067 at 2026-11-19 22:40:08
+[559136.118366] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559136.139219] XFS (ublkb0): Ending clean mount
+[559136.302128] EXT4-fs (loop8): unable to read superblock
+[559136.310154] EXT4-fs (ublkb1): VFS: Can't find ext4 filesystem
+[559136.322209] XFS (ublkb1): Mounting V5 Filesystem 8b32828e-3c22-4658-8cfd-cb59eec395a1
+[559136.340785] XFS (ublkb1): Ending clean mount
+[559136.357656] XFS (ublkb1): Unmounting Filesystem 8b32828e-3c22-4658-8cfd-cb59eec395a1
+[559136.366252] XFS (ublkb1): Mounting V5 Filesystem 8b32828e-3c22-4658-8cfd-cb59eec395a1
+[559136.390989] XFS (ublkb1): Ending clean mount
+[559136.411782] XFS (ublkb1): Unmounting Filesystem 8b32828e-3c22-4658-8cfd-cb59eec395a1
+[559136.436601] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559136.493360] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559136.514953] XFS (ublkb0): Ending clean mount
+[559136.603668] run fstests generic/069 at 2026-11-19 22:40:09
+[559136.858040] XFS (ublkb1): Mounting V5 Filesystem e34930de-6a73-42f7-8a12-5181455587c4
+[559136.876503] XFS (ublkb1): Ending clean mount
+[559138.051313] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559138.085104] XFS (ublkb1): Unmounting Filesystem e34930de-6a73-42f7-8a12-5181455587c4
+[559138.149954] XFS (ublkb1): Mounting V5 Filesystem e34930de-6a73-42f7-8a12-5181455587c4
+[559138.172944] XFS (ublkb1): Ending clean mount
+[559138.178992] XFS (ublkb1): Unmounting Filesystem e34930de-6a73-42f7-8a12-5181455587c4
+[559138.205419] run fstests generic/070 at 2026-11-19 22:40:11
+[559138.338030] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559138.351821] XFS (ublkb0): Ending clean mount
+[559140.079050] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559140.139367] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559140.165241] XFS (ublkb0): Ending clean mount
+[559140.196223] run fstests generic/071 at 2026-11-19 22:40:13
+[559140.440539] XFS (ublkb1): Mounting V5 Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.458867] XFS (ublkb1): Ending clean mount
+[559140.487437] XFS (ublkb1): Unmounting Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.500977] XFS (ublkb1): Mounting V5 Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.525500] XFS (ublkb1): Ending clean mount
+[559140.551744] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559140.571744] XFS (ublkb1): Unmounting Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.631239] XFS (ublkb1): Mounting V5 Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.674562] XFS (ublkb1): Ending clean mount
+[559140.682477] XFS (ublkb1): Unmounting Filesystem 1cd063e7-c253-472f-b3da-b437fbe35e3a
+[559140.711409] run fstests generic/073 at 2026-11-19 22:40:13
+[559140.850340] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559140.878025] XFS (ublkb0): Ending clean mount
+[559141.055086] XFS (dm-0): Mounting V5 Filesystem 40c37baa-7bc2-421b-ac0d-49da90d2f480
+[559141.073607] XFS (dm-0): Ending clean mount
+[559141.148393] XFS (dm-0): Unmounting Filesystem 40c37baa-7bc2-421b-ac0d-49da90d2f480
+[559141.167307] XFS (dm-0): Mounting V5 Filesystem 40c37baa-7bc2-421b-ac0d-49da90d2f480
+[559141.216215] XFS (dm-0): Starting recovery (logdev: internal)
+[559141.242932] XFS (dm-0): Ending recovery (logdev: internal)
+[559141.265034] XFS (dm-0): Unmounting Filesystem 40c37baa-7bc2-421b-ac0d-49da90d2f480
+[559141.290804] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559141.371399] run fstests generic/075 at 2026-11-19 22:40:14
+[559141.492280] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559141.518571] XFS (ublkb0): Ending clean mount
+[559141.555767] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559141.612550] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559141.637400] XFS (ublkb0): Ending clean mount
+[559142.215958] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559142.283151] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559142.313372] XFS (ublkb0): Ending clean mount
+[559142.887149] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559142.956094] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559142.985533] XFS (ublkb0): Ending clean mount
+[559146.629649] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559146.690829] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559146.714336] XFS (ublkb0): Ending clean mount
+[559150.383130] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559150.443037] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559150.463452] XFS (ublkb0): Ending clean mount
+[559150.489998] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559150.551070] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559150.576779] XFS (ublkb0): Ending clean mount
+[559150.604794] run fstests generic/076 at 2026-11-19 22:40:23
+[559150.842899] XFS (ublkb1): Mounting V5 Filesystem b6b09a94-90e4-4939-964c-8280155b9bcb
+[559150.861301] XFS (ublkb1): Ending clean mount
+[559151.764035] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559151.791503] XFS (ublkb1): Unmounting Filesystem b6b09a94-90e4-4939-964c-8280155b9bcb
+[559151.919065] XFS (ublkb1): Mounting V5 Filesystem b6b09a94-90e4-4939-964c-8280155b9bcb
+[559151.942919] XFS (ublkb1): Ending clean mount
+[559151.950468] XFS (ublkb1): Unmounting Filesystem b6b09a94-90e4-4939-964c-8280155b9bcb
+[559151.980339] run fstests generic/078 at 2026-11-19 22:40:24
+[559152.116043] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559152.143045] XFS (ublkb0): Ending clean mount
+[559152.363017] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559152.434656] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559152.463704] XFS (ublkb0): Ending clean mount
+[559152.494450] run fstests generic/079 at 2026-11-19 22:40:25
+[559152.743901] XFS (ublkb1): Mounting V5 Filesystem 683257c0-4b2a-4e28-9cca-7003933461dc
+[559152.762474] XFS (ublkb1): Ending clean mount
+[559152.800151] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559152.820809] XFS (ublkb1): Unmounting Filesystem 683257c0-4b2a-4e28-9cca-7003933461dc
+[559152.885230] XFS (ublkb1): Mounting V5 Filesystem 683257c0-4b2a-4e28-9cca-7003933461dc
+[559152.910252] XFS (ublkb1): Ending clean mount
+[559152.917826] XFS (ublkb1): Unmounting Filesystem 683257c0-4b2a-4e28-9cca-7003933461dc
+[559152.942411] run fstests generic/080 at 2026-11-19 22:40:25
+[559153.062565] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559153.079154] XFS (ublkb0): Ending clean mount
+[559155.137729] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559155.194325] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559155.215929] XFS (ublkb0): Ending clean mount
+[559155.242842] run fstests generic/081 at 2026-11-19 22:40:28
+[559155.983181] XFS (dm-3): Mounting V5 Filesystem 275a6b03-9239-4bf3-b677-c762f0516a6d
+[559156.021425] XFS (dm-3): Ending clean mount
+[559156.051584] device-mapper: snapshots: Invalidating snapshot: Unable to allocate exception.
+[559156.055132] dm-3: writeback error on inode 131, offset 0, sector 192
+[559156.055267] dm-3: writeback error on inode 131, offset 2236416, sector 4560
+[559156.055486] dm-3: writeback error on inode 131, offset 3284992, sector 6608
+[559156.055644] dm-3: writeback error on inode 131, offset 4333568, sector 8656
+[559156.055788] dm-3: writeback error on inode 131, offset 1187840, sector 2512
+[559156.056827] XFS (dm-3): log I/O error -5
+[559156.057105] XFS (dm-3): Filesystem has been shut down due to log error (0x2).
+[559156.057190] XFS (dm-3): Please unmount the filesystem and rectify the problem(s).
+[559156.057426] XFS (dm-3): Unmounting Filesystem 275a6b03-9239-4bf3-b677-c762f0516a6d
+[559156.426647] XFS (ublkb0): Unmounting Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559156.466307] XFS (ublkb0): Mounting V5 Filesystem 5386ce2a-e165-4d76-b589-7d0ae8e1c789
+[559156.481271] XFS (ublkb0): Ending clean mount
+[559156.507587] run fstests generic/082 at 2026-11-19 22:40:29
+[559156.759936] XFS (ublkb1): Mounting V5 Filesystem 76a5dfca-c38e-4d3e-bc92-25f48d520ef8
+[559156.777910] XFS (ublkb1): Ending clean mount
+[559156.780415] XFS (ublkb1): Quotacheck needed: Please wait.
+[559156.785389] XFS (ublkb1): Quotacheck: Done.
+[559156.805253] xfs: Unknown parameter 'nosuchopt'

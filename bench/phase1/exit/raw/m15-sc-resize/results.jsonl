@@ -1,0 +1,1 @@
+{"cell":"scenario/resize/ublk.after_update_size","status":"pass","t":"2026-11-19T23:50:19Z","point":"ublk.after_update_size","kind":"resize","hit":"1","fs":"ext4","crashed":"1","crash_after_s":"13","secs":"53","recovery_stall_ms":"672","fio_rc":"124","fio_errors":"0","guest_fsck":"0","fsyncer_verify":"0","lunix_fsck":"0","notes":""}

@@ -1,0 +1,133 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=32000 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=128000, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=16384, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+10+0 records in
+10+0 records out
+wrote 32768/32768 bytes at offset 0
+32 KiB, 8 ops; 0.0226 sec (1.378 MiB/sec and 352.6559 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0345 sec (1.808 MiB/sec and 462.8424 ops/sec)
+10+0 records in
+10+0 records out
+wrote 32768/32768 bytes at offset 32768
+32 KiB, 8 ops; 0.0230 sec (1.357 MiB/sec and 347.4182 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0458 sec (1.363 MiB/sec and 349.0249 ops/sec)
+10+0 records in
+10+0 records out
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0363 sec (1.718 MiB/sec and 439.8142 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0362 sec (1.725 MiB/sec and 441.6717 ops/sec)
+10+0 records in
+10+0 records out
+wrote 4096/4096 bytes at offset 4096
+4 KiB, 1 ops; 0.0024 sec (1.597 MiB/sec and 408.8307 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0375 sec (1.665 MiB/sec and 426.3370 ops/sec)
+10+0 records in
+10+0 records out
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (4.883 GiB/sec and 1280000.0000 ops/sec)
+wrote 131072/131072 bytes at offset 0
+128 KiB, 32 ops; 0.0000 sec (3.130 GiB/sec and 820512.8205 ops/sec)
+linked 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0021 sec (1.825 MiB/sec and 467.2897 ops/sec)
+wrote 4096/4096 bytes at offset 0
+4 KiB, 1 ops; 0.0000 sec (390.625 MiB/sec and 100000.0000 ops/sec)
+linked 4096/4096 bytes at offset 20480
+4 KiB, 1 ops; 0.0000 sec (95.274 MiB/sec and 24390.2439 ops/sec)
+wrote 4096/4096 bytes at offset 20480
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+linked 4096/4096 bytes at offset 40960
+4 KiB, 1 ops; 0.0000 sec (134.698 MiB/sec and 34482.7586 ops/sec)
+wrote 4096/4096 bytes at offset 40960
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+linked 4096/4096 bytes at offset 61440
+4 KiB, 1 ops; 0.0000 sec (97.656 MiB/sec and 25000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 61440
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+linked 4096/4096 bytes at offset 81920
+4 KiB, 1 ops; 0.0000 sec (111.607 MiB/sec and 28571.4286 ops/sec)
+wrote 4096/4096 bytes at offset 81920
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+linked 4096/4096 bytes at offset 102400
+4 KiB, 1 ops; 0.0000 sec (130.208 MiB/sec and 33333.3333 ops/sec)
+wrote 4096/4096 bytes at offset 102400
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+linked 4096/4096 bytes at offset 122880
+4 KiB, 1 ops; 0.0000 sec (90.843 MiB/sec and 23255.8140 ops/sec)
+wrote 4096/4096 bytes at offset 122880
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 4096
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 24576
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 45056
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 65536
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 86016
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 106496
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 126976
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 8192
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 28672
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 49152
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 69632
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 90112
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 110592
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+wrote 4096/4096 bytes at offset 12288
+4 KiB, 1 ops; 0.0000 sec (488 MiB/sec and 125000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 12288
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 32768
+4 KiB, 1 ops; 0.0000 sec (434.028 MiB/sec and 111111.1111 ops/sec)
+wrote 4096/4096 bytes at offset 32768
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 53248
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+wrote 4096/4096 bytes at offset 53248
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 73728
+4 KiB, 1 ops; 0.0000 sec (651.042 MiB/sec and 166666.6667 ops/sec)
+wrote 4096/4096 bytes at offset 73728
+4 KiB, 1 ops; 0.0000 sec (977 MiB/sec and 250000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 94208
+4 KiB, 1 ops; 0.0000 sec (205.592 MiB/sec and 52631.5789 ops/sec)
+wrote 4096/4096 bytes at offset 94208
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 114688
+4 KiB, 1 ops; 0.0000 sec (488 MiB/sec and 125000.0000 ops/sec)
+wrote 4096/4096 bytes at offset 114688
+4 KiB, 1 ops; 0.0000 sec (781.250 MiB/sec and 200000.0000 ops/sec)
+wrote 65536/65536 bytes at offset 0
+64 KiB, 16 ops; 0.0346 sec (1.803 MiB/sec and 461.5607 ops/sec)

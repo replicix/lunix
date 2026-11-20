@@ -1,0 +1,8 @@
+File system magic#: 0x58465342
+Allocation size: 4096
+
+22. Test a 1 byte file                                
+22.01 SEEK_DATA expected 0 or 0, got 0.                           succ
+22.02 SEEK_DATA expected 0 or 0, got 0.                           succ
+
+umount: /dev/ublkb1: not mounted.

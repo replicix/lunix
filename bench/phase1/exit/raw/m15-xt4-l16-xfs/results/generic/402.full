@@ -1,0 +1,42 @@
+meta-data=/dev/ublkb1            isize=512    agcount=4, agsize=1048576 blks
+         =                       sectsz=4096  attr=2, projid32bit=1
+         =                       crc=1        finobt=1, sparse=1, rmapbt=1
+         =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+         =                       exchange=0   metadir=0
+data     =                       bsize=4096   blocks=4194304, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+log      =internal log           bsize=4096   blocks=27162, version=2
+         =                       sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+         =                       rgcount=0    rgsize=0 extents
+         =                       zoned=0      start=0 reserved=0
+Discarding blocks...Done.
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+min supported timestamp -2147483648
+max supported timestamp 16299260424
+In memory timestamps update test start
+Updating file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_1 to timestamp -2147483648
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_1 Updated timestamp is -2147483648
+Updating file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_2 to timestamp 0
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_2 Updated timestamp is 0
+Updating file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_3 to timestamp 16299260424
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_3 Updated timestamp is 16299260424
+Updating file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_4 to timestamp 8149630212
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_4 Updated timestamp is 8149630212
+Updating file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_5 to timestamp 16299260425
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_5 Updated timestamp is 16299260424
+In memory timestamps update complete
+Unmounting and mounting scratch <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+On disk timestamps update test start
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_1 Updated timestamp is -2147483648
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_2 Updated timestamp is 0
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_3 Updated timestamp is 16299260424
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_4 Updated timestamp is 8149630212
+Checking file: <scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/test_5 Updated timestamp is 16299260424
+On disk timestamps update test complete

@@ -1,0 +1,144 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+zero-length file:
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+Sparse file (no blocks):
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+Contiguous file:
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..31]: 192..223
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..31]: 192..223
+Write backwards sync, but contiguous - should defrag to 1 extent
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..7]: 256..263
+	1: [8..15]: 248..255
+	2: [16..23]: 240..247
+	3: [24..31]: 232..239
+	4: [32..39]: 224..231
+	5: [40..47]: 216..223
+	6: [48..55]: 208..215
+	7: [56..63]: 200..207
+	8: [64..71]: 192..199
+	9: [72..79]: 8388736..8388743
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..79]: 264..343
+Write backwards sync leaving holes - defrag should do nothing
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..7]: hole
+	1: [8..15]: 312..319
+	2: [16..23]: hole
+	3: [24..31]: 304..311
+	4: [32..39]: hole
+	5: [40..47]: 296..303
+	6: [48..55]: hole
+	7: [56..63]: 280..287
+	8: [64..71]: hole
+	9: [72..79]: 272..279
+	10: [80..87]: hole
+	11: [88..95]: 264..271
+	12: [96..103]: hole
+	13: [104..111]: 256..263
+	14: [112..119]: hole
+	15: [120..127]: 248..255
+	16: [128..135]: hole
+	17: [136..143]: 240..247
+	18: [144..151]: hole
+	19: [152..159]: 232..239
+	20: [160..167]: hole
+	21: [168..175]: 224..231
+	22: [176..183]: hole
+	23: [184..191]: 216..223
+	24: [192..199]: hole
+	25: [200..207]: 208..215
+	26: [208..215]: hole
+	27: [216..223]: 200..207
+	28: [224..231]: hole
+	29: [232..239]: 192..199
+	30: [240..247]: hole
+	31: [248..255]: 8388736..8388743
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..7]: hole
+	1: [8..15]: 312..319
+	2: [16..23]: hole
+	3: [24..31]: 304..311
+	4: [32..39]: hole
+	5: [40..47]: 296..303
+	6: [48..55]: hole
+	7: [56..63]: 280..287
+	8: [64..71]: hole
+	9: [72..79]: 272..279
+	10: [80..87]: hole
+	11: [88..95]: 264..271
+	12: [96..103]: hole
+	13: [104..111]: 256..263
+	14: [112..119]: hole
+	15: [120..127]: 248..255
+	16: [128..135]: hole
+	17: [136..143]: 240..247
+	18: [144..151]: hole
+	19: [152..159]: 232..239
+	20: [160..167]: hole
+	21: [168..175]: 224..231
+	22: [176..183]: hole
+	23: [184..191]: 216..223
+	24: [192..199]: hole
+	25: [200..207]: 208..215
+	26: [208..215]: hole
+	27: [216..223]: 200..207
+	28: [224..231]: hole
+	29: [232..239]: 192..199
+	30: [240..247]: hole
+	31: [248..255]: 8388736..8388743
+Write forwards sync leaving holes - defrag should do nothing
+<scratch>/mnt/m15-xfstests-lunix-xfs-16k-scratch/fragfile.1274359:
+	0: [0..7]: 320..327
+	1: [8..15]: hole
+	2: [16..23]: 336..343
+	3: [24..31]: hole
+	4: [32..39]: 352..359
+	5: [40..47]: hole
+	6: [48..55]: 368..375
+	7: [56..63]: hole
+	8: [64..71]: 384..391
+	9: [72..79]: hole
+	10: [80..87]: 400..407
+	11: [88..95]: hole
+	12: [96..103]: 416..423
+	13: [104..111]: hole
+	14: [112..119]: 432..439
+	15: [120..127]: hole
+	16: [128..135]: 448..455
+	17: [136..143]: hole
+	18: [144..151]: 464..471
+	19: [152..159]: hole
+	20: [160..167]: 576..583
+	21: [168..175]: 584..591
+	22: [176..183]: 592..599
+	23: [184..191]: 600..607
+	24: [192..199]: 608..615
+	25: [200..207]: 616..623
+	26: [208..215]: 624..631
+	27: [216..223]: 632..639
+	28: [224..231]: 640..647
+	29: [232..239]: 648..655
+	30: [240..247]: 656..663
+	31: [248..255]: 664..671

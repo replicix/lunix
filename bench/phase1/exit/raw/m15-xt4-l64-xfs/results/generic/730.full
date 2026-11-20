@@ -1,0 +1,10 @@
+echo '1' 2>&1 > /sys/fs/xfs/ublkb1/error/fail_at_unmount
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/max_retries
+echo '0' 2>&1 > /sys/fs/xfs/ublkb1/error/metadata/EIO/retry_timeout_seconds
+scsi_debug options sector_size=512 physblk_exp=0 lowest_aligned=0 dev_size_mb=600 delay=0 clustering=1
+SCSI debug device /dev/sda
+# _mkfs_dev /dev/sda
+# _mount /dev/sda <scratch>/mnt/m15-xfstests-lunix-xfs-64k-test/scsi_debug_730
+wrote 1048576/1048576 bytes at offset 0
+1 MiB, 256 ops; 0.0002 sec (3.938 GiB/sec and 1032258.0645 ops/sec)
+umount: /dev/ublkb1: not mounted.

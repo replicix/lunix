@@ -1,0 +1,4 @@
+1795135899
+{"used":134217728,"cap":536870912,"tip":14,"dirty":0,"commits":14,"written":1007681536,"space":{"used":1060505586,"limit":17179869184,"fs_free":289331593216,"journal":66064320,"segments":992478008,"cache":0,"map":723046,"index":1236032,"commits":4180,"headroom_held":0,"waiters":0}}
+1795135904
+{"used":134217728,"cap":536870912,"tip":26,"dirty":0,"commits":26,"written":1734344704,"space":{"used":1856095030,"limit":17179869184,"fs_free":288609214464,"journal":66064320,"segments":1786460437,"cache":0,"map":1288813,"index":2273664,"commits":7796,"headroom_held":0,"waiters":0}}

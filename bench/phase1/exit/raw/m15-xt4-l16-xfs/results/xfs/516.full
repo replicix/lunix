@@ -1,0 +1,6 @@
+Test: no raid parameters
+Format with 256k stripe unit; 4x stripe width
+** mkfs failed with extra mkfs options added to "" by test 516 **
+** attempting to mkfs using only test 516 options: -b size=1k -d su=256k,sw=4 **
+516 not run: _scratch_mkfs_xfs: block size 1024 cannot be smaller than sector size 4096
+umount: /dev/ublkb1: not mounted.
