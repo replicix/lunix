@@ -99,6 +99,9 @@ for t in stack_support stack_model stack_gc stack_gc_ladder stack_gc_rate stack_
 done
 LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features testsupport "${stack_tests[@]}"
 
+step "lunixd with crashpoints: a write after a kill between C6 and C9 and the recovery does not stall (milestone jcut)"
+cargo test -j "$jobs" --release -p lunixd --features testsupport,crashpoints --test stack_ring_recover
+
 if [ "${LUNIX_SKIP_OWNERSHIP:-}" = "1" ]; then
   step "ownership (skipped: not a milestone branch)"
 else

@@ -273,6 +273,44 @@ impl JournalCharges {
         }
     }
 
+    /// The cut `c'` in `(last cut, c]` that a cut bounded by journal bytes
+    /// takes (ADR-33): the `write_seq` of the first record, in `write_seq`
+    /// order, at which the charges since the last cut reach `budget` and
+    /// `write_seq >= floor`; `c` when they do not reach it by `c`. Every
+    /// record at or below the answer is in the cut, whichever lane holds it.
+    /// Reads only: the charges go at C9 (`take_upto`).
+    pub(crate) fn cut_for(&self, budget: u64, floor: u64, c: u64) -> u64 {
+        // The coordinator holds every stream at once, in a fixed order; a
+        // queue thread holds one lane's at a time, so this cannot deadlock.
+        let guards: Vec<_> = self
+            .lanes
+            .iter()
+            .chain(std::iter::once(&self.recovered))
+            .map(lock)
+            .collect();
+        let mut at = vec![0usize; guards.len()];
+        let mut sum = 0u64;
+        loop {
+            let next = guards
+                .iter()
+                .zip(&at)
+                .enumerate()
+                .filter_map(|(k, (g, &i))| g.get(i).map(|e| (e.0, k)))
+                .min();
+            let Some((seq, k)) = next else {
+                return c;
+            };
+            if seq > c {
+                return c;
+            }
+            sum = sum.saturating_add(guards[k][at[k]].1);
+            at[k] += 1;
+            if sum >= budget && seq >= floor {
+                return seq;
+            }
+        }
+    }
+
     /// Takes the charges of every record at or below `cut`; returns their
     /// sum.
     pub(crate) fn take_upto(&self, cut: u64) -> u64 {
@@ -415,6 +453,24 @@ impl Inner {
         }
     }
 
+    /// A write has waited `waited` for a free ring file so far (ADR-33).
+    pub(crate) fn note_ring_wait(&self, waited: Duration) {
+        crate::stats::max(
+            &self.cuts.ring_wait_max_ms,
+            u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
+        );
+    }
+
+    /// A write that waited for the ring since `since` is no longer waiting:
+    /// it was admitted, failed or its queue went away.
+    pub(crate) fn end_ring_wait(&self, since: Duration) {
+        self.note_ring_wait(self.clock.monotonic().saturating_sub(since));
+        let _ = self
+            .cuts
+            .ring_waiters
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+    }
+
     /// A write was admitted (reserved or granted). A load on the hot path.
     pub(crate) fn note_admitted(&self) {
         if self.full.blocked.load(Ordering::Relaxed) {
@@ -518,5 +574,56 @@ mod tests {
             f.ladder_backoff_at(Duration::from_secs(86_404)),
             Duration::from_secs(16)
         );
+    }
+}
+
+#[cfg(test)]
+mod cut_for_tests {
+    use super::*;
+
+    /// Lane 0 holds the odd numbers, lane 1 the even ones, 10 bytes each.
+    fn charges() -> JournalCharges {
+        let c = JournalCharges::new(2, Vec::new());
+        for s in 1..=6u64 {
+            c.push(usize::from(s % 2 == 0), s, 10);
+        }
+        c
+    }
+
+    #[test]
+    fn the_cut_is_the_record_where_the_sum_reaches_the_budget_across_lanes() {
+        let c = charges();
+        assert_eq!(c.cut_for(25, 0, 6), 3, "10, 20, 30 at seq 3");
+        assert_eq!(c.cut_for(60, 0, 6), 6);
+        assert_eq!(
+            c.cut_for(0, 0, 6),
+            1,
+            "a budget of 0 takes the first record"
+        );
+        assert_eq!(c.cut_for(1000, 0, 6), 6, "unreachable: everything up to c");
+    }
+
+    #[test]
+    fn records_above_c_are_not_taken_and_the_floor_raises_the_cut() {
+        let c = charges();
+        assert_eq!(c.cut_for(1000, 0, 4), 4);
+        assert_eq!(c.cut_for(10, 5, 6), 5, "the floor is past the budget point");
+        assert_eq!(c.cut_for(10, 100, 6), 6, "a floor above c is c");
+        assert_eq!(
+            c.cut_for(10, 1, 6),
+            1,
+            "a floor at the first record is no floor"
+        );
+    }
+
+    #[test]
+    fn the_replayed_records_come_first_in_write_seq_order() {
+        let c = JournalCharges::new(2, vec![(2, 10), (1, 10)]);
+        c.push(0, 3, 10);
+        c.push(1, 4, 10);
+        assert_eq!(c.cut_for(30, 0, 4), 3);
+        assert_eq!(c.cut_for(40, 0, 4), 4);
+        assert_eq!(c.take_upto(2), 20, "what the cut released");
+        assert_eq!(c.cut_for(10, 0, 4), 3);
     }
 }

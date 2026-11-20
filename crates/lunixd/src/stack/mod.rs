@@ -491,6 +491,8 @@ pub struct OpenParams {
     /// Cap on the resident journal window (the daemon's
     /// `journal_resident_max`; `None`: the volume's `journal_max`).
     pub journal_resident_max: Option<u64>,
+    /// The engine's cut target (the daemon's `cut_target_ms`, ADR-33).
+    pub cut_target: std::time::Duration,
     /// Journal settings hook, applied after [`JournalConfig::new`] and
     /// `lock_memory` (`None`: the production geometry). Tests only; the
     /// daemon never sets it.
@@ -529,6 +531,7 @@ impl OpenParams {
             lock_memory: false,
             store_fs: None,
             journal_resident_max: None,
+            cut_target: std::time::Duration::from_secs(1),
             journal_tweak: None,
             gc: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
@@ -845,6 +848,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     cfg.full_timeout = space.full_timeout();
     cfg.gc_pressure_rate_factor = p.gc_pressure_rate_factor;
+    cfg.cut_target = p.cut_target;
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
     // idle ticks, with the settings of volume.json. A step may compact up to
     // one second of `gc_rate`: its time budget bounds it, and the collector's

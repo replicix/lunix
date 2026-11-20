@@ -407,6 +407,10 @@ journal):
   been destaged into a segment whose `fdatasync` is done, *and* the
   commit that names the owning map change is durable (§8.2). The file's
   resident entries are released as reclaim takes the file out of use.
+  Each file is rewritten with zeros and renamed before it is free; the lane
+  it belongs to is signalled at that moment, not when the reclaim of every
+  lane is done (ADR-33), so a write parked for the ring resumes with the
+  first free file.
 - **Retention after destage:** in async and sync modes, records also wait
   until the containing cut is committed to the authority. A DELTA commit
   can then be rebuilt from the journal.
@@ -869,12 +873,28 @@ trailer = footer offset + length + magic
 - A global atomic `write_seq` is assigned at write admission, across all
   queues and journal lanes. It is unrelated to the `commit_seq` of §8.2.
 - To cut at `c` (a `write_seq` value):
-  1. Pick `c` = the current `write_seq` value.
+  1. Pick `c` = the current `write_seq` value, lowered to a bounded cut
+     (below).
   2. Wait until every write with `write_seq ≤ c` has reached the journal;
      that is only the in-flight ones.
   3. Destage up to `c` into sealed segments and the map, using MVCC on
      the overlay: writes with `write_seq > c` stay out of this map version.
   4. Seal the map.
+- **A cut is bounded by journal bytes** (ADR-33). Any `c'` in
+  `(last cut, c]` is a prefix cut, so the coordinator takes the `c'` whose
+  records, summed from the per-lane charge lists, are at most `cut_target`
+  (`cut_target_ms`, 1 s) times the drain rate of its last four cuts
+  (journal bytes over the time from C1 to C9). The bound is raised to the
+  lowest `c'` that lets reclaim free a ring file of the fullest lane
+  (`Journal::cut_freeing_file`), so every commit under pressure frees
+  something, and it never exceeds half the ring (the floor wins when the two
+  disagree). With no history the half ring is the bound. While the ring is
+  above the fill trigger the next commit follows at once. Under a light load
+  the writes since the last cut are fewer than the bound, the cut is
+  everything written so far and `T` and `B` decide as before. Explicit
+  commits (a grow, the final commit of a detach) cut everything. A cut
+  frees its ring files file by file (§4.1 "Reclaim"): a lane parked for a
+  full ring is woken as soon as one of its files is free.
 - A cut never stalls new writes; it only waits for in-flight ones. Every
   completed FLUSH names a `write_seq`, so "the state at the last FLUSH before
   time t" is well defined (CDP at commit granularity).
@@ -941,7 +961,8 @@ a FULL's own segments is persisted afterwards and named by the next FULL.
 
 **Local commit order.** A local FULL commit is made in this durable order;
 each step has a crash point:
-1. Pick `c`, wait for in-flight writes, cut the overlay (§8.1).
+1. Pick `c` (a bounded cut, §8.1), wait for in-flight writes, cut the
+   overlay.
 2. Destage the cut. Extents go to segments and **every segment is sealed**
    (footer, trailer, `fdatasync`, rename, directory `fsync`) **before the
    map transaction commits in memory**, so no reader can reach an unsealed

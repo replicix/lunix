@@ -72,6 +72,11 @@ pub struct TestHooks {
     /// A point to park at, once: the engine thread sends on `reached`, then
     /// waits for `release` (see `park_at`).
     pub parked: Mutex<Option<Park>>,
+    /// A point at which the manual clock moves, and by how much, every time
+    /// the engine passes it (a cut that takes time, for the bound of a cut).
+    pub advance: Mutex<Vec<(&'static str, Duration)>>,
+    /// The clock `advance` moves.
+    pub clock: Mutex<Option<Arc<ManualClock>>>,
 }
 
 /// The two ends of a parked crash point, the engine side.
@@ -124,6 +129,14 @@ impl TestHooks {
 
 impl EngineHooks for TestHooks {
     fn crash_at(&self, point: &'static str) -> bool {
+        let by: Duration = lock(&self.advance)
+            .iter()
+            .filter(|(p, _)| *p == point)
+            .map(|a| a.1)
+            .sum();
+        if let (false, Some(clock)) = (by.is_zero(), lock(&self.clock).as_ref()) {
+            clock.advance(by);
+        }
         let park = {
             let mut p = lock(&self.parked);
             if p.as_ref().is_some_and(|k| k.point == point) {
@@ -178,6 +191,10 @@ pub struct Checks {
     pub flush_outstanding: Arc<AtomicU64>,
     pub flush_outstanding_max: AtomicU64,
     pub violations: Mutex<Vec<String>>,
+    /// The journal's `fill().used_bytes` is multiplied by this (0 or 1: as
+    /// is): rings whose files hold fewer record bytes than their length
+    /// (batch padding in the real journal).
+    pub fill_scale: AtomicU64,
 }
 
 impl Checks {
@@ -463,7 +480,14 @@ impl Journal for GJournal {
         self.inner.reclaim(upto)
     }
     fn fill(&self) -> JournalFill {
-        self.inner.fill()
+        let mut f = self.inner.fill();
+        f.used_bytes = f
+            .used_bytes
+            .saturating_mul(self.checks.fill_scale.load(Ordering::SeqCst).max(1));
+        f
+    }
+    fn cut_freeing_file(&self) -> Option<WriteSeq> {
+        self.inner.cut_freeing_file()
     }
 }
 
@@ -791,8 +815,12 @@ impl Vol {
                 ..MemFloor::default()
             }),
             checks,
-            clock,
-            hooks: Arc::new(TestHooks::default()),
+            clock: Arc::clone(&clock),
+            hooks: {
+                let h = TestHooks::default();
+                *lock(&h.clock) = Some(Arc::clone(&clock));
+                Arc::new(h)
+            },
             space_capacity: 1 << 40,
             dirty_cap: None,
             tweak: default_tweak,

@@ -2559,7 +2559,9 @@ and the M16 validity rule with the sustained cell.
 
 **Status: accepted (2026-11-19, the maintainer: the recommended options for
 W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
-Not implemented yet.** It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
+Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
+2026-11-20). Open: T6 (measurement), then T7 to T9 as T6 decides, and T10.**
+It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
 DESIGN §4.1, §5, §8.1, §8.2 and §20. The root-cause analysis with the code
 references, the options in full, the throughput model and the test list are in
 [research/2026-11-19-write-throughput.md](research/2026-11-19-write-throughput.md)
@@ -2608,9 +2610,13 @@ references, the options in full, the throughput model and the test list are in
   covers it.** Reclaiming a destaged prefix before its commit would lose
   flushed writes at a crash.
 - **Cuts are bounded by journal bytes.** The coordinator cuts at most
-  `cut_target` (1 s) times the drain rate of its last cuts, never less than
-  what frees one ring file of the fullest lane and never more than half the
-  ring, and commits back to back while the ring is above the fill trigger.
+  `cut_target` (1 s) times the drain rate of its last cuts and never less
+  than one ring file's worth of records, never less than what frees one ring
+  file of the fullest lane (this floor wins over the ceiling) and never more
+  than half the ring, both in record bytes. It commits back to back while the
+  ring is above the fill trigger or a write is parked for ring space. While a
+  write is parked, each tick also reclaims the files the durable tip already
+  covers, which a crash between C6 and C9 can leave behind.
   Every such cut is a prefix cut; C1-C9 and their crash points are unchanged.
   Under a light load `T` and `B` decide as today.
 - **A lane is woken as soon as one of its files is free**, not after all
