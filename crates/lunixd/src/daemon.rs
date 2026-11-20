@@ -26,7 +26,7 @@ use lunix_iface::ctl::{
     Attach, Attached, Compress, CtlError, ErrorCode, GcPressure, GcRequest, JournalDamagePolicy,
     NameParam, Request, Resize, Response, RollbackFloorView, SpaceBody, SpaceFigures, SpaceRequest,
     ThrottleStatus, VolumeCreate, VolumeCreated, VolumeMode, VolumeState, VolumeStatusBody,
-    VolumeSummary, PROTOCOL_VERSION,
+    VolumeSummary, WritePathStatus, PROTOCOL_VERSION,
 };
 use lunix_iface::gc::GcControl;
 use lunix_iface::space::{SpaceEvents, SpaceGate};
@@ -672,7 +672,9 @@ impl Daemon {
                 let s = &l.stack;
                 let stats = s.engine.stats();
                 let fill = lunix_iface::journal::Journal::fill(&*s.journal);
-                let (tip, _) = s.engine.tip();
+                let tip = s.engine.tip_view();
+                let cuts = s.engine.cut_stats();
+                let win = s.journal.window_stats();
                 let read_only = s.space.is_read_only() || s.engine.is_stopped();
                 let written = stats.chunks_total.saturating_sub(stats.chunks_zero);
                 let snap = s.space.snapshot();
@@ -705,9 +707,18 @@ impl Daemon {
                     journal_capacity: fill.capacity_bytes,
                     journal_marks_written: s.journal.marks_written(),
                     journal_marks_skipped: s.journal.marks_skipped(),
+                    write_path: WritePathStatus {
+                        ring_waiters: cuts.ring_waiters,
+                        ring_wait_longest_ms: cuts.ring_wait_longest_ms,
+                        window_resident_bytes: win.resident_bytes,
+                        window_hits: win.hits,
+                        window_misses: win.misses,
+                        last_cut_bytes: cuts.last_cut_bytes,
+                        last_cut_ms: cuts.last_cut_ms,
+                    },
                     locked_bytes: l.device.locked_bytes() + s.journal.locked_bytes(),
-                    last_commit_seq: tip.0,
-                    last_commit_ms: Some(s.engine.tip_created_at().0),
+                    last_commit_seq: tip.commit_seq.0,
+                    last_commit_ms: Some(tip.created_at.0),
                     dedup_ratio: ratio(written, written.saturating_sub(stats.dedup_hits)),
                     compression_ratio: ratio(stats.stored_ulen, stats.stored_clen),
                     stats,
@@ -745,6 +756,7 @@ impl Daemon {
                     journal_capacity: 0,
                     journal_marks_written: 0,
                     journal_marks_skipped: 0,
+                    write_path: WritePathStatus::default(),
                     locked_bytes: 0,
                     last_commit_seq: pk.tip.map_or(0, |t| t.0),
                     last_commit_ms: None,
@@ -911,6 +923,8 @@ impl Daemon {
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
         op.lock_memory = self.cfg.harden;
         op.destage_workers = self.cfg.destage_workers;
+        op.journal_resident_max = self.cfg.journal_resident_max;
+        op.cut_target = self.cfg.cut_target;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
         op.full_timeout = self.cfg.full_timeout;
         op.throttle = self.cfg.throttle;
@@ -1570,6 +1584,18 @@ impl Daemon {
             .filter(|(_, s)| matches!(*lock(s), Slot::Attached(_)))
             .map(|(k, _)| k)
             .collect()
+    }
+
+    /// Test hook: the engine of an attached volume (a test holds its
+    /// coordinator mutex to show that status does not wait for it).
+    #[cfg(feature = "testsupport")]
+    pub fn engine_of(&self, name: &str) -> Option<Arc<lunix_engine::Engine>> {
+        let slot = self.slot(name);
+        let g = lock(&slot);
+        match &*g {
+            Slot::Attached(l) => Some(Arc::clone(&l.stack.engine)),
+            _ => None,
+        }
     }
 
     /// The volume directory of `name`, from the registry.

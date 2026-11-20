@@ -14,6 +14,8 @@ workspace = true
 # Compiled out unless on (see lunix_iface::crashpoint); only lunixd's
 # crashpoints build enables it.
 crashpoints = ["lunix-iface/crashpoints"]
+# Test hooks (`Engine::hold_coordinator`); lunixd's `testsupport` turns it on.
+testsupport = []
 
 [dependencies]
 lunix-format.workspace = true

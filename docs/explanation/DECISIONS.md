@@ -39,6 +39,12 @@ keyring cost policy), and ADR-31 records the rollback anchor.
 (write back-pressure and the full volume) was **accepted by the maintainer on
 2026-11-18** with every recommended option (M1-M9). It amends ADR-14's ladder.
 
+**Accepted 2026-11-19:** [ADR-33](#adr-33-write-throughput-a-resident-journal-window-and-bounded-cuts)
+(write throughput: the journal read-back and the ring stalls) was **accepted
+by the maintainer on 2026-11-19** with the recommended options, except W6
+(the read-around CRC-checks whole records) and W9 (performance targets are
+relative to the host's measured raw device rates).
+
 **Terminology.** Two sequence numbers exist. `write_seq` numbers writes
 and cuts (the `seq` of ADR-3, 4, 10, 26, 27 and 28, and `cut_seq`).
 `commit_seq` is a commit's position in the chain (the `seq` of
@@ -2548,3 +2554,200 @@ backwards compatibility").
 than `full_timeout`), the deterministic engine test, the slow-GC and
 replayed-E1 stack tests, the M15 cells under a cap with the full-volume cell,
 and the M16 validity rule with the sustained cell.
+
+## ADR-33: Write throughput: a resident journal window and bounded cuts
+
+**Status: accepted (2026-11-19, the maintainer: the recommended options for
+W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
+Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
+2026-11-20). Open: T6 (measurement), then T7 to T9 as T6 decides, and T10.**
+It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
+DESIGN §4.1, §5, §8.1, §8.2 and §20. The root-cause analysis with the code
+references, the options in full, the throughput model and the test list are in
+[research/2026-11-19-write-throughput.md](research/2026-11-19-write-throughput.md)
+(cited below as "the note").
+
+**Context:**
+- The M16 re-measurement on `main` at `cda79fb` (2026-11-19) reaches 2.4-3.2 K
+  IOPS for 4 KiB random writes and 0.04 GB/s for sequential writes, against
+  the §20 targets of 300 K and 3 GB/s, with completion stalls of 15-35 s.
+- **Destage reads every record back from the ring file, one synchronous
+  `O_DIRECT` read per piece** (82.8 % of the daemon's blocked time). The
+  payload was in memory at the append and is dropped when the batch write
+  completes. Eight workers at 3 ms per read assemble 2.7 K pieces per second
+  (the note, §2.1).
+- **Ring files are freed only at C9, and a cut covers everything written so
+  far.** A commit lasts `cut bytes / drain rate`, 22-28 s here, and a write
+  parked for a full ring waits for the rest of it. Reclaim also rewrites each
+  file with zeros before any parked write is woken (the note, §2.2).
+- **`lunix status` takes the coordinator mutex**, which the coordinator holds
+  for a whole commit: 10-15 s (the note, §2.3).
+- On a RAM-backed directory an earlier run was limited by the ladder thread's
+  urgent GC mark, which also holds the coordinator. Whether that still holds
+  on `cda79fb` is not known (the note, §2.4).
+- The read-back is not checked against the record CRC today (the note, §2.1).
+
+**Decision:**
+- **The journal keeps what it wrote in memory until the ring file is
+  reclaimed: the resident window.** A copy of each batch's bytes is taken
+  when the batch is sealed and indexed per lane by `(ordinal, file offset)`.
+  `Journal::read_at` and `JournalLane::submit_read` serve from it and fall
+  back to the file.
+  - It is a cache of bytes already in the ring. The acknowledgement, the
+    group flush, FUA, the C6 durability point and recovery do not change.
+  - The bytes served are the bytes handed to the journal write, so chunks
+    stay byte-exact; ids, tags and AEAD are computed at destage as before.
+  - Memory: at most the record bytes of the un-reclaimed ring files, capped
+    by `journal_resident_max` (default: `journal_max`). Past the cap a new
+    batch is not admitted (the oldest records, which the next cut needs,
+    stay). The window is plaintext, like the batch buffers and the read
+    cache, and is not locked memory.
+- **A miss reads 1 MiB, not one piece.** `read_at` on a location that is not
+  resident reads the 1 MiB-aligned window of the ring file around it once,
+  whatever the number of workers that miss in it, and makes it resident
+  within the cap. This is the path after a restart and past the cap.
+- **The reclaim rule stays: a record leaves the ring only when a durable FULL
+  covers it.** Reclaiming a destaged prefix before its commit would lose
+  flushed writes at a crash.
+- **Cuts are bounded by journal bytes.** The coordinator cuts at most
+  `cut_target` (1 s) times the drain rate of its last cuts and never less
+  than one ring file's worth of records, never less than what frees one ring
+  file of the fullest lane (this floor wins over the ceiling) and never more
+  than half the ring, both in record bytes. It commits back to back while the
+  ring is above the fill trigger or a write is parked for ring space. While a
+  write is parked, each tick also reclaims the files the durable tip already
+  covers, which a crash between C6 and C9 can leave behind.
+  Every such cut is a prefix cut; C1-C9 and their crash points are unchanged.
+  Under a light load `T` and `B` decide as today.
+- **A lane is woken as soon as one of its files is free**, not after all
+  files of all lanes are rewritten.
+- **The status reads a published tip**, not the coordinator's state.
+- **Observability:** ring waiters and the longest ring wait, the resident
+  window's bytes, hits and misses, the bytes and duration of the last cut.
+- **Configuration:** daemon-wide keys in `lunixd.toml`:
+  `journal_resident_max`, `cut_target_ms`. `volume.json` is untouched.
+
+**Rejected** (the note, §4, has the trade-offs):
+- *Reclaiming the ring per destaged prefix, before the commit.* After a crash
+  the tip's map does not reference the destaged chunks and their records are
+  gone: flushed data is lost. Making it safe needs a new durable object
+  between FULLs, which is a format change and a second recovery path.
+- *Payload references in the overlay.* The same guarantees, but it changes
+  `lunix-iface`, the overlay's entry and its memory gate, and has nothing to
+  reference after a restart.
+- *io_uring or batched reads per piece as the main fix.* It keeps one device
+  operation per piece; a volume with an operation limit gains nothing.
+- *A fixed cut bound.* Too small on a fast device (overwrites destaged twice,
+  more garbage), too large on a slow one.
+- *Overlapping commits.* Only the worker stage can overlap without breaking
+  prefix cuts; the gain is the share of C5-C9, small once the read-back is
+  gone. Revisit after the measurement.
+
+**Consequences:**
+- **Format freeze: no byte and no reader rule of any frozen format changes.**
+  Two later options would (dropping the zero rewrite at reclaim; smaller ring
+  files) and are not part of this decision; W7 names them.
+- **Interface changes** in `lunix-iface` (not on disk, the lead's sign-off): a
+  read-only `Journal` query for the cut that frees a file, and counters.
+  `read_at` keeps its contract.
+- **Memory:** up to `journal_max` more per attached volume while a backlog
+  exists (2 GiB with the defaults), none when the ring is drained.
+- **More FULLs under sustained overload** (about one per second instead of
+  one per 22-28 s): more commit objects, map packs and index runs for GC, and
+  `retain_last` covers less wall-clock time.
+- **Integrity improves on the resident path:** a ring block damaged after the
+  write no longer reaches a chunk. The miss path checks it too (W6): the
+  read-around parses whole records and checks each record's crc32c, as the
+  recovery scan does, before any of its bytes reach a chunk.
+- **Expected (the note, §6; a model, not a measurement):** the 2.7 K
+  pieces/s bound goes; a parked write waits for one bounded cut, 1-2 s
+  instead of 15-35 s. On an NVMe-class device with a 4 GiB working set and
+  the 2 GiB ring: about 110 K sustained 4 KiB IOPS at 64 KiB chunks and about
+  170 K at 16 KiB with a 2 GB/s destage, bursts at the journal's bandwidth,
+  and 1.5-2 GB/s sequential, bounded by the single packer thread. The
+  sequential 3 GB/s and the sustained 300 K need stage 2 or a larger ring. On
+  the measured network volume the sustained rate stays at the volume's
+  bandwidth, a few thousand IOPS at 64 KiB chunks; the targets cannot be
+  validated there.
+
+**Decided** (the recommendation first; the maintainer's choice is given
+below the table where it differs):
+
+| # | question | recommendation | alternative |
+|---|---|---|---|
+| W1 | Where the just-written payload lives | a resident window inside `lunix-journal`, behind `read_at` | references in the overlay's pieces (an interface change) |
+| W2 | Its memory | cap `journal_resident_max` = `journal_max` by default, not locked | half the ring; or locked memory under `lock_memory` (raises the `RLIMIT_MEMLOCK` need by the cap) |
+| W3 | A miss (after a restart, past the cap) | one 1 MiB read-around per window | per-piece io_uring reads; or today's read |
+| W4 | The ring stalls | reclaim stays behind the durable FULL; cuts bounded by journal bytes, adaptive at a 1 s target | a fixed bound of a quarter of the ring |
+| W5 | More FULLs under load | accept; watch GC's object count and the index's run count in the measurement | a floor on the time between two FULLs (longer stalls on a slow device) |
+| W6 | The unchecked read-back | leave the miss path as it is now; record the gap | parse and CRC-check whole records in the read-around (more work in T2) |
+| W7 | The zero rewrite at reclaim | keep it; wake per freed file now; measure its share | later, with a **FREEZE sign-off**: drop it (a reader-rule change of on-disk-formats §5.3); or `FALLOC_FL_ZERO_RANGE` (no format change, a latency risk to measure) |
+| W8 | The urgent GC mark under the coordinator | measure first on `cda79fb` or later; step it only if it still limits | make `run_urgent` release the coordinator between mark units now |
+| W9 | DESIGN §20 and the M16 cells | write cells run on an NVMe-class device and a RAM-backed reference, and state the working set, the ring and the chunk size; the sustained 4 KiB figure feeds ADR-5's default | leave §20 and report the cells as shortfalls |
+
+**The maintainer's choices where they differ from the recommendation:**
+
+- **W6: check the CRC on the miss path.** The read-around reads and parses
+  whole records (a record cut by the 1 MiB window is completed with one more
+  read) and checks each record's crc32c before its bytes are used; a mismatch
+  is a damaged record and destage fails the cut as for any read error. No
+  read is added anywhere else: nothing is read ahead of need and nothing is
+  read back after a write. The cost is crc32c on the miss path only (hardware
+  crc32c, at most a fifth of a core at 2 GB/s of misses) and one completing
+  read for a record cut at a window edge.
+- **W9: relative targets.** The absolute rows of DESIGN §20 (300 K 4 KiB
+  write IOPS, 3 GB/s, 500 K, 5 GB/s) assumed an NVMe host and are not tied to
+  the device under test. They become **percentages of the host's measured raw
+  rates**:
+  - every measurement first runs a raw baseline with fio on the same file
+    system and device that hold the journal and the store, with the same
+    patterns, block sizes, queue depths and job counts as the Lunix cells
+    (4 KiB random write and read, sequential write and read, `fdatasync`
+    commits per second), back to back with the Lunix cells on the same host;
+  - every Lunix result is reported with its raw counterpart and the ratio;
+  - burst writes compare with raw writes to the journal device; sustained
+    writes with the write-amplification model (journal, store and, today, the
+    reclaim zero rewrite on one device); reads that miss the cache with raw
+    reads of the store device; cache-hit reads with the ublk framework
+    ceiling (the null target);
+  - the required percentages are set from the first baseline run (T6) and
+    recorded in DESIGN §20; the NVMe figures stay only as an illustration.
+
+**Work steps** (one implementer each; T1 to T5 are independent except where
+noted):
+
+- **T1, resident window** (`lunix-journal`): the copy at batch seal, the
+  per-lane index, `read_at` and `submit_read` hits, release at reclaim, the
+  cap, counters. Tests: the note's §7, first item.
+- **T2, read-around** (`lunix-journal`, after T1): the 1 MiB miss read, once
+  per window, into the window within the cap, parsing whole records and
+  checking each record's crc32c (W6), with one completing read for a record
+  cut at the window edge. Tests: concurrent misses, file ends, a location
+  reclaimed meanwhile, the first cut after a restart, a record damaged on disk
+  after the write (destage fails the cut, no chunk holds the bytes), a record
+  cut at the window edge.
+- **T3, bounded cuts** (`lunix-engine`, `lunix-iface`): the byte bound from
+  the charge lists, the adaptive target, the file-boundary floor (the new
+  `Journal` query), back-to-back commits above the fill trigger, the
+  `lunixd.toml` keys. Tests: the crash-point and recovery suites at a small
+  bound, the bound under a manual clock.
+- **T4, wake and counters** (`lunix-journal`, `lunix-engine`, `lunixd`): a
+  lane's wake per freed file; ring waiters, longest ring wait, resident bytes,
+  hits and misses, last cut bytes and duration in the status.
+- **T5, status off the coordinator mutex** (`lunix-engine`, `lunixd`): the
+  published tip; `tip`, `tip_created_at`, `window_turn_left`.
+- **T6, measurement** (after T1-T5): the raw-device baseline of W9, then the
+  M16 w4k and seqw cells with the stall profile on the same host, reported as
+  ratios to the baseline, plus a RAM-backed directory as a reference; the
+  share of the zero rewrite, of C5-C9, of the packer and of the urgent mark.
+  Its report decides T7 to T9.
+- **T7 to T9, conditional on T6:** the urgent mark in steps (W8); segment
+  seals off the packer thread; the zero rewrite (W7, only with the sign-off).
+- **T10, documents**: DESIGN §4.1, §5, §8, and §20 rewritten as relative
+  targets (W9) with the percentages from T6.
+
+*Gate:* the note's §7: the resident window's property test (window and file
+return the same bytes), the existing kill and recovery suites at the bounded
+cadence on `plain`, `integrity` and `encrypted` volumes, no completion above a
+few seconds in the M16 write cells, and `lunix status` in milliseconds under
+load.

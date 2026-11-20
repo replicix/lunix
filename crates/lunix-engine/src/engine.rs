@@ -1,7 +1,7 @@
 //! The engine: shared state, `BlockEngine`, the control-plane entry points.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,47 @@ use crate::read::{ExtentReader, ReadCtx, ReadPool};
 use crate::recover::{recover, RecoveryReport};
 use crate::stats::Counters;
 
+/// The published tip (see `Inner::tip_view`): all three figures come from one
+/// commit, so a reader never sees a mix of two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TipView {
+    /// The tip's `commit_seq`.
+    pub commit_seq: CommitSeq,
+    /// The tip's cut: every write at or below it is in the commit.
+    pub cut_seq: WriteSeq,
+    /// The tip's `created_at` (the writer clamp of D17).
+    pub created_at: lunix_format::TimeMs,
+}
+
+impl TipView {
+    pub(crate) fn of(tip: &lunix_format::commit::Full) -> Self {
+        Self {
+            commit_seq: tip.common.commit_seq,
+            cut_seq: tip.cut_seq,
+            created_at: tip.common.created_at,
+        }
+    }
+}
+
+impl Inner {
+    /// Publishes the tip the coordinator just installed. Called with the
+    /// coordinator mutex held, after `co.tip` changed and after
+    /// `FullState::note_cut` (`window_turn_left` pairs the published tip with
+    /// `hole_commit`, so a reader between the two must see the old tip).
+    pub(crate) fn publish_tip(&self, co: &Coord) {
+        *self.tip_view.write().unwrap_or_else(|p| p.into_inner()) = TipView::of(&co.tip);
+    }
+
+    /// The published tip, without the coordinator mutex.
+    pub(crate) fn tip_view(&self) -> TipView {
+        *self.tip_view.read().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// Test hook: holds the coordinator mutex, as a commit does, until dropped.
+#[cfg(feature = "testsupport")]
+pub struct CoordHold<'a>(#[expect(dead_code, reason = "held for its drop")] MutexGuard<'a, Coord>);
+
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -45,6 +86,9 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// gets most of the coordinator's time while the cuts still come between
 /// its steps.
 pub(crate) const GC_BUSY_PERIOD: Duration = Duration::from_millis(10);
+
+/// The pause of the hot loop while a thread waits for the coordinator mutex.
+pub(crate) const HOT_YIELD: Duration = Duration::from_millis(2);
 
 /// The error of every call after a failure stopped the commits.
 pub(crate) fn stopped() -> Error {
@@ -125,6 +169,11 @@ pub(crate) struct Inner {
     /// yet at or below a durable cut (C9 releases per cut, `jcharges`).
     pub(crate) journal_charged: AtomicU64,
     pub(crate) coord: Mutex<Coord>,
+    /// The tip's figures as the coordinator last published them (ADR-33 T5):
+    /// `tip`, `tip_created_at` and `window_turn_left` read this and never the
+    /// coordinator mutex, which a commit holds for its whole length. The
+    /// write lock is held for one `Copy` store, never across I/O.
+    pub(crate) tip_view: RwLock<TipView>,
     /// The collector's status after its last call (`GcControl::status` and
     /// [`GcStatusHandle`] read it without the coordinator mutex).
     pub(crate) gc_status: Arc<Mutex<GcStatusSnapshot>>,
@@ -159,6 +208,15 @@ pub(crate) struct Inner {
     /// The `JournalReserved` charge of every record above the last cut,
     /// released per cut at C9 (ADR-32 review M4).
     pub(crate) jcharges: JournalCharges,
+    /// Ring waits and the last cut (ADR-33), read without the coordinator.
+    pub(crate) cuts: crate::cut::CutCounters,
+    /// The last background tick committed: the next one follows at once while
+    /// the ring is above the fill trigger (`coordinator_wait`).
+    pub(crate) back_to_back: AtomicBool,
+    /// Threads waiting for the coordinator mutex on an explicit call (a
+    /// commit, a grow, a detach, a GC pass): the hot loop of the background
+    /// thread leaves the mutex to them (`coordinator_wait`).
+    pub(crate) coord_waiters: AtomicU64,
 }
 
 impl Inner {
@@ -189,6 +247,43 @@ impl Inner {
             what,
             "journal failure: the volume is read-only"
         );
+    }
+
+    /// How long the background coordinator waits before its next tick: no
+    /// time while the last tick committed and the ring is still above the
+    /// fill trigger with writes not yet cut (ADR-33: cuts are bounded, so
+    /// commits follow back to back until the ring is below the trigger),
+    /// `GC_BUSY_PERIOD` at most while a pass has work, else `period`.
+    pub(crate) fn coordinator_wait(&self, period: Duration) -> Duration {
+        let hot = self.back_to_back.load(Ordering::Acquire)
+            && !self.is_failed()
+            && self.journal.last_issued().0 > self.durable_cut.load(Ordering::Acquire)
+            && (self.journal.fill().ratio() > self.cfg.journal_fill_trigger
+                || self.journal_full.load(Ordering::Acquire)
+                || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0);
+        if hot {
+            // `std::sync::Mutex` is not fair: a thread that waits for the
+            // coordinator (explicit commit, grow, detach, the GC ladder) is
+            // let in by a short sleep, else it could lose every race.
+            if self.coord_waiters.load(Ordering::Acquire) > 0 {
+                HOT_YIELD.min(period)
+            } else {
+                Duration::ZERO
+            }
+        } else if self.gc_busy.load(Ordering::Acquire) {
+            period.min(GC_BUSY_PERIOD)
+        } else {
+            period
+        }
+    }
+
+    /// Locks the coordinator for an explicit call, visibly waiting while
+    /// it is held (`coordinator_wait`).
+    pub(crate) fn lock_coord(&self) -> MutexGuard<'_, Coord> {
+        self.coord_waiters.fetch_add(1, Ordering::AcqRel);
+        let g = lock(&self.coord);
+        self.coord_waiters.fetch_sub(1, Ordering::AcqRel);
+        g
     }
 
     /// Wakes the coordinator waiting in C1.
@@ -330,6 +425,7 @@ impl Engine {
             journal_full: AtomicBool::new(false),
             durable_cut: AtomicU64::new(rec.tip.cut_seq.0),
             journal_charged: AtomicU64::new(rec.journal_charged),
+            tip_view: RwLock::new(TipView::of(&coord.tip)),
             coord: Mutex::new(coord),
             gc_status: Arc::new(Mutex::new(gc_status)),
             closing: AtomicBool::new(false),
@@ -343,6 +439,9 @@ impl Engine {
             report: rec.report,
             full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
             jcharges: JournalCharges::new(lanes, rec.journal_charges),
+            cuts: crate::cut::CutCounters::default(),
+            back_to_back: AtomicBool::new(false),
+            coord_waiters: AtomicU64::new(0),
             cfg,
         });
         let engine = Self {
@@ -366,13 +465,9 @@ impl Engine {
                 // A pass with work left steps again soon: at one 50 ms step
                 // per period the collector would get a third of its budget
                 // and fall behind a sustained overwrite (milestone gcrate).
-                let wait = weak.upgrade().map_or(period, |inner| {
-                    if inner.gc_busy.load(Ordering::Acquire) {
-                        period.min(GC_BUSY_PERIOD)
-                    } else {
-                        period
-                    }
-                });
+                let wait = weak
+                    .upgrade()
+                    .map_or(period, |inner| inner.coordinator_wait(period));
                 {
                     let g = lock(&s.0);
                     let (g, _) = s.1.wait_timeout(g, wait).unwrap_or_else(|p| p.into_inner());
@@ -410,8 +505,57 @@ impl Engine {
     /// # Errors
     /// Whatever the cut or commit reports.
     pub fn commit_now(&self, force: bool) -> Result<CommitOutcome> {
-        let mut co = lock(&self.inner.coord);
-        self.inner.commit(&mut co, force, None)
+        let mut co = self.inner.lock_coord();
+        self.inner.commit(&mut co, force, None, false)
+    }
+
+    /// Like [`commit_now`](Self::commit_now), but the cut is bounded by
+    /// journal bytes as the coordinator's own cuts are (ADR-33). For the
+    /// tests of the bound and of the crash points at a small bound.
+    ///
+    /// # Errors
+    /// Whatever the cut or commit reports.
+    #[doc(hidden)]
+    pub fn commit_bounded(&self, force: bool) -> Result<CommitOutcome> {
+        let mut co = self.inner.lock_coord();
+        self.inner.commit(&mut co, force, None, true)
+    }
+
+    /// How long the background coordinator would wait now before its next
+    /// tick (`background_period` when idle, none while it commits back to
+    /// back above the fill trigger). For tests.
+    #[doc(hidden)]
+    pub fn coordinator_wait(&self) -> Duration {
+        self.inner
+            .coordinator_wait(self.inner.cfg.background_period)
+    }
+
+    /// Runs what the background thread runs once (a tick, then the
+    /// bookkeeping of the back-to-back rule), for tests without the thread:
+    /// loop on it while [`coordinator_wait`](Self::coordinator_wait) is zero.
+    #[doc(hidden)]
+    pub fn background_tick(&self) {
+        self.inner.background_tick();
+    }
+
+    /// Threads waiting for the coordinator mutex on an explicit call. For
+    /// tests.
+    #[doc(hidden)]
+    pub fn coordinator_waiters(&self) -> u64 {
+        self.inner.coord_waiters.load(Ordering::Acquire)
+    }
+
+    /// The `cut_seq` of the last commit this process made durable (set at
+    /// C6, before any later step). For tests that crash after C6.
+    #[doc(hidden)]
+    pub fn durable_cut(&self) -> WriteSeq {
+        WriteSeq(self.inner.durable_cut.load(Ordering::Acquire))
+    }
+
+    /// The write path's counters (ADR-33): ring waits and the last cut. Reads
+    /// atomics only, never the coordinator's mutex.
+    pub fn cut_stats(&self) -> crate::cut::CutStats {
+        self.inner.cuts.snapshot()
     }
 
     /// Checks the commit triggers (`T`, `B`, journal fill, a full ring,
@@ -424,16 +568,32 @@ impl Engine {
         self.inner.tick()
     }
 
-    /// The verified tip: `commit_seq`, its cut and the rollback floor the
-    /// engine last wrote.
+    /// The last durable tip as the coordinator published it: `commit_seq`
+    /// and its cut. Never waits for a commit, so it can show a commit that
+    /// is between C6 (durable) and C10 (done): its size, rollback floor,
+    /// counters and journal reclaim may not have caught up yet. Do not read
+    /// "the tip advanced" as "the commit call returned".
     pub fn tip(&self) -> (CommitSeq, WriteSeq) {
-        let co = lock(&self.inner.coord);
-        (co.tip.common.commit_seq, co.tip.cut_seq)
+        let v = self.inner.tip_view();
+        (v.commit_seq, v.cut_seq)
     }
 
     /// The tip's `created_at` (the writer clamp of D17), for status displays.
     pub fn tip_created_at(&self) -> lunix_format::TimeMs {
-        lock(&self.inner.coord).tip.common.created_at
+        self.inner.tip_view().created_at
+    }
+
+    /// The whole published tip, from one commit (what status shows); the
+    /// same caveat as [`Engine::tip`].
+    pub fn tip_view(&self) -> TipView {
+        self.inner.tip_view()
+    }
+
+    /// Test hook: holds the coordinator mutex until the guard drops, as a
+    /// long commit would. Test builds only (`testsupport`).
+    #[cfg(feature = "testsupport")]
+    pub fn hold_coordinator(&self) -> CoordHold<'_> {
+        CoordHold(lock(&self.inner.coord))
     }
 
     /// True once a test hook stopped the engine at a crash point, or a
@@ -471,8 +631,8 @@ impl Engine {
     /// decision M6) while writes are refused or parked for space; 0 when
     /// they are not.
     pub fn window_turn_left(&self) -> u64 {
-        let co = lock(&self.inner.coord);
-        self.inner.window_turn_left(&co)
+        self.inner
+            .window_turn_left(self.inner.tip_view().commit_seq)
     }
 
     /// The volume is about to quiesce (ADR-32 review M3, beside
@@ -588,8 +748,9 @@ impl BlockEngine for Engine {
             return Ok(());
         }
         {
-            let mut co = lock(&self.inner.coord);
-            self.inner.commit(&mut co, true, Some(new_size_bytes))?;
+            let mut co = self.inner.lock_coord();
+            self.inner
+                .commit(&mut co, true, Some(new_size_bytes), false)?;
         }
         let hook = lock(&self.inner.resize_hook).clone();
         match hook {
@@ -613,8 +774,8 @@ impl BlockEngine for Engine {
             let _g = lock(&self.inner.gc_wake.0);
             self.inner.gc_wake.1.notify_all();
         }
-        let mut co = lock(&self.inner.coord);
-        self.inner.commit(&mut co, false, None).map(|_| ())
+        let mut co = self.inner.lock_coord();
+        self.inner.commit(&mut co, false, None, false).map(|_| ())
     }
 
     fn stats(&self) -> EngineStats {

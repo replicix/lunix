@@ -123,8 +123,8 @@ struct Mutation {
     space: SpaceWait,
     /// `clock.monotonic()` at arrival: every wait counts from it.
     arrived: std::time::Duration,
-    /// Parked for a full journal ring.
-    ring_wait: bool,
+    /// Parked for a full journal ring since this `clock.monotonic()`.
+    ring_since: Option<std::time::Duration>,
 }
 
 struct ReadState {
@@ -301,7 +301,7 @@ impl Queue {
                             outstanding: 0,
                             space: SpaceWait::None,
                             arrived: self.inner.clock.monotonic(),
-                            ring_wait: false,
+                            ring_since: None,
                         }),
                     },
                 );
@@ -360,13 +360,16 @@ impl Queue {
     /// True when a parked request waits for the journal ring.
     fn ring_wait_parked(&self) -> bool {
         self.parked.iter().chain(self.parked_holes.iter()).any(
-            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_wait),
+            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_since.is_some()),
         )
     }
 
     fn fail(&mut self, tag: Tag, errno: i32, done: &mut dyn Completer) {
         if let Some(r) = self.reqs.remove(&tag) {
             if let Kind::Mutate(m) = &r.kind {
+                if let Some(since) = m.ring_since {
+                    self.inner.end_ring_wait(since);
+                }
                 if let SpaceWait::Charged(b) = m.space {
                     self.inner.space.release(SpaceKind::JournalReserved, b);
                 } else if let SpaceWait::Waiting(w, b) = &m.space {
@@ -519,7 +522,12 @@ impl Queue {
                         self.fail(tag, errno, done);
                         return Step::Done;
                     }
-                    m.ring_wait = true;
+                    let now = inner.clock.monotonic();
+                    let since = *m.ring_since.get_or_insert_with(|| {
+                        inner.cuts.ring_waiters.fetch_add(1, Ordering::Relaxed);
+                        now
+                    });
+                    inner.note_ring_wait(now.saturating_sub(since));
                     inner.journal_full.store(true, Ordering::Release);
                     return Step::Parked;
                 }
@@ -533,7 +541,9 @@ impl Queue {
                 }
             };
             m.space = SpaceWait::None;
-            m.ring_wait = false;
+            if let Some(since) = m.ring_since.take() {
+                inner.end_ring_wait(since);
+            }
             let seq = slot.write_seq;
             if m.record == RecordKind::Hole {
                 inner.full.note_hole(seq.0);
@@ -956,7 +966,7 @@ impl Queue {
             }
         }
         let ring = self.parked.iter().chain(self.parked_holes.iter()).any(
-            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_wait),
+            |t| matches!(self.reqs.get(t), Some(Req { kind: Kind::Mutate(m), .. }) if m.ring_since.is_some()),
         );
         if self.shared.ring_parked.load(Ordering::Relaxed) != ring {
             self.shared.ring_parked.store(ring, Ordering::Relaxed);
@@ -1014,6 +1024,14 @@ impl Drop for Queue {
                 .poison(first, "queue handler dropped with writes in flight");
         }
         self.inner.notify_progress();
+        // Requests still parked for the ring leave the waiter count.
+        for r in self.reqs.values() {
+            if let Kind::Mutate(m) = &r.kind {
+                if let Some(since) = m.ring_since {
+                    self.inner.end_ring_wait(since);
+                }
+            }
+        }
         let idx = usize::from(self.shared.id.0);
         if let Some(slot) = lock(&self.inner.queues).get_mut(idx) {
             *slot = None;

@@ -94,10 +94,13 @@ step "lunixd with testsupport: clippy, then the stack tests in release with luni
 cargo clippy -j "$jobs" -p lunixd --all-targets --features testsupport,crashpoints -- -D warnings
 cargo build -j "$jobs" --release -p lunix-fsck --features crashpoints
 stack_tests=(--lib)
-for t in stack_support stack_model stack_gc stack_gc_ladder stack_gc_rate stack_throttle control_gc; do
+for t in stack_support stack_model stack_gc stack_gc_ladder stack_gc_rate stack_throttle control_gc status_lockfree stack_window; do
   [ -f "crates/lunixd/tests/$t.rs" ] && stack_tests+=(--test "$t")
 done
 LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features testsupport "${stack_tests[@]}"
+
+step "lunixd with crashpoints: a write after a kill between C6 and C9 and the recovery does not stall (milestone jcut)"
+cargo test -j "$jobs" --release -p lunixd --features testsupport,crashpoints --test stack_ring_recover
 
 if [ "${LUNIX_SKIP_OWNERSHIP:-}" = "1" ]; then
   step "ownership (skipped: not a milestone branch)"

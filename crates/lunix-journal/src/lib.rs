@@ -7,6 +7,14 @@
 //! `lunix-iface` journal
 //! module documentation is the contract; this crate's own decisions are
 //! recorded in the crate README.
+//!
+//! The journal also keeps what it wrote in memory until the ring file is
+//! reclaimed (the *resident window*, ADR-33), serves reads from it, and on a
+//! miss reads and checks a whole 1 MiB window of the file; see the `window`
+//! module's documentation and [`FileJournal::window_stats`]. Two limits are
+//! deliberate (ADR-33): a guest read that misses the window is not checked,
+//! and with a `resident_max` below the backlog a cut reads, each miss costs a
+//! 1 MiB read and check.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -19,11 +27,13 @@ mod ring;
 mod scan;
 mod shared;
 mod sys;
+mod window;
 
 pub use config::{
     JournalConfig, TraceEvent, TraceFn, DEFAULT_JOURNAL_MAX, DEFAULT_MARK_IDLE, MIN_JOURNAL_MAX,
 };
 pub use journal::FileJournal;
+pub use window::WindowStats;
 
 use lunix_format::local::CheckpointSlot;
 use lunix_format::CommitSeq;

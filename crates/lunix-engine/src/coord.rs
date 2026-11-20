@@ -109,6 +109,16 @@ pub(crate) struct Coord {
     pub(crate) gc_error: Option<String>,
     /// The last error of `apply_moved`, logged once per change.
     pub(crate) rehint_error: Option<String>,
+    /// The journal bytes and durations of the last committed cuts: the drain
+    /// rate behind the bound of the next one (ADR-33).
+    pub(crate) drain: crate::cut::DrainHistory,
+    /// The journal bytes the cut in flight released at C9.
+    pub(crate) cut_bytes: u64,
+    /// `clock.monotonic()` when the cut in flight finished C9 (the GC step of
+    /// C10 is not part of the cut's time).
+    pub(crate) cut_end: Duration,
+    /// The last error of `reclaim_covered`, logged once per change.
+    pub(crate) reclaim_error: Option<String>,
 }
 
 impl Coord {
@@ -142,6 +152,10 @@ impl Coord {
             gc_cut: false,
             gc_error: None,
             rehint_error: None,
+            drain: crate::cut::DrainHistory::default(),
+            cut_bytes: 0,
+            cut_end: Duration::ZERO,
+            reclaim_error: None,
         }
     }
 }
@@ -270,11 +284,12 @@ impl Inner {
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
         let wanted = self.wanted(&mut co);
+        self.reclaim_covered(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
         let space_cut = self.space_cut(&co);
         if wanted || space_cut.is_some() {
             let cut_started = self.clock.monotonic();
-            let res = self.commit(&mut co, space_cut == Some(true), None);
+            let res = self.commit(&mut co, space_cut == Some(true), None, true);
             self.after_space_cut(&co, space_cut, &res);
             // A commit that failed before it changed the map (no space for
             // the cut above all, an index run still unpersisted, writes in
@@ -307,10 +322,56 @@ impl Inner {
         }
     }
 
+    /// Frees the ring files that hold only records at or below the tip's cut
+    /// while a write is parked for the ring. They are there when a process
+    /// died between C6 and C9 (the FULL was durable, the reclaim not done),
+    /// and recovery replays nothing of them: no write is dirty, `wanted` sees
+    /// no trigger and no commit would reclaim them, so a lane left full of
+    /// such records would park its writes until they fail. The tip is durable
+    /// (C6), so everything at or below its `cut_seq` may go (DESIGN §8.2).
+    fn reclaim_covered(&self, co: &mut Coord) {
+        if self.is_failed()
+            || !(self.journal_full.load(Ordering::Acquire)
+                || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0)
+        {
+            return;
+        }
+        match self
+            .journal
+            .tail_after(co.tip.cut_seq)
+            .and_then(|t| self.journal.reclaim(&t))
+        {
+            Ok(r) if r.files > 0 => {
+                co.reclaim_error = None;
+                tracing::debug!(
+                    files = r.files,
+                    cut = co.tip.cut_seq.0,
+                    "ring files below the tip's cut reclaimed for a parked write"
+                );
+                self.signal_queues();
+            }
+            Ok(_) => co.reclaim_error = None,
+            Err(e) => {
+                let msg = e.to_string();
+                if co.reclaim_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "journal reclaim below the tip failed; retried at the next tick");
+                    co.reclaim_error = Some(msg);
+                }
+            }
+        }
+    }
+
     /// The background thread's tick: logs a failure once per distinct error
     /// instead of every period.
     pub(crate) fn background_tick(&self) {
         let res = self.tick();
+        // A commit is followed at once while the ring stays above the fill
+        // trigger (`coordinator_wait`); anything else, an error above all,
+        // waits the period.
+        self.back_to_back.store(
+            matches!(res, Ok(CommitOutcome::Committed { .. })),
+            Ordering::Release,
+        );
         let mut co = crate::engine::lock(&self.coord);
         match res {
             Ok(_) => co.last_error = None,
@@ -357,19 +418,23 @@ impl Inner {
             || self.overlay.dirty_bytes() >= self.cfg.dirty_bytes
             || self.journal.fill().ratio() > self.cfg.journal_fill_trigger
             || self.journal_full.load(Ordering::Acquire)
+            || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0
     }
 
     /// Cuts at the current `write_seq` and commits (C1-C10). `force`
-    /// commits even when nothing changed; `new_size` grows the volume. A
-    /// commit that fails for space, at any step (the destage, the index
-    /// run's retry), runs GC's urgent pass (`space_short`).
+    /// commits even when nothing changed; `new_size` grows the volume.
+    /// `bounded` cuts a prefix bounded by journal bytes (`bound_cut_bytes`)
+    /// instead of everything written so far. A commit that fails for space, at
+    /// any step (the destage, the index run's retry), runs GC's urgent pass
+    /// (`space_short`).
     pub(crate) fn commit(
         &self,
         co: &mut Coord,
         force: bool,
         new_size: Option<u64>,
+        bounded: bool,
     ) -> Result<CommitOutcome> {
-        let res = self.commit_once(co, force, new_size);
+        let res = self.commit_once(co, force, new_size, bounded);
         self.full.note_commit(&res, self.clock.monotonic());
         match &res {
             Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
@@ -384,6 +449,7 @@ impl Inner {
         co: &mut Coord,
         force: bool,
         new_size: Option<u64>,
+        bounded: bool,
     ) -> Result<CommitOutcome> {
         if self.is_failed() {
             return Err(crate::engine::stopped());
@@ -411,8 +477,12 @@ impl Inner {
         if poisoned != u64::MAX {
             c = c.min(poisoned.saturating_sub(1)).max(prev);
         }
+        if bounded {
+            c = self.bound_cut_bytes(co, prev, c);
+        }
         c = self.bound_cut(prev, c);
         point!(self.points, "engine.c1.waited");
+        let cut_started = self.clock.monotonic();
         // A cut too big for the map's dirty-leaf cap is retried smaller:
         // any c' in (prev, c] is a cut too.
         loop {
@@ -425,9 +495,90 @@ impl Inner {
                     tracing::info!(cut = c, "map dirty-leaf cap reached: cutting smaller");
                 }
                 Err(CutFail::Other(e)) => return Err(e),
-                Ok(o) => return Ok(o),
+                Ok(o) => {
+                    if matches!(o, CommitOutcome::Committed { .. }) {
+                        self.note_cut(co, cut_started);
+                    }
+                    return Ok(o);
+                }
             }
         }
+    }
+
+    /// ADR-33: lowers `c` to a cut of at most `cut_target` times the drain
+    /// rate of the last cuts in journal bytes (the charge lists), at most half
+    /// the ring (in record bytes, see below), at least one ring file of bytes
+    /// and at least what lets reclaim free a ring file of the fullest lane
+    /// (`Journal::cut_freeing_file`; the floor wins over the half ring, so
+    /// every commit under pressure frees something). With no history the rate
+    /// bounds nothing. Every `c'` in `(prev, c]` with all writes `<= c` in the
+    /// overlay is a prefix cut, as `bound_cut` relies on. Under a light load
+    /// the writes since the last cut are fewer than the bound and `c` stays.
+    fn bound_cut_bytes(&self, co: &Coord, prev: u64, c: u64) -> u64 {
+        if c <= prev + 1 {
+            return c;
+        }
+        let fill = self.journal.fill();
+        // The ceiling is half the ring, in the units of the charges: a ring
+        // file holds fewer record bytes than its length (batch padding, file
+        // headers), so half the ring's bytes is scaled by what the charged
+        // records occupy of the files in use.
+        let held = self.journal_charged.load(Ordering::Acquire);
+        let scale = |bytes: u64| {
+            if fill.used_bytes == 0 {
+                bytes
+            } else {
+                let n = u128::from(held.min(fill.used_bytes));
+                u64::try_from(u128::from(bytes) * n / u128::from(fill.used_bytes))
+                    .unwrap_or(u64::MAX)
+            }
+        };
+        let half = scale(fill.capacity_bytes / 2);
+        // The rate bounds the cut, the half ring caps it, and one ring file
+        // (in the same record-byte units) is the least: a fixed commit cost at or above `cut_target`
+        // cannot shrink the cuts below it.
+        let budget = co
+            .drain
+            .budget(self.cfg.cut_target)
+            .map_or(half, |b| b.min(half))
+            .max(
+                self.cfg
+                    .cut_min_bytes
+                    .unwrap_or_else(|| scale(fill.file_bytes)),
+            );
+        let floor = self
+            .journal
+            .cut_freeing_file()
+            .map_or(0, |w| w.0)
+            .clamp(prev + 1, c);
+        let bounded = self.jcharges.cut_for(budget, floor, c).clamp(prev + 1, c);
+        if bounded < c {
+            tracing::debug!(
+                cut = c,
+                bounded,
+                budget,
+                floor,
+                "cut bounded by journal bytes"
+            );
+        }
+        bounded
+    }
+
+    /// Notes a committed cut: its journal bytes and duration feed the next
+    /// bound and the status.
+    fn note_cut(&self, co: &mut Coord, started: Duration) {
+        let took = co.cut_end.saturating_sub(started);
+        // A cut without journal bytes (a forced FULL, GC moves) says nothing
+        // about the drain rate.
+        if co.cut_bytes > 0 {
+            co.drain.push(co.cut_bytes, took);
+        }
+        let c = &self.cuts;
+        c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
+        c.last_cut_ms.store(
+            u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
     }
 
     /// Lowers `c` so that the cut dirties at most `max_leaves_per_cut` map
@@ -654,6 +805,7 @@ impl Inner {
         co.tip = full;
         co.tip_hash = sealed.hash;
         self.full.note_cut(prev, c, commit_seq.0);
+        self.publish_tip(co);
         co.retained.push(commit);
         co.retained.retain(|r| r.common().commit_seq >= chain_floor);
         co.last_commit_at = self.clock.monotonic();
@@ -732,6 +884,9 @@ impl Inner {
         // The ring files are the journal's to recycle; the charge of every
         // record at or below the cut goes now, whichever files were reused
         // (ADR-32 review M4): the ledger then equals what a restart charges.
+        // Cleared before the reclaim: a write that parks again while the
+        // reclaim goes on (it wakes lane by lane) keeps the flag.
+        self.journal_full.store(false, Ordering::Release);
         match &tail {
             Ok(t) => {
                 if let Err(e) = self.journal.reclaim(t) {
@@ -741,12 +896,14 @@ impl Inner {
             Err(e) => tracing::warn!(error = %e, "journal tail unknown; nothing reclaimed"),
         }
         let held = self.journal_charged.load(Ordering::Acquire);
-        let give = self.jcharges.take_upto(c).min(held);
+        let released = self.jcharges.take_upto(c);
+        co.cut_bytes = released;
+        let give = released.min(held);
         self.journal_charged.fetch_sub(give, Ordering::AcqRel);
         self.space.release(SpaceKind::JournalReserved, give);
         self.overlay.release(&cut);
         self.abandon(acct);
-        self.journal_full.store(false, Ordering::Release);
+        co.cut_end = self.clock.monotonic();
         point!(self.points, "engine.c9.reclaimed");
         self.signal_queues();
         // C10: one budgeted GC step, only between cuts with the map at the tip.

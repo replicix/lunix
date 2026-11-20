@@ -358,9 +358,59 @@ journal):
     most the tip's `commit_seq`. A checkpoint from beyond the tip (after
     `fsck --repair --truncate-tip`, §4.4) says that records up to the old
     tip's cut may be skipped, and they must not be.
+- **Resident window (ADR-33).** The journal keeps what it wrote in memory
+  until the ring file is reclaimed. A lane copies each batch's record bytes
+  when it seals the batch and indexes the copy, per lane, by `(ordinal, file
+  offset)` once the batch write has completed, before the `Append`
+  completions are delivered. `read_at` and `submit_read` serve a location
+  from it and fall back to the file.
+  - It is a cache of bytes already in the ring: the acknowledgement, the
+    group flush, FUA, the C6 point and recovery do not change, a crash loses
+    it, and no on-disk format changes. The bytes served are the bytes
+    handed to the write, so chunks stay byte-exact; a ring block damaged
+    after the write no longer reaches a chunk through it.
+  - Memory: at most the record bytes of the un-reclaimed ring files, capped
+    by `journal_resident_max` of `lunixd.toml` (default: the volume's
+    `journal_max`). Past the cap a new batch is not admitted (the oldest
+    records, which the next cut needs, stay). The window is plaintext, like
+    the batch buffers and the read cache, and is not locked memory.
+  - **A miss reads 1 MiB around it.** `read_at` on a location that is not
+    resident (after a restart, past the cap) reads the 1 MiB-aligned window
+    of the ring file around it, once however many workers miss in it, and
+    parses whole records with the recovery reader's record checks (magic,
+    `gen`, own `off`, resync in 8-byte steps) and each record's crc32c
+    **before any of its bytes is used**. It does not apply the reader's
+    `write_seq` order or its stop at a zero block, so it can accept valid
+    records beyond a recovery stop point; the window is cleared when the
+    wipe runs, a read that began before the wipe cannot index after it, and a
+    batch whose write completes evicts every entry it overlaps even when the
+    cap did not admit it. Only
+    verified records are served or made resident (within the cap). A record
+    cut by the edge of the window is completed with one more read. A record
+    that fails its checksum (or has no valid header at its place) fails the
+    read as `Corrupt`, so destage fails the cut like for any read error and
+    no chunk ever holds the damaged bytes. Nothing is read ahead of need and
+    nothing is read back after a write.
+  - `submit_read` (guest reads) uses the window for hits only; a miss is the
+    single asynchronous read of the piece it was, **unchecked** (after a
+    restart or past the cap a guest read can still return damaged ring bytes
+    to the guest). ADR-33 adds no read anywhere else and these bytes never
+    reach a chunk.
+  - Past `journal_resident_max` every `read_at` miss in a window that was not
+    made resident reads and checks 1 MiB again (concurrent misses share one
+    read): with a small cap destage can be slower than before the window. The
+    default, `journal_max`, never binds.
+  - Counters (`FileJournal::window_stats`): resident bytes and cap, hits,
+    misses, batches not admitted, window reads, completing reads, checksum
+    failures.
 - **Reclaim:** journal space is freed once every record in a file has
   been destaged into a segment whose `fdatasync` is done, *and* the
-  commit that names the owning map change is durable (§8.2).
+  commit that names the owning map change is durable (§8.2). The file's
+  resident entries are released as reclaim takes the file out of use.
+  Each file is rewritten with zeros and renamed before it is free; the lane
+  it belongs to is signalled at that moment, not when the reclaim of every
+  lane is done (ADR-33), so a write parked for the ring resumes with the
+  first free file.
 - **Retention after destage:** in async and sync modes, records also wait
   until the containing cut is committed to the authority. A DELTA commit
   can then be rebuilt from the journal.
@@ -513,6 +563,10 @@ extents grouped by chunk; it prefers chunks whose newest record is older
 than the async interval, so overwrites are absorbed.
 
 1. **Assemble the chunk.**
+   - A piece whose source is the journal is read with `Journal::read_at`:
+     from the resident window when the bytes are in it, else through the
+     1 MiB read-around, which checks each record's crc32c (§4.1, ADR-33). A
+     read error, a damaged record included, fails the cut.
    - If the chunk is fully covered by the overlay, use that data.
    - If it is partially covered, read the base chunk (local store or
      backend) and patch it. A cold RMW is counted in metrics; the base
@@ -819,12 +873,28 @@ trailer = footer offset + length + magic
 - A global atomic `write_seq` is assigned at write admission, across all
   queues and journal lanes. It is unrelated to the `commit_seq` of §8.2.
 - To cut at `c` (a `write_seq` value):
-  1. Pick `c` = the current `write_seq` value.
+  1. Pick `c` = the current `write_seq` value, lowered to a bounded cut
+     (below).
   2. Wait until every write with `write_seq ≤ c` has reached the journal;
      that is only the in-flight ones.
   3. Destage up to `c` into sealed segments and the map, using MVCC on
      the overlay: writes with `write_seq > c` stay out of this map version.
   4. Seal the map.
+- **A cut is bounded by journal bytes** (ADR-33). Any `c'` in
+  `(last cut, c]` is a prefix cut, so the coordinator takes the `c'` whose
+  records, summed from the per-lane charge lists, are at most `cut_target`
+  (`cut_target_ms`, 1 s) times the drain rate of its last four cuts
+  (journal bytes over the time from C1 to C9). The bound is raised to the
+  lowest `c'` that lets reclaim free a ring file of the fullest lane
+  (`Journal::cut_freeing_file`), so every commit under pressure frees
+  something, and it never exceeds half the ring (the floor wins when the two
+  disagree). With no history the half ring is the bound. While the ring is
+  above the fill trigger the next commit follows at once. Under a light load
+  the writes since the last cut are fewer than the bound, the cut is
+  everything written so far and `T` and `B` decide as before. Explicit
+  commits (a grow, the final commit of a detach) cut everything. A cut
+  frees its ring files file by file (§4.1 "Reclaim"): a lane parked for a
+  full ring is woken as soon as one of its files is free.
 - A cut never stalls new writes; it only waits for in-flight ones. Every
   completed FLUSH names a `write_seq`, so "the state at the last FLUSH before
   time t" is well defined (CDP at commit granularity).
@@ -891,7 +961,8 @@ a FULL's own segments is persisted afterwards and named by the next FULL.
 
 **Local commit order.** A local FULL commit is made in this durable order;
 each step has a crash point:
-1. Pick `c`, wait for in-flight writes, cut the overlay (§8.1).
+1. Pick `c` (a bounded cut, §8.1), wait for in-flight writes, cut the
+   overlay.
 2. Destage the cut. Extents go to segments and **every segment is sealed**
    (footer, trailer, `fdatasync`, rename, directory `fsync`) **before the
    map transaction commits in memory**, so no reader can reach an unsealed

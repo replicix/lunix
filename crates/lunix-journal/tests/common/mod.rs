@@ -49,9 +49,12 @@ pub fn open_lane(j: &dyn Journal, lane: u16) -> Box<dyn JournalLane> {
 
 /// The data of a record: every byte derives from the sequence number.
 pub fn pattern(seq: u64, blocks: u32) -> Vec<u8> {
+    // A hash of (seq, byte index): no period, so a read shifted by blocks (or
+    // by one byte) differs from what was written.
     let mut v = vec![0u8; blocks as usize * 4096];
     for (i, b) in v.iter_mut().enumerate() {
-        *b = (seq as usize).wrapping_mul(31).wrapping_add(i) as u8;
+        let x = (seq << 24 | i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        *b = (x >> 56) as u8;
     }
     v
 }

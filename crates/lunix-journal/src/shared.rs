@@ -6,12 +6,14 @@ use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
 use lunix_iface::journal::FlushDone;
+use lunix_iface::wake::WakeFd;
 use lunix_iface::Error;
 
 use crate::aligned::AlignedBuf;
 use crate::config::JournalConfig;
 use crate::ring::{lock, Rings};
 use crate::scan::Plan;
+use crate::window::Window;
 
 /// `poison_at` value meaning "not poisoned".
 pub(crate) const NOT_POISONED: u64 = u64::MAX;
@@ -131,12 +133,32 @@ pub(crate) struct Shared {
     /// The highest cut a caller asked a tail for (initially the floor).
     pub max_cut_asked: AtomicU64,
     pub zero: AlignedBuf,
+    /// The resident journal window (ADR-33).
+    pub window: Window,
     /// Lanes whose next append fails (test hook).
     pub fail_next: Mutex<BTreeSet<u16>>,
     pub fail_any: AtomicBool,
     /// The next group's `fdatasync` fails (test hook).
     pub fail_sync: AtomicBool,
+    /// The next batch write completes as failed (test hook).
+    pub fail_write: AtomicBool,
+    /// Each lane's wake fd, kept from `open_lane`: reclaim signals a lane as
+    /// soon as one of its files is free (ADR-33), not at the end of the
+    /// whole reclaim.
+    pub wakes: Vec<Mutex<Option<WakeFd>>>,
+    /// Called after each queue file reclaim freed, with the lane and the
+    /// number of files freed so far by that reclaim (test hook).
+    pub reclaim_hook: Mutex<Option<ReclaimHook>>,
+    /// Called as soon as a queue file is on the free list, before its lane is
+    /// signalled (test hook).
+    pub free_hook: Mutex<Option<ReclaimHook>>,
+    /// The n-th file the next reclaim re-initialises fails (0: none; test
+    /// hook).
+    pub fail_reclaim_nth: std::sync::atomic::AtomicU32,
 }
+
+/// A test hook of reclaim: see [`Shared::reclaim_hook`].
+pub(crate) type ReclaimHook = std::sync::Arc<dyn Fn(u16, u32) + Send + Sync>;
 
 impl Shared {
     pub(crate) fn poisoned_at(&self) -> Option<u64> {
@@ -149,6 +171,23 @@ impl Shared {
     pub(crate) fn poison(&self, seq: u64) {
         self.poison_at.fetch_min(seq, Ordering::SeqCst);
         self.coord.notify();
+    }
+
+    /// Signals lane `lane`'s queue: a ring file of it is free, so a write
+    /// parked for the ring may fit now.
+    pub(crate) fn wake_lane(&self, lane: u16) {
+        if let Some(w) = self.wakes.get(usize::from(lane)) {
+            if let Some(w) = lock(w).as_ref() {
+                w.signal();
+            }
+        }
+    }
+
+    /// True when this file of a reclaim is the one the test hook fails.
+    pub(crate) fn inject_reclaim_failure(&self) -> bool {
+        self.fail_reclaim_nth
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            == Ok(1)
     }
 
     pub(crate) fn poisoned_error() -> Error {

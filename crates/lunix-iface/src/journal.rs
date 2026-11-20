@@ -432,6 +432,9 @@ pub struct JournalFill {
     pub used_bytes: u64,
     /// Total ring capacity (`journal_max`).
     pub capacity_bytes: u64,
+    /// Bytes of one ring file (0 when the journal has none). The coordinator
+    /// never cuts less than this many journal bytes (ADR-33).
+    pub file_bytes: u64,
 }
 
 impl JournalFill {
@@ -489,7 +492,11 @@ pub trait Journal: Send + Sync {
     /// replay). Same precondition as `submit_read`.
     ///
     /// # Errors
-    /// `NotFound` for a reclaimed location; `Io`.
+    /// `NotFound` for a reclaimed location; `Io`; `Corrupt` when the journal
+    /// checked the record the bytes belong to and its checksum (or its
+    /// header) did not verify: nothing is written to `buf` then, and a
+    /// destage that reads it fails the cut (a journal may serve a location it
+    /// still holds without checking it again).
     fn read_at(&self, loc: JournalLoc, buf: &mut [u8]) -> Result<()>;
 
     /// Scans every file of every lane (blocking) and returns the records with
@@ -533,6 +540,21 @@ pub trait Journal: Send + Sync {
 
     /// The ring's fill. Non-blocking.
     fn fill(&self) -> JournalFill;
+
+    /// The lowest cut `c` for which [`tail_after`](Self::tail_after)`(c)` and
+    /// [`reclaim`](Self::reclaim) free at least one ring file of the fullest
+    /// lane (ADR-33, bounded cuts): the lane with the fewest free files among
+    /// those that hold a sealed file, and in it the oldest such
+    /// file; the answer is the highest `write_seq` that file holds (0 when it holds none). A tie
+    /// between lanes takes the lower answer. The coordinator raises a bounded
+    /// cut to it, so a cut under pressure always frees something.
+    ///
+    /// `None` when no lane has such a file (every file is free or is the
+    /// lane's current one): no cut frees anything. The answer may lie at or
+    /// below an earlier cut (a file whose reclaim has not happened yet); a
+    /// caller takes the larger of it and its own lower bound. Read-only and
+    /// non-blocking; the answer is a snapshot.
+    fn cut_freeing_file(&self) -> Option<WriteSeq>;
 }
 
 impl fmt::Display for LaneId {
