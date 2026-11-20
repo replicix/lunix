@@ -180,7 +180,7 @@ Commits: `7081d8c` (N1-N5 and the nits), `ddc243a` (the ring-full product bug be
 | N2 | the closing lane clears its wake fd before it counts as closed (a successor's wake is never erased) | `a_reopened_lane_is_woken_per_file_after_its_predecessor_closed` (sequential: it checks the successor is signalled and the predecessor is not; the race itself is ordered by the code, not tested) |
 | N3 | the one-ring-file minimum is scaled into record bytes by `held / used_bytes` like the ceiling (`cut_min_bytes` stays unscaled) | `the_one_ring_file_minimum_is_in_record_bytes` (fills occupying a quarter of their length: 60 instead of 210 with the unscaled floor) |
 | N4 | `wanted` also fires while a write waits for the ring (`ring_waiters > 0`) | `a_tick_cuts_for_a_ring_waiter_after_the_flag_was_cleared` (fails without the clause) |
-| N5 | new hidden hook `set_free_hook`: called right after the slot is on the free list, before the lane is signalled | `a_lane_that_fills_a_just_freed_file_keeps_its_counters` now parks there: with the reset after the push the next reclaim frees 2 files instead of 1 |
+| N5 | new hidden hook `set_free_hook`: called right after the slot is on the free list, before the lane is signalled | `a_lane_that_fills_a_just_freed_file_keeps_its_counters` now parks there: with the reset placed after the hook call the next reclaim frees 2 files instead of 1 (the first round's original order, a reset directly after the unlock and before the hook, is a window no hook can sit in and is not caught; the test pins that nothing resets after the point where a lane can take the file) |
 | nits | the duplicated comment in `journal.rs` removed; the one-file minimum is in `cut.rs`, `EngineConfig::cut_target` and the `cut_target_ms` row of `lunixd/src/config.rs`. `DECISIONS.md` is the lead's | |
 
 ### A write stalled for good after a kill and the recovery (found by M15)
@@ -234,3 +234,37 @@ run). All 141 kills of every loop had passed fsck and the prefix check. On `ddc2
 under four concurrent loops, and did not change it.
 
 Remote disk: 3.1 GiB at the largest sample (no incremental cache); the remote directory was deleted.
+
+## Third review round (the spot check of 7081d8c/ddc243a; MERGE AFTER FIXES, tests and gate only)
+
+Commit `b8841e2`, and the commit of this section. `tools/ci.sh` (CPUs 8-15, `-j 4`, `*_DEBUG=0`, `CARGO_INCREMENTAL=0`) on `b8841e2`: green, ownership
+`jcut ok (32 changed paths)`, 2 113 tests passed, 0 failed, 28 ignored.
+
+| finding | what changed |
+|---|---|
+| R1 | `stack_ring_recover` asserts after `vol.open()` that the ring is full (`used_bytes == capacity_bytes`), the precondition of the stall. With `reclaim_covered` removed the test fails (the first write fails at the 60 s ring deadline), with it it passes |
+| R2 | the child records, for every crash point a partial commit or tick passed, the first and last hit number inside one (the crash-point counters before and after it); the loop kills at the first (in `LUNIX_KILL_HITS=all` also the last), requires every `engine.c*` point to be among them, counts the kills at such a hit, and fails when a point passed in a partial cut was never killed inside one. Results below |
+| R3 | the success line of `reclaim_covered` is `debug`; the failure `warn` is logged once per distinct error (`Coord::reclaim_error`, cleared on success) |
+| R4 | a run that exits before its hit retries at `observed - 1` (not at the observed count), and a point whose count varied between runs needs one distinct kill fewer |
+| R5 | the N5 test comment and the sentence of the second round say what the test pins: a reset after the point where a lane can take the file; the original reset directly after the unlock is a window no hook can sit in |
+| R6 | the stack test keeps each child's stderr in a file and prints it when the child ends wrongly; four iterations (one per crash point: `engine.c6.committed`, `engine.c7.checkpoint`, `engine.c7.floor`, `engine.c8.index`), about 5 s |
+| outside the round | `FileJournal::reclaim`: on an I/O error the failing file and every candidate it had not processed go back to `Used` (they stayed `Recycling` until the next start). Test `a_failed_reclaim_gives_back_every_file_it_had_not_processed`: three sealed files, the second fails through the new hidden `fail_nth_reclaim_file`; the retry frees 2 files, and 1 with the old put-back (run: fails) |
+
+### Kill loops on `b8841e2`
+
+`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first`, `cut_min_bytes = 1`; "partial cuts" are the commits and ticks of the counting run that left requests uncut;
+the last column are the kills whose hit lay inside such a commit or tick. Every commit-path point (`engine.c1` to `c9`, and the store, destage and index points
+under them: 39 points in all) passed in a partial cut in every loop and was killed inside one.
+
+| loop | runs / kills | partial cuts | kills inside a partial cut | points covered |
+|---|---|---|---|---|
+| plain 16 KiB | 88 / 88 | 9 | 39 | 39 of 39 |
+| integrity 16 KiB | 91 / 91 | 9 | 39 | 39 of 39 |
+| encrypted 16 KiB | 88 / 88 | 9 | 39 | 39 of 39 |
+| plain 64 KiB | 88 / 88 | 9 | 39 | 39 of 39 |
+
+The first commit of a process is whole (the drain history is empty): hit 1 of the `first` mode is not a partial one, which is why the inside hits are added.
+The `LUNIX_KILL_HITS=all` loops, the integrity and encrypted 64 KiB loops and the second-round loops were run on `ddc243a`, not on this head (the head differs by the journal
+error path and the log levels); not rerun, as asked.
+
+Remote disk: below 3.2 GiB (no incremental cache); the remote directory was deleted.
