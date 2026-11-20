@@ -169,3 +169,68 @@ encrypted (16 KiB and 64 KiB) were not run.
 Remote disk this round: 2.9 GiB after the gate (no incremental cache), and the remote directory was deleted afterwards.
 
 Commits: `2541d6a` (the fixes) and the commit of this section.
+
+## Second review round (MERGE AFTER FIXES: the re-review of 2541d6a/ca0a50a)
+
+Commits: `7081d8c` (N1-N5 and the nits), `ddc243a` (the ring-full product bug below), and the commit of this section.
+
+| finding | what changed | test |
+|---|---|---|
+| N1 (blocker) | `stack_kill.rs`: with `LUNIX_KILL_CUT_MS` set the child's engine gets `cut_min_bytes = Some(1)` (the one-ring-file floor, 64 MiB here, had made every `commit_bounded` a whole cut); the child counts the commits and ticks that left requests uncut, the counting run prints it (`partial cuts`) and the loop fails when it is 0; the header comment says so | the loops themselves: 9-10 partial cuts in every loop |
+| N2 | the closing lane clears its wake fd before it counts as closed (a successor's wake is never erased) | `a_reopened_lane_is_woken_per_file_after_its_predecessor_closed` (sequential: it checks the successor is signalled and the predecessor is not; the race itself is ordered by the code, not tested) |
+| N3 | the one-ring-file minimum is scaled into record bytes by `held / used_bytes` like the ceiling (`cut_min_bytes` stays unscaled) | `the_one_ring_file_minimum_is_in_record_bytes` (fills occupying a quarter of their length: 60 instead of 210 with the unscaled floor) |
+| N4 | `wanted` also fires while a write waits for the ring (`ring_waiters > 0`) | `a_tick_cuts_for_a_ring_waiter_after_the_flag_was_cleared` (fails without the clause) |
+| N5 | new hidden hook `set_free_hook`: called right after the slot is on the free list, before the lane is signalled | `a_lane_that_fills_a_just_freed_file_keeps_its_counters` now parks there: with the reset after the push the next reclaim frees 2 files instead of 1 |
+| nits | the duplicated comment in `journal.rs` removed; the one-file minimum is in `cut.rs`, `EngineConfig::cut_target` and the `cut_target_ms` row of `lunixd/src/config.rs`. `DECISIONS.md` is the lead's | |
+
+### A write stalled for good after a kill and the recovery (found by M15)
+
+Root cause. A process killed between C6 (the FULL is durable) and C9 (the journal reclaim) leaves ring files that hold only records at or below the
+tip's `cut_seq`. Recovery replays none of them, so nothing is dirty and `Coord::wanted` returns false before it looks at `journal_full` (its first test is
+`last_issued > tip.cut_seq`); and `commit_once` with nothing to cut is `Idle` and does not reclaim either. A lane whose files are all of that kind has no
+room: its first write parks for the ring, the coordinator idles in `wait_timeout`, `journal_used` stays at that lane's files, the tip and the commit count stay
+constant, and the write fails with EIO after the 60 s ring wait (or hangs longer in a cell that waits). `last_commit_error="other"` is not a failed commit: it
+is the label the log line gives when the last commit did not fail for space (`full.rs`, `if nospace { "no space" } else { "other" }`); no commit was attempted.
+M15's hypothesis (no trigger) is right, N4's `ring_waiters` clause alone does not cover it (it lives behind the same `dirty` test).
+
+Fix. `Inner::reclaim_covered`, called by every tick: while `journal_full` or a ring waiter exists, `tail_after(tip.cut_seq)` and `reclaim` free the files below the
+tip's cut (the FULL is durable, so they may go: DESIGN section 8.2) and signal the queues. It runs before the trigger check, so a dirty lane is helped too.
+
+Tests.
+- `jcut::a_lane_left_full_of_covered_records_by_a_crash_is_freed_for_its_parked_write` (engine, fake journal): a single lane filled exactly (504 records in two
+  files), flushed, a crash after C6, a restart, a write that parks, ticks: the write completes. Without the fix it never does.
+- `stack_ring_recover::a_write_after_a_kill_during_ingest_and_the_recovery_does_not_stall` (real stack, no root; in `tools/ci.sh`): twelve iterations, each on a fresh
+  volume of four queues and two 1 MiB files per lane: a child fills every lane exactly with 256 KiB writes, makes them durable and commits; `LUNIX_CRASH_AT`
+  kills it inside that commit at `engine.c6.committed`, `engine.c7.checkpoint`, `engine.c7.floor` or `engine.c8.index` (three each); the parent recovers and writes 96
+  more times, each within 30 s. Without the fix the test fails after 60 s (EIO of the ring wait); with it twelve iterations take about 15 s. An earlier
+  version that killed the child at random moments of a running ingest did not reproduce the stall without the fix (the coordinator keeps the ring from ever being
+  full), which is why the kill is placed at the crash points on a deliberately full ring.
+- `tamper.sh` itself needs root and the M15 harness, which is not on this branch: not run. The test above is the equivalent, 12 kills, 0 stalls.
+
+### Gate of the second review round
+
+`tools/ci.sh` (CPUs 8-15, `-j 4`, `*_DEBUG=0`, `CARGO_INCREMENTAL=0`) on `ddc243a`: green, ownership `jcut ok (32 changed paths)`. 2 103 tests passed, 0 failed,
+28 ignored. `tools/ci.sh` gained the `stack_ring_recover` line.
+
+Kill loops by hand on `ddc243a` at the bounded cadence (`LUNIX_KILL_CUT_MS=1`, `cut_min_bytes = 1`); every loop of the table ran with 9 or 10 partial cuts in its
+counting run (commits and ticks that left requests uncut):
+
+| loop | hits | points reached | runs / kills | partial cuts | result |
+|---|---|---|---|---|---|
+| plain 16 KiB | first | 52 of 55 | 52 / 52 | 9 | ok |
+| integrity 16 KiB | first | 52 | 52 / 52 | 9 | ok |
+| encrypted 16 KiB | first | 52 | 52 / 52 | 9 | ok |
+| plain 64 KiB | first | 52 | 52 / 52 | 9 | ok |
+| integrity 64 KiB | first | 52 | 52 / 52 | 10 | ok |
+| encrypted 64 KiB | first | 52 | 52 / 52 | 9 | ok |
+| plain 16 KiB | all | 52 | 141 / 141 | 9 | ok (8 711 s) |
+| integrity 16 KiB | all | 52 | 141 / 141 | 9 | ok (8 576 s) |
+| encrypted 16 KiB | all | 52 | 141 / 141 | 9 | ok (7 877 s) |
+| plain 64 KiB | all | 52 | 141 / 141 | 10 | ok (7 902 s) |
+
+A previous run of the HITS=all loops on `7081d8c` failed two of four (plain 64 KiB, integrity 16 KiB) in the loop's last coverage assertion, not in a kill:
+`journal.mark.after_sync`, a time-driven point, was killed at two distinct hits of its 37 or 39 instead of three (the hit counts of marks differ from run to
+run). All 141 kills of every loop had passed fsck and the prefix check. On `ddc243a` all four passed; I treat that assertion as flaky for time-driven points
+under four concurrent loops, and did not change it.
+
+Remote disk: 3.1 GiB at the largest sample (no incremental cache); the remote directory was deleted.
