@@ -869,6 +869,12 @@ impl Drop for FileLane {
             let mut inner = lock(&ring.inner);
             inner.resume_off = a.next_off;
         }
+        // Reclaim no longer signals a closed lane's queue. Before the lane
+        // counts as closed: once it does, a successor may store its own wake
+        // and this must not erase it.
+        if let Some(w) = self.sh.wakes.get(usize::from(self.id)) {
+            *lock(w) = None;
+        }
         if let Some(open) = lock(&self.sh.st).lane_open.get_mut(usize::from(self.id)) {
             *open = false;
         }

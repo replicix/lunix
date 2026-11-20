@@ -43,6 +43,16 @@ pub struct EngineConfig {
     pub max_leaves_per_cut: u64,
     /// Cut when the journal ring is fuller than this (0.5).
     pub journal_fill_trigger: f64,
+    /// The cut target (ADR-33, `cut_target_ms` of `lunixd.toml`): the
+    /// coordinator cuts at most this long at the drain rate of its last cuts,
+    /// in journal bytes (1 s by default). Never less than one ring file of
+    /// journal bytes (`cut_min_bytes`) and than what frees a ring file of the
+    /// fullest lane, never more than half the ring.
+    pub cut_target: Duration,
+    /// The least a bounded cut takes, in journal bytes (`None`: one ring file
+    /// of the journal, the default). Tests that want cuts of a record or two
+    /// set it small; the daemon never does.
+    pub cut_min_bytes: Option<u64>,
     /// FULL commits retained (`last:N`), at least 1.
     pub retain_last: u32,
     /// Recompute chunk ids on every store read.
@@ -100,6 +110,8 @@ impl EngineConfig {
             map_fanout: 512,
             max_leaves_per_cut: (json.map_dirty_leaves_max / 2).max(2),
             journal_fill_trigger: 0.5,
+            cut_target: Duration::from_secs(1),
+            cut_min_bytes: None,
             retain_last: json.retain_last.max(1),
             verify_reads: json.verify_reads,
             read_cache_max: json.read_cache_max,

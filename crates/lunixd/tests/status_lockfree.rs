@@ -91,6 +91,13 @@ fn status_and_gc_status_return_while_the_coordinator_mutex_is_held() {
             assert_eq!(s.state, VolumeState::Attached);
             assert_eq!(s.last_commit_seq, want.commit_seq.0);
             assert_eq!(s.last_commit_ms, Some(want.created_at.0));
+            // The write path's counters come from atomics and the journal's
+            // window, not from the coordinator (ADR-33 T4).
+            let cuts = engine.cut_stats();
+            assert_eq!(s.write_path.ring_waiters, 0);
+            assert_eq!(s.write_path.last_cut_bytes, cuts.last_cut_bytes);
+            assert_eq!(s.write_path.last_cut_ms, cuts.last_cut_ms);
+            assert_eq!(s.write_path.window_resident_bytes, 0);
         }
         r => panic!("{r:?}"),
     }
