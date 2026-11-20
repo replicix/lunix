@@ -555,6 +555,17 @@ pub trait Journal: Send + Sync {
     /// caller takes the larger of it and its own lower bound. Read-only and
     /// non-blocking; the answer is a snapshot.
     fn cut_freeing_file(&self) -> Option<WriteSeq>;
+
+    /// Per lane (indexed by lane number), how many ring files [`reclaim`]
+    /// has freed since the journal was opened (a file counts when it is
+    /// ready for reuse, at the moment its lane is signalled). Empty for a
+    /// journal that does not count. Non-blocking, no allocation beyond the
+    /// answer.
+    ///
+    /// [`reclaim`]: Self::reclaim
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        Vec::new()
+    }
 }
 
 impl fmt::Display for LaneId {

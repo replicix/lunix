@@ -253,6 +253,8 @@ struct LaneState {
     wake: Option<WakeFd>,
     accepted_max: u64,
     fail_next: Option<Fail>,
+    /// Files this lane's reclaims freed (`Journal::freed_files_by_lane`).
+    freed: u64,
 }
 
 struct State {
@@ -443,6 +445,7 @@ impl MemJournal {
                     wake: None,
                     accepted_max: 0,
                     fail_next: None,
+                    freed: 0,
                 }
             })
             .collect();
@@ -1001,6 +1004,7 @@ impl Journal for MemJournal {
             for o in gone {
                 if let Some(f) = l.files.remove(&o) {
                     report.files += 1;
+                    l.freed += 1;
                     report.bytes += f
                         .recs
                         .values()
@@ -1023,6 +1027,14 @@ impl Journal for MemJournal {
             file_bytes: st.cfg.file_bytes,
         }
     }
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        lock(&self.inner.state)
+            .lanes
+            .iter()
+            .map(|l| l.freed)
+            .collect()
+    }
+
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
         let st = lock(&self.inner.state);
         // The files share one pool here: the fullest lane is the one that

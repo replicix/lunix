@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lunix_format::journal::{FileHeader, BLOCK, MARK_FILE_LEN};
@@ -171,6 +171,12 @@ pub(crate) struct Rings {
     pub marks: LaneRing,
     /// Length of a queue lane's file.
     pub file_len: u64,
+    /// `FALLOC_FL_ZERO_RANGE` is not used: configured off, or the file system
+    /// refused it.
+    pub zero_range_off: AtomicBool,
+    /// Files re-initialised by `ZERO_RANGE` and by rewriting zeros.
+    pub zeroed_by_range: AtomicU64,
+    pub zeroed_by_rewrite: AtomicU64,
 }
 
 impl Rings {
@@ -303,6 +309,9 @@ pub(crate) fn open_rings(cfg: &JournalConfig, zero: &AlignedBuf) -> Result<Rings
         lanes,
         marks,
         file_len: cfg.file_len,
+        zero_range_off: AtomicBool::new(!cfg.zero_range),
+        zeroed_by_range: AtomicU64::new(0),
+        zeroed_by_rewrite: AtomicU64::new(0),
     })
 }
 
@@ -391,6 +400,36 @@ pub(crate) struct Reinit {
 }
 
 impl Rings {
+    /// Zeroes `[4096, to)` of a file being re-initialised: with
+    /// `FALLOC_FL_ZERO_RANGE` when the file system does it (a metadata
+    /// operation on ext4 and xfs: nothing is written), else by writing zeros.
+    /// Either way the range reads as zeros once the caller's `fdatasync`
+    /// returned (on-disk-formats §5.1).
+    fn zero_body(&self, file: &std::fs::File, to: u64, zero: &AlignedBuf) -> io::Result<()> {
+        if !self.zero_range_off.load(Ordering::Relaxed) {
+            match sys::fallocate_zero(file, B, sys::round4k(to)) {
+                Ok(()) => {
+                    self.zeroed_by_range.fetch_add(1, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Err(e) if sys::zero_range_unsupported(&e) => {
+                    tracing::info!(
+                        error = %e,
+                        "the journal's file system does not do FALLOC_FL_ZERO_RANGE: freed ring files are rewritten with zeros"
+                    );
+                    self.zero_range_off.store(true, Ordering::Relaxed);
+                }
+                // Any other failure: this file is rewritten (the rewrite
+                // reports its own error), the next one tries again.
+                Err(e) => {
+                    tracing::warn!(error = %e, "FALLOC_FL_ZERO_RANGE of a freed ring file failed: rewriting it with zeros");
+                }
+            }
+        }
+        self.zeroed_by_rewrite.fetch_add(1, Ordering::Relaxed);
+        sys::zero_range(file, B, to, zero)
+    }
+
     /// Re-initialises one slot as a free file with a new ordinal and
     /// generation: zero `[4096, hi)`, `fdatasync`, new header, `fdatasync`,
     /// rename. The caller syncs the directory. Returns the new generation.
@@ -411,7 +450,7 @@ impl Rings {
         if len != ring.file_len {
             file.file.set_len(ring.file_len)?;
         }
-        sys::zero_range(&file.file, B, zero_to.min(ring.file_len), zero)?;
+        self.zero_body(&file.file, zero_to.min(ring.file_len), zero)?;
         file.file.sync_data()?;
         let gen = sys::random_nonzero()?;
         let hdr = FileHeader {

@@ -96,6 +96,10 @@ struct State {
     /// Scripted pacing: a bulk request that fits waits (`Paced`) until the
     /// script ends it; a `Sync` one that fits is admitted at once.
     pacing: bool,
+    /// The ring pace the engine last set (`SpaceGate::set_ring_pace`).
+    ring_pace: Option<u64>,
+    /// How many times the engine changed it.
+    ring_pace_sets: u64,
 }
 
 impl State {
@@ -184,6 +188,8 @@ impl MemSpace {
                 throttle: ThrottleState::Open,
                 idle: false,
                 pacing: false,
+                ring_pace: None,
+                ring_pace_sets: 0,
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
@@ -210,6 +216,17 @@ impl MemSpace {
         let mut st = lock(&self.st);
         st.pacing = on;
         st.grant_waiters();
+    }
+
+    /// The ring pace the engine set last, bytes per second (`None`: no pace).
+    /// The fake keeps the figure and paces nothing.
+    pub fn ring_pace(&self) -> Option<u64> {
+        lock(&self.st).ring_pace
+    }
+
+    /// How many times the engine changed the ring pace.
+    pub fn ring_pace_changes(&self) -> u64 {
+        lock(&self.st).ring_pace_sets
     }
 
     /// Runs the registered steps, in ladder order, until one frees something.
@@ -244,6 +261,14 @@ impl SpaceEvents for MemSpace {
 }
 
 impl SpaceGate for MemSpace {
+    fn set_ring_pace(&self, rate: Option<u64>) {
+        let mut st = lock(&self.st);
+        if st.ring_pace != rate {
+            st.ring_pace = rate;
+            st.ring_pace_sets += 1;
+        }
+    }
+
     fn reserve(
         &self,
         kind: SpaceKind,

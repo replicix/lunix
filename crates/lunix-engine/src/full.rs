@@ -4,11 +4,19 @@
 //! * **Ring-full waits have a deadline** (path P6). A write refused by a full
 //!   journal ring parks in its queue, not in the gate. It fails at once when
 //!   the engine has stopped committing or the volume is read-only (`EIO`).
-//!   Otherwise it fails after `full_timeout` from its arrival when a commit
-//!   attempt failed since it arrived, and after `max(full_timeout, 60 s)`
-//!   while commits succeed (ordinary journal back-pressure must not turn into
-//!   `EIO` on a healthy volume with a short `full_timeout`): `ENOSPC` while
-//!   the failed commits since the last success failed for space, else `EIO`.
+//!   Otherwise it fails after `full_timeout` without ring progress when a
+//!   commit attempt failed since it arrived, and after `max(full_timeout,
+//!   60 s)` without ring progress while commits succeed (ordinary journal
+//!   back-pressure must not turn into `EIO` on a healthy volume with a short
+//!   `full_timeout`): `ENOSPC` while the failed commits since the last success
+//!   failed for space, else `EIO`. **Ring progress** is a ring file freed or a
+//!   cut that released journal bytes (milestone jstall): the time counts from
+//!   the later of the write's arrival and the last progress, so a slow but
+//!   moving ring never fails a write, and a ring that does not move fails
+//!   every parked write at its deadline. The queues judge every parked write
+//!   of a queue that waits for the ring (not only the head) at each wake and
+//!   on the timer thread's signal ([`Inner::signal_ring_parked`]), which runs
+//!   while a commit holds the coordinator.
 //!   Once the volume began to close
 //!   ([`Engine::begin_close`](crate::Engine::begin_close)) it answers as soon
 //!   as a commit attempt failed for space or I/O after the close, and at the
@@ -20,8 +28,7 @@
 //!   `max(full_timeout, 60 s)`, or the whole bound at quiesce, instead of
 //!   `full_timeout` (bounded; a stopped engine still fails it at once). The
 //!   close is one-way: after the bound every later ring-full park fails at
-//!   once (a failed quiesce leaves the device refusing I/O). The background
-//!   coordinator wakes the queues that hold a ring-parked request.
+//!   once (a failed quiesce leaves the device refusing I/O).
 //! * **A discard frees space on a full volume** (path P4, decision M6). Hole
 //!   records are charged with `SpaceGate::charge` (the 64 bytes go into a
 //!   preallocated ring file), never refused for space, and do not queue
@@ -96,6 +103,9 @@ pub(crate) struct FullState {
     /// `clock.monotonic()` in ms + 1 when writes were admitted again after
     /// a refusal (0: refusing, or never refused).
     admitted_since_ms: AtomicU64,
+    /// `clock.monotonic()` in ms + 1 of the last ring progress: a ring file
+    /// freed, or a cut that released journal bytes (0: none yet).
+    ring_progress_ms: AtomicU64,
     /// `clock.monotonic()` in ms + 1 of the last "refused" log line.
     refused_logged: AtomicU64,
     /// The ring bound after `begin_close`, in ms.
@@ -128,6 +138,7 @@ impl FullState {
             commit_failures: AtomicU64::new(0),
             last_failure_ms: AtomicU64::new(0),
             admitted_since_ms: AtomicU64::new(0),
+            ring_progress_ms: AtomicU64::new(0),
             refused_logged: AtomicU64::new(0),
             close_bound_ms: AtomicU64::new(0),
             last_hole: AtomicU64::new(last_hole),
@@ -192,6 +203,21 @@ impl FullState {
             self.set_ladder_backoff(crate::gc::SPACE_URGENT_MIN);
         }
         self.ladder_backoff()
+    }
+
+    /// The ring moved at `now`: a file was freed or a cut released journal
+    /// bytes. Parked writes count their deadline from here.
+    pub(crate) fn note_ring_progress(&self, now: Duration) {
+        self.ring_progress_ms
+            .fetch_max(ms(now).saturating_add(1), Ordering::Relaxed);
+    }
+
+    /// The last ring progress, `None` before the first.
+    pub(crate) fn ring_progress(&self) -> Option<Duration> {
+        match self.ring_progress_ms.load(Ordering::Relaxed) {
+            0 => None,
+            p => Some(Duration::from_millis(p - 1)),
+        }
     }
 
     /// A hole record with this number was appended.
@@ -335,7 +361,8 @@ impl JournalCharges {
 impl Inner {
     /// The verdict on a write parked for a full journal ring that arrived at
     /// `arrived` (`clock.monotonic()`): `None` keeps it waiting, else the
-    /// errno it fails with.
+    /// errno it fails with. The deadline counts from the later of the arrival
+    /// and the ring's last progress.
     pub(crate) fn ring_wait_verdict(&self, arrived: Duration) -> Option<i32> {
         if self.read_only() {
             return Some(EIO);
@@ -343,12 +370,14 @@ impl Inner {
         let f = &self.full;
         let now = self.clock.monotonic();
         let waited = now.saturating_sub(arrived);
+        let since = f.ring_progress().map_or(arrived, |p| p.max(arrived));
+        let idle = now.saturating_sub(since);
         let timeout = f.full_timeout();
         let failed_since = f.last_failure_ms.load(Ordering::Relaxed) > ms(arrived);
         let normal = if failed_since {
-            waited >= timeout
+            idle >= timeout
         } else {
-            waited >= timeout.max(RING_MIN_WAIT)
+            idle >= timeout.max(RING_MIN_WAIT)
         };
         let closing = f.closing.load(Ordering::Acquire);
         let close_due = closing && {
@@ -368,6 +397,7 @@ impl Inner {
             tracing::warn!(
                 full_timeout_ms = ms(timeout),
                 waited_ms = ms(waited),
+                no_progress_ms = ms(idle),
                 last_commit_error = if nospace { "no space" } else { "other" },
                 closing,
                 "write failed: journal ring full"
@@ -453,18 +483,18 @@ impl Inner {
         }
     }
 
-    /// A write has waited `waited` for a free ring file so far (ADR-33).
+    /// A write has waited `waited` (from its arrival) for a free ring file so
+    /// far (ADR-33): the longest wait since the attach and in the last 60 s.
     pub(crate) fn note_ring_wait(&self, waited: Duration) {
-        crate::stats::max(
-            &self.cuts.ring_wait_max_ms,
-            u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
-        );
+        let w = u64::try_from(waited.as_millis()).unwrap_or(u64::MAX);
+        crate::stats::max(&self.cuts.ring_wait_max_ms, w);
+        self.cuts.ring_wait_recent.note(self.clock.monotonic(), w);
     }
 
-    /// A write that waited for the ring since `since` is no longer waiting:
-    /// it was admitted, failed or its queue went away.
-    pub(crate) fn end_ring_wait(&self, since: Duration) {
-        self.note_ring_wait(self.clock.monotonic().saturating_sub(since));
+    /// A write that waited for the ring, since `arrived`, is no longer
+    /// waiting: it was admitted, failed or its queue went away.
+    pub(crate) fn end_ring_wait(&self, arrived: Duration) {
+        self.note_ring_wait(self.clock.monotonic().saturating_sub(arrived));
         let _ = self
             .cuts
             .ring_waiters

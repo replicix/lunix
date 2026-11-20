@@ -221,9 +221,30 @@ fn the_background_coordinator_commits_under_load_without_losing_a_write() {
                 (o, r.submit(k as usize, IoOp::Write, k == 3, o, 12288, &d))
             })
             .collect();
-        for (o, t) in &tags {
+        for (_, t) in &tags {
             assert!(r.wait(&[*t])[0].0.is_ok());
-            want[*o as usize..*o as usize + d.len()].copy_from_slice(&d);
+        }
+        // Four overlapping writes in flight together have no order but their
+        // `write_seq`s: a write that parked for the ring (on its own lane)
+        // is journaled after one that did not, whatever order they arrived
+        // in. The model applies them in the order the engine numbered them.
+        let mut order: Vec<(u64, u64)> = {
+            let seqs = lock(&v.hooks.seqs);
+            tags.iter()
+                .map(|(o, t)| {
+                    let s = seqs
+                        .iter()
+                        .rev()
+                        .find(|(_, tag, _)| tag == t)
+                        .map(|(_, _, s)| s.0)
+                        .expect("every write was numbered");
+                    (s, *o)
+                })
+                .collect()
+        };
+        order.sort_unstable();
+        for (_, o) in order {
+            want[o as usize..o as usize + d.len()].copy_from_slice(&d);
         }
         let ro = (i * 7 * 4096) % (size - 8192);
         let (st, got) = r.read(1, ro, 8192);

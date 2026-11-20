@@ -59,6 +59,10 @@ pub(crate) struct Ledger {
     pub fulls: u64,
     /// The paced band's settings (ADR-32).
     pub throttle: ThrottleConfig,
+    /// The rate the engine paces admissions to while the journal ring is
+    /// nearly full (`SpaceGate::set_ring_pace`), bytes per second. A second
+    /// input of the band: the space state does not follow it.
+    pub ring_pace: Option<u64>,
     pub bucket: Bucket,
     pub counters: Counters,
     pub state: StateClock,
@@ -78,6 +82,7 @@ impl Ledger {
             closing: false,
             fulls: 0,
             throttle,
+            ring_pace: None,
             bucket: Bucket::new(),
             counters: Counters::default(),
             state: StateClock::new(now),
@@ -210,6 +215,25 @@ impl Ledger {
         self.throttle.rate(self.headroom(), self.soft())
     }
 
+    /// The rate admissions are paced at now: the space curve's and the ring
+    /// pace's, the slower of the two. `None` when neither paces, with the band
+    /// off, or once a quiesce began. The throttle state follows
+    /// [`band_rate`](Self::band_rate) only.
+    pub fn pace_rate(&self) -> Option<u64> {
+        if self.closing || !self.throttle.enabled {
+            return None;
+        }
+        match (self.band_rate(), self.ring_pace) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Sets the ring pace (raised to the band's minimum rate).
+    pub fn set_ring_pace(&mut self, rate: Option<u64>) {
+        self.ring_pace = rate.map(|r| r.max(self.throttle.min_rate));
+    }
+
     /// The first request still waiting.
     fn head(&self) -> Option<&Parked> {
         self.waiters
@@ -234,7 +258,7 @@ impl Ledger {
     /// the band is left. Returns true when the state changed.
     pub fn note_state(&mut self, now: Duration) -> bool {
         let to = self.throttle_state();
-        if self.band_rate().is_none() {
+        if self.pace_rate().is_none() {
             self.bucket.deactivate();
         }
         self.meter.sample(now, &self.counters);
@@ -293,7 +317,7 @@ impl Ledger {
                 }
                 break;
             }
-            if let Some(rate) = self.band_rate() {
+            if let Some(rate) = self.pace_rate() {
                 self.bucket.refill(now, rate);
                 if self.bucket.has(bytes) {
                     self.bucket.take(bytes);
@@ -396,7 +420,7 @@ impl Ledger {
     pub fn next_wake(&self, now: Duration) -> Option<Duration> {
         let deadline = self.next_deadline();
         let paced = self.head().and_then(|p| {
-            let rate = self.band_rate()?;
+            let rate = self.pace_rate()?;
             if !self.fits(p.bytes) {
                 return None;
             }
@@ -443,7 +467,7 @@ impl Ledger {
     /// is not a refusal (ADR-32). Returns how many failed.
     pub fn fail_unfit(&mut self, now: Duration) -> usize {
         let all: Vec<Parked> = self.waiters.drain(..).collect();
-        let paced = self.band_rate().is_some();
+        let paced = self.pace_rate().is_some();
         let mut n = 0;
         for p in all {
             if p.waiter.state() != WaiterState::Pending {
@@ -496,7 +520,7 @@ impl Ledger {
         }
         let head_fits = self.head().is_none_or(|p| self.fits(p.bytes));
         let ahead = self.head().is_some();
-        let Some(rate) = self.band_rate() else {
+        let Some(rate) = self.pace_rate() else {
             if !ahead || no_wait {
                 self.admit(kind, bytes);
                 return ReserveOutcome::Reserved;

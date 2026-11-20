@@ -489,6 +489,9 @@ impl Journal for GJournal {
     fn cut_freeing_file(&self) -> Option<WriteSeq> {
         self.inner.cut_freeing_file()
     }
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        self.inner.freed_files_by_lane()
+    }
 }
 
 fn take_one(a: &AtomicU64) -> bool {

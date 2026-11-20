@@ -63,6 +63,10 @@ const GC_SHARE_MAX: Duration = Duration::from_secs(1);
 /// Steps in a row without the clock moving that end a share (`gc_share`).
 const GC_SHARE_STALLS: u32 = 8;
 
+/// Steps of a share while writes wait for the journal ring (milestone
+/// jstall): the collector gets this much after each cut, never nothing.
+pub(crate) const GC_YIELD_STEPS: u32 = 1;
+
 /// The coordinator's state, under the engine's coordinator mutex.
 pub(crate) struct Coord {
     /// The durable tip.
@@ -119,6 +123,9 @@ pub(crate) struct Coord {
     pub(crate) cut_end: Duration,
     /// The last error of `reclaim_covered`, logged once per change.
     pub(crate) reclaim_error: Option<String>,
+    /// The ring pace: writes are admitted at the drain rate while the ring is
+    /// nearly full (milestone jstall).
+    pub(crate) ring_pacer: crate::cut::RingPacer,
 }
 
 impl Coord {
@@ -156,6 +163,7 @@ impl Coord {
             cut_bytes: 0,
             cut_end: Duration::ZERO,
             reclaim_error: None,
+            ring_pacer: crate::cut::RingPacer::default(),
         }
     }
 }
@@ -283,6 +291,7 @@ impl Inner {
         // ADR-32 T4: the collector's pressure follows the gate's state.
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
+        self.update_ring_pace(&mut co);
         let wanted = self.wanted(&mut co);
         self.reclaim_covered(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
@@ -343,6 +352,7 @@ impl Inner {
         {
             Ok(r) if r.files > 0 => {
                 co.reclaim_error = None;
+                self.full.note_ring_progress(self.clock.monotonic());
                 tracing::debug!(
                     files = r.files,
                     cut = co.tip.cut_seq.0,
@@ -536,16 +546,19 @@ impl Inner {
         let half = scale(fill.capacity_bytes / 2);
         // The rate bounds the cut, the half ring caps it, and one ring file
         // (in the same record-byte units) is the least: a fixed commit cost at or above `cut_target`
-        // cannot shrink the cuts below it.
+        // cannot shrink the cuts below it. With no history (the first cut
+        // after an attach) the budget is that one file, not the half ring: a
+        // restart over a full ring must not start with a 30 s cut that parks
+        // every write behind it (milestone jstall; T6 section 1.1).
+        let one_file = self
+            .cfg
+            .cut_min_bytes
+            .unwrap_or_else(|| scale(fill.file_bytes));
         let budget = co
             .drain
             .budget(self.cfg.cut_target)
-            .map_or(half, |b| b.min(half))
-            .max(
-                self.cfg
-                    .cut_min_bytes
-                    .unwrap_or_else(|| scale(fill.file_bytes)),
-            );
+            .map_or(one_file, |b| b.min(half))
+            .max(one_file);
         let floor = self
             .journal
             .cut_freeing_file()
@@ -573,12 +586,40 @@ impl Inner {
         if co.cut_bytes > 0 {
             co.drain.push(co.cut_bytes, took);
         }
+        // A cut that released journal bytes moved the ring: parked writes
+        // count their deadline from here (milestone jstall).
+        if co.cut_bytes > 0 {
+            self.full.note_ring_progress(self.clock.monotonic());
+        }
         let c = &self.cuts;
         c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
         c.last_cut_ms.store(
             u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             Ordering::Relaxed,
         );
+        // The new drain rate reaches the gate at once, not at the next tick.
+        self.update_ring_pace(co);
+    }
+
+    /// Feeds the space gate the ring pace (milestone jstall, ADR-32): while
+    /// the journal ring is nearly full, or a write waited for it a moment ago,
+    /// writes are admitted at the drain rate of the last cuts, so a write sees
+    /// a short smooth wait in the band instead of a stop of two cuts. Without
+    /// a drain history there is no rate and no pace. The gate keeps its own
+    /// rules (the delay cap, the FUA bypass).
+    fn update_ring_pace(&self, co: &mut Coord) {
+        let fill = self.journal.fill();
+        // A write waits for the ring now (`journal_full` is not asked: it
+        // stays up until the next C9, whoever waits).
+        let waiting = self.cuts.ring_waiters.load(Ordering::Relaxed) > 0;
+        let rate = co.drain.budget(Duration::from_secs(1)).map(|r| r.max(1));
+        let want = co
+            .ring_pacer
+            .observe(fill.ratio(), waiting, rate, self.clock.monotonic());
+        let w = want.unwrap_or(0);
+        if self.cuts.ring_pace_rate.swap(w, Ordering::Relaxed) != w {
+            self.space.set_ring_pace(want);
+        }
     }
 
     /// Lowers `c` so that the cut dirties at most `max_leaves_per_cut` map
@@ -1073,12 +1114,22 @@ impl Inner {
         let until = now.saturating_add(share);
         let mut last = now;
         let mut stalled = 0u32;
+        // While writes wait for the ring the cuts have the device: the share
+        // shrinks to one step, so the collector never stops (milestone
+        // jstall; space pressure keeps the whole share).
+        let mut steps_left = if self.gc_yields_to_ring() {
+            GC_YIELD_STEPS
+        } else {
+            u32::MAX
+        };
         while stalled < GC_SHARE_STALLS
+            && steps_left > 0
             && self.gc_busy.load(Ordering::Acquire)
             && !self.is_failed()
             && !self.closing.load(Ordering::Acquire)
             && last < until
         {
+            steps_left = steps_left.saturating_sub(1);
             self.gc_step(co);
             let t = self.clock.monotonic();
             stalled = if t == last { stalled + 1 } else { 0 };

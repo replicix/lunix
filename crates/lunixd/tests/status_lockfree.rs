@@ -98,6 +98,17 @@ fn status_and_gc_status_return_while_the_coordinator_mutex_is_held() {
             assert_eq!(s.write_path.last_cut_bytes, cuts.last_cut_bytes);
             assert_eq!(s.write_path.last_cut_ms, cuts.last_cut_ms);
             assert_eq!(s.write_path.window_resident_bytes, 0);
+            // The jstall figures: the same atomics, no coordinator.
+            assert_eq!(s.write_path.ring_parked_writes, 0);
+            assert_eq!(s.write_path.ring_wait_max_60s_ms, cuts.ring_wait_max_60s_ms);
+            assert_eq!(s.write_path.ring_pace_rate, 0);
+            let ws = engine.write_stats();
+            assert_eq!(s.write_path.freed_files_by_lane, ws.freed_files_by_lane);
+            assert!(!s.write_path.freed_files_by_lane.is_empty());
+            assert_eq!(
+                s.write_path.write_latency_log2_us.len(),
+                lunix_engine::LATENCY_BUCKETS
+            );
         }
         r => panic!("{r:?}"),
     }

@@ -461,4 +461,17 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// `Invalid` for a setting that fails `VolumeJson` validation, or one
     /// that still carries a `cache_max_percent`.
     fn reconfigure(&self, settings: &SpaceSettings) -> Result<()>;
+
+    /// Paces the admission of journal reservations to `rate` bytes per
+    /// second while the journal ring is nearly full (ADR-32's band, fed by the
+    /// engine with the drain rate of its last cuts; milestone jstall), or
+    /// ends the pace (`None`). It is a second input of the band, not a
+    /// space state: the throttle state, the GC pressure and the headroom
+    /// marks do not follow it. The band's own rules apply to it: a
+    /// [`ReserveClass::Sync`] request is admitted at once and charged to
+    /// the bucket, and no request is delayed longer than the delay cap
+    /// (counted from its arrival), so a ring pace never fails a request.
+    /// The rate is raised to the band's minimum rate. A gate without a band
+    /// ignores it.
+    fn set_ring_pace(&self, _rate: Option<u64>) {}
 }
