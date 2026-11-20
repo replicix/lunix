@@ -53,7 +53,7 @@ fio_cell() { # chunkk q name job rep runtime qd
   local ck=$1 q=$2 name=$3 job=$4 rep=$5 rt=$6 qd=$7
   local cell="partA/c${ck}k/q$q/$name/rep$rep"; local d; d=$(cell_dir "$cell"); CELLNO=$((CELLNO + 1))
   local RUNTIME=$rt   # the job files read RUNTIME; the global default is not changed
-  export DEV="$CUR_DEV" WS SLICE RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=$qd SEED=$((100 + CELLNO))
+  export DEV="$CUR_DEV" WS SLICE RUNTIME RAMP CPUS="$FIO_CPUS" JOBS QD=$qd SEED=$((100 + CELLNO)) LATLOG="$d/lat"
   local grace=$(((rt + RAMP) / 2 + RAMP))
   read -r l1 _ < /proc/loadavg
   snap "$VOL" "$d/status-before.json"
@@ -81,6 +81,31 @@ fio_cell() { # chunkk q name job rep runtime qd
     ( sleep "$((RAMP + 5))"; perf record -e sched:sched_switch --call-graph dwarf,8192 -p "$DPID" -o "$d/offcpu.data" -- sleep 6 >/dev/null 2>&1
       perf script -i "$d/offcpu.data" -F comm,tid,time,ip,sym --no-inline 2>/dev/null | head -40000 > "$d/offcpu-script.txt"; perf report --stdio --no-children -i "$d/offcpu.data" --sort comm,sym -g caller,0.5,callee --max-stack 12 2>/dev/null | head -150 > "$d/offcpu-report.txt"; rm -f "$d/offcpu.data" ) & pp2="$pp2 $!"
   fi
+  # STATUS_PROBE=1 (ADR-33 T6): `lunix status NAME --json` once per second during the cell, with its wall time in ms (probe.tsv:
+  # seconds into the cell, ms, exit code); the status must stay fast under load (ADR-33 gate: milliseconds)
+  local pr=""
+  if [ "${STATUS_PROBE:-0}" = 1 ]; then
+    ( while sleep 1; do
+        a=$(date +%s%N); lx status "$VOL" --json >/dev/null 2>&1; rcp=$?; b=$(date +%s%N)
+        printf '%s\t%s\t%s\n' "$((SECONDS - st0))" "$(((b - a) / 1000000))" "$rcp" >> "$d/probe.tsv"
+      done ) & pr=$!
+  fi
+  # SHARES=1 (first repetition of w4k and seqw): where the wall time of the daemon's threads goes, for the ADR-33 T6 shares:
+  # an on-CPU `perf record` (cpu-clock, dwarf call graphs, 8 s) and an off-CPU one (sched_switch of the daemon's threads, all
+  # CPUs so that the switch-in is seen too, dwarf, 6 s), both raw scripts
+  # kept as compressed text for tests/perf/shares.py; a per-thread state sample (every 0.2 s for 10 s: comm, state, wchan)
+  local pp3=""
+  if [ "${SHARES:-0}" = 1 ] && [ "$rep" = 1 ] && [ "$name" != r4k ] && [ "$name" != seqr ]; then
+    ( sleep "$((RAMP + 4))"
+      perf record -e cpu-clock -F 499 --call-graph dwarf,16384 -p "$DPID" -o "$d/oncpu.data" -- sleep 8 >/dev/null 2>&1
+      perf script -i "$d/oncpu.data" -F comm,tid,time,ip,sym --no-inline 2>/dev/null | gzip -1 > "$d/oncpu-script.txt.gz"; rm -f "$d/oncpu.data" ) & pp3=$!
+    ( sleep "$((RAMP + 14))"
+      perf record -a -e sched:sched_switch --filter 'prev_comm ~ "lunix*" || next_comm ~ "lunix*"' --call-graph dwarf,16384 -o "$d/offcpu2.data" -- sleep 6 >/dev/null 2>&1
+      perf script -i "$d/offcpu2.data" -F comm,tid,time,trace,ip,sym --no-inline 2>/dev/null | gzip -1 > "$d/offcpu-script.txt.gz"; rm -f "$d/offcpu2.data" ) & pp3="$pp3 $!"
+    ( sleep "$((RAMP + 22))"; for _i in $(seq 1 100); do
+        for t in /proc/"$DPID"/task/*; do printf '%s %s %s %s\n' "$_i" "$(cat "$t/comm" 2>/dev/null | tr ' ' _)" "$(awk '{print $3}' "$t/stat" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"; done
+        sleep 0.2; done > "$d/thread-states.txt" 2>/dev/null ) & pp3="$pp3 $!"
+  fi
   if [ "${SAMPLE:-0}" = 1 ]; then
     ( while sleep "${SAMPLE_S:-5}"; do
         ths=$(for t in /proc/"$DPID"/task/*; do printf '%s:%s:%s\n' "$(cat "$t/comm" 2>/dev/null)" "$(awk '{print $3}' "$t/stat" 2>/dev/null)" "$(cat "$t/wchan" 2>/dev/null)"; done | sort | uniq -c | jq -R -s -c 'split("\n")|map(select(length>0))')
@@ -89,6 +114,9 @@ fio_cell() { # chunkk q name job rep runtime qd
   fi
   wait_fio "$fp" $((rt + grace + 120)); local frc=$?
   [ -n "$sp" ] && { kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; }
+  [ -n "$pr" ] && { kill "$pr" 2>/dev/null; wait "$pr" 2>/dev/null; }
+  # shellcheck disable=SC2086
+  [ -n "$pp3" ] && wait $pp3 2>/dev/null
   # shellcheck disable=SC2086
   [ -n "$pp2" ] && wait $pp2 2>/dev/null
   local c1 w; c1=$(cpu_secs "$DPID"); w=$((SECONDS - t0)); [ "$w" -ge 1 ] || w=1
@@ -107,11 +135,16 @@ fio_cell() { # chunkk q name job rep runtime qd
   case "$name" in w4k|seqw) sleep 10; snap "$VOL" "$d/status-idle10.json"; ju1=$(jq -r '.journal_used // ""' "$d/status-idle10.json" 2>/dev/null) ;; esac
   local rcm cache_b mapb; rcm=$(jq -r '.read_cache_max // ""' "$(vol_dir "$VOL")/volume.json" 2>/dev/null)
   cache_b=$(jq -r '.space.cache // ""' "$d/status-end.json" 2>/dev/null); mapb=$(jq -r '.stats.map_bytes_written // ""' "$d/status-end.json" 2>/dev/null)
+  # ADR-33 write-path counters at the end of the cell (status-end.json), and the destage stage times over the cell
+  local wp stg; wp=$(jq -r '.write_path // {} | [.ring_waiters, .ring_wait_longest_ms, .window_resident_bytes, .window_hits, .window_misses, .last_cut_bytes, .last_cut_ms] | map(. // "") | join(",")' "$d/status-end.json" 2>/dev/null)
+  stg=$(jq -r -n --slurpfile a "$d/status-before.json" --slurpfile b "$d/status-end.json" '[range(0;5)] | map(($b[0].stats.stage_ns[.] // 0) - ($a[0].stats.stage_ns[.] // 0)) | join(",")' 2>/dev/null)
+  local cm; cm=$(jq -r -n --slurpfile a "$d/status-before.json" --slurpfile b "$d/status-end.json" '($b[0].stats.commits // 0) - ($a[0].stats.commits // 0)' 2>/dev/null)
+  local pmax; pmax=$(sort -k2 -nr "$d/probe.tsv" 2>/dev/null | head -1 | cut -f2); local pn; pn=$(wc -l < "$d/probe.tsv" 2>/dev/null)
   [ "$frc" = 0 ] && [ "$(fio_errors "$jf")" = 0 ]; local ok=$?
   say "- $cell: ${iops:-?} IOPS, $(awk -v b="${bw:-0}" 'BEGIN{printf "%.2f", b/1e9}') GB/s, p99 ${p99:-?} us, daemon CPU ${cpu_s}s (${cpu_us:-?} us/IO), rss ${rss1} KiB, split $split"
   rec "$cell" "$([ $ok = 0 ] && echo info || echo fail)" chunk_k="$ck" queues="$q" cell_name="$name" rep="$rep" runtime="$rt" iops="${iops:-}" bw_bytes="${bw:-}" \
       p50_us="${p50:-}" p99_us="${p99:-}" p999_us="${p999:-}" ios="${ios:-}" daemon_cpu_s="$cpu_s" window_s="$w" cpu_us_per_io="${cpu_us:-}" rss_kib_before="$rss0" \
-      rss_kib_after="$rss1" hwm_kib="$hwm" journal_used_end="${ju0:-}" journal_used_idle10="${ju1:-}" thread_split="$split" load1="$l1" destage_workers="$DESTAGE_WORKERS" read_cache_max="${rcm:-}" cache_bytes_end="${cache_b:-}" map_bytes_written_end="${mapb:-}" fio_rc="$frc" noisy_host="$NOISY"
+      rss_kib_after="$rss1" hwm_kib="$hwm" journal_used_end="${ju0:-}" journal_used_idle10="${ju1:-}" thread_split="$split" load1="$l1" destage_workers="$DESTAGE_WORKERS" read_cache_max="${rcm:-}" cache_bytes_end="${cache_b:-}" map_bytes_written_end="${mapb:-}" fio_rc="$frc" noisy_host="$NOISY" write_path_end="${wp:-}" stage_ns_delta="${stg:-}" commits_delta="${cm:-}" status_probe_max_ms="${pmax:-}" status_probe_n="${pn:-}" journal_max="$JOURNAL_MAX" ws_gib="$WS_GIB"
   [ "$ok" = 0 ] || FAIL=1
 }
 

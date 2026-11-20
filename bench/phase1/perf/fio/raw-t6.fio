@@ -1,0 +1,84 @@
+; ADR-33 T6 raw baseline (W9): the same patterns, block sizes, queue depths and job counts as the Lunix cells, run on a
+; file of the file system that holds the journal and the store (the volume directory's file system). Environment: DIR (the
+; directory), WS (bytes, the working set: 4 GiB), SLICE (WS / JOBS), RUNTIME, RAMP, CPUS, JOBS (8), SEED.
+; The file is written once beforehand (fill), so reads hit allocated blocks. direct=1 everywhere, like the journal.
+[global]
+directory=${DIR}
+filename=rawfile
+ioengine=io_uring
+direct=1
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+ramp_time=${RAMP}
+randseed=${SEED}
+group_reporting=1
+percentile_list=50:90:99:99.9:99.99
+numjobs=${JOBS}
+
+; burst and sustained write ceiling of the journal device, 4 KiB random: the Lunix w4k cell (QD 128, 8 jobs, own slices)
+[w4k]
+rw=randwrite
+bs=4k
+iodepth=128
+size=${SLICE}
+offset_increment=${SLICE}
+refill_buffers=1
+buffer_compress_percentage=50
+
+; store-device raw reads, 4 KiB random: the Lunix r4k cell when the read cache misses (QD 128, 8 jobs over the working set)
+[r4k]
+stonewall
+rw=randread
+bs=4k
+iodepth=128
+size=${WS}
+
+; 1 MiB sequential write, QD 32, 8 jobs on slices: the Lunix seqw cell
+[seqw]
+stonewall
+rw=write
+bs=1m
+iodepth=32
+size=${SLICE}
+offset_increment=${SLICE}
+refill_buffers=1
+buffer_compress_percentage=50
+
+; 1 MiB sequential read: the Lunix seqr cell
+[seqr]
+stonewall
+rw=read
+bs=1m
+iodepth=32
+size=${SLICE}
+offset_increment=${SLICE}
+
+; fdatasync commits per second: the journal's flush shape, one writer, write then fdatasync (64 KiB, 4 KiB)
+[commit64k]
+stonewall
+ioengine=psync
+numjobs=1
+rw=write
+bs=64k
+fdatasync=1
+size=${SLICE}
+
+[commit4k]
+stonewall
+ioengine=psync
+numjobs=1
+rw=write
+bs=4k
+fdatasync=1
+size=${SLICE}
+
+; 8 writers each with fdatasync of 4 KiB (the lanes' commit rate when they flush together)
+[commit4k-x8]
+stonewall
+ioengine=psync
+rw=write
+bs=4k
+fdatasync=1
+size=${SLICE}
+offset_increment=${SLICE}
