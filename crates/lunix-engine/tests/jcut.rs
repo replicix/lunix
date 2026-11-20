@@ -333,6 +333,52 @@ fn a_tick_cuts_for_a_ring_waiter_after_the_flag_was_cleared() {
 }
 
 #[test]
+fn a_lane_left_full_of_covered_records_by_a_crash_is_freed_for_its_parked_write() {
+    // A process dies after C6 (the FULL is durable) before C9 (the reclaim):
+    // after the restart the ring holds records that are all at or below the
+    // tip's cut, none is dirty, and the one lane has no room. The first write
+    // parks; nothing is dirty, so no trigger fired and no commit would
+    // reclaim: the write used to wait until it failed. The tick reclaims the
+    // covered files and the write goes on.
+    let mut v = ring(1, 2);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    // Two ring files of 252 records each: exactly full.
+    writes(&mut r, 0, 504);
+    assert!(r.flush(0).is_ok());
+    v.hooks.arm("engine.c6.committed", 1);
+    assert!(r.engine.commit_now(true).is_err(), "stopped after C6");
+    v.hooks.disarm();
+    let p = r.stop();
+    v.absorb(p, 3);
+    let mut r = v.open().map_err(|e| e.0).expect("reopen");
+    assert_eq!(r.engine.tip().1 .0, 504, "the FULL of the cut was durable");
+    assert_eq!(
+        r.journal.fill().used_bytes,
+        2 * MIN_FILE_BYTES,
+        "the ring is full"
+    );
+    let data = pattern(9, 4096);
+    let t = r.submit(0, IoOp::Write, false, 0, 4096, &data);
+    for _ in 0..20 {
+        r.pump();
+    }
+    assert!(!r.is_done(t), "no room: it parks");
+    assert_eq!(r.engine.cut_stats().ring_waiters, 1);
+    // Nothing is dirty: a tick used to be Idle for ever.
+    for _ in 0..5 {
+        r.engine.tick().expect("tick");
+        r.pump();
+    }
+    assert!(
+        r.is_done(t),
+        "the covered files were reclaimed and the write went on"
+    );
+    assert!(r.wait(&[t])[0].0.is_ok());
+    assert_eq!(r.engine.cut_stats().ring_waiters, 0);
+    assert_eq!(r.read(0, 0, 4096).1, data);
+}
+
+#[test]
 fn commits_follow_back_to_back_while_the_ring_is_above_the_fill_trigger() {
     // The background thread waits its period between ticks, except while the
     // last tick committed and the ring is above the trigger with writes not

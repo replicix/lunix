@@ -393,9 +393,11 @@ paths = [
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_kill.rs",
+  "crates/lunixd/tests/stack_ring_recover.rs",
   "crates/lunixd/tests/status_lockfree.rs",
   "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-jcut.md",
+  "tools/ci.sh",
   "tools/ownership.toml",
 ]
 

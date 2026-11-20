@@ -281,6 +281,7 @@ impl Inner {
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
         let wanted = self.wanted(&mut co);
+        self.reclaim_covered(&co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
         let space_cut = self.space_cut(&co);
         if wanted || space_cut.is_some() {
@@ -315,6 +316,38 @@ impl Inner {
                 self.gc_step(&mut co);
             }
             Ok(CommitOutcome::Idle)
+        }
+    }
+
+    /// Frees the ring files that hold only records at or below the tip's cut
+    /// while a write is parked for the ring. They are there when a process
+    /// died between C6 and C9 (the FULL was durable, the reclaim not done),
+    /// and recovery replays nothing of them: no write is dirty, `wanted` sees
+    /// no trigger and no commit would reclaim them, so a lane left full of
+    /// such records would park its writes until they fail. The tip is durable
+    /// (C6), so everything at or below its `cut_seq` may go (DESIGN §8.2).
+    fn reclaim_covered(&self, co: &Coord) {
+        if self.is_failed()
+            || !(self.journal_full.load(Ordering::Acquire)
+                || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0)
+        {
+            return;
+        }
+        match self
+            .journal
+            .tail_after(co.tip.cut_seq)
+            .and_then(|t| self.journal.reclaim(&t))
+        {
+            Ok(r) if r.files > 0 => {
+                tracing::info!(
+                    files = r.files,
+                    cut = co.tip.cut_seq.0,
+                    "ring files below the tip's cut reclaimed for a parked write"
+                );
+                self.signal_queues();
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "journal reclaim below the tip failed"),
         }
     }
 
