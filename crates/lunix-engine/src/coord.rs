@@ -117,6 +117,8 @@ pub(crate) struct Coord {
     /// `clock.monotonic()` when the cut in flight finished C9 (the GC step of
     /// C10 is not part of the cut's time).
     pub(crate) cut_end: Duration,
+    /// The last error of `reclaim_covered`, logged once per change.
+    pub(crate) reclaim_error: Option<String>,
 }
 
 impl Coord {
@@ -153,6 +155,7 @@ impl Coord {
             drain: crate::cut::DrainHistory::default(),
             cut_bytes: 0,
             cut_end: Duration::ZERO,
+            reclaim_error: None,
         }
     }
 }
@@ -281,7 +284,7 @@ impl Inner {
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
         let wanted = self.wanted(&mut co);
-        self.reclaim_covered(&co);
+        self.reclaim_covered(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
         let space_cut = self.space_cut(&co);
         if wanted || space_cut.is_some() {
@@ -326,7 +329,7 @@ impl Inner {
     /// no trigger and no commit would reclaim them, so a lane left full of
     /// such records would park its writes until they fail. The tip is durable
     /// (C6), so everything at or below its `cut_seq` may go (DESIGN §8.2).
-    fn reclaim_covered(&self, co: &Coord) {
+    fn reclaim_covered(&self, co: &mut Coord) {
         if self.is_failed()
             || !(self.journal_full.load(Ordering::Acquire)
                 || self.cuts.ring_waiters.load(Ordering::Relaxed) > 0)
@@ -339,15 +342,22 @@ impl Inner {
             .and_then(|t| self.journal.reclaim(&t))
         {
             Ok(r) if r.files > 0 => {
-                tracing::info!(
+                co.reclaim_error = None;
+                tracing::debug!(
                     files = r.files,
                     cut = co.tip.cut_seq.0,
                     "ring files below the tip's cut reclaimed for a parked write"
                 );
                 self.signal_queues();
             }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "journal reclaim below the tip failed"),
+            Ok(_) => co.reclaim_error = None,
+            Err(e) => {
+                let msg = e.to_string();
+                if co.reclaim_error.as_deref() != Some(msg.as_str()) {
+                    tracing::warn!(error = %msg, "journal reclaim below the tip failed; retried at the next tick");
+                    co.reclaim_error = Some(msg);
+                }
+            }
         }
     }
 

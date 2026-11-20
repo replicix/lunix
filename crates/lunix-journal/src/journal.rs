@@ -94,6 +94,7 @@ impl FileJournal {
             wakes: (0..lanes).map(|_| Mutex::new(None)).collect(),
             reclaim_hook: Mutex::new(None),
             free_hook: Mutex::new(None),
+            fail_reclaim_nth: std::sync::atomic::AtomicU32::new(0),
         });
         let worker = Arc::clone(&sh);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -162,6 +163,15 @@ impl FileJournal {
     #[doc(hidden)]
     pub fn fail_next_sync(&self) {
         self.sh.fail_sync.store(true, Ordering::SeqCst);
+    }
+
+    /// Test hook: the `n`-th ring file (from 1) the next `reclaim` re-initialises
+    /// fails with an I/O error, as a failed write or sync would.
+    #[doc(hidden)]
+    pub fn fail_nth_reclaim_file(&self, n: u32) {
+        self.sh
+            .fail_reclaim_nth
+            .store(n, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Test hook: `f(lane, freed)` is called by `reclaim` right after a queue
@@ -536,22 +546,27 @@ impl Journal for FileJournal {
                     self.sh.window.release_file(ring.lane, job.old);
                 }
             }
-            for job in jobs {
+            let mut jobs = jobs.into_iter();
+            while let Some(job) = jobs.next() {
                 let file = &ring.files[job.slot];
                 lunix_iface::crashpoint!("journal.before_reclaim_delete");
-                let done = rings
-                    .reinit_slot(
-                        &self.sh.cfg,
-                        ring,
-                        file,
-                        Reinit {
-                            old_ordinal: job.old,
-                            new_ordinal: job.new,
-                            zero_to: job.hi,
-                        },
-                        &self.sh.zero,
-                    )
-                    .and_then(|g| sys::fsync_dir(&rings.dir).map(|()| g));
+                let done = if self.sh.inject_reclaim_failure() {
+                    Err(std::io::Error::other("injected reclaim failure"))
+                } else {
+                    rings
+                        .reinit_slot(
+                            &self.sh.cfg,
+                            ring,
+                            file,
+                            Reinit {
+                                old_ordinal: job.old,
+                                new_ordinal: job.new,
+                                zero_to: job.hi,
+                            },
+                            &self.sh.zero,
+                        )
+                        .and_then(|g| sys::fsync_dir(&rings.dir).map(|()| g))
+                };
                 let mut inner = lock(&ring.inner);
                 match done {
                     Ok(gen) => {
@@ -589,7 +604,13 @@ impl Journal for FileJournal {
                         lunix_iface::crashpoint!("journal.after_reclaim_delete");
                     }
                     Err(e) => {
+                        // This file and every candidate not yet processed go
+                        // back to `Used`: left `Recycling` they would never be
+                        // a candidate again (a later reclaim retries them).
                         inner.slots[job.slot].role = Role::Used;
+                        for rest in jobs {
+                            inner.slots[rest.slot].role = Role::Used;
+                        }
                         return Err(io_err(e));
                     }
                 }

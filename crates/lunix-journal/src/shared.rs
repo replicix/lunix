@@ -152,6 +152,9 @@ pub(crate) struct Shared {
     /// Called as soon as a queue file is on the free list, before its lane is
     /// signalled (test hook).
     pub free_hook: Mutex<Option<ReclaimHook>>,
+    /// The n-th file the next reclaim re-initialises fails (0: none; test
+    /// hook).
+    pub fail_reclaim_nth: std::sync::atomic::AtomicU32,
 }
 
 /// A test hook of reclaim: see [`Shared::reclaim_hook`].
@@ -178,6 +181,13 @@ impl Shared {
                 w.signal();
             }
         }
+    }
+
+    /// True when this file of a reclaim is the one the test hook fails.
+    pub(crate) fn inject_reclaim_failure(&self) -> bool {
+        self.fail_reclaim_nth
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            == Ok(1)
     }
 
     pub(crate) fn poisoned_error() -> Error {

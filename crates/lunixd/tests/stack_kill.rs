@@ -40,8 +40,12 @@
 //! whole one; with a target of `1` the cuts are a few records once the first
 //! cuts have set the drain rate. The counting run counts the commits and ticks
 //! that left requests uncut (`partial cuts`, printed, in the child's file
-//! `progress.partial`) and the loop fails when there is none: no kill would
-//! land inside a partial cut.
+//! `progress.partial`) and the loop fails when there is none. The child also
+//! records, for every crash point a partial commit passed, the first and last
+//! hit number inside one; the loop adds the first (and in `LUNIX_KILL_HITS=all`
+//! the last) to the hits it kills at, requires every `engine.c*` point to be
+//! among them, and fails when a point passed in a partial commit was never
+//! killed inside one. It prints the kills that landed inside a partial cut.
 //!
 //! `LUNIX_KILL_HITS` is `all` (first, middle and last hit: the gate) or
 //! `first` (the default, one kill per point); `LUNIX_KILL_MIB` (default 160)
@@ -344,9 +348,31 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
-/// Returns how many commits and ticks left requests uncut.
-fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) -> u64 {
-    let mut partial = 0u64;
+/// The commits and ticks of a child that left requests uncut, and for every
+/// crash point they passed the first and the last hit number inside one.
+#[derive(Default)]
+struct Partial {
+    n: u64,
+    hits: BTreeMap<String, (u64, u64)>,
+}
+
+impl Partial {
+    /// One partial commit or tick that began with the hit counts `before`.
+    fn note(&mut self, before: &BTreeMap<&'static str, u64>) {
+        self.n += 1;
+        for (p, a) in lunix_iface::crashpoint::counts() {
+            let b = before.get(p).copied().unwrap_or(0);
+            if a > b {
+                let e = self.hits.entry(p.to_owned()).or_insert((b + 1, b + 1));
+                e.1 = b + 1;
+            }
+        }
+    }
+}
+
+/// Returns the partial commits and ticks.
+fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) -> Partial {
+    let mut partial = Partial::default();
     let mut stack = vol.open_with(fast_gc).expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
@@ -390,6 +416,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 progress(prog, n, &d);
             }
             Step::Commit { force } => {
+                let before = lunix_iface::crashpoint::counts();
                 let out = if cut_ms().is_some() {
                     stack.engine.commit_bounded(force)
                 } else {
@@ -398,15 +425,20 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 .expect("child commit");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
-                    partial += u64::from(k < bounds.len());
+                    if k < bounds.len() {
+                        partial.note(&before);
+                    }
                     progress(prog, base + k, &d);
                 }
             }
             Step::Tick => {
+                let before = lunix_iface::crashpoint::counts();
                 let out = stack.engine.tick().expect("child tick");
                 if let CommitOutcome::Committed { cut_seq, .. } = out {
                     let k = bounds.partition_point(|b| *b <= cut_seq.0);
-                    partial += u64::from(k < bounds.len());
+                    if k < bounds.len() {
+                        partial.note(&before);
+                    }
                     progress(prog, base + k, &d);
                 }
             }
@@ -466,7 +498,11 @@ fn kill_child() {
             let partial = execute(&vol, &p.run, p.prep.iter().filter(is_op).count(), &mut prog);
             let mut f = spec.progress.as_os_str().to_owned();
             f.push(".partial");
-            std::fs::write(f, partial.to_string()).expect("partial cuts");
+            let mut text = format!("{}\n", partial.n);
+            for (point, (first, last)) in &partial.hits {
+                text.push_str(&format!("{point} {first} {last}\n"));
+            }
+            std::fs::write(f, text).expect("partial cuts");
         }
     }
     lunix_iface::crashpoint::dump_counts().expect("dump counts");
@@ -813,19 +849,43 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         ChildEnd::Exited(c) => c,
         ChildEnd::Killed => panic!("the counting run was killed"),
     };
+    // The hits of the counting run that lie inside a partial commit or tick
+    // (bounded runs only): point -> (first, last).
+    let mut partial_hits: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     if cut_ms().is_some() {
         let mut f = p.progress.as_os_str().to_owned();
         f.push(".partial");
-        let n: u64 = std::fs::read_to_string(f)
-            .expect("the run child's partial cut count")
-            .trim()
-            .parse()
-            .expect("a count");
-        eprintln!("kill loop {mode:?} {} KiB: partial cuts {n}", cs >> 10);
+        let text = std::fs::read_to_string(f).expect("the run child's partial cuts");
+        let mut lines = text.lines();
+        let n: u64 = lines.next().and_then(|l| l.parse().ok()).expect("a count");
+        for l in lines {
+            let mut w = l.split(' ');
+            if let (Some(pt), Some(a), Some(b)) = (w.next(), w.next(), w.next()) {
+                partial_hits.insert(
+                    pt.to_owned(),
+                    (a.parse().expect("hit"), b.parse().expect("hit")),
+                );
+            }
+        }
+        eprintln!(
+            "kill loop {mode:?} {} KiB: partial cuts {n}, {} points passed in one",
+            cs >> 10,
+            partial_hits.len()
+        );
         assert!(
             n > 0,
             "a bounded run without a partial cut: no kill would land in one"
         );
+        // Every step of the commit protocol is inside a partial commit.
+        for p in lunix_iface::crashpoint::registered()
+            .into_iter()
+            .filter(|n| n.starts_with("engine.c"))
+        {
+            assert!(
+                partial_hits.contains_key(p),
+                "{p}: no partial commit passed it"
+            );
+        }
     }
     verify(&cfg, &p, "counting run", &mut tally);
     drop(p);
@@ -847,6 +907,10 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
     );
     let mut unreached = Vec::new();
     let mut killed: BTreeMap<&str, BTreeSet<u64>> = BTreeMap::new();
+    // Kills at a hit inside a partial commit, per point.
+    let mut partial_kills: BTreeMap<&str, u64> = BTreeMap::new();
+    // Points whose hit count differed between runs (timing).
+    let mut varied: BTreeSet<&str> = BTreeSet::new();
     let mut runs = 0u64;
     for point in &points {
         let c = counts.get(*point).copied().unwrap_or(0);
@@ -859,6 +923,16 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         } else {
             vec![1]
         };
+        // A hit inside a partial commit (the first; the last too in `all`
+        // mode), so the kill lands in a bounded cut.
+        let inside: BTreeSet<u64> = partial_hits
+            .get(*point)
+            .map(|&(a, b)| if all_hits { vec![a, b] } else { vec![a] })
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        hits.extend(inside.iter().copied());
+        hits.sort_unstable();
         hits.dedup();
         for mut hit in hits {
             let dir = t.path().join(format!("r{runs}"));
@@ -874,9 +948,12 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
                 if c2 == 0 || c2 >= hit {
                     break;
                 }
+                varied.insert(point);
                 drop(p);
                 std::fs::remove_dir_all(&dir).expect("cleanup");
-                hit = c2;
+                // Below what this run reached: the next run reaches it more
+                // often than it reaches the same count again.
+                hit = c2.saturating_sub(1).max(1);
                 p = prepare(&cfg, &dir);
                 end = run_child(&cfg, &p, Some(&format!("{point}:{hit}")));
             }
@@ -885,6 +962,9 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
                 ChildEnd::Killed => {
                     tally.kills += 1;
                     killed.entry(point).or_default().insert(hit);
+                    if inside.contains(&hit) {
+                        *partial_kills.entry(point).or_default() += 1;
+                    }
                 }
                 ChildEnd::Exited(_) => eprintln!("{what}: not reached in this run"),
             }
@@ -902,13 +982,37 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         tally.kills,
         started.elapsed()
     );
+    let partial_total: u64 = partial_kills.values().sum();
+    eprintln!(
+        "kill loop {mode:?} {} KiB: {partial_total} kills at a hit inside a partial cut, \
+         {} of {} points",
+        cs >> 10,
+        partial_kills.len(),
+        partial_hits.len()
+    );
     for (point, hits) in &killed {
         let c = counts[*point];
-        let want = if all_hits { c.min(3) } else { 1 };
+        let mut want = if all_hits { c.min(3) } else { 1 };
+        // A point whose hit count varies from run to run (journal marks) may
+        // lose its last hit: one distinct kill fewer.
+        if varied.contains(point) {
+            want = want.saturating_sub(1).max(1);
+        }
         assert!(
             hits.len() as u64 >= want.min(c),
             "{point}: killed at {hits:?} of {c} hits"
         );
+    }
+    if cut_ms().is_some() {
+        for point in partial_hits.keys() {
+            let Some(p) = points.iter().find(|p| **p == point.as_str()) else {
+                continue;
+            };
+            assert!(
+                partial_kills.get(*p).copied().unwrap_or(0) > 0,
+                "{point}: passed in a partial cut but never killed inside one"
+            );
+        }
     }
     let missing: Vec<&&str> = points
         .iter()

@@ -86,7 +86,7 @@ fn a_write_after_a_kill_during_ingest_and_the_recovery_does_not_stall() {
         "engine.c7.floor",
         "engine.c8.index",
     ];
-    let iters: u64 = 12;
+    let iters: u64 = POINTS.len() as u64;
     let t = Scratch::new("ring-recover");
     let mut worst = Duration::ZERO;
     for it in 0..iters {
@@ -94,13 +94,16 @@ fn a_write_after_a_kill_during_ingest_and_the_recovery_does_not_stall() {
         let vol = builder(&t.path().join(format!("v{it}")))
             .create()
             .expect("create");
-        let at = format!("{}:1", POINTS[(it % 4) as usize]);
+        let at = format!("{}:1", POINTS[it as usize]);
+        let log = t.path().join(format!("child-{it}.log"));
+        let out = std::fs::File::create(&log).expect("child log");
+        let err = out.try_clone().expect("child log");
         let mut child = Command::new(std::env::current_exe().expect("exe"))
             .args(["--exact", "ring_child", "--nocapture", "--test-threads=1"])
             .env(CHILD_ENV, &vol.voldir)
             .env("LUNIX_CRASH_AT", &at)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(out)
+            .stderr(err)
             .spawn()
             .expect("spawn the child");
         let start = Instant::now();
@@ -117,10 +120,19 @@ fn a_write_after_a_kill_during_ingest_and_the_recovery_does_not_stall() {
         assert_eq!(
             std::os::unix::process::ExitStatusExt::signal(&status),
             Some(9),
-            "iteration {it}: the child ends at {at}: {status}"
+            "iteration {it}: the child ends at {at}: {status}: {}",
+            std::fs::read_to_string(&log).unwrap_or_default()
         );
 
         let stack = vol.open().expect("recovery");
+        // The precondition of the stall: every lane is full of records the
+        // tip covers (two files per lane, all holding records), so the first
+        // write has no room. Without it the test would pass without the fix.
+        let fill = lunix_iface::journal::Journal::fill(&*stack.journal);
+        assert_eq!(
+            fill.used_bytes, fill.capacity_bytes,
+            "iteration {it}: the ring is not full after the recovery: {fill:?}"
+        );
         let mut d = Driver::new(&stack).expect("driver");
         let t0 = Instant::now();
         for i in 0..96u64 {

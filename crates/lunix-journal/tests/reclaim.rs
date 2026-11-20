@@ -464,8 +464,11 @@ fn a_lane_that_fills_a_just_freed_file_keeps_its_counters() {
     let (reached_tx, reached_rx) = std::sync::mpsc::channel();
     let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
     let go_rx = std::sync::Mutex::new(go_rx);
-    // Parked right after the slot is on the free list, before its lane is
-    // signalled: the lane can take the file from here.
+    // Parked right after the slot is on the free list and the ring lock is
+    // released, before its lane is signalled: the lane can take the file from
+    // here. (What it pins: no reset after this point. The original code reset
+    // directly after the unlock, before this hook, a window no hook can sit in:
+    // that order is not caught, a reset placed after the hook is.)
     let once = std::sync::atomic::AtomicBool::new(true);
     j.set_free_hook(Some(std::sync::Arc::new(move |_lane, freed| {
         let _ = reached_tx.send(freed);
@@ -537,4 +540,31 @@ fn a_reopened_lane_is_woken_per_file_after_its_predecessor_closed() {
     assert_eq!(j.reclaim(&tail).expect("reclaim").files, 1);
     assert!(w2.drain() > 0, "the new lane is signalled");
     assert_eq!(w1.drain(), 0, "the closed lane's wake is not");
+}
+
+#[test]
+fn a_failed_reclaim_gives_back_every_file_it_had_not_processed() {
+    // Three sealed files to free; the second fails. The first is free; the
+    // second and the third are candidates again (they used to stay
+    // `Recycling` until the next start), so a retry frees both.
+    let dir = scratch();
+    let cfg = small_cfg(dir.path().join("journal"), 1, 4);
+    let j = open_journal(&cfg);
+    recover_all(&j);
+    let mut l = open_lane(&j, 0);
+    let mut last = 0;
+    for i in 0..95u64 {
+        last = write_rec(&mut *l, i, BIG).seq;
+        complete_appends(&mut *l, 1);
+    }
+    group_flush(&j);
+    let tail = j.tail_after(WriteSeq(last)).expect("tail");
+    j.fail_nth_reclaim_file(2);
+    let e = j.reclaim(&tail).expect_err("the second file fails");
+    assert!(e.to_string().contains("injected"), "{e}");
+    let rep = j.reclaim(&tail).expect("the retry");
+    assert_eq!(rep.files, 2, "the failed file and the one after it");
+    // The lane has all its files back: it was full of nothing but those.
+    let again = j.reclaim(&tail).expect("nothing left");
+    assert_eq!(again.files, 0);
 }
