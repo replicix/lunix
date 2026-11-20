@@ -152,11 +152,11 @@ run_cell() { # target chunk mode
   hung1=$(dmesg | grep -ciE 'hung task|blocked for more than')
   [ "$hung1" = "$hung0" ]; expect "$cell: no hung-task line in the kernel log" $? || bad=1
   local thr dly dmx
-  thr=$(jq -r '[.. | .delayed_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null); dly=$(jq -r '[.. | .delayed_writes? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
+  thr=$(jq -r '[.. | .throttled_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null); dly=$(jq -r '[.. | .delayed_writes? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
   dmx=$(jq -r '[.. | .delay_max_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
-  local ens; ens=$(jq -r '[.. | .enospc? // empty] | first // 0' "$d/status-2.json" 2>/dev/null)
+  local ens; ens=$(jq -r '.throttle.enospc // ([.. | .enospc? // empty] | first) // 0' "$d/status-2.json" 2>/dev/null)
   [ "${ens:-0}" = 0 ]; expect "$cell: the gate refused no reservation for space (enospc counter $ens)" $? || bad=1
-  say "- $cell: throttled (delayed_ms) $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
+  say "- $cell: throttled_ms $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
       secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" notes="$notes"

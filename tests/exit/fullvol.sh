@@ -19,7 +19,7 @@ say "# M15 full-volume cell ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1
 VOL=fullv; D="$OUT/raw/fullvol"; mkdir -p "$D"
 hung() { dmesg | grep -ciE 'hung task|blocked for more than'; }
 # the gate state: `throttle.state` of the status (T5 of ADR-32); a build without those fields is judged by the ledger (used within the headroom of the limit)
-gate_state() { lx space "$VOL" --json 2>/dev/null | jq -r '.figures.throttle.state // (if (.figures.used + (.settings.headroom // 0)) >= .figures.limit then "full-by-ledger" else "open" end)'; }
+gate_state() { lx status "$VOL" --json 2>/dev/null | jq -r '.throttle.state // empty' | grep . || lx space "$VOL" --json 2>/dev/null | jq -r '(if (.figures.used + (.settings.headroom // 0)) >= .figures.limit then "full-by-ledger" else "open" end)'; }
 cell_begin "$VOL" "$VOL_GIB" "$CHUNK" "$VOLMODE"
 lx space "$VOL" --cache-max "$CAP" --on-full wait --full-timeout "${FULL_TIMEOUT_S}s" --json > "$D/space-set.json" 2>&1; expect "set cache_max $CAP, on_full wait, full_timeout ${FULL_TIMEOUT_S}s" $? || true
 H0=$(hung)
@@ -39,6 +39,7 @@ st=$(gate_state); say "- gate state after the fill: $st"
 [ "$st" = full ] || [ "$st" = stop ] || [ "$st" = full-by-ledger ]; expect "the status shows the gate full (got $st)" $? || true
 [ "$(hung)" = "$H0" ]; expect "no hung-task line after the fill" $? || true
 lx space "$VOL" --json > "$D/space-full.json" 2>&1
+lx status "$VOL" --json | jq -c .throttle > "$D/throttle-full.json" 2>&1
 # ---- 3: blkdiscard of half the device
 HALF=$((VOL_GIB * GIB / 2))
 blkdiscard -o 0 -l "$HALF" "$CUR_DEV"; expect "blkdiscard of half the device (rc $?)" $? || true
