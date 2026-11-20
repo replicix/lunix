@@ -2560,7 +2560,10 @@ and the M16 validity rule with the sustained cell.
 **Status: accepted (2026-11-19, the maintainer: the recommended options for
 W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
 Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
-2026-11-20). Open: T6 (measurement), then T7 to T9 as T6 decides, and T10.**
+2026-11-20); T6 measured (`p1/m16`); the stall fixes it led to, with T9 as
+`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20). T7 not needed; T8 deferred.
+Open: the T6 re-run on the merged tree, a dm-log-writes check of the zeroing
+order before the FREEZE sign-off, and T10.**
 It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
 DESIGN §4.1, §5, §8.1, §8.2 and §20. The root-cause analysis with the code
 references, the options in full, the throughput model and the test list are in
@@ -2712,6 +2715,29 @@ below the table where it differs):
     ceiling (the null target);
   - the required percentages are set from the first baseline run (T6) and
     recorded in DESIGN §20; the NVMe figures stay only as an illustration.
+
+- **Stall fixes after T6 (2026-11-20, the maintainer: all five).** T6 found
+  writes parked for ring space for most of a minute and failing at 60 s. Each
+  cut freed one file and lanes alternated, so a write waited about two cuts;
+  the zero rewrite held each freed file for over 100 ms. Adopted:
+  - a ring pace: the space gate admits writes at the sustained cut rate
+    (cut end to cut end of the last four cuts, at least 4 MiB/s) while writes are parked for ring
+    space, so the ring does not fill faster than cuts free it; retries of a
+    refused write pay no pacing again;
+  - reclaim zeroes a file with `FALLOC_FL_ZERO_RANGE` (T9 without a format
+    change: the file stays fully allocated and reads zeros) and falls back to
+    the rewrite on any error, never leaving a hole; `sync_all` follows it;
+  - GC yields the coordinator while writes are parked for ring space, with a
+    2 s hold;
+  - the first cut after an attach, with no drain history yet, is one ring
+    file of records, not half the ring;
+  - the ring deadline counts from the last progress of the write's lane (a
+    file freed, a running cut, or a cut that released bytes while the lane
+    still holds records above it), not from the write's arrival. A lane that
+    makes no progress still fails at 60 s;
+  - instrumentation in the status `write_path`: ring-wait maxima since the
+    first refusal and over 60 s, parked writes, files freed per lane, a wait
+    histogram, the applied pace rate.
 
 **Work steps** (one implementer each; T1 to T5 are independent except where
 noted):
