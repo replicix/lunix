@@ -120,11 +120,11 @@ fn run(sized: bool, seconds: u64) -> Outcome {
         *total += REC;
     };
 
-    let steps = seconds * 1000 / DT.as_millis() as u64;
+    let steps = seconds * PER_S;
     for step in 0..steps {
         let now = ck.monotonic();
         // The writer.
-        credit = (credit + OFFERED * DT.as_millis() as u64 / 1000).min(OFFERED);
+        credit = (credit + OFFERED / PER_S).min(OFFERED);
         while credit >= REC && pending.len() < DEPTH {
             credit -= REC;
             pending.push_back(now);
