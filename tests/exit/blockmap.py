@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """blockmap.py snap DIR OUT.pkl.gz [GLOB] | cmp A.pkl.gz B.pkl.gz OUT.json
 
+inunw SNAP BADLIST: how many of the reported blocks lie in unwritten extents of the snapshot.
 snap: for every file DIR/GLOB (default main.*): the FIEMAP state of every 4 KiB block (0 hole, 1 mapped, 2 unwritten) and the first 8 bytes of
 the SHA-256 of every 4 KiB block, read with O_DIRECT. cmp: per file, blocks whose content changed, blocks whose extent state changed
 (written->unwritten, unwritten->written, hole), and the number of extents of each snapshot. Exit 0 always; the summary line says what changed."""
@@ -81,7 +82,23 @@ def cmp(a, b, out):
         sum(v["unwritten_blocks_pre"] for v in rep.values() if isinstance(v, dict)), sum(v["unwritten_blocks_post"] for v in rep.values() if isinstance(v, dict))))
 
 
-if sys.argv[1] == "snap":
+def inunw(snapf, lst):
+    S = pickle.load(gzip.open(snapf, "rb"))
+    n = u = 0
+    for l in open(lst):
+        p = l.split()
+        if len(p) < 3:
+            continue
+        n += 1
+        v = S.get(os.path.basename(p[0]))
+        if v and int(p[1]) // BS < len(v["state"]) and v["state"][int(p[1]) // BS] == 2:
+            u += 1
+    print("bad=%d in_unwritten_extent=%d" % (n, u))
+
+
+if sys.argv[1] == "inunw":
+    inunw(sys.argv[2], sys.argv[3])
+elif sys.argv[1] == "snap":
     snap(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "main.*")
 else:
     cmp(sys.argv[2], sys.argv[3], sys.argv[4])

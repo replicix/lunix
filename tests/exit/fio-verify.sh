@@ -177,7 +177,7 @@ run_cell() { # target chunk mode
       qd=${p%%:*}; jobs=${p##*:}
       fio_env "$tgt" "$i" "$qd" "$jobs"
       local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
-      VONLY=1 LOOPS=1 fio_run "$cell-pre$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local prc=$?
+      VONLY=1 LOOPS=1 RUNTIME="${VRUNTIME:-3600}" fio_run "$cell-pre$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local prc=$?
       local pjf="$OUT/raw/fio-${cell//\//_}-pre$i.json" perrs; perrs=$(fio_errors "$pjf")
       pre_errs="$pre_errs p$i:$perrs"
       [ "$prc" = 0 ] && [ "$perrs" = 0 ]; expect "$cell p$i: verify_only BEFORE the detach (same attach, caches dropped): rc $prc, errors $perrs" $? || badpre=1
@@ -217,7 +217,7 @@ run_cell() { # target chunk mode
       qd=${p%%:*}; jobs=${p##*:}
       fio_env "$tgt" "$i" "$qd" "$jobs"
       local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
-      VONLY=1 LOOPS=1 fio_run "$cell-v$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local vrc=$?
+      VONLY=1 LOOPS=1 RUNTIME="${VRUNTIME:-3600}" fio_run "$cell-v$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local vrc=$?
       local vjf="$OUT/raw/fio-${cell//\//_}-v$i.json" verrs; verrs=$(fio_errors "$vjf")
       post_errs="$post_errs p$i:$verrs"
       [ "$vrc" = 0 ] && [ "$verrs" = 0 ]; expect "$cell p$i: verify_only AFTER detach/attach: rc $vrc, errors $verrs" $? || bad=1
@@ -227,7 +227,7 @@ run_cell() { # target chunk mode
     for k in $(seq 0 $((profiles_done - 1))); do
       [ -e "$d/bad-pre$k.txt" ] && [ -e "$d/bad-v$k.txt" ] || continue
       awk '{print $1, $2}' "$d/bad-pre$k.txt" | sort -u > "$d/set-pre-$k.txt"; awk '{print $1, $2}' "$d/bad-v$k.txt" | sort -u > "$d/set-post-$k.txt"
-      errset="$errset p$k:pre=$(wc -l < "$d/set-pre-$k.txt"),post=$(wc -l < "$d/set-post-$k.txt"),only_pre=$(comm -23 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),only_post=$(comm -13 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l)"
+      errset="$errset p$k:pre=$(wc -l < "$d/set-pre-$k.txt"),post=$(wc -l < "$d/set-post-$k.txt"),only_pre=$(comm -23 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),only_post=$(comm -13 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),in_unwritten_pre=$(python3 -I "$here/blockmap.py" inunw "$d/snap-pre-$k.pkl.gz" "$d/bad-pre$k.txt" 2>/dev/null | sed 's/.*in_unwritten_extent=//'),in_unwritten_post=$(python3 -I "$here/blockmap.py" inunw "$d/snap-pre-$k.pkl.gz" "$d/bad-v$k.txt" 2>/dev/null | sed 's/.*in_unwritten_extent=//')"
     done
     say "- error sets (offsets) pre vs post:${errset:- none}"
     status_json "$vol" > "$d/status-post.json" 2>/dev/null; winpost=$(win_note "$d/status-post.json")
