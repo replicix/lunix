@@ -67,7 +67,20 @@ The mutation runs (patch on the host copy, tests, revert) for the earlier rules 
 
 ## Gates
 
-GATES_PLACEHOLDER
+Final tree = main `e675b2f` (with T8) + this branch, CPUs 0-7, `-j 8`.
+
+* `tools/ci.sh`: green, `check-ownership: gate ok (7 changed paths)`, `ci: all green`; 2 233 tests passed, 0 failed, 30 ignored (sum of the
+  `test result` lines).
+* Kill loops by hand, one at a time, on the same code (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`,
+  `cargo test --release -p lunixd --features testsupport,crashpoints --test stack_kill`):
+
+| loop | points reached | runs / kills | result |
+|---|---|---|---|
+| plain 16 KiB | 55 of 58 | 57 / 57 | ok (1 813 s) |
+| integrity 16 KiB | 55 of 58 | 60 / 60 | ok (2 040 s) |
+
+Remote disk: the target directory was cleaned before CI (it stayed under about 12 GiB with the debug and release builds of CI; the 10 GiB figure
+was exceeded by CI's own debug build, as in the first round). The whole remote directory was removed at the end; nothing of mine is left.
 
 ## Deviations
 
