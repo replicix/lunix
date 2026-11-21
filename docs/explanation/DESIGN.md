@@ -463,7 +463,16 @@ journal):
   - while the gate is not open, GC works harder: 4 times the step budget,
     `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and the
     floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms`,
-    until the gate has been open for 5 s (§11, `docs/reference/gc.md`).
+    until the gate has been open for 5 s (§11, `docs/reference/gc.md`);
+  - before the band, in the lead zone, GC gets the floor grace alone: while
+    the gate is open and the headroom is below `soft + lead`, with `lead =
+    min(ingest x (floor grace + 2 x 5 s), soft, limit / 4)` and `ingest` the
+    admitted rate of the last 10 s (0 for an idle writer). Garbage that
+    died, or was condemned, in the last grace is then deletable when the
+    headroom reaches the soft mark, instead of one grace and one pass after
+    it (the reclaim at the first entry was zero). The gate paces nothing in
+    the zone; the zone is entered below `soft + lead`, left above
+    `soft + 1.25 x lead`, and every fall of the level waits 5 s;
 
   If the reservation would cross the limit, the space ladder runs:
   1. Evict clean cache.
@@ -928,7 +937,8 @@ trailer = footer offset + length + magic
   without tokens (`ReserveClass::Retry`): it paid its pace once. The ring
   pace's delays are counted apart from the space throttle's in the status.
 - **GC yields to the cuts.** While a write waits for the ring, and the gate
-  applies no space pressure, the collector gets one step after each cut
+  applies no space pressure (the lead zone of §4.3 changes only the grace and
+  does not count), the collector gets one step after each cut
   instead of a third of the cut's time and compacts at an eighth of its rate
   (at least 4 MiB/s), the switch holding for 2 s after the last waiter: the
   cuts have the device, and the collector is slowed, never stopped.
@@ -1794,8 +1804,9 @@ ADR-16 and ADR-22 set the shape.
   tokens and for space, delayed writes and their summed and longest wait,
   requests admitted by the delay cap, FUA writes that skipped the band,
   holes admitted, `ENOSPC` count, stops and fulls, time throttled, 10 s
-  ingest and reclaim rates (reported, never control inputs), what GC is
-  getting (`normal`, `raised`, `urgent`) and the amplification (store
+  ingest and reclaim rates (reported; the ingest rate also sizes the lead
+  zone of §4.3, no other control input), what GC is
+  getting (`normal`, `lead`, `raised`, `urgent`) and the amplification (store
   bytes over the live bytes of the last mark). The counters live in the
   gate and start at the attach; the checkpoint holds none. One log line
   per state change (transitions closer than 5 s are merged) and one every

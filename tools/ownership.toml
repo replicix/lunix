@@ -548,6 +548,7 @@ paths = [
   "crates/lunix-cli/src/render.rs",
   "crates/lunixd/src/daemon.rs",
   "docs/reference/gc.md",
+  "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-leadzone.md",
   "tools/ownership.toml",
 ]
