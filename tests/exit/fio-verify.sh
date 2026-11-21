@@ -160,7 +160,7 @@ run_cell() { # target chunk mode
     say "- profile $i: QD $qd, $jobs job(s), $PER_PROFILE_MIB MiB, $RUNTIME s"
     local job; job=$(job_file "$tgt")
     CUR_WLOOPS=$(wloops "$p"); say "  loops $CUR_WLOOPS over each job's file, trim companion $RUNTIME s, write cap $WRITE_CAP_S s"
-    RUNTIME=$WRITE_CAP_S TRIM_RUNTIME=$RUNTIME fio_run "$cell-p$i" "$WRITE_CAP_S" "$job" "--aux-path=$d/state-$i"; local frc=$?
+    local trt=$RUNTIME; RUNTIME=$WRITE_CAP_S TRIM_RUNTIME=$trt fio_run "$cell-p$i" "$WRITE_CAP_S" "$job" "--aux-path=$d/state-$i"; local frc=$?
     rm -rf "$d/stateW-$i"; cp -a "$d/state-$i" "$d/stateW-$i"   # state-W: the state as the write run left it, before anything else touches it
     wait "$TC_PID"; local trc=$?
     local jf="$OUT/raw/fio-${cell//\//_}-p$i.json" errs; errs=$(fio_errors "$jf")
