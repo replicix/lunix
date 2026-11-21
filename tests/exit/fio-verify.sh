@@ -48,7 +48,7 @@ LIVE_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB)); CAP_MIB=$(( $(num
 # fio_env TARGET I QD JOBS: exports the variables of the job files
 fio_env() {
   local i=$2 jobs=$4
-  export SEED=$((1000 + i)) QD=$3 JOBS=$jobs RUNTIME LOOPS=1000000 VONLY=0
+  export SEED=$((1000 + i)) QD=$3 JOBS=$jobs RUNTIME LOOPS="${CUR_WLOOPS:-1000000}" VONLY=0
   export PER_JOB=$((PER_PROFILE_MIB * MIB / jobs)) TRIM_SIZE=$((TRIM_MIB * MIB))
   if [ "$1" = raw ]; then
     export DEV="$CUR_DEV" BASE=$((i * PER_PROFILE_MIB * MIB)) TRIM_BASE=$(((NPROF * PER_PROFILE_MIB + i * TRIM_MIB) * MIB))
@@ -56,7 +56,19 @@ fio_env() {
     export DIR="$MNT/p$i"; mkdir -p "$DIR"
   fi
 }
-job_file() { if [ "$1" = raw ]; then echo "$JOBDIR/verify-raw.fio"; else echo "$JOBDIR/verify-fs.fio"; fi; }
+# The write run is bounded by LOOPS (whole passes over every job's file), not by time: a verify_only of a run cut off in its first loop checks
+# blocks that were never written (fio artefact, 2026-11-21). RUNTIME is the length of the trim companion; WRITE_CAP_S, a safety net far above the
+# expected time, fails the cell (the run is never verified) when the write run is not done by then. The generated job files give the companion its
+# own runtime; the job files of the other scripts are untouched.
+: "${WRITE_CAP_S:=$(( RUNTIME * 3 > 1800 ? RUNTIME * 3 : 1800 ))}"
+JOBGEN="$OUT/jobs"; mkdir -p "$JOBGEN"
+for _f in verify-raw verify-fs; do awk '/^\[trimmix\]/{print; print "runtime=${TRIM_RUNTIME}"; next} 1' "$JOBDIR/$_f.fio" > "$JOBGEN/$_f.fio"; done
+job_file() { if [ "$1" = raw ]; then echo "$JOBGEN/verify-raw.fio"; else echo "$JOBGEN/verify-fs.fio"; fi; }
+# wloops QD:JOBS: loops over the 4 GiB of a profile, about what the former 600 s run wrote on the exit volume (fvf cells of 2026-11-20), at least 1
+wloops() {
+  [ -z "${WLOOPS:-}" ] || { echo "$WLOOPS"; return; }
+  case "$1" in 1:1) echo 4 ;; 32:1) echo 10 ;; 128:1) echo 9 ;; 1:8) echo 4 ;; 32:8) echo 2 ;; 128:8) echo 1 ;; *) echo 2 ;; esac
+}
 
 
 # ---- diagnostics of a verify failure (fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach) ----------------------
@@ -77,12 +89,12 @@ diag_pass() {
   return 0
 }
 # first_pass_note CELL I JOBMIB: bytes written per main job in the first pass against the size of its file (did the first loop complete?)
-first_pass_note() {
+first_pass_note() { # CELL I JOBMIB LOOPS
   local jf="$OUT/raw/fio-${1//\//_}-p$2.json" w ios
   w=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576 | floor] | "\(min)/\($sz) MiB min..max \(max)"' 2>/dev/null)
   ios=$(fio_json "$jf" 2>/dev/null | jq -r '[.jobs[] | select(.jobname=="main") | .write.total_ios] | join(",")' 2>/dev/null)
   say "- p$2 first pass: written per job (min of $(fio_json "$jf" 2>/dev/null | jq '[.jobs[] | select(.jobname=="main")] | length' 2>/dev/null) jobs) $w; total_ios per job $ios"
-  FIRST_LOOP_DONE=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576] | if min >= $sz then "yes" else "no" end' 2>/dev/null)
+  FIRST_LOOP_DONE=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576] | if min >= ($sz * '"$4"') then "yes" else "no" end' 2>/dev/null)
 }
 # win_note STATUS_JSON: the journal window counters of the daemon (misses = guest reads that went to the ring files)
 win_note() { jq -r '.write_path | "hits=\(.window_hits) misses=\(.window_misses)"' "$1" 2>/dev/null || echo "n/a"; }
@@ -147,11 +159,13 @@ run_cell() { # target chunk mode
     fi
     say "- profile $i: QD $qd, $jobs job(s), $PER_PROFILE_MIB MiB, $RUNTIME s"
     local job; job=$(job_file "$tgt")
-    fio_run "$cell-p$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i"; local frc=$?
+    CUR_WLOOPS=$(wloops "$p"); say "  loops $CUR_WLOOPS over each job's file, trim companion $RUNTIME s, write cap $WRITE_CAP_S s"
+    RUNTIME=$WRITE_CAP_S TRIM_RUNTIME=$RUNTIME fio_run "$cell-p$i" "$WRITE_CAP_S" "$job" "--aux-path=$d/state-$i"; local frc=$?
     rm -rf "$d/stateW-$i"; cp -a "$d/state-$i" "$d/stateW-$i"   # state-W: the state as the write run left it, before anything else touches it
     wait "$TC_PID"; local trc=$?
     local jf="$OUT/raw/fio-${cell//\//_}-p$i.json" errs; errs=$(fio_errors "$jf")
-    first_pass_note "$cell" "$i" $((PER_PROFILE_MIB / jobs)); fp_done="$fp_done p$i:$FIRST_LOOP_DONE"
+    first_pass_note "$cell" "$i" $((PER_PROFILE_MIB / jobs)) "$CUR_WLOOPS"; fp_done="$fp_done p$i:$FIRST_LOOP_DONE"
+    [ "$FIRST_LOOP_DONE" = yes ]; expect "$cell p$i: every job completed its $CUR_WLOOPS loop(s) (write run complete; fio rc $frc)" $? || { bad=1; notes="$notes;write-run-incomplete p$i"; }
     [ "$frc" = 0 ] && [ "$errs" = 0 ]; expect "$cell p$i: fio rc $frc, job errors $errs (zero verify failures)" $? || bad=1
     [ "$trc" = 0 ]; expect "$cell p$i: trimcheck (discard, write-zeroes) rc $trc" $? || bad=1
     [ "$frc" = 0 ] && [ "$errs" = 0 ] && [ "$trc" = 0 ] || bad=1
