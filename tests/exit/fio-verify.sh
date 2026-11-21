@@ -30,6 +30,7 @@ CELL_SECS=$((${#PROF[@]} * (RUNTIME + VERIFY_GRACE) + 3600))
 export SCRIPT_CAP="${SCRIPT_CAP:-$((NCELLS * CELL_SECS))}" FIO_GRACE="$VERIFY_GRACE"
 . "$here/lib.sh"
 harness_init m15-fio
+SIGNAL=0
 JOBDIR="$REPO/bench/phase1/exit/fio"
 say "# M15 fio verify ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $(nproc) cpus; $NCELLS cells, profiles: $PROFILES, runtime $RUNTIME s)"
 say "- script cap $SCRIPT_CAP s: run through the wrapper with LUNIX_ROOT_TIMEOUT >= $((SCRIPT_CAP + 600))"
@@ -92,6 +93,22 @@ reattach_note() {
   GAPS=$(grep -ac 'stopped at a gap' "$DLOG")
 }
 
+
+# ---- audit of the files across the detach (2026-11-21: pre-detach and post-detach passes of one failing cell did not report the same blocks) ----
+# state-W: fio's verify state as the write run left it; every verify_only pass gets a fresh copy and a job file with the state save off, so
+# no pass can change what the next one loads. snap/cmp: extent state (FIEMAP) and a hash of every 4 KiB block (O_DIRECT) of every job file
+# before the pre-detach pass and after the re-attach; a block whose content changed, or an extent written->unwritten, is a Lunix signal.
+nosave_job() { sed 's/^verify_state_save=1/verify_state_save=0/' "$1" > "$2/$(basename "$1").nosave"; echo "$2/$(basename "$1").nosave"; }
+fresh_state() { mkdir -p "$1/old"; [ -d "$1/state-$2" ] && mv "$1/state-$2" "$1/old/state-$2.$(date +%s%N)"; cp -a "$1/stateW-$2" "$1/state-$2"; }
+audit_snap() { # DIR TAG NPROF
+  local d=$1 tag=$2 n=$3 k f
+  for k in $(seq 0 $((n - 1))); do
+    say "- audit $tag p$k: $(python3 -I "$here/blockmap.py" snap "$MNT/p$k" "$d/snap-$tag-$k.pkl.gz")"
+    for f in "$MNT"/p$k/main.*; do
+      if [ "$CUR_TGT" = xfs ]; then xfs_bmap -v "$f" > "$d/map-$tag-p$k-$(basename "$f").txt" 2>&1; else filefrag -v "$f" > "$d/map-$tag-p$k-$(basename "$f").txt" 2>&1; fi
+    done
+  done
+}
 run_cell() { # target chunk mode
   local tgt=$1 chunk=$2 mode=$3
   local cell="fio-verify/$tgt/c$((chunk / 1024))k/$mode" vol="v$((chunk / 1024))$tgt$mode"
@@ -131,6 +148,7 @@ run_cell() { # target chunk mode
     say "- profile $i: QD $qd, $jobs job(s), $PER_PROFILE_MIB MiB, $RUNTIME s"
     local job; job=$(job_file "$tgt")
     fio_run "$cell-p$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i"; local frc=$?
+    rm -rf "$d/stateW-$i"; cp -a "$d/state-$i" "$d/stateW-$i"   # state-W: the state as the write run left it, before anything else touches it
     wait "$TC_PID"; local trc=$?
     local jf="$OUT/raw/fio-${cell//\//_}-p$i.json" errs; errs=$(fio_errors "$jf")
     first_pass_note "$cell" "$i" $((PER_PROFILE_MIB / jobs)); fp_done="$fp_done p$i:$FIRST_LOOP_DONE"
@@ -150,14 +168,15 @@ run_cell() { # target chunk mode
   # phase 1b (cp-s... fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach, none before): verify_only of every profile BEFORE the
   # umount and the detach, on the same attach, after the guest page cache is dropped, so that a failure can be placed before or after the detach.
   # (fio reads with O_DIRECT anyway; the daemon's own read cache is small against 4 GiB per profile.)
-  local badpre=0 pre_errs="" post_errs=""
+  local badpre=0 pre_errs="" post_errs="" audit=0 sig="n/a" errset=""
+  if [ "$bad" = 0 ] && [ "$tgt" != raw ] && [ "${STATE_AUDIT:-1}" = 1 ]; then audit=1; sync; audit_snap "$d" pre "$profiles_done"; fi
   if [ "$bad" = 0 ] && [ "${PRE_VERIFY:-1}" = 1 ]; then
     sync; echo 3 > /proc/sys/vm/drop_caches
     i=0
     for p in "${PROF[@]:0:$profiles_done}"; do
       qd=${p%%:*}; jobs=${p##*:}
       fio_env "$tgt" "$i" "$qd" "$jobs"
-      local job; job=$(job_file "$tgt")
+      local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
       VONLY=1 LOOPS=1 fio_run "$cell-pre$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local prc=$?
       local pjf="$OUT/raw/fio-${cell//\//_}-pre$i.json" perrs; perrs=$(fio_errors "$pjf")
       pre_errs="$pre_errs p$i:$perrs"
@@ -184,12 +203,20 @@ run_cell() { # target chunk mode
     local dm0; dm0=$(dmesg | wc -l)
     [ "$tgt" = raw ] || mount_fs "$tgt" "$CUR_DEV" "$MNT" || bad=1
     dmesg | tail -n +$((dm0 + 1)) > "$d/dmesg-remount.txt"; dm_rec=$(grep -aic 'recover' "$d/dmesg-remount.txt")
+    if [ "$audit" = 1 ] && [ "$bad" = 0 ]; then
+      audit_snap "$d" post "$profiles_done"; sig=0; local k cs
+      for k in $(seq 0 $((profiles_done - 1))); do
+        say "- audit cmp p$k (before the detach vs after the attach): $(python3 -I "$here/blockmap.py" cmp "$d/snap-pre-$k.pkl.gz" "$d/snap-post-$k.pkl.gz" "$d/cmp-$k.json")"
+        cs=$(jq -r '.total | .content_changed + .written_to_unwritten' "$d/cmp-$k.json" 2>/dev/null); [ "${cs:-1}" = 0 ] || sig=1
+      done
+      if [ "$sig" = 1 ]; then fail "$cell: DATA-LOSS SIGNAL: a block changed or an extent went written->unwritten across the detach (see cmp-*.json)"; bad=1; SIGNAL=1; fi
+    fi
     say "- dmesg at the re-mount: $dm_rec line(s) with 'recover' ($(grep -ai 'starting recovery' "$d/dmesg-remount.txt" | head -1))"
     i=0
     for p in "${PROF[@]:0:$profiles_done}"; do
       qd=${p%%:*}; jobs=${p##*:}
       fio_env "$tgt" "$i" "$qd" "$jobs"
-      local job; job=$(job_file "$tgt")
+      local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
       VONLY=1 LOOPS=1 fio_run "$cell-v$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local vrc=$?
       local vjf="$OUT/raw/fio-${cell//\//_}-v$i.json" verrs; verrs=$(fio_errors "$vjf")
       post_errs="$post_errs p$i:$verrs"
@@ -197,6 +224,12 @@ run_cell() { # target chunk mode
       if diag_pass "$d" "v$i" "$OUT/raw/fio-${cell//\//_}-v$i.stdout" "$qd"; then rr_post="$rr_post p$i:[$DIAG_SUM]"; fi
       i=$((i + 1))
     done
+    for k in $(seq 0 $((profiles_done - 1))); do
+      [ -e "$d/bad-pre$k.txt" ] && [ -e "$d/bad-v$k.txt" ] || continue
+      awk '{print $1, $2}' "$d/bad-pre$k.txt" | sort -u > "$d/set-pre-$k.txt"; awk '{print $1, $2}' "$d/bad-v$k.txt" | sort -u > "$d/set-post-$k.txt"
+      errset="$errset p$k:pre=$(wc -l < "$d/set-pre-$k.txt"),post=$(wc -l < "$d/set-post-$k.txt"),only_pre=$(comm -23 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),only_post=$(comm -13 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l)"
+    done
+    say "- error sets (offsets) pre vs post:${errset:- none}"
     status_json "$vol" > "$d/status-post.json" 2>/dev/null; winpost=$(win_note "$d/status-post.json")
     say "- journal window after the post-detach verify_only: $winpost"
     [ "$tgt" = raw ] || { umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after verify_only" $? || bad=1; }
@@ -253,7 +286,7 @@ run_cell() { # target chunk mode
   say "- $cell: throttled_ms $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
-      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" first_loop_complete="${fp_done# }" replayed="${REPLAYED:-n/a}" recovery_gap_lines="${GAPS:-n/a}" detach1_rc="$drc1" detach2_rc="$drc2" window_pre="$winpre" window_post="$winpost" remount_recover_lines="$dm_rec" zero_pre="${rr_pre# }" zero_post="${rr_post# }" zero_again="$rr_again" notes="$notes"
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" first_loop_complete="${fp_done# }" replayed="${REPLAYED:-n/a}" recovery_gap_lines="${GAPS:-n/a}" detach1_rc="$drc1" detach2_rc="$drc2" window_pre="$winpre" window_post="$winpost" remount_recover_lines="$dm_rec" zero_pre="${rr_pre# }" zero_post="${rr_post# }" zero_again="$rr_again" audit_signal="$sig" errsets="${errset# }" notes="$notes"
   [ "$bad" = 0 ] || FAIL=1
 }
 
@@ -264,4 +297,5 @@ done; done; done
 say ""; say "## end"
 [ "$(wc -l < "$RES")" = "$NCELLS" ]; expect "every cell produced a result record ($(wc -l < "$RES") of $NCELLS)" $? || FAIL=1
 say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
+[ "${SIGNAL:-0}" = 1 ] && exit 5
 exit "$FAIL"
