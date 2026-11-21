@@ -1,0 +1,27 @@
+// Kernel view of the requests of one ublk device (DEVNO = major<<20|minor, substituted by diag-sidecar.sh).
+// issue = the block layer handed the request to the ublk driver (the daemon's tag is delivered);
+// complete = the daemon's answer ended the request. tagwait = time fio (or its io-wq workers) spent in blk_mq_get_tag, i.e. waiting for a free
+// tag of the device (more requests outstanding than queues x depth). Long events (over LONG_MS) are printed with their time.
+tracepoint:block:block_rq_issue /args->dev == DEVNO/ {
+  @iss[args->sector, args->nr_sector] = nsecs;
+  @inflight++;
+}
+tracepoint:block:block_rq_complete /args->dev == DEVNO/ {
+  $t = @iss[args->sector, args->nr_sector];
+  if ($t != 0) {
+    $d = (nsecs - $t) / 1000000;
+    @dispatch_to_complete_ms = hist($d);
+    if ($d > LONG_MS) { printf("%llu LONG dispatch_to_complete %llu ms sector %llu nr %u rwbs %s\n", elapsed / 1000000, $d, args->sector, args->nr_sector, args->rwbs); }
+    delete(@iss[args->sector, args->nr_sector]);
+  }
+  @inflight--;
+}
+kprobe:blk_mq_get_tag /comm == "fio" || comm == "iou-wrk"/ { @gt[tid] = nsecs; @waiting++; }
+kretprobe:blk_mq_get_tag /@gt[tid] != 0/ {
+  $d = (nsecs - @gt[tid]) / 1000000;
+  @tagwait_ms = hist($d);
+  if ($d > LONG_MS) { printf("%llu LONG tagwait %llu ms comm %s\n", elapsed / 1000000, $d, comm); }
+  delete(@gt[tid]); @waiting--;
+}
+interval:s:1 { printf("%llu TICK inflight %lld tagwaiting %lld\n", elapsed / 1000000, @inflight, @waiting); }
+END { clear(@iss); clear(@gt); }
