@@ -1,7 +1,7 @@
 # M15 results: phase 1 exit tests (2026-11-21)
 
 Status: every item was measured; which main commit built the binaries differs per item and is stated in the next table. Two things are open and are
-reported as findings, not hidden: (1) the fio-verify cells on `67c7769` fail ADR-32's "no write completion beyond `full_timeout`" check (data integrity is
+reported as findings, not hidden: (1) the fio-verify cells on `67c7769` failed a 30 s completion check (the real `full_timeout` is 60 s; the cause is gate queueing plus the ublk tag wait, diagnosed below; data integrity is
 clean in every pass); (2) the crash loops, crash points, xfstests and negative controls were measured on `03b858e` and have not been rerun since the
 stall fixes. Raw results (results.jsonl, results.md, stall tables, xfstests logs and the comparison, ratio JSON) are under `raw/` (`raw/final-runs/`
 holds the runs of 2026-11-20/21, `raw/zero-blocks/` the zero-block episode); the scripts are `tests/exit/*.sh`, the fio job files
@@ -31,7 +31,7 @@ for the runs below; `6d16fbf` for the rerun). Exact fio job files: `bench/phase1
 
 | item | state | verdict |
 |---|---|---|
-| 1 fio verify | final harness on `67c7769`: 3 xfs reps PASS, raw 24G PASS, full 16K integrity 3 cells FAIL on the latency check only | integrity **PASS** (0 verify errors, pre and post detach, no block or extent changed across the detach); **FAIL** ADR-32 check: longest write completion 67 / 80 / 102 s against `full_timeout` 30 s, see below |
+| 1 fio verify | final harness on `67c7769`: 3 xfs reps PASS, raw 24G PASS, full 16K integrity 3 cells FAIL on the latency check only | integrity **PASS** (0 verify errors, pre and post detach, no block or extent changed across the detach); the 30 s latency check failed (67 / 80 / 102 s) because it used the wrong bound: diagnosed as gate queueing plus the wait for a ublk tag, see below |
 | 2 xfstests | all six runs complete; comparison below | ext4: no Lunix-only failure but the reference fails 244 of 684 for an environment reason (needs a fix before it means anything); xfs: 3 Lunix-only (xfs/129, 234, 253), one reference hang excluded (xfs/118) |
 | 3a kill -9 loops | ext4 100 cycles, xfs 50 cycles | **PASS** |
 | 3b crash points | 79 points, 3 hits each (rerun on `03b858e`) plus scenarios | 211 PASS, 0 FAIL; 69 of 79 reached by the workload, the other 10 reached by scenarios (10 of 10 clean) |
@@ -252,12 +252,38 @@ newF16 per cell (all numbers from `raw/final-runs/newF16/results.jsonl`):
 | ext4 16K integrity | 0 / 0 | 0 / 0 (extent count 6 -> 133 in p0 after re-mount, states identical) | **80.5 s** (p5; p4 9.3 s) | 413 s | 48.2 (49.7) | 43.2 | 31.2 | 1.32 |
 | xfs 16K integrity | 0 / 0 | 0 / 0 | **102.4 s** (p5; p4 31.2 s) | 404 s | 48.2 (49.7) | 45.4 | 31.4 | 1.38 |
 
-**Finding (not fixed here).** In profiles 4 and 5 (QD 32 and 128, 8 jobs) of all three cells the writer sees completions of 31 to 102 s, above
-`full_timeout` (30 s), while the gate is in `slowdown` and no write returns ENOSPC (`enospc` 0, `stops` 0, `fulls` 0). The daemon's own numbers are
-much smaller: `delay_max_ms` 95-449 ms, journal ring wait at most 1.1 s since the attach, and the write-latency histogram's top bucket is 2^24 us (16.8-33.5 s).
-The guest-side latency is therefore larger than what the daemon accounts for (queueing in the ublk queues or between the submit and the daemon's
-accounting is the suspect; not diagnosed). Profiles 0 to 3 are all under 10 s. This check is the ADR-32 §9.4 one; it passed vacuously on the 2083779 cells.
-Binaries `67c7769`; whether `80e1cd1` changes it was not measured.
+**Finding, diagnosed on `80e1cd1` (2026-11-21, `raw/latency-diag/`, scripts `tests/exit/diag/`).** The 67 / 80 / 102 s are not a stall and not a Lunix
+defect of the write path; the check itself was wrong in two ways, and what remains is queueing behind the space gate.
+1. **The bound was misread.** `space.full_timeout_ms` is null, so the daemon default of **60 s** applies (`DEFAULT_FULL_TIMEOUT`); the harness compared with 30 s. The
+   daemon's latency histogram bucket `b` is `2^(b-1) <= t < 2^b` us: bucket 24 is 8.4-16.8 s, not 17-33 s as first written above.
+2. **Inside the daemon the time is the space gate, nothing else.** With the gate open, 98 000 writes at QD 128 x 8 jobs: p50 33-65 ms, maximum under 0.52 s
+   (`openhist.txt`), so the journal append, flush and acknowledgement together are under 0.52 s. The ring wait is at most 1.1 s, the commit cuts take at
+   most 0.65 s (`last_cut_ms`, never over 1 s in a long-completion second), the root disk is at 31-34 % utilisation with a 1.6 ms write await in the slow
+   seconds. In `slowdown` the gate admits at its rate (4-36 MB/s, `rate` = bytes written per second to within 10 %), and a write queued behind others waits for
+   its turn (strict per-queue FIFO; the 10 s `throttle_max_delay_ms` counts only from the moment a write reaches the front of its queue, which is why the status
+   `delay_max_ms` says 200-450 ms while the histogram says 8-17 s): in the F run on `80e1cd1`, profile 4 (QD 32 x 8): 11 825 of 146 515 writes took 4.2 s or more,
+   fio maximum 9.5 s, kernel dispatch-to-complete maximum 8.9 s, 2 % of the writes outside the device. At the limit the gate goes to `stop`: all writes park
+   until GC frees space (23 s at a 10 GiB cap, 48 s at the 48 GiB cap, ended by a GC pass), bounded by `full_timeout` 60 s. During the 48 s episode (profile 5,
+   only the trim companion and the guest file system's own log and metadata writes were running) 25 sync writes completed together after 46.8 s (the figure of the
+   failed check); `gate stops` is 2 and `delay_max_ms` 46 760 in that profile's status. With `throttle = false` the gate stops 1045 times and one write waited 41.7 s;
+   `throttle_max_delay_ms = 1000` leaves it at 99 stops and 28 s (the stops, not the pace, own the tail).
+3. **Outside the daemon: the wait for a ublk tag.** The device has 4 queues x 128 tags (one per 4 CPUs); fio pinned to CPUs 8-15 reaches two of them (255-264 writes
+   in flight), pinned to CPUs 4-7 (the original newF16 run) one (128). Profile 5 has 1024 outstanding writes: in the F run 74 % of them waited outside the device
+   (mean wait about 2 s at 340 writes/s, tail 25-30 s because blk-mq tag wake-ups are not FIFO): fio maximum 41.9 s against a kernel
+   dispatch-to-complete maximum of 10.2 s and a daemon maximum under 16.8 s. The original 67 / 80 / 102 s are this share on top of the gate (daemon maximum
+   16.8 s in all three cells). The kernel tag wait is not covered by the daemon's deadlines.
+4. **No correlation with the coordinator.** Long completions occur in 100 % of the slowdown seconds and in 0 of the seconds with `last_cut_ms` > 1 s; GC passes
+   run every 4-9 s without relation; the coordinator thread sometimes sleeps in `jbd2_log_wait_commit` (fsync on the host's ext4) for a second or two, which no
+   completion over 4 s lined up with. The host's other half ran no builds during these runs (the p1/seal work started after them; the last variant overlapped
+   it for its final minutes; its numbers are not used above).
+**Why the gate is slow, a hypothesis (not tested):** while slowdown or stop lasts the admitted rate is what GC reclaims, 4-20 MB/s against a root disk that could take
+3-4 times more; GC's compaction budget (`gc_pressure_rate_factor` 4, `r_mid` = max(gc_rate, 16 MiB/s)) rather than the disk is the limit. **Proposed fixes (not
+implemented here):** (a) count the pace delay from a write's arrival in the queue, so a write behind others cannot exceed `throttle_max_delay_ms` plus service
+(today only the front of each queue is judged); (b) start the compaction pressure at the soft mark with a budget sized to the ingest times the amplification (1.5-1.7
+here), so the band does not end in `stop`; (c) a deeper ublk queue (`depth` up to 1024 is allowed by `max_locked_buffers`) moves the waiting from the blk-mq tag
+queue into the daemon, where the deadlines apply, at the cost of the same latency for the guest. **Harness change (done, `ca63273`):** the check is now the gate-side bound
+(longest wait in the gate, from the per-profile status, within `full_timeout` + 5 s; the counters of the post-attach status restart and were the wrong source); fio's own
+longest completion is reported, not judged, with the note that it includes the tag wait.
 
 ### The 2083779 cells (time-bounded write run, before the harness change)
 
@@ -342,7 +368,7 @@ waited out the 60 s grace in the middle); `p1/gcrate` fixed that.
 
 ## Not done / pending, in order
 
-1. The fio-verify longest-completion finding above (67 / 80 / 102 s against 30 s on `67c7769`); rerun the three cells on the final main.
+1. The gate fixes proposed in the latency diagnosis above (pace delay counted from arrival, compaction pressure from the soft mark); rerun the three fio-verify cells on the final main with the gate-side check.
 2. Crash loops (3a, 3c), crash points (3b) and xfstests were measured on `03b858e`; rerun on the final main before the M15 merge.
 3. M16 parts of ADR-32 §9.5 (before/after pair, throttled = 0 validity, sustained cell, the §20 sentence) are not implemented.
 4. xfstests: the ext4 reference environment error and the 4K-sector comparison are in `xfstests-compare.md`.

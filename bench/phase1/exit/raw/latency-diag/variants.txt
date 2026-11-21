@@ -1,0 +1,12 @@
+== V1
+["fail","61760","0","0","32597"]
+{"state":"slowdown","stops":7,"fulls":0,"enospc":0,"delay_max_ms":14049}
+== V2
+["fail","0","0","0","32053"]
+{"state":"slowdown","stops":2,"fulls":0,"enospc":0,"delay_max_ms":8002}
+== V3
+["fail","0","0","0","31484"]
+{"state":"open","stops":99,"fulls":0,"enospc":0,"delay_max_ms":27974}
+== V4
+["fail","0","0","0","45723"]
+{"state":"open","stops":1045,"fulls":0,"enospc":0,"delay_max_ms":41660}

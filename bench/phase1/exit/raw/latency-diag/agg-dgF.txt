@@ -1,0 +1,3 @@
+open secs 1847 written MB/s -165.1 gate rate MB/s 0.0 writes/s -2898 avg KB -297911544
+slowdown secs 3122 written MB/s 97.7 gate rate MB/s 90.1 writes/s 1714 avg KB 56
+stop secs 48 written MB/s 0.2 gate rate MB/s 4.2 writes/s 5 avg KB 43

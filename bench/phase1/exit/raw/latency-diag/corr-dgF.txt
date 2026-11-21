@@ -1,0 +1,8 @@
+p4
+window 249 s: 249 s not open (100 %), last_cut_ms max 596, seconds with last_cut_ms>1000: 0
+seconds with a kernel completion >=4 s: 71; of those, gate state slowdown/stop: 71; with last_cut_ms>1000: 0; max completion 46786 ms
+commits 3084..3231 (1.7 s per commit)
+p5
+window 249 s: 249 s not open (100 %), last_cut_ms max 646, seconds with last_cut_ms>1000: 0
+seconds with a kernel completion >=4 s: 41; of those, gate state slowdown/stop: 41; with last_cut_ms>1000: 0; max completion 46786 ms
+commits 3341..3449 (2.3 s per commit)

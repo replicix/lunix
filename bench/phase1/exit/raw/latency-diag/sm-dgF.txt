@@ -1,0 +1,24 @@
+p0  window 517 s  states {'open': 517}
+    written 83.9 MB/s, gate rate (mean) 0.0 MB/s, kernel writes in flight (mean) 3, fio max lat 0.2 s, clat p99 0.00 p99.9 0.01 p99.99 0.02 s
+    outstanding writes of fio 1, in the device 3: 0 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^18 us (0.1-0.3 s), writes in buckets >= 2^22 us (4 s): 0 of 873707; kernel dispatch->complete over limit: 0 events, max 0 ms
+p1  window 383 s  states {'open': 232, 'slowdown': 152}
+    written 139.8 MB/s, gate rate (mean) 224.2 MB/s, kernel writes in flight (mean) 31, fio max lat 1.0 s, clat p99 0.09 p99.9 0.34 p99.99 0.76 s
+    outstanding writes of fio 32, in the device 31: 2 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^20 us (0.5-1.0 s), writes in buckets >= 2^22 us (4 s): 0 of 877294; kernel dispatch->complete over limit: 0 events, max 0 ms
+p2  window 586 s  states {'open': 106, 'slowdown': 481}
+    written 81.8 MB/s, gate rate (mean) 163.4 MB/s, kernel writes in flight (mean) 123, fio max lat 2.2 s, clat p99 0.94 p99.9 1.48 p99.99 2.02 s
+    outstanding writes of fio 128, in the device 123: 4 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^22 us (2.1-4.2 s), writes in buckets >= 2^22 us (4 s): 35 of 768887; kernel dispatch->complete over limit: 0 events, max 0 ms
+p3  window 529 s  states {'slowdown': 516, 'open': 14}
+    written 44.8 MB/s, gate rate (mean) 100.9 MB/s, kernel writes in flight (mean) 14, fio max lat 1.1 s, clat p99 0.16 p99.9 0.40 p99.99 0.93 s
+    outstanding writes of fio 8, in the device 14: 0 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^21 us (1.0-2.1 s), writes in buckets >= 2^22 us (4 s): 0 of 385877; kernel dispatch->complete over limit: 0 events, max 0 ms
+p4  window 287 s  states {'slowdown': 287}
+    written 33.6 MB/s, gate rate (mean) 36.3 MB/s, kernel writes in flight (mean) 252, fio max lat 9.5 s, clat p99 5.67 p99.9 8.36 p99.99 9.06 s
+    outstanding writes of fio 256, in the device 252: 2 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^24 us (8.4-16.8 s), writes in buckets >= 2^22 us (4 s): 11825 of 146515; kernel dispatch->complete over limit: 7120 events, max 8908 ms
+p5  window 289 s  states {'slowdown': 289}
+    written 19.2 MB/s, gate rate (mean) 19.6 MB/s, kernel writes in flight (mean) 262, fio max lat 41.9 s, clat p99 17.11 p99.9 17.11 p99.99 17.11 s
+    outstanding writes of fio 1024, in the device 262: 74 % wait outside the device for a tag (Little)
+    daemon histogram top bucket 2^24 us (8.4-16.8 s), writes in buckets >= 2^22 us (4 s): 8545 of 97020; kernel dispatch->complete over limit: 3224 events, max 10155 ms
