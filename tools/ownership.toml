@@ -496,3 +496,31 @@ paths = [
   "tools/ci.sh",
   "tools/ownership.toml",
 ]
+
+# gate: the M15 latency diagnosis, two space-gate fixes (a write's pacing delay
+# counts from its arrival; the collector is sized to the ingest from the soft
+# mark).
+[gate]
+paths = [
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/tests/pace.rs",
+  "crates/lunix-engine/src/pressure.rs",
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/tests/pressure.rs",
+  "crates/lunix-engine/tests/jstall.rs",
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-testkit/src/space.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "crates/lunixd/tests/gate_equilibrium.rs",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-gate.md",
+  "tools/ownership.toml",
+]

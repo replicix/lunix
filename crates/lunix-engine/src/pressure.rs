@@ -9,6 +9,15 @@
 //! with hysteresis: the engine returns to the normal figures after the gate
 //! has been open for [`HOLD`].
 //!
+//! **Sizing (milestone gate).** The factors above are floors. Inside the band
+//! the collector is sized to the writers: the compaction work wanted is the
+//! ingest rate times the write amplification (`gc_write_amp_percent`, 200 by
+//! default; 1.5 to 1.7 was measured), raised from 1 to 2 times as the
+//! headroom falls from the soft mark to the limit ([`gc_demand`]). The step
+//! budget and the compaction rate cap are the larger of the factors and
+//! that demand, so in steady overload the reclaim rate meets the admitted
+//! rate and the band reaches an equilibrium instead of ending in `stop`.
+//!
 //! Both pieces here are plain state machines: the engine feeds them the
 //! gate's snapshot and the clock and acts on what they return.
 
@@ -25,8 +34,29 @@ use crate::engine::{lock, Inner};
 /// normal figures.
 pub const HOLD: Duration = Duration::from_secs(5);
 
-/// The step budget's multiple under pressure.
+/// The step budget's multiple under pressure (the floor; see [`gc_demand`]).
 pub const BUDGET_FACTOR: u32 = 4;
+
+/// The largest multiple the sizing may give the step budget's bytes.
+pub const MAX_BUDGET_FACTOR: u64 = 64;
+
+/// The largest multiple of a step's time budget (a step holds the
+/// coordinator; the bytes of a larger budget are got from more steps, see
+/// [`SHARE_UNDER_PRESSURE`]).
+pub const MAX_TIME_FACTOR: u64 = 8;
+
+/// The collector stops yielding to ring-parked writes (milestone jstall) when
+/// the headroom is below this multiple of the soft mark.
+pub const NEAR_BAND_MULTIPLE: u64 = 2;
+
+/// The default write amplification, percent: compaction bytes (read and
+/// write) per byte ingested.
+pub const DEFAULT_WRITE_AMP_PERCENT: u64 = 200;
+
+/// The share of a cut's time the collector gets after it while a gate
+/// pressure holds (an outstanding third otherwise): equal to the cut, so the
+/// collector gets about half of the coordinator.
+pub const SHARE_UNDER_PRESSURE: u32 = 1;
 
 /// Transitions closer than this are coalesced into one log line.
 pub const LOG_COALESCE: Duration = Duration::from_secs(5);
@@ -86,24 +116,35 @@ impl Pressure {
         }
     }
 
-    /// The step budget at this pressure.
+    /// The step budget at this pressure: four times the base, or more when
+    /// `demand` (the compaction rate the writers call for, [`gc_demand`])
+    /// is more than four times `base_rate`. The bytes scale with the whole
+    /// multiple, the time with at most [`MAX_TIME_FACTOR`].
     #[must_use]
-    pub fn budget(self, base: GcBudget) -> GcBudget {
+    pub fn budget(self, base: GcBudget, base_rate: u64, demand: u64) -> GcBudget {
         if self == Self::Normal {
             return base;
         }
+        let want = if base_rate == 0 {
+            0
+        } else {
+            demand.div_ceil(base_rate)
+        };
+        let f = want.clamp(u64::from(BUDGET_FACTOR), MAX_BUDGET_FACTOR);
         GcBudget {
-            max_duration: base.max_duration.saturating_mul(BUDGET_FACTOR),
-            max_bytes: base.max_bytes.saturating_mul(u64::from(BUDGET_FACTOR)),
+            max_duration: base
+                .max_duration
+                .saturating_mul(u32::try_from(f.min(MAX_TIME_FACTOR)).unwrap_or(u32::MAX)),
+            max_bytes: base.max_bytes.saturating_mul(f),
         }
     }
 
-    /// The collector's settings at this pressure: the compaction rate times
-    /// `rate_factor` (uncapped when urgent) and the grace at the floor (10 s
-    /// plus twice `read_timeout`, the urgent pass's rule), never longer than
-    /// configured.
+    /// The collector's settings at this pressure: the compaction rate the
+    /// larger of `rate_factor` times the base and `demand` (uncapped when
+    /// urgent) and the grace at the floor (10 s plus twice `read_timeout`,
+    /// the urgent pass's rule), never longer than configured.
     #[must_use]
-    pub fn params(self, base: GcParams, rate_factor: u64) -> GcParams {
+    pub fn params(self, base: GcParams, rate_factor: u64, demand: u64) -> GcParams {
         if self == Self::Normal {
             return base;
         }
@@ -117,11 +158,31 @@ impl Pressure {
             } else if self == Self::Urgent {
                 u64::MAX
             } else {
-                base.rate_bytes_per_s.saturating_mul(rate_factor.max(1))
+                base.rate_bytes_per_s
+                    .saturating_mul(rate_factor.max(1))
+                    .max(demand)
             },
             ..base
         }
     }
+}
+
+/// The compaction work the writers call for, bytes per second (read plus
+/// write): the ingest rate times `amp_percent` / 100, times a factor that
+/// rises from 1 at the soft mark to 2 at the limit (the backlog is worked
+/// off as the band narrows). 0 with the band off, or outside it (nothing is
+/// being paced, so nothing is asked beyond the base figures).
+#[must_use]
+pub fn gc_demand(snap: &SpaceSnapshot, amp_percent: u64) -> u64 {
+    let t = &snap.throttle;
+    if t.soft == 0 || t.headroom >= t.soft || t.state == ThrottleState::Open {
+        return 0;
+    }
+    // x = headroom / soft in 0..1; the factor is 2 - x.
+    let pos = u128::from(t.headroom.min(t.soft)) * 1000 / u128::from(t.soft);
+    let milli = 2000 - pos;
+    let d = u128::from(t.ingest_rate) * u128::from(amp_percent) * milli / 100_000;
+    u64::try_from(d).unwrap_or(u64::MAX)
 }
 
 /// The pressure from the gate's state, with the hold.
@@ -361,15 +422,31 @@ impl Inner {
 
     /// The collector's step budget now.
     pub(crate) fn gc_budget_now(&self) -> Option<GcBudget> {
-        self.cfg.gc_budget.map(|b| self.pressure_now().budget(b))
+        let base_rate = self.cfg.gc_params.map_or(0, |p| p.rate_bytes_per_s);
+        let demand = self.gc_demand.load(Ordering::Acquire);
+        self.cfg
+            .gc_budget
+            .map(|b| self.pressure_now().budget(b, base_rate, demand))
+    }
+
+    /// How much of a cut's time the collector gets after it: a third, or all
+    /// of it (and a longer cap) while a gate pressure holds.
+    pub(crate) fn gc_share_divisor(&self) -> u32 {
+        if self.pressure_now() == Pressure::Normal {
+            crate::coord::GC_SHARE_DIVISOR
+        } else {
+            SHARE_UNDER_PRESSURE
+        }
     }
 
     /// The collector's settings now.
     pub(crate) fn gc_params_now(&self) -> Option<GcParams> {
         self.cfg.gc_params.map(|p| {
-            let p = self
-                .pressure_now()
-                .params(p, self.cfg.gc_pressure_rate_factor);
+            let p = self.pressure_now().params(
+                p,
+                self.cfg.gc_pressure_rate_factor,
+                self.gc_demand.load(Ordering::Acquire),
+            );
             if self.gc_yields_to_ring() {
                 yielding(p)
             } else {
@@ -382,7 +459,11 @@ impl Inner {
     /// for the journal ring and the space gate applies no pressure (milestone
     /// jstall; under pressure the volume needs the collector more).
     pub(crate) fn gc_yields_to_ring(&self) -> bool {
-        if self.pressure_now() != Pressure::Normal {
+        // Also not within twice the soft mark of the band: the collector
+        // must not be slowed to an eighth just before the volume needs it at
+        // the ingest rate, or a ring-bound writer carries the volume into the
+        // band and the `stop` with a collector that yielded its way there.
+        if self.pressure_now() != Pressure::Normal || self.near_band.load(Ordering::Acquire) {
             return false;
         }
         let now = u64::try_from(self.clock.monotonic().as_millis()).unwrap_or(u64::MAX);
@@ -404,6 +485,17 @@ impl Inner {
         let now = self.clock.monotonic();
         let level = lock(&self.pressure).observe(snap.throttle.state, active(&snap), now);
         self.pressure_level.store(level.code(), Ordering::Release);
+        let demand = if level == Pressure::Normal {
+            0
+        } else {
+            gc_demand(&snap, self.cfg.gc_write_amp_percent)
+        };
+        self.gc_demand.store(demand, Ordering::Release);
+        let t = &snap.throttle;
+        self.near_band.store(
+            t.soft > 0 && t.headroom < t.soft.saturating_mul(NEAR_BAND_MULTIPLE),
+            Ordering::Release,
+        );
         let lines = lock(&self.throttle_watch).observe(&snap, level, now);
         for l in lines {
             self.log_throttle(&l);
@@ -623,19 +715,19 @@ mod tests {
             max_duration: Duration::from_millis(50),
             max_bytes: 64 << 20,
         };
-        assert_eq!(Pressure::Normal.budget(base), base);
+        assert_eq!(Pressure::Normal.budget(base, 64 << 20, 0), base);
         for p in [Pressure::Raised, Pressure::Urgent] {
-            let b = p.budget(base);
+            let b = p.budget(base, 64 << 20, 0);
             assert_eq!(b.max_duration, Duration::from_millis(200));
             assert_eq!(b.max_bytes, 256 << 20);
         }
         let n = params();
-        assert_eq!(Pressure::Normal.params(n, 4), n);
-        let r = Pressure::Raised.params(n, 4);
+        assert_eq!(Pressure::Normal.params(n, 4, 0), n);
+        let r = Pressure::Raised.params(n, 4, 0);
         assert_eq!(r.rate_bytes_per_s, 256 << 20);
         assert_eq!(r.grace, secs(30), "10 s + 2 x read_timeout");
         assert_eq!(r.retain_last, 2);
-        let u = Pressure::Urgent.params(n, 4);
+        let u = Pressure::Urgent.params(n, 4, 0);
         assert_eq!(u.rate_bytes_per_s, u64::MAX, "uncapped at the limit");
         assert_eq!(u.grace, secs(30));
         // The floor grace is never longer than the configured one.
@@ -643,13 +735,88 @@ mod tests {
             grace: secs(20),
             ..n
         };
-        assert_eq!(Pressure::Raised.params(short, 4).grace, secs(20));
+        assert_eq!(Pressure::Raised.params(short, 4, 0).grace, secs(20));
         // A configured read_timeout moves the floor.
         let slow = GcParams {
             read_timeout: secs(30),
             ..n
         };
-        assert_eq!(Pressure::Raised.params(slow, 4).grace, secs(60));
+        assert_eq!(Pressure::Raised.params(slow, 4, 0).grace, secs(60));
+    }
+
+    fn band(ingest: u64, headroom: u64, soft: u64) -> SpaceSnapshot {
+        SpaceSnapshot {
+            throttle: ThrottleFigures {
+                state: ThrottleState::Slowdown,
+                ingest_rate: ingest,
+                headroom,
+                soft,
+                ..ThrottleFigures::default()
+            },
+            ..SpaceSnapshot::default()
+        }
+    }
+
+    #[test]
+    fn the_demand_is_the_ingest_times_the_amplification_rising_to_twice_at_the_limit() {
+        let mib = 1u64 << 20;
+        // At the soft mark's edge: 100 MiB/s x 2.0 = 200 MiB/s.
+        let d = gc_demand(&band(100 * mib, 999 * mib, 1000 * mib), 200);
+        assert!(d.abs_diff(200 * mib) <= mib, "{d}");
+        // In the middle: 1.5 times that.
+        let d = gc_demand(&band(100 * mib, 500 * mib, 1000 * mib), 200);
+        assert_eq!(d, 300 * mib);
+        // At the limit: twice.
+        assert_eq!(gc_demand(&band(100 * mib, 0, 1000 * mib), 200), 400 * mib);
+        // The amplification is the tunable: 1.5 measured-style.
+        assert_eq!(gc_demand(&band(100 * mib, 0, 1000 * mib), 150), 300 * mib);
+        // No ingest, no band, or the gate open: no demand.
+        assert_eq!(gc_demand(&band(0, 0, 1000 * mib), 200), 0);
+        assert_eq!(gc_demand(&band(100 * mib, 0, 0), 200), 0);
+        assert_eq!(gc_demand(&band(100 * mib, 1000 * mib, 1000 * mib), 200), 0);
+        let mut open = band(100 * mib, 10, 1000 * mib);
+        open.throttle.state = ThrottleState::Open;
+        assert_eq!(gc_demand(&open, 200), 0);
+    }
+
+    #[test]
+    fn the_budget_and_the_rate_are_sized_to_the_demand_above_the_floors() {
+        let mib = 1u64 << 20;
+        let base = GcBudget {
+            max_duration: Duration::from_millis(50),
+            max_bytes: 64 * mib,
+        };
+        let n = params();
+        // 1 GiB/s of demand against 64 MiB/s: 16 x the bytes, the time capped.
+        let b = Pressure::Raised.budget(base, 64 * mib, 1024 * mib);
+        assert_eq!(b.max_bytes, 16 * 64 * mib);
+        assert_eq!(b.max_duration, Duration::from_millis(50 * MAX_TIME_FACTOR));
+        assert_eq!(
+            Pressure::Raised.params(n, 4, 1024 * mib).rate_bytes_per_s,
+            1024 * mib
+        );
+        // Below the floors the floors hold.
+        let b = Pressure::Raised.budget(base, 64 * mib, 10 * mib);
+        assert_eq!(b.max_bytes, 4 * 64 * mib);
+        assert_eq!(b.max_duration, Duration::from_millis(200));
+        assert_eq!(
+            Pressure::Raised.params(n, 4, 10 * mib).rate_bytes_per_s,
+            256 * mib
+        );
+        // A hopeless demand is bounded.
+        let b = Pressure::Raised.budget(base, 64 * mib, u64::MAX);
+        assert_eq!(b.max_bytes, MAX_BUDGET_FACTOR * 64 * mib);
+        // Normal ignores the demand; `no compaction` stays none.
+        assert_eq!(Pressure::Normal.budget(base, 64 * mib, 1 << 40), base);
+        let off = GcParams {
+            rate_bytes_per_s: 0,
+            ..n
+        };
+        assert_eq!(Pressure::Raised.params(off, 4, 1 << 40).rate_bytes_per_s, 0);
+        assert_eq!(
+            Pressure::Raised.budget(base, 0, 1 << 40).max_bytes,
+            4 * 64 * mib
+        );
     }
 
     #[test]
@@ -718,8 +885,8 @@ mod tests {
             ..params()
         };
         for p in [Pressure::Raised, Pressure::Urgent] {
-            assert_eq!(p.params(off, 4).rate_bytes_per_s, 0, "{p:?}");
-            assert_eq!(p.params(off, 4).grace, secs(30));
+            assert_eq!(p.params(off, 4, 0).rate_bytes_per_s, 0, "{p:?}");
+            assert_eq!(p.params(off, 4, 0).grace, secs(30));
         }
     }
 

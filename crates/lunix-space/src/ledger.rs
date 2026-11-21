@@ -27,8 +27,6 @@ pub(crate) struct Parked {
     pub bytes: u64,
     pub arrived: Duration,
     pub deadline: Duration,
-    /// When the gate parked it (the gate's own wait is measured from here).
-    pub parked_at: Duration,
     /// Only the ring pace delays it (the space curve is not pacing): its
     /// wait is counted in the ring pace's figures.
     pub ring_paced: bool,
@@ -268,9 +266,13 @@ impl Ledger {
         self.state.enter(to, now, &mut self.counters)
     }
 
-    /// A request that waited in the gate was admitted.
+    /// A request that waited in the gate was admitted. Its wait is counted
+    /// from its arrival (at its queue), not from the moment it parked: a
+    /// request that stood behind others before it reached the gate waited
+    /// all that time too (the delay cap and `delay_max_ms` share this
+    /// origin).
     fn note_delay(&mut self, p: &Parked, now: Duration, granted: bool) {
-        let ms = u64::try_from(now.saturating_sub(p.parked_at).as_millis()).unwrap_or(u64::MAX);
+        let ms = u64::try_from(now.saturating_sub(p.arrived).as_millis()).unwrap_or(u64::MAX);
         if p.ring_paced {
             self.counters.ring_delay_max_ms = self.counters.ring_delay_max_ms.max(ms);
         } else {
@@ -285,6 +287,28 @@ impl Ledger {
                 self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
             }
             self.counters.admitted = self.counters.admitted.saturating_add(p.bytes);
+        }
+    }
+
+    /// A request admitted at its first contact with the gate, after it stood
+    /// in its queue since `arrived` (behind requests that were pacing or
+    /// waiting): that wait is a delay like any other, counted from the
+    /// arrival. Under a millisecond it is not a delay (a request reaches the
+    /// gate within microseconds of its arrival).
+    fn note_direct_delay(&mut self, arrived: Duration, now: Duration) {
+        let waited = now.saturating_sub(arrived);
+        if waited < Duration::from_millis(1) {
+            return;
+        }
+        let ms = u64::try_from(waited.as_millis()).unwrap_or(u64::MAX);
+        if self.ring_only() {
+            self.counters.ring_delay_max_ms = self.counters.ring_delay_max_ms.max(ms);
+            self.counters.ring_delayed_writes += 1;
+            self.counters.ring_delayed_ms = self.counters.ring_delayed_ms.saturating_add(ms);
+        } else {
+            self.counters.delay_max_ms = self.counters.delay_max_ms.max(ms);
+            self.counters.delayed_writes += 1;
+            self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
         }
     }
 
@@ -450,10 +474,21 @@ impl Ledger {
             let tokens = now.saturating_add(b.wait_for(p.bytes, rate));
             Some(tokens.min(self.cap_at(p.arrived)))
         });
-        match (deadline, paced) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        // A request behind the head is due at its own cap, which may be
+        // before the head's tokens (it arrived earlier, in another queue):
+        // the head and what stands before it are admitted with it
+        // (`due_behind`). The scan stops where a request does not fit.
+        let due = if self.pace_rate().is_some() {
+            self.waiters
+                .iter()
+                .filter(|p| p.waiter.state() == WaiterState::Pending)
+                .take_while(|p| self.fits(p.bytes))
+                .map(|p| self.cap_at(p.arrived))
+                .min()
+        } else {
+            None
+        };
+        [deadline, paced, due].into_iter().flatten().min()
     }
 
     /// Re-judges every parked request under the current policy (after
@@ -549,6 +584,7 @@ impl Ledger {
         }
         let Some(rate) = self.pace_rate() else {
             if !ahead || no_wait {
+                self.note_direct_delay(arrived, now);
                 self.admit(kind, bytes);
                 return ReserveOutcome::Reserved;
             }
@@ -571,6 +607,7 @@ impl Ledger {
         if !ahead {
             if self.bucket.has(bytes) {
                 self.bucket.take(bytes);
+                self.note_direct_delay(arrived, now);
                 self.admit(kind, bytes);
                 self.note_state(now);
                 return ReserveOutcome::Reserved;
@@ -584,6 +621,7 @@ impl Ledger {
                 } else {
                     self.counters.delay_capped += 1;
                 }
+                self.note_direct_delay(arrived, now);
                 self.admit(kind, bytes);
                 self.note_state(now);
                 return ReserveOutcome::Reserved;
@@ -620,7 +658,6 @@ impl Ledger {
             bytes,
             arrived,
             deadline,
-            parked_at: now,
             // A request that waits for space is the space throttle's, one
             // that waits for tokens is the ring pace's when only it paces.
             ring_paced,
@@ -650,6 +687,13 @@ impl Ledger {
                 self.note_state(now);
                 return ReserveOutcome::NoSpace;
             }
+        }
+        if fits && deadline > now && now >= self.cap_at(arrived) {
+            // Past its delay cap on first contact (it waited in its queue):
+            // it is admitted now, with what stands before it, not at the
+            // next tick. A request that does not fit, or stands behind one
+            // that does not, stays: the grant loop stops there.
+            self.grant_waiters(now);
         }
         self.note_state(now);
         if fits {
@@ -738,5 +782,83 @@ impl Ledger {
             full: self.full,
             throttle: t,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lunix_format::local::{FreeFloor, SpaceSettings};
+
+    const GIB: u64 = 1 << 30;
+    const REC: u64 = 64 << 10;
+
+    /// A 10 GiB limit, 8 MiB of headroom (inside the band at its minimum
+    /// rate, 64 KiB/s), a 10 s cap, the bucket empty.
+    fn band_ledger() -> Ledger {
+        let s = SpaceSettings {
+            free_floor: FreeFloor::Bytes(0),
+            on_full: OnFull::Wait,
+            full_timeout_ms: Some(60_000),
+            cache_max: None,
+            cache_max_percent: None,
+            headroom: 0,
+        };
+        let policy = Policy::from_settings(&s, Duration::from_secs(60)).expect("policy");
+        let mut throttle = ThrottleConfig::default().with_gc_rate(0);
+        throttle.min_rate = 64 << 10;
+        let mut l = Ledger::new(policy, 0, throttle, Duration::ZERO);
+        l.fs = FsView {
+            stat: FsStat {
+                total: 10 * GIB,
+                free: 10 * GIB,
+            },
+            used_mark: 0,
+        };
+        l.charge_raw(SpaceKind::Segments, 10 * GIB - (8 << 20));
+        for _ in 0..16 {
+            let o = l.reserve(
+                SpaceKind::JournalReserved,
+                REC,
+                None,
+                Duration::ZERO,
+                ReserveClass::Bulk,
+                Duration::ZERO,
+            );
+            assert!(matches!(o, ReserveOutcome::Reserved));
+        }
+        l
+    }
+
+    #[test]
+    fn next_wake_is_the_earliest_cap_among_the_requests_that_fit() {
+        // Head (young) has a long way to its tokens (a 1 MiB record at
+        // 64 KiB/s: 16 s) and its cap is at 11 s; a request behind it,
+        // arrived at 0, is due at 10 s: the timer must wake then.
+        let mut l = band_ledger();
+        let now = Duration::from_secs(1);
+        l.bucket.refill(now, 64 << 10);
+        while l.bucket.has(REC) {
+            l.bucket.take(REC);
+        }
+        let big = l.reserve(
+            SpaceKind::JournalReserved,
+            1 << 20,
+            None,
+            now,
+            ReserveClass::Bulk,
+            now,
+        );
+        assert!(matches!(big, ReserveOutcome::Paced(_)), "{big:?}");
+        let old = l.reserve(
+            SpaceKind::JournalReserved,
+            REC,
+            None,
+            Duration::ZERO,
+            ReserveClass::Bulk,
+            now,
+        );
+        assert!(matches!(old, ReserveOutcome::Paced(_)), "{old:?}");
+        assert_eq!(l.next_wake(now), Some(Duration::from_secs(10)));
     }
 }

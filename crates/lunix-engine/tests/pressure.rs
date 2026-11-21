@@ -259,3 +259,72 @@ fn a_volume_resting_in_the_band_with_no_writer_loses_its_pressure() {
     step(&r, &seen);
     assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
 }
+
+#[test]
+fn in_the_band_the_collector_is_sized_to_the_ingest_and_grows_through_the_band() {
+    // Milestone gate. 100 MiB/s of ingest, soft mark 1000 MiB, write
+    // amplification 2.0 by default: the compaction rate is the ingest times
+    // that at the soft mark (200 MiB/s, under the 4 x 64 = 256 MiB/s floor),
+    // 1.5 times at the middle of the band and twice at the limit; the step
+    // budget follows (never below the floors).
+    let (_v, r, seen) = setup();
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    // The floor still rules at the soft mark: 200 < 256.
+    r.space
+        .set_throttle_figures(100 * MIB, 999 * MIB, 1000 * MIB);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(p.rate_bytes_per_s, 256 * MIB);
+    assert_eq!(b.max_bytes, 4 * MIB);
+    // 400 MiB/s of ingest: 800 MiB/s at the soft mark, 1200 in the middle,
+    // 1600 at the limit: the rate and the budget are sized, not the floors.
+    r.space
+        .set_throttle_figures(400 * MIB, 999 * MIB, 1000 * MIB);
+    let (b, p) = step(&r, &seen);
+    assert!(p.rate_bytes_per_s.abs_diff(800 * MIB) <= 2 * MIB, "{p:?}");
+    assert_eq!(b.max_bytes, 13 * MIB, "ceil(800 / 64) x the 1 MiB base");
+    assert_eq!(b.max_duration, Duration::from_millis(50 * 8), "time capped");
+    r.space
+        .set_throttle_figures(400 * MIB, 500 * MIB, 1000 * MIB);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(p.rate_bytes_per_s, 1200 * MIB);
+    assert_eq!(b.max_bytes, 19 * MIB);
+    r.space.set_throttle_figures(400 * MIB, 0, 1000 * MIB);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(p.rate_bytes_per_s, 1600 * MIB);
+    assert_eq!(b.max_bytes, 25 * MIB);
+    // Stop: uncapped rate, budget still sized.
+    r.space.set_throttle_state(ThrottleState::Stop);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(p.rate_bytes_per_s, u64::MAX);
+    assert_eq!(b.max_bytes, 25 * MIB);
+}
+
+#[test]
+fn the_write_amplification_is_the_tunable_of_the_sizing() {
+    fn amp_100(cfg: &mut lunix_engine::EngineConfig) {
+        gc_on(cfg);
+        cfg.gc_write_amp_percent = 100;
+    }
+    let (_v, r, seen) = setup_with(amp_100);
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    r.space.set_throttle_figures(400 * MIB, 0, 1000 * MIB);
+    let (_, p) = step(&r, &seen);
+    // 400 x 1.0 x 2 at the limit.
+    assert_eq!(p.rate_bytes_per_s, 800 * MIB);
+}
+
+#[test]
+fn the_sizing_ends_with_the_pressure() {
+    let (v, r, seen) = setup();
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    r.space.set_throttle_figures(400 * MIB, 0, 1000 * MIB);
+    step(&r, &seen);
+    r.space.set_throttle_state(ThrottleState::Open);
+    r.space
+        .set_throttle_figures(400 * MIB, 5000 * MIB, 1000 * MIB);
+    v.clock.advance(Duration::from_secs(5));
+    step(&r, &seen);
+    v.clock.advance(Duration::from_secs(5));
+    let (b, p) = step(&r, &seen);
+    normal(b, p);
+}

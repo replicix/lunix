@@ -199,6 +199,12 @@ pub(crate) struct Inner {
     /// the collector calls.
     pub(crate) pressure: Mutex<crate::pressure::PressureTracker>,
     pub(crate) pressure_level: AtomicU8,
+    /// The compaction rate the writers call for (`pressure::gc_demand`), as
+    /// of the last tick; 0 outside the band.
+    pub(crate) gc_demand: AtomicU64,
+    /// The headroom is within twice the soft mark (as of the last tick): the
+    /// collector does not yield to ring-parked writes.
+    pub(crate) near_band: AtomicBool,
     /// The throttle's log lines (ADR-32).
     pub(crate) throttle_watch: Mutex<crate::pressure::ThrottleWatch>,
     pub(crate) resize_hook: Mutex<Option<Arc<dyn ResizeHook>>>,
@@ -436,6 +442,8 @@ impl Engine {
             gc_busy: AtomicBool::new(false),
             pressure: Mutex::new(crate::pressure::PressureTracker::default()),
             pressure_level: AtomicU8::new(0),
+            gc_demand: AtomicU64::new(0),
+            near_band: AtomicBool::new(false),
             throttle_watch: Mutex::new(crate::pressure::ThrottleWatch::default()),
             resize_hook: Mutex::new(None),
             report: rec.report,

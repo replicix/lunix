@@ -62,7 +62,7 @@ pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, S
 pub use engine::CoordHold;
 pub use engine::{CommitOutcome, Engine, GcStatusHandle, TipView};
 pub use error::OpenError;
-pub use pressure::{Pressure, PressureTracker};
+pub use pressure::{gc_demand, Pressure, PressureTracker, DEFAULT_WRITE_AMP_PERCENT};
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;
 

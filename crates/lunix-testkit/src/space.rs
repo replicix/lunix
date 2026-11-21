@@ -91,6 +91,10 @@ struct State {
     full: bool,
     /// What the snapshot reports as the throttle state (a test script).
     throttle: ThrottleState,
+    /// Scripted band figures the snapshot reports (`ingest_rate`, `headroom`,
+    /// `soft`); `None`: no soft mark, one byte per second of ingest while a
+    /// writer is active.
+    figures: Option<(u64, u64, u64)>,
     /// No writer: the snapshot reports no bytes admitted lately.
     idle: bool,
     /// Scripted pacing: a bulk request that fits waits (`Paced`) until the
@@ -186,6 +190,7 @@ impl MemSpace {
                 read_only: false,
                 full: false,
                 throttle: ThrottleState::Open,
+                figures: None,
                 idle: false,
                 pacing: false,
                 ring_pace: None,
@@ -200,6 +205,13 @@ impl MemSpace {
     /// it to put the collector under pressure.
     pub fn set_throttle_state(&self, state: ThrottleState) {
         lock(&self.st).throttle = state;
+    }
+
+    /// Scripts the band's figures the snapshot reports: the ingest rate (a
+    /// writer is active when it is above 0), the headroom and the soft mark.
+    /// The state stays the one `set_throttle_state` scripted.
+    pub fn set_throttle_figures(&self, ingest_rate: u64, headroom: u64, soft: u64) {
+        lock(&self.st).figures = Some((ingest_rate, headroom, soft));
     }
 
     /// Scripts whether a writer is active (bytes admitted in the last 10 s):
@@ -428,7 +440,12 @@ impl SpaceGate for MemSpace {
                 } else {
                     st.throttle
                 },
-                ingest_rate: u64::from(!st.idle),
+                ingest_rate: match st.figures {
+                    Some((i, _, _)) if !st.idle => i,
+                    _ => u64::from(!st.idle),
+                },
+                headroom: st.figures.map_or(0, |(_, h, _)| h),
+                soft: st.figures.map_or(0, |(_, _, s)| s),
                 ..ThrottleFigures::default()
             },
         }

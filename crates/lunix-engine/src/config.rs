@@ -79,6 +79,11 @@ pub struct EngineConfig {
     /// The compaction rate's multiple while writes are slowed (ADR-32,
     /// `gc_pressure_rate_factor`; 4 by default). Held by `Pressure::params`.
     pub gc_pressure_rate_factor: u64,
+    /// The write amplification the collector is sized for while the gate
+    /// paces writes, percent (compaction bytes per byte ingested; 200 by
+    /// default, the measured amplification was 150 to 170). See
+    /// [`crate::pressure::gc_demand`].
+    pub gc_write_amp_percent: u64,
     /// Operator override (ADR-31, decision of 2026-11-13): open although the
     /// chain from the tip back to the rollback floor cannot be walked
     /// (`OpenError::ForkUnverifiable`). The caller audits it.
@@ -124,6 +129,7 @@ impl EngineConfig {
             gc_budget: None,
             gc_params: None,
             gc_pressure_rate_factor: 4,
+            gc_write_amp_percent: crate::pressure::DEFAULT_WRITE_AMP_PERCENT,
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
         }

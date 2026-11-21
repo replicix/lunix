@@ -1195,3 +1195,415 @@ fn the_ring_pace_is_counted_apart_from_the_space_throttle_and_only_while_applied
     g.set_ring_pace(None);
     assert_eq!(g.snapshot().throttle.ring_pace_rate, 0);
 }
+
+// ---------------------------------------------------------------------------
+// Milestone gate: the pacing delay counts from a write's arrival at its queue.
+//
+// The engine keeps one FIFO per queue: only the front of a queue is in the
+// gate, the writes behind it wait in the queue and reach the gate when the
+// writes before them were admitted. They call `reserve_since` with the time
+// they arrived at the queue, so the delay cap and the delay figures count from
+// there, not from the moment they reached the front.
+// ---------------------------------------------------------------------------
+
+const REC: u64 = 64 * KIB;
+
+/// A gate in the band at its minimum rate (64 KiB/s), a 10 s delay cap and a
+/// 60 s `full_timeout`; the bucket (1 MiB and a header) is emptied.
+fn slow_band(ck: &Arc<ManualClock>, cap: Duration) -> Arc<LunixSpace> {
+    let c = cfg(Some(Duration::from_secs(60)), |c| {
+        // The curve is far below the minimum here: the rate is 64 KiB/s.
+        c.throttle.mid_rate = KIB;
+        c.throttle.min_rate = 64 * KIB;
+        c.throttle.max_delay = cap;
+    });
+    let g = at_headroom(256 * MIB, c, ck);
+    for _ in 0..16 {
+        reserved(g.reserve(K, REC, None).unwrap());
+    }
+    g
+}
+
+/// The engine's queues, reduced to what the gate sees: each queue is a FIFO
+/// of arrival times, only its front is in the gate.
+struct Queues {
+    waiting: Vec<VecDeque<Duration>>,
+    front: Vec<Option<(Waiter, Duration)>>,
+    /// The wait of every admitted write, arrival to admission.
+    waits: Vec<Duration>,
+    admitted_bytes: u64,
+}
+
+impl Queues {
+    fn new(n: usize) -> Self {
+        Self {
+            waiting: (0..n).map(|_| VecDeque::new()).collect(),
+            front: (0..n).map(|_| None).collect(),
+            waits: Vec::new(),
+            admitted_bytes: 0,
+        }
+    }
+
+    /// Lets every queue admit what the gate grants and offer its next front.
+    /// `refill` is called with the queue number and the time of each
+    /// admission (a closed loop enqueues the next write there).
+    fn pump(
+        &mut self,
+        g: &LunixSpace,
+        now: Duration,
+        class: ReserveClass,
+        mut refill: impl FnMut(usize, Duration) -> Option<Duration>,
+    ) {
+        for qi in 0..self.waiting.len() {
+            loop {
+                if let Some((w, arrived)) = &self.front[qi] {
+                    if w.state() != WaiterState::Granted {
+                        break;
+                    }
+                    self.waits.push(now - *arrived);
+                    self.admitted_bytes += REC;
+                    let at = now;
+                    self.front[qi] = None;
+                    if let Some(a) = refill(qi, at) {
+                        self.waiting[qi].push_back(a);
+                    }
+                }
+                let Some(arrived) = self.waiting[qi].pop_front() else {
+                    break;
+                };
+                match g.reserve_since(K, REC, None, arrived, class).unwrap() {
+                    ReserveOutcome::Reserved => {
+                        self.waits.push(now - arrived);
+                        self.admitted_bytes += REC;
+                        if let Some(a) = refill(qi, now) {
+                            self.waiting[qi].push_back(a);
+                        }
+                    }
+                    ReserveOutcome::Paced(w) => {
+                        // Granted on first contact (a due write): the next
+                        // pass of the loop admits it.
+                        let granted = w.state() == WaiterState::Granted;
+                        self.front[qi] = Some((w, arrived));
+                        if !granted {
+                            break;
+                        }
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+        }
+    }
+
+    fn longest(&self) -> Duration {
+        self.waits.iter().copied().max().unwrap_or_default()
+    }
+}
+
+#[test]
+fn n_writes_queued_behind_a_slow_head_none_waits_beyond_the_cap() {
+    // 4 queues x 40 writes of 64 KiB all arrive at 0; the gate admits 64 KiB/s,
+    // so the last would wait 160 x 1 s = 160 s in strict FIFO. The cap is 5 s.
+    let ck = clock();
+    let cap = Duration::from_secs(5);
+    let g = slow_band(&ck, cap);
+    let mut q = Queues::new(4);
+    for w in &mut q.waiting {
+        w.extend(std::iter::repeat_n(Duration::ZERO, 40));
+    }
+    let step = Duration::from_millis(10);
+    for _ in 0..1000 {
+        let now = ck_now(&ck);
+        q.pump(&g, now, ReserveClass::Bulk, |_, _| None);
+        ck.advance(step);
+        g.tick();
+    }
+    let now = ck_now(&ck);
+    q.pump(&g, now, ReserveClass::Bulk, |_, _| None);
+    assert_eq!(q.waits.len(), 160, "every write was admitted");
+    assert!(
+        q.longest() <= cap + step,
+        "the longest wait {:?} is beyond the cap {cap:?}",
+        q.longest()
+    );
+    // The figure the status shows is the same: from arrival, not from the
+    // front of the queue (about 5000 ms, not the ~1 s of one head's wait).
+    let t = g.snapshot().throttle;
+    assert!(
+        (4990..=5020).contains(&t.delay_max_ms),
+        "delay_max_ms {} must be the real wait",
+        t.delay_max_ms
+    );
+    assert!(t.delay_capped >= 100, "most went through the cap: {t:?}");
+    assert_eq!(t.enospc, 0);
+}
+
+#[test]
+fn a_write_that_reaches_the_gate_late_is_counted_from_its_arrival() {
+    // It stood 4 s in its queue, then waited about 1 s in the gate behind a
+    // head: delay_max_ms is about 5 s, not about 1 s.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    ck.advance(Duration::from_secs(4));
+    // Empty the bucket the 4 s refilled; the first write that waits is the head.
+    let head = loop {
+        match g
+            .reserve_since(K, REC, None, ck_now(&ck), ReserveClass::Bulk)
+            .unwrap()
+        {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => break w,
+            other => panic!("{other:?}"),
+        }
+    };
+    let w = paced(
+        g.reserve_since(K, REC, None, Duration::ZERO, ReserveClass::Bulk)
+            .unwrap(),
+    );
+    for _ in 0..60 {
+        ck.advance(Duration::from_millis(100));
+        g.tick();
+        if w.state() == WaiterState::Granted {
+            break;
+        }
+    }
+    assert_eq!(head.state(), WaiterState::Granted);
+    assert_eq!(w.state(), WaiterState::Granted);
+    let t = g.snapshot().throttle;
+    assert!(
+        (5000..=6500).contains(&t.delay_max_ms),
+        "the 4 s in the queue count: {}",
+        t.delay_max_ms
+    );
+}
+
+#[test]
+fn a_due_write_that_stands_behind_a_young_head_is_admitted_on_first_contact() {
+    // The head arrived just now and needs tokens; the other write arrived 10 s
+    // ago in another queue. It is due: the gate admits it (and the head
+    // before it) in the call, not at the next tick.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    ck.advance(Duration::from_secs(10));
+    // The bucket refilled 640 KiB meanwhile: empty it again.
+    loop {
+        match g
+            .reserve_since(K, REC, None, ck_now(&ck), ReserveClass::Bulk)
+            .unwrap()
+        {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => {
+                // The first that waits is the young head.
+                let old = g
+                    .reserve_since(K, REC, None, Duration::ZERO, ReserveClass::Bulk)
+                    .unwrap();
+                let old_granted = match old {
+                    ReserveOutcome::Reserved => true,
+                    ReserveOutcome::Paced(o) => o.state() == WaiterState::Granted,
+                    other => panic!("{other:?}"),
+                };
+                assert!(old_granted, "the due write waits for the next tick");
+                assert_eq!(w.state(), WaiterState::Granted, "it stood before it");
+                return;
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn the_ring_pace_alone_keeps_the_cap_and_counts_from_the_arrival() {
+    // The space curve is far away (10 GiB of headroom); only the engine's ring
+    // pace paces. Its waits are in the ring figures, from the arrival.
+    let ck = clock();
+    let c = cfg(None, |c| {
+        c.throttle.max_delay = Duration::from_secs(3);
+        c.throttle.min_rate = 64 * KIB;
+    });
+    let g = open_gate(c, &ck);
+    g.set_ring_pace(Some(64 * KIB));
+    for _ in 0..16 {
+        reserved(g.reserve(K, REC, None).unwrap());
+    }
+    let mut q = Queues::new(2);
+    for w in &mut q.waiting {
+        w.extend(std::iter::repeat_n(Duration::ZERO, 20));
+    }
+    let step = Duration::from_millis(10);
+    for _ in 0..500 {
+        let now = ck_now(&ck);
+        q.pump(&g, now, ReserveClass::Bulk, |_, _| None);
+        ck.advance(step);
+        g.tick();
+    }
+    q.pump(&g, ck_now(&ck), ReserveClass::Bulk, |_, _| None);
+    assert_eq!(q.waits.len(), 40);
+    assert!(
+        q.longest() <= Duration::from_secs(3) + step,
+        "{:?}",
+        q.longest()
+    );
+    let t = g.snapshot().throttle;
+    assert!(
+        (2990..=3020).contains(&t.ring_pace_max_ms),
+        "{}",
+        t.ring_pace_max_ms
+    );
+    assert_eq!(t.delay_max_ms, 0, "the space curve delayed nothing: {t:?}");
+    assert!(t.ring_pace_capped > 0);
+}
+
+#[test]
+fn a_retry_after_a_ring_refusal_pays_no_tokens_and_counts_no_gate_delay() {
+    // The write stood 6 s for the journal ring (the engine's own wait), then
+    // retries: admitted at once, no token, no cap, no delay in the gate.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    ck.advance(Duration::from_secs(6));
+    let before = g.snapshot().throttle;
+    reserved(
+        g.reserve_since(K, REC, None, Duration::ZERO, ReserveClass::Retry)
+            .unwrap(),
+    );
+    let after = g.snapshot().throttle;
+    assert_eq!(after.delayed_writes, before.delayed_writes);
+    assert_eq!(after.delay_max_ms, before.delay_max_ms);
+    assert_eq!(after.delay_capped, before.delay_capped);
+    // It took no token: a young write needs the same wait it needed before:
+    // 6 s of refill (6 records) minus the ones the drain left.
+    let mut free = 0;
+    while let ReserveOutcome::Reserved = g
+        .reserve_since(K, REC, None, ck_now(&ck), ReserveClass::Bulk)
+        .unwrap()
+    {
+        free += 1;
+    }
+    assert_eq!(free, 6, "the retry did not spend a token");
+}
+
+#[test]
+fn after_cap_admissions_the_debt_is_one_second_of_the_rate_and_is_paid() {
+    // 32 writes (2 MiB) arrive at 0; the cap is 10 s; 640 KiB of tokens accrue
+    // in that time, so ~22 go through the cap and overdraw the bucket. The
+    // debt is limited to one second of the rate (64 KiB), not 22 records.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    let mut q = Queues::new(1);
+    q.waiting[0].extend(std::iter::repeat_n(Duration::ZERO, 32));
+    let step = Duration::from_millis(10);
+    for _ in 0..1000 {
+        q.pump(&g, ck_now(&ck), ReserveClass::Bulk, |_, _| None);
+        ck.advance(step);
+        g.tick();
+    }
+    q.pump(&g, ck_now(&ck), ReserveClass::Bulk, |_, _| None);
+    assert_eq!(q.waits.len(), 32);
+    let t = g.snapshot().throttle;
+    assert!(t.delay_capped >= 15, "{t:?}");
+    // A young write now: the bucket is 64 KiB in debt, so it needs
+    // (64 + 64) KiB at 64 KiB/s: 2 s (not the 22 s the full debt would make,
+    // and not the 1 s of an uncharged cap admission).
+    let t0 = ck_now(&ck);
+    let w = paced(
+        g.reserve_since(K, REC, None, t0, ReserveClass::Bulk)
+            .unwrap(),
+    );
+    let mut waited = Duration::ZERO;
+    while w.state() != WaiterState::Granted && waited < Duration::from_secs(9) {
+        ck.advance(step);
+        g.tick();
+        waited += step;
+    }
+    assert!(
+        (Duration::from_millis(1900)..=Duration::from_millis(2100)).contains(&waited),
+        "{waited:?}"
+    );
+    assert_eq!(g.snapshot().throttle.delay_capped, t.delay_capped, "paced");
+}
+
+#[test]
+fn the_pace_holds_on_average_when_the_queues_are_short_of_the_cap() {
+    // 4 queues, one write each in flight (a closed loop: the next arrives when
+    // the last was admitted). Natural wait 4 x 1 s, under the 10 s cap: the
+    // admitted bytes follow the rate, nothing goes through the cap.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    let start = ck_now(&ck);
+    let mut q = Queues::new(4);
+    for w in &mut q.waiting {
+        w.push_back(start);
+    }
+    let end = Duration::from_secs(200);
+    let step = Duration::from_millis(10);
+    while ck_now(&ck) < end {
+        q.pump(&g, ck_now(&ck), ReserveClass::Bulk, |_, at| Some(at));
+        ck.advance(step);
+        g.tick();
+    }
+    let secs = ck_now(&ck).as_secs();
+    let rate = 64 * KIB;
+    // At least the rate; at most the rate plus the bucket's burst (1 MiB and
+    // a header) and a record or two in flight.
+    assert!(
+        q.admitted_bytes >= rate * (secs - 2),
+        "{}",
+        q.admitted_bytes
+    );
+    assert!(
+        q.admitted_bytes <= rate * secs + MIB + 4 * REC,
+        "{} against {}",
+        q.admitted_bytes,
+        rate * secs
+    );
+    let t = g.snapshot().throttle;
+    assert_eq!(t.delay_capped, 0, "{t:?}");
+    assert!(q.longest() < Duration::from_secs(10));
+}
+
+#[test]
+fn past_the_cap_the_rate_rises_to_depth_over_cap_and_no_further() {
+    // 64 writes always outstanding: strict pacing would take 64 s each; the
+    // cap admits each at 10 s, so the admitted rate is depth x size / cap
+    // (410 KiB/s), not unbounded, and no write waits beyond the cap.
+    let ck = clock();
+    let cap = Duration::from_secs(10);
+    let g = slow_band(&ck, cap);
+    let mut q = Queues::new(4);
+    for w in &mut q.waiting {
+        w.extend(std::iter::repeat_n(Duration::ZERO, 16));
+    }
+    let end = Duration::from_secs(200);
+    let step = Duration::from_millis(10);
+    while ck_now(&ck) < end {
+        q.pump(&g, ck_now(&ck), ReserveClass::Bulk, |_, at| Some(at));
+        ck.advance(step);
+        g.tick();
+    }
+    let rate = q.admitted_bytes / ck_now(&ck).as_secs();
+    let want = 64 * REC / 10;
+    assert!(
+        rate >= want * 9 / 10 && rate <= want * 12 / 10,
+        "{rate} against {want}"
+    );
+    assert!(q.longest() <= cap + step, "{:?}", q.longest());
+}
+
+#[test]
+fn a_write_that_stood_in_its_queue_and_is_admitted_by_tokens_counts_the_wait() {
+    // It reaches the gate 3 s after it arrived, finds its tokens, and is
+    // admitted without ever parking: the 3 s are a delay all the same.
+    let ck = clock();
+    let g = slow_band(&ck, Duration::from_secs(10));
+    ck.advance(Duration::from_secs(3));
+    reserved(
+        g.reserve_since(K, REC, None, Duration::ZERO, ReserveClass::Bulk)
+            .unwrap(),
+    );
+    let t = g.snapshot().throttle;
+    assert_eq!((t.delayed_writes, t.delay_max_ms), (1, 3000), "{t:?}");
+    // A write that did not stand anywhere is not a delay.
+    reserved(
+        g.reserve_since(K, REC, None, ck_now(&ck), ReserveClass::Bulk)
+            .unwrap(),
+    );
+    assert_eq!(g.snapshot().throttle.delayed_writes, 1);
+}

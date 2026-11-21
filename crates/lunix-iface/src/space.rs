@@ -279,7 +279,8 @@ pub struct ThrottleFigures {
     pub delayed_writes: u64,
     /// The summed wait of those, in milliseconds.
     pub delayed_ms: u64,
-    /// The longest wait in the gate of one request (admitted or failed), ms.
+    /// The longest wait of one request (admitted or failed) from its arrival
+    /// at its queue, ms: the time it stood behind others included.
     pub delay_max_ms: u64,
     /// Requests admitted by the delay cap.
     pub delay_capped: u64,

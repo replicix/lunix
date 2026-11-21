@@ -443,9 +443,12 @@ journal):
     (`throttle_min_rate`): unbounded at the soft mark, `r_mid` in the
     middle of the band, `r_min` near the limit;
   - one request is delayed at most `throttle_max_delay_ms` (10 s) from its
-    arrival; past that it is admitted if it fits and the bucket carries
-    the debt, so the band can be overrun by many large requests in flight
-    and the hard mark then does the pacing;
+    arrival at its queue, the time it stood behind other requests of the
+    queue included (and `delay_max_ms` is that wait); past that it is
+    admitted if it fits, together with what stands before it, and the
+    bucket carries the debt (at most one second of the rate), so the band
+    can be overrun by many large requests in flight and the hard mark then
+    does the pacing;
   - never paced: reads; FLUSH (it reserves nothing); a FUA write of at
     most 256 KiB, the write an fsync waits on (admitted at once, charged
     to the bucket; at the hard mark it waits like any write); discards and
@@ -457,10 +460,20 @@ journal):
   - a paced write is not a refusal: it is granted by the gate's timer
     thread, the window turn does not start for it and `ENOSPC` is not
     in play;
-  - while the gate is not open, GC works harder: 4 times the step budget,
-    `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and the
-    floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms`,
+  - while the gate is not open, GC works harder: at least 4 times the step
+    budget, `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and
+    the floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms`,
     until the gate has been open for 5 s (§11, `docs/reference/gc.md`).
+    From the soft mark on these are sized to the writers: the compaction
+    rate and the step budget are at least the ingest rate times the write
+    amplification (`gc_write_amp_percent`, 200), rising from 1 to 2 times
+    that as the headroom falls from the soft mark to the limit; the share
+    of the coordinator's time the collector gets after a cut rises from a
+    third to all of the cut's time, and one pass may compact four seconds
+    of the compaction rate if that is more than `compact_per_pass`. The
+    collector does not yield to ring-parked writes (milestone jstall)
+    within twice the soft mark of the band, so the yield cannot carry the
+    volume into the band with a slowed collector;
 
   If the reservation would cross the limit, the space ladder runs:
   1. Evict clean cache.

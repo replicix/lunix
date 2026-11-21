@@ -510,6 +510,9 @@ pub struct OpenParams {
     /// The compaction rate's multiple while writes are slowed (the daemon's
     /// `gc_pressure_rate_factor`).
     pub gc_pressure_rate_factor: u64,
+    /// The write amplification the collector is sized for in the band,
+    /// percent (the daemon's `gc_write_amp_percent`).
+    pub gc_write_amp_percent: u64,
     /// The band's middle rate in bytes per second, instead of
     /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
     /// small volume hold writes for seconds; the daemon never sets it.
@@ -537,6 +540,7 @@ impl OpenParams {
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
+            gc_write_amp_percent: lunix_engine::DEFAULT_WRITE_AMP_PERCENT,
             throttle_mid_rate: None,
         }
     }
@@ -848,6 +852,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.allow_unverifiable_fork = p.allow_unverifiable_fork;
     cfg.full_timeout = space.full_timeout();
     cfg.gc_pressure_rate_factor = p.gc_pressure_rate_factor;
+    cfg.gc_write_amp_percent = p.gc_write_amp_percent;
     cfg.cut_target = p.cut_target;
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
     // idle ticks, with the settings of volume.json. A step may compact up to

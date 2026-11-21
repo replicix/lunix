@@ -1637,7 +1637,11 @@ impl Gc {
             None => {
                 let sources = match self.ctx.as_ref().and_then(|x| x.liveness.as_ref()) {
                     Some(l) => {
-                        let s = self.compaction_sources(view, l, self.cfg.compact_per_pass);
+                        let per_pass = config::per_pass_bytes(
+                            self.cfg.compact_per_pass,
+                            view.params.rate_bytes_per_s,
+                        );
+                        let s = self.compaction_sources(view, l, per_pass);
                         (!s.is_empty())
                             .then(|| Compactor::new(s, view.clock.monotonic(), COMPACT_QUEUE))
                     }

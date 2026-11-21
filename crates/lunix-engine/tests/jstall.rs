@@ -831,3 +831,50 @@ fn space_pressure_keeps_the_collector_whole_while_a_write_waits_for_the_ring() {
     // Raised: 4 x the rate, not an eighth.
     assert_eq!(script.rate.load(Ordering::SeqCst), 4 * GC_RATE);
 }
+
+#[test]
+fn the_collector_does_not_yield_within_twice_the_soft_mark_of_the_band() {
+    // Milestone gate: a ring-bound writer must not carry the volume to the
+    // band with a collector slowed to an eighth. Above twice the soft mark
+    // the yield holds as before; below it (the gate still `open`) the
+    // collector keeps its rate and its share.
+    let soft = 4u64 << 30;
+    let (_v, mut r, script) = gc_setup();
+    park_one(&mut r);
+    r.space.set_throttle_figures(100 << 20, 3 * soft, soft);
+    let far = tick_steps(&r, &script, 3);
+    assert_eq!(far, vec![2, 2, 2], "yielding at 3 x the soft mark");
+    assert_eq!(script.rate.load(Ordering::SeqCst), GC_RATE / 8);
+
+    let (_v, mut r, script) = gc_setup();
+    park_one(&mut r);
+    r.space
+        .set_throttle_figures(100 << 20, soft + soft / 2, soft);
+    let near = tick_steps(&r, &script, 3);
+    assert!(near.iter().all(|&n| n >= 5), "full shares: {near:?}");
+    assert_eq!(
+        script.rate.load(Ordering::SeqCst),
+        GC_RATE,
+        "not yielding within 2 x the soft mark"
+    );
+}
+
+#[test]
+fn under_gate_pressure_the_collector_gets_up_to_two_seconds_after_a_cut_not_one() {
+    // Milestone gate: after a 3 s cut the share is a third (1 s, capped) in
+    // normal times and all of it (2 s, capped) while the gate paces writes:
+    // with 100 ms steps, about 10 steps against about 20.
+    let (_v, r, script) = gc_setup();
+    let free = tick_steps(&r, &script, 2);
+    assert!(
+        free.iter().all(|&n| (9..=13).contains(&n)),
+        "a third, 1 s: {free:?}"
+    );
+    let (_v, r, script) = gc_setup();
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    let paced = tick_steps(&r, &script, 2);
+    assert!(
+        paced.iter().all(|&n| (19..=23).contains(&n)),
+        "all of the cut, 2 s: {paced:?}"
+    );
+}
