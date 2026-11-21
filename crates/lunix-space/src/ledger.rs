@@ -290,8 +290,8 @@ impl Ledger {
         }
     }
 
-    /// A request admitted at its first contact with the gate, after it stood
-    /// in its queue since `arrived` (behind requests that were pacing or
+    /// A request admitted at its first contact with the gate while the pace
+    /// is active, after it stood in its queue since `arrived` (behind requests that were pacing or
     /// waiting): that wait is a delay like any other, counted from the
     /// arrival. Under a millisecond it is not a delay (a request reaches the
     /// gate within microseconds of its arrival).
@@ -479,10 +479,12 @@ impl Ledger {
         // the head and what stands before it are admitted with it
         // (`due_behind`). The scan stops where a request does not fit.
         let due = if self.pace_rate().is_some() {
+            // The same scan as `due_behind`: up to the first request that
+            // does not fit, whatever its state.
             self.waiters
                 .iter()
-                .filter(|p| p.waiter.state() == WaiterState::Pending)
                 .take_while(|p| self.fits(p.bytes))
+                .filter(|p| p.waiter.state() == WaiterState::Pending)
                 .map(|p| self.cap_at(p.arrived))
                 .min()
         } else {
@@ -584,7 +586,9 @@ impl Ledger {
         }
         let Some(rate) = self.pace_rate() else {
             if !ahead || no_wait {
-                self.note_direct_delay(arrived, now);
+                // Nothing paces: whatever the request waited in its queue
+                // (a parked head, the ring, a slow append) is not the gate's
+                // delay and is not counted here.
                 self.admit(kind, bytes);
                 return ReserveOutcome::Reserved;
             }

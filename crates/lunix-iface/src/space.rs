@@ -275,7 +275,11 @@ pub struct ThrottleFigures {
     pub paced_waiters: u64,
     /// Requests waiting for space.
     pub space_waiters: u64,
-    /// Requests that waited in the gate and were admitted.
+    /// Requests that waited in the gate, for tokens or for space, or stood
+    /// in their queue while the pace was active, and were admitted. Their
+    /// wait counts from their arrival at the queue. A wait in a queue while
+    /// nothing paces (behind a request parked for the journal ring, a slow
+    /// append) is not counted here.
     pub delayed_writes: u64,
     /// The summed wait of those, in milliseconds.
     pub delayed_ms: u64,

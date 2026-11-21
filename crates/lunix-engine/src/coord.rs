@@ -57,15 +57,12 @@ const MOVES_CUT_GAP: Duration = Duration::from_secs(1);
 
 /// After a cut, a busy collector steps for up to the cut's time divided by
 /// this (`gc_share`): a quarter of the coordinator.
-pub(crate) const GC_SHARE_DIVISOR: u32 = 3;
+const GC_SHARE_DIVISOR: u32 = 3;
 
 /// The longest share after one cut (`gc_share`): a long cut does not hold the
 /// coordinator (the ladder, `grow`, the window turn, ring-parked writes) for
 /// a third of its time.
 const GC_SHARE_MAX: Duration = Duration::from_secs(1);
-
-/// [`GC_SHARE_MAX`] while a gate pressure holds.
-const GC_SHARE_MAX_PRESSURE: Duration = Duration::from_secs(2);
 
 /// Steps in a row without the clock moving that end a share (`gc_share`).
 const GC_SHARE_STALLS: u32 = 8;
@@ -1239,12 +1236,7 @@ impl Inner {
     /// over [`GC_SHARE_STALLS`] steps (a manual one) ends the share.
     fn gc_share(&self, co: &mut Coord, cut_started: Duration) {
         let now = self.clock.monotonic();
-        let max = if self.pressure_now() == crate::pressure::Pressure::Normal {
-            GC_SHARE_MAX
-        } else {
-            GC_SHARE_MAX_PRESSURE
-        };
-        let share = (now.saturating_sub(cut_started) / self.gc_share_divisor().max(1)).min(max);
+        let share = (now.saturating_sub(cut_started) / GC_SHARE_DIVISOR).min(GC_SHARE_MAX);
         let until = now.saturating_add(share);
         let mut last = now;
         let mut stalled = 0u32;

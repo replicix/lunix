@@ -119,23 +119,6 @@ impl GcConfig {
     }
 }
 
-/// How many seconds of the compaction rate one pass may move at least
-/// ([`per_pass_bytes`]). Passes follow each other at least `busy_interval`
-/// (5 s) apart, so 4 s of the rate is what the rate allows between two.
-pub const PASS_RATE_WINDOW_SECS: u64 = 4;
-
-/// The live bytes one pass may compact: [`GcConfig::compact_per_pass`], or
-/// [`PASS_RATE_WINDOW_SECS`] seconds of the compaction rate if that is more.
-/// At the daemon's defaults (256 MiB, 64 MiB/s) the two are equal, so the
-/// normal pass is unchanged; the rate the engine hands the collector while
-/// the gate paces writes (sized to the ingest, milestone gate) lifts the cap
-/// with it, which the per-pass cap alone would hold at about 256 MiB per
-/// pass however high the rate. An uncapped rate (`u64::MAX`) is uncapped.
-#[must_use]
-pub fn per_pass_bytes(compact_per_pass: u64, rate_bytes_per_s: u64) -> u64 {
-    compact_per_pass.max(rate_bytes_per_s.saturating_mul(PASS_RATE_WINDOW_SECS))
-}
-
 /// The grace floor: 10 s plus twice `read_timeout` (30 s with the default
 /// `read_timeout` of 10 s). The urgent pass uses it instead of `grace`.
 pub fn grace_floor(params: &GcParams) -> Duration {
@@ -170,22 +153,4 @@ pub fn validate(params: &GcParams) -> Result<()> {
 /// hint could not be resolved).
 pub(crate) fn compaction_refused(params: &GcParams) -> bool {
     params.id_len == IdLen::Zero
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_per_pass_cap_follows_the_rate_above_the_default_and_never_falls_below_it() {
-        let mib = 1u64 << 20;
-        // The daemon's figures: unchanged.
-        assert_eq!(per_pass_bytes(256 * mib, 64 * mib), 256 * mib);
-        // Below them: the configured cap holds.
-        assert_eq!(per_pass_bytes(256 * mib, mib), 256 * mib);
-        // A raised or sized rate lifts it.
-        assert_eq!(per_pass_bytes(256 * mib, 400 * mib), 1600 * mib);
-        // Uncapped stays uncapped, no overflow.
-        assert_eq!(per_pass_bytes(256 * mib, u64::MAX), u64::MAX);
-    }
 }

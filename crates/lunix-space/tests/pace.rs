@@ -1607,3 +1607,32 @@ fn a_write_that_stood_in_its_queue_and_is_admitted_by_tokens_counts_the_wait() {
     );
     assert_eq!(g.snapshot().throttle.delayed_writes, 1);
 }
+
+#[test]
+fn a_write_that_stood_in_its_queue_at_an_open_gate_is_no_delay_of_the_gate() {
+    // Nothing paces (10 GiB of headroom, no ring pace): a write that reaches
+    // the gate 3 s after it arrived (it stood behind a request parked for the
+    // journal ring, say) is admitted, and nothing of the throttle's figures
+    // moves, a FUA write included. Under the pace the same wait is counted
+    // (`a_write_that_stood_in_its_queue_and_is_admitted_by_tokens_...`).
+    let ck = clock();
+    let g = open_gate(cfg(None, |_| {}), &ck);
+    ck.advance(Duration::from_secs(3));
+    for class in [ReserveClass::Bulk, ReserveClass::Sync] {
+        reserved(
+            g.reserve_since(K, REC, None, Duration::ZERO, class)
+                .unwrap(),
+        );
+    }
+    let t = g.snapshot().throttle;
+    assert_eq!(
+        (
+            t.delayed_writes,
+            t.delayed_ms,
+            t.delay_max_ms,
+            t.ring_paced_writes
+        ),
+        (0, 0, 0, 0),
+        "{t:?}"
+    );
+}

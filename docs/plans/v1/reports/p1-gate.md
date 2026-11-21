@@ -1,184 +1,100 @@
-# p1-gate: two space-gate fixes from the M15 latency diagnosis
+# p1-gate: the pacing delay counts from a write's arrival (part 1 of the M15 latency fixes)
 
-Branch `p1/gate` from main `80e1cd1`. Remote: Linux 7.0.0, CPUs 0-7, `-j 8`. No on-disk format change; `WritePathStatus` untouched; no
-interface method changed (one doc comment in `lunix-iface/src/space.rs`). `docs/explanation/DECISIONS.md` is not edited: the proposed ADR-32
-amendment is below.
+Branch `p1/gate` on main `e675b2f` (with T8 / seal). Remote: Linux 7.0.0, CPUs 0-7, `-j 8`. No on-disk format change, no interface method
+changed (doc comments in `lunix-iface/src/space.rs`), `WritePathStatus` untouched. Part 2 (collector sizing) is parked, see the last section.
+`docs/explanation/DECISIONS.md` is not edited: the proposed ADR-32 amendment is below.
 
-## What was found, and what was changed
+## What was found
 
-### 1. The pacing delay counts from arrival
-
-**The diagnosis, corrected.** At `80e1cd1` the cap was already counted from a write's arrival for every write that reaches the gate: the engine
-passes `Mutation::arrived` to `reserve_since`, the ledger's `cap_at(arrived)` and the grant loop use it. A write behind others in its queue is not
-in the gate; when it reaches the front it carries its old arrival and is admitted at once if it is past the cap. The stack test below, run on
-`80e1cd1`, shows it: 32 writes queued behind a slow band, slowest write 10.0 s (the cap). What was wrong:
+At `80e1cd1` the cap was already counted from a write's arrival for every write that reaches the gate (the engine passes `Mutation::arrived` to
+`reserve_since`; `cap_at(arrived)` and the grant loop use it), so a write behind others in its queue is admitted at once when it reaches the front
+past its cap. The defects were:
 
 * the figures (`delay_max_ms`, `delayed_ms`, `delayed_writes`) counted from the moment the gate parked the request, and not at all for a write
-  admitted at its first contact after standing in its queue: the status said 0.2 to 0.9 s while a write had waited 10 s;
-* a due write that reached the gate behind a younger head was parked and admitted only at the next timer tick;
+  admitted at first contact after standing in its queue: the status said 0.2 to 0.9 s while a write had waited 10 s;
+* a due write that reached the gate behind a younger head was admitted only at the next timer tick;
 * the timer woke at the head's tokens or cap, not at the cap of a request behind it.
 
-So of the 8 to 17 s in the M15 histogram, what is not a stop is the cap working as designed (up to 10 s) plus service, and the stops (up to
-47 s) own the rest. The measured 9.5 s fio maximum of profile 4 is the cap, not a leak.
+The stack test, run on `80e1cd1`, shows it: slowest write 10.0 s (the cap), `delay_max_ms` 922.
 
-**Changes** (`crates/lunix-space/src/ledger.rs`):
+## Changes (`crates/lunix-space/src/ledger.rs`)
 
-* `note_delay` counts from `arrived` (the `parked_at` field is gone). Delay figures are the wait from arrival to admission, for waits for tokens
-  and for space alike.
-* `note_direct_delay`: a write admitted at first contact (tokens, cap, no pacing) after standing at least 1 ms in its queue is a delayed write,
-  counted in the space figures, or in the ring pace's when only it paces. `Retry` (a ring-refused write, which paid its pace the first time) and
-  `Sync` (FUA bypass) are not counted.
-* `park`: a request that fits and is past its cap on first contact is granted at once, with what stands before it (`grant_waiters`), as the
-  deadline case already was.
-* `next_wake`: the earliest of the deadline, the head's tokens or cap, and the cap of every request that fits.
-* Token accounting is unchanged and now tested: a cap admission overdraws the bucket, the debt is at most one second of the rate (`overdraw` and
-  `refill` clamp), the pace holds on average while `depth x size / rate` is under the cap; above it the admitted rate is `depth x size / cap`
-  (the cap's purpose), never more. The ring pace composes the same way (own counters, own cap clock); `Retry` pays no tokens.
-
-### 2. The collector is sized to the ingest from the soft mark
-
-**The diagnosis, corrected.** The pressure already started at the entry to the band (`slowdown`). What it lacked is a size: the budget and rate
-were fixed multiples (4 x) of the volume's `gc_rate`, whatever the ingest, and three further limits sat under them: the collector's share of
-the coordinator after a cut (a third, at most 1 s), the step's time (4 x 50 ms) and `compact_per_pass` (256 MiB per pass, passes at least 5 s
-and three marks apart, so about 17 MB/s of reclaim at WA 1.6: the 4-20 MB/s measured).
-
-**Changes**
-
-* `lunix-engine/src/pressure.rs`: `gc_demand(snapshot, amp_percent)` = `ingest_rate x amp / 100 x (2 - x)`, `x = headroom / soft`: once the
-  ingest is known the collector is asked for the ingest times the amplification at the soft mark, rising linearly to twice that at the limit
-  (zero outside the band). `Pressure::budget` and `Pressure::params` take it: the budget's bytes are `ceil(demand / gc_rate)` x the base (floor 4,
-  cap 64), its time at most 8 x, the compaction rate `max(gc_rate x gc_pressure_rate_factor, demand)`; uncapped at stop and full as before.
-  The levels keep their meaning (normal, raised in the band, urgent at stop and full), and the grace is still the floor grace.
-* `gc_write_amp_percent` in `lunixd.toml` (default 200, 100 ..= 1000, validated; measured 150 to 170), through `OpenParams` and
-  `EngineConfig::gc_write_amp_percent`.
-* Under pressure the collector's share after a cut is all of the cut's time, at most 2 s (was a third, at most 1 s).
-* `lunix-gc/src/config.rs::per_pass_bytes`: one pass may compact `max(compact_per_pass, 4 s of the compaction rate)`. At the daemon's 256 MiB
-  and 64 MiB/s the two are equal: the normal pass is unchanged; a raised or sized rate lifts the cap with it.
-* GC yield to ring-parked writes (jstall): unchanged in normal times; it no longer applies while the headroom is under twice the soft mark
-  (`near_band`), so a ring-bound writer cannot carry the volume into the band with a collector slowed to an eighth. In the band pressure still
-  outranks the yield, as before. The collector is never stopped by the yield (the floor of 4 MiB/s and one step per share are unchanged).
+* `note_delay` counts from `arrived` (the `parked_at` field is gone), for waits for tokens and for space.
+* `note_direct_delay`: a write admitted at first contact **while the pace is active** (tokens or cap) after standing at least 1 ms in its queue
+  is a delayed write, in the space figures, or in the ring pace's when only it paces. Not counted: `Retry`, `Sync` (FUA bypass), and any
+  admission when nothing paces (review finding 3: a wait behind a ring-parked head, a slow append or an earlier record of one large request
+  is not the gate's delay).
+* `park`: a request that fits and is past its cap on first contact is granted at once with what stands before it, not at the next tick.
+* `next_wake`: also wakes at the cap of the requests that fit, scanned like `due_behind` (up to the first request that does not fit, whatever its
+  state; review finding 8).
+* Token accounting is unchanged (debt at most one second of the rate) and now tested; the ring pace composes the same way (own counters, own cap
+  clock), `Retry` pays no tokens.
+* Docs: `ThrottleFigures::delayed_writes` and `delay_max_ms` in `lunix-iface/src/space.rs`; one sentence of DESIGN section 4.3.
 
 ## Proposed ADR-32 amendment (for DECISIONS.md, the lead's file)
 
 > **Amendment (milestone gate).**
-> - **The delay cap counts from arrival, and so does the figure.** `throttle_max_delay_ms` is counted from a write's arrival at its queue, the time
->   it stood behind other requests of the queue included. A request that reaches the gate past its cap is admitted at once, with what stands
->   before it; the timer wakes at the earliest cap of any request that fits. `delay_max_ms`, `delayed_ms` and `delayed_writes` count from arrival
->   and include writes admitted at first contact after standing in their queue (under 1 ms is not a delay). A write never waits in the band longer
->   than `throttle_max_delay_ms` plus its own service. Unchanged: past the cap a request is admitted if it fits and the bucket carries the debt,
->   at most one second of the rate. Above the cap's reach (`depth x size / rate` over the cap) the admitted rate is `depth x size / cap` and the
->   hard mark does the pacing. The ring pace composes the same way; a `Retry` pays no tokens and counts no gate delay.
-> - **GC's duty is sized to the writers from the soft mark.** From entry to the band the compaction rate and the step budget are at least the
->   ingest rate times `gc_write_amp_percent` / 100 (default 200, `lunixd.toml`, 100 ..= 1000), rising linearly to twice that at the limit, on top
->   of the floors (4 x budget, `gc_rate x gc_pressure_rate_factor`, floor grace; uncapped at stop and full). The collector's share of the
->   coordinator after a cut rises from a third to all of the cut (at most 2 s) while the gate is not open, and one pass may compact four seconds
->   of the compaction rate if that exceeds `compact_per_pass`. The collector does not yield to ring-parked writes within twice the soft mark.
-> - **Limit of the mechanism (measured).** A sized collector cannot reclaim what is not yet old enough: garbage waits one grace (floor grace
->   30 s) and a pass or two. A cap `L` still fixes the sustained write rate at `(L - live) / tau`, and a volume that enters the band faster than
->   `tau` allows (a first fill of a small cap, `soft / ingest < tau`) stops once; the band's overshoot is the delay feedback of the dead time.
+> - **The delay cap counts from arrival, and so do the figures.** `throttle_max_delay_ms` is counted from a write's arrival at its queue, the
+>   time it stood behind other requests of the queue included. A request that reaches the gate past its cap is admitted at once, together with
+>   what stands before it; the timer wakes at the earliest cap among the requests before the first one that does not fit. A write is not held
+>   by the **pace** longer than `throttle_max_delay_ms` plus its own service; a write that waits for space (a request behind one that does
+>   not fit) still waits up to `full_timeout`. `delay_max_ms`, `delayed_ms` and `delayed_writes` count from arrival: for requests that waited
+>   in the gate, and for requests admitted at first contact after standing in their queue while the pace is active (under 1 ms is not a delay).
+>   With nothing pacing, a wait in a queue (behind a ring-parked request, a slow append) is not a gate delay and is not counted; `Retry` and FUA
+>   in the band are not counted either.
+> - Unchanged: past the cap a request is admitted if it fits and the bucket carries the debt, at most one second of the rate. Above the cap's
+>   reach (`depth x size / rate` over the cap) the admitted rate is `depth x size / cap` and the hard mark does the pacing. The ring pace composes
+>   the same way; a `Retry` with a fitting head pays no tokens.
+> - **Known limit (not changed).** The cap counts the wait for space too: after a stop of 10 s or more every queued write is past its cap and is
+>   admitted at once when headroom returns, the debt clamped at one second of the rate. Counting from `max(arrived, the gate's last exit from
+>   stop)` is a separate decision.
 
-## Tests (each rule has one that fails without it)
+## Tests
 
 | rule | test | fails when |
 |---|---|---|
-| figures from arrival; N writes queued behind a slow head wait at most the cap | `pace.rs::n_writes_queued_behind_a_slow_head_none_waits_beyond_the_cap` (4 queues x 40 writes at 64 KiB/s, cap 5 s: longest wait <= cap + 10 ms, `delay_max_ms` 4990..=5020) and `a_write_that_reaches_the_gate_late_is_counted_from_its_arrival` | origin moved to the first contact: 10 of 34 pace tests fail (these, the ring-pace, debt, old-behind-young and `past_the_cap` tests) |
-| direct admissions after a queue wait are delays | `a_write_that_stood_in_its_queue_and_is_admitted_by_tokens_counts_the_wait` | `note_direct_delay` made a no-op: this test fails |
-| a due write is admitted at first contact | `a_due_write_that_stands_behind_a_young_head_is_admitted_on_first_contact`, `past_the_cap_the_rate_rises_to_depth_over_cap_and_no_further` | the grant in `park` removed: both fail |
-| the timer wakes at a request behind the head | `ledger::tests::next_wake_is_the_earliest_cap_among_the_requests_that_fit` | `due` removed from `next_wake`: fails (only this one) |
-| debt after cap admissions is one second of the rate and paid | `after_cap_admissions_the_debt_is_one_second_of_the_rate_and_is_paid` (probe write waits 1.9-2.1 s: not 1 s uncharged, not 22 s unbounded) | debt unbounded: it and two throttle unit tests fail; cap admissions uncharged: it and `the_delay_cap_admits_at_exactly_the_cap_and_the_debt_is_bounded` fail |
-| the pace holds on average short of the cap | `the_pace_holds_on_average_when_the_queues_are_short_of_the_cap` (200 s, 4 queues: bytes between `rate x (T-2)` and `rate x T + 1 MiB + 4 records`, no cap admission) | (invariant test, guards the clamp and the bucket) |
+| figures from arrival; N writes behind a slow head: none paced beyond the cap | `pace.rs::n_writes_queued_behind_a_slow_head_none_waits_beyond_the_cap` (4 queues x 40 writes at 64 KiB/s, cap 5 s: longest <= cap + 10 ms, `delay_max_ms` 4990..=5020), `a_write_that_reaches_the_gate_late_is_counted_from_its_arrival` | origin moved to first contact: 10 of 34 pace tests fail |
+| direct admission after a queue wait under the pace is a delay | `a_write_that_stood_in_its_queue_and_is_admitted_by_tokens_counts_the_wait` | `note_direct_delay` a no-op: fails |
+| **no delay counted at an open gate (finding 3)** | `a_write_that_stood_in_its_queue_at_an_open_gate_is_no_delay_of_the_gate` (arrived 3 s ago, Bulk and Sync: figures stay 0) | call restored in the no-pace branch: it fails (34 passed, 1 failed) |
+| a due write is admitted at first contact | `a_due_write_that_stands_behind_a_young_head_is_admitted_on_first_contact`, `past_the_cap_the_rate_rises_to_depth_over_cap_and_no_further` | grant in `park` removed: both fail |
+| the timer wakes at a request behind the head | `ledger::tests::next_wake_is_the_earliest_cap_among_the_requests_that_fit` | `due` removed from `next_wake`: fails |
+| debt after cap admissions: one second of the rate, paid | `after_cap_admissions_the_debt_is_one_second_of_the_rate_and_is_paid` | debt unbounded or cap admissions uncharged: fails (with two throttle unit tests / the cap test) |
+| the pace holds on average short of the cap | `the_pace_holds_on_average_when_the_queues_are_short_of_the_cap` | invariant test |
 | ring pace: cap from arrival, own counters; `Retry` | `the_ring_pace_alone_keeps_the_cap_and_counts_from_the_arrival`, `a_retry_after_a_ring_refusal_pays_no_tokens_and_counts_no_gate_delay` | origin mutation fails the first |
-| demand sizing | `pressure::tests::the_demand_is_...`, `the_budget_and_the_rate_are_sized_...`, `tests/pressure.rs::in_the_band_the_collector_is_sized_to_the_ingest_and_grows_through_the_band`, `the_write_amplification_is_the_tunable_of_the_sizing`, `the_sizing_ends_with_the_pressure` | `gc_demand` forced to 0: 3 of them fail |
-| steady state in the band, no stop; the old figures stop | `lunixd/tests/gate_equilibrium.rs` (real gate and real pressure rules on a manual clock, simulated store and collector; see below) | demand forced to 0: `sized_to_the_ingest_...` fails (the second test asserts the old figures stop) |
-| share under pressure | `jstall.rs::under_gate_pressure_the_collector_gets_up_to_two_seconds_after_a_cut_not_one` | divisor left at 3: fails |
-| no yield near the band | `jstall.rs::the_collector_does_not_yield_within_twice_the_soft_mark_of_the_band` | `near_band` never set: fails |
-| per-pass cap follows the rate | `lunix-gc config::tests::the_per_pass_cap_follows_the_rate_above_the_default_and_never_falls_below_it` | cap ignores the rate: fails |
-| config key | `lunixd config` unit tests (`gc_write_amp_percent` 150 parsed, 99 and 1001 refused, default 200) | |
-| stack: no write beyond the cap + service, no stop, data verifies | `stack_throttle.rs::deep_overwrites_at_a_small_cap_wait_at_most_the_cap_and_the_gate_never_stops` (real gate, engine, store, collector; 32 x 256 KiB writes in flight at 64 KiB/s inside the band, 45 s): slowest 12.9 s (cap 10 s + commit and append), `delay_max_ms` 10 001, 0 stops, 55 cap admissions, every block reads back, fsck clean | on `80e1cd1` it **fails**: slowest 10.0 s but `delay_max_ms` 922 (the figure from the front, not from arrival) |
+| real stack figure | `stack_throttle.rs::deep_overwrites_report_their_wait_from_arrival` (32 x 256 KiB in flight against a slow band, 25 s; asserts only `delay_max_ms + 5 s >= the slowest wait the test saw`, no duration bound, no stop count; data reads back) | fails on `80e1cd1` (`delay_max_ms` 922 against a 10 s wait) |
 
-`gate_equilibrium`: writer 100 MiB/s through one queue (256 in flight), 1 GiB live, garbage reclaimable after the grace, collector work bounded by
-the rate it is handed, its step budget (20 steps/s) and a 120 MiB/s device ceiling, WA 1.6, `gc_rate` 1 MiB/s, 10 GiB limit, 900 s. Sized:
-0 stops, 0 `ENOSPC`, rests in `slowdown` at a headroom of 1.33 GiB (x = 0.82, the curve's point for the 75 MiB/s the collector reclaims), tail
-admitted rate 75 MiB/s, longest wait 210 ms. The old figures (rule removed): 1 604 stops, 4 MiB/s. The model is mine: it shows the sizing rule
-decides between equilibrium and stops when `gc_rate` is small against the ingest; it does not show that real stops go away (see the end-to-end
-check).
-
-Mutation runs: logs of each mutation (patch applied on the host copy, tests run, patch reverted) were kept in the scratchpad; the results are the
-"fails when" column. M3 (next_wake) is caught only by its unit test; no pace test sees it.
+The mutation runs (patch on the host copy, tests, revert) for the earlier rules were done in the first round; finding 3's was repeated in this one.
 
 ## Gates
 
-`origin/main` moved during the work (to `e675b2f`, milestone seal, 21 files, no conflict). Because the branch was already pushed and force-push is
-not allowed, main was **merged into the branch** (signed merge commit) instead of rebasing it, and the gate below was re-run on the merged tree.
+GATES_PLACEHOLDER
 
-* `tools/ci.sh` on the code of `ca22aa3` (CPUs 0-7, `-j 8`): green, `check-ownership: gate ok (20 changed paths)`, `ci: all green`; 2 220 tests
-  passed, 0 failed, 28 ignored (sum of the `test result` lines). `tools/ci.sh` again on the merged tree (main `e675b2f` + this branch): green, `gate ok (21 changed paths)`, `ci: all green`; 2 249
-  passed, 0 failed, 30 ignored. The commit after the first run changes only casts in a test file and this report
-  (`gate_equilibrium.rs` re-run: 2 passed; clippy `-D warnings` on `lunixd` clean).
-* Kill loops, by hand on the code of `ca22aa3` (before the merge of main; **not re-run on the merged tree**, whose seal changes touch the cut and
-  destage paths: the lead may want them re-run), one at a time (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`,
-  `cargo test --release -p lunixd --features testsupport,crashpoints --test stack_kill`):
+## Deviations
 
-| loop | points reached | runs / kills | kills inside a partial cut | result |
-|---|---|---|---|---|
-| plain 16 KiB | 52 of 55 | 54 / 54 | 40 of 41 points | ok (1 733 s) |
-| integrity 16 KiB | 52 of 55 | 57 / 57 | 40 of 41 | ok (1 907 s) |
+1. The finding-1 diagnosis of the brief ("the cap is counted only from the head") holds for the figures only; see "What was found".
+2. `tools/ownership.toml` gained a `[gate]` entry, trimmed to the paths changed.
+3. Main was merged into the branch earlier (no force-push); the final tree contains `e675b2f`.
+4. The end-to-end M15 check (8G cap, xfs 16K integrity, `128:8`, two runs per build, all cells passed) showed stops 2 and 0 before, 1 and 6 after
+   with part 2 included; it did not show a gain and is not evidence for part 1 either. The first stop in each run is at band entry with
+   `reclaim_rate=0`.
 
-## End-to-end check (M15 harness, `p1/m15` @ a92d27c, the same cell on both builds)
+## Parked: part 2 (collector sizing)
 
-`tests/exit/fio-verify.sh`: xfs, `CHUNKS=16384 MODES=integrity PROFILES="128:8"` (QD 128 x 8 jobs), `CACHE_MAX=8G` (not 12G: the 12G store plus the
-volume exceeds the 10 GiB remote budget), `PER_PROFILE_MIB=2048 WLOOPS=12 RUNTIME=240`, daemon on CPUs 0-3, fio on 4-7, 4 queues, release binaries
-of `80e1cd1` (before) and of this branch (after), root run through the wrapper's lock and leftovers checks, one at a time. All four cells
-**passed** (0 verify errors before and after the detach, no `ENOSPC`, no `full`, fsck clean).
+Branch `p1/gate-gc` (`6bc041c`) keeps it unchanged: `gc_demand` and `gc_write_amp_percent`, budget and rate sized to the ingest, the share after
+a cut (all of the cut, at most 2 s), `lunix-gc` `per_pass_bytes`, the no-yield zone (`near_band`), `MemSpace::set_throttle_figures`,
+`gate_equilibrium.rs` and its jstall and DESIGN text. Review findings against it:
 
-| run | gate stops | gate-side longest wait (status `delay_max_ms`) | fio longest completion | delayed writes | cap admissions |
-|---|---|---|---|---|---|
-| before 1 | 2 | 23 296 ms (from the front of the queue) | 37 990 ms | 110 509 | 100 |
-| before 2 | 0 | 333 ms (from the front) | 14 234 ms | 142 101 | 0 |
-| after 1 | 1 | 13 137 ms (from arrival) | 21 142 ms | 280 210 | 112 |
-| after 2 | 6 (3 episodes logged) | 15 449 ms (from arrival) | 36 404 ms | 250 908 | 264 |
+1. **HIGH, no-yield zone** (`headroom < 2 x soft`): undoes the ADR-33 GC yield for limits up to 2 GiB and above 70 % full otherwise, the regime
+   of the T6 ring stalls; no hysteresis; not measured with ring-wait figures. If wanted, a narrower zone with hysteresis (below `soft + soft/4`,
+   released above `soft + soft/2`) and the M16 write cells as the gate.
+2. **HIGH, per-pass cap lifted** with no bound on the space compaction takes from the cut (`u64::MAX` at stop and full; 1 GiB already at the
+   floors in the band): a pass can fill the reserved region while no source is deletable for the grace. Keep `compact_per_pass`, or bound it by
+   the free reserved region; shorten the gap between passes instead.
+4. **MEDIUM, no evidence**: stops 2, 0 against 1, 6; the sizing did not act in the cell (demand under the floors); `ingest_rate` is the admitted
+   rate, so the demand shrinks deep in the band; the doubled share takes coordinator time from the cuts. Only `gc_demand` with
+   `gc_write_amp_percent` is inert at the defaults.
+   (Finding 6: `gate_equilibrium.rs` proves its own model; 9: stale `docs/reference/gc.md` and `coord.rs` comments.)
 
-**This does not show an improvement in stops, and the report does not claim one.** Two runs per build vary more than the difference
-(before 2 and 0, after 1 and 6). What the runs do show:
-
-* the figure now says what a write waited: the two "after" maxima (13 and 15 s) are stop episodes of 15 to 20 s (the log lines `writes wait for
-  space` bracket them), and `delayed_ms` is 4.5 to 27 s per throttle episode instead of 0.03 to 0.16 s per 10 000 writes;
-* the stop at the first band entry is in every run that has one: `write throttle on ... reclaim_rate=0` and `writes wait for space` 15 s later at
-  `used` = the limit. At entry no garbage is yet older than the grace (floor 30 s), so no collector, however sized, has anything to free;
-  at 200 MB/s the 1.3 GiB between the soft mark and the limit last 6 s. This is the ADR's `L = R x tau` limit: with the cap at 8 GiB
-  and 2.3 GiB live the sustainable rate is about 150 MB/s, the cell offers 200+;
-* the reclaim rate in the band was 120 to 280 MB/s in all four runs (the sizing's demand was met by the base figures in this cell: demand
-  200 to 400 MiB/s against a floor of 256 MiB/s), so the sizing is not what separates the runs;
-* the later stops of after 2 and before 1 follow cap admissions (`delay_capped` 264, 100): 1 024 writes in flight against a headroom
-  of a few hundred MiB; the cap admits them faster than the curve, and the hard mark does the pacing (ADR-32, consequences). That is the
-  designed overrun, not a regression of this change, but the extra cap admissions in after 2 are a visible effect of counting all waits from
-  arrival and of the longer collector share; the sample is too small to say which.
-
-## Deviations, choices, open items
-
-1. **The finding-1 diagnosis was refined** (above): the cap clock was already the arrival for writes that reach the gate; the defects are the
-   figures, the late-contact admission and the timer. The brief's wording "counted only once a write reaches the head" holds for the figures only.
-2. **The finding-2 diagnosis was refined**: the pressure already started at `slowdown`. The change is the sizing, the share, the per-pass cap and
-   the no-yield zone. **It is not shown to remove stops** (end-to-end above). The limit that remains is the grace dead time at the first fill of a
-   small cap; a lead zone (pressure and floor grace from `soft + ingest x (tau_floor + pass period)` instead of at `soft`) would address it and
-   is not implemented: it moves the start of pressure before the band, contrary to the brief's "at the soft mark". Recorded as an open choice.
-3. **`tools/ownership.toml` gained a `[gate]` entry** (there was none). Files outside the brief's list that the entry owns: `lunix-gc`
-   (`collector.rs`, `config.rs`: the per-pass cap), `lunix-iface/src/space.rs` (one doc comment), `lunix-testkit/src/space.rs` (`MemSpace::
-   set_throttle_figures`), `lunix-engine/tests/jstall.rs` (two tests), `lunix-engine/src/{config,coord,engine,lib}.rs`.
-4. **The sizing changes normal behaviour only through `near_band`** (no yield within 2 x the soft mark) and the share while pressure holds;
-   the daemon's default pass and rate are unchanged by `per_pass_bytes`. A volume with `gc_rate` above 64 MiB/s now gets 4 s of its rate per
-   pass instead of 256 MiB in normal times too.
-5. **The 8G cap of the end-to-end cell** and the 2 GiB profile (disk budget); the 12G of the brief was not run.
-6. **A pre-existing failure outside CI:** `lunix-engine --release --features testsupport --test queue`
-   (`the_background_coordinator_commits_under_load_without_losing_a_write`) fails on `80e1cd1` too; CI runs it in the debug profile, where it
-   passes. Not caused by this change.
-7. **`ci.sh` was not edited** (not in the `[gate]` list): `gate_equilibrium` runs in `cargo test --workspace` (no `testsupport` needed);
-   the new stack test is in `stack_throttle`, already in the CI list.
-8. **No rust-skills conflicts.** Tests use a few `as` casts on counters and float arithmetic (`gate_equilibrium.rs`); library code uses
-   `try_from` and saturating arithmetic.
-9. **No new counters** in `ThrottleFigures`; the delay figures changed meaning (documented in `lunix-iface/src/space.rs`).
-
-Remote disk: the target directory grew to 24 GiB over the CI runs (debug and release builds), above the 10 GiB budget, until `cargo clean
---profile dev` cut it to 3.6 GiB mid-run; the end-to-end store peaked at 7.7 GiB (cap 8 G). At the end the whole remote directory of this
-milestone was removed (the root-owned scratch of the end-to-end runs through the wrapper's `root` subcommand); no mount, device or process of
-mine is left. `root.lock.holder` still names this milestone (the file is rewritten by the next root run).
+**The lead-zone idea**: the measured stop is the grace dead time at the first fill (`reclaim_rate=0` at band entry; `L = R x tau`). Start the
+pressure and the floor grace before the band, from about `soft + ingest x (tau_floor + pass period)` of headroom, so garbage condemned earlier
+is deletable earlier; needs its own milestone with M15 and M16 measurements over enough runs.

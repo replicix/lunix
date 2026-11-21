@@ -39,8 +39,7 @@
 //! | `throttle_soft_max_bytes` | 68719476736 | upper clamp of the soft mark; at least `throttle_soft_min_bytes` |
 //! | `throttle_min_rate` | 4194304 | `r_min`: the slowest admission rate inside the band, bytes per second per volume; at least 65536 |
 //! | `throttle_max_delay_ms` | 10000 | the longest one request is delayed by pacing; 10 ..= `full_timeout_ms` |
-//! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the floor of the sizing below; the budget is at least 4 times, the grace the floor); 1 ..= 64 |
-//! | `gc_write_amp_percent` | 200 | the write amplification the collector is sized for in the band, percent: its step budget and compaction rate are at least the ingest rate times this, rising to twice that at the limit; 100 ..= 1000 |
+//! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
 //! (`volume.json`), not a daemon key. The per-volume policy keys
@@ -133,9 +132,6 @@ pub struct DaemonConfig {
     pub throttle: lunix_space::ThrottleConfig,
     /// The compaction rate's multiple while writes are slowed.
     pub gc_pressure_rate_factor: u64,
-    /// The write amplification the collector is sized for while writes are
-    /// slowed, percent.
-    pub gc_write_amp_percent: u64,
 }
 
 impl Default for DaemonConfig {
@@ -169,7 +165,6 @@ impl Default for DaemonConfig {
             store_max_percent: 200,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
-            gc_write_amp_percent: lunix_engine::DEFAULT_WRITE_AMP_PERCENT,
         }
     }
 }
@@ -440,13 +435,6 @@ impl DaemonConfig {
                 }
                 self.gc_pressure_rate_factor = f;
             }
-            "gc_write_amp_percent" => {
-                let a = n(v)?;
-                if !(100..=1000).contains(&a) {
-                    return Err("gc_write_amp_percent must be 100 to 1000".into());
-                }
-                self.gc_write_amp_percent = a;
-            }
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())
@@ -580,7 +568,7 @@ volume_roots = "/a, /b"
         let c = DaemonConfig::parse(
             "throttle = false\nthrottle_soft_percent = 30\nthrottle_soft_min_bytes = 134217728\n\
              throttle_soft_max_bytes = 1073741824\nthrottle_min_rate = 1_000_000\n\
-             throttle_max_delay_ms = 500\ngc_pressure_rate_factor = 8\ngc_write_amp_percent = 150\n",
+             throttle_max_delay_ms = 500\ngc_pressure_rate_factor = 8\n",
         )
         .unwrap();
         assert!(!c.throttle.enabled);
@@ -590,8 +578,6 @@ volume_roots = "/a, /b"
         assert_eq!(c.throttle.min_rate, 1_000_000);
         assert_eq!(c.throttle.max_delay, Duration::from_millis(500));
         assert_eq!(c.gc_pressure_rate_factor, 8);
-        assert_eq!(c.gc_write_amp_percent, 150);
-        assert_eq!(DaemonConfig::default().gc_write_amp_percent, 200);
         for bad in [
             "throttle_soft_percent = 0",
             "throttle_soft_percent = 51",
@@ -602,8 +588,6 @@ volume_roots = "/a, /b"
             "throttle_max_delay_ms = 61000",
             "throttle_max_delay_ms = 6000\nfull_timeout_ms = 5000",
             "gc_pressure_rate_factor = 0",
-            "gc_write_amp_percent = 99",
-            "gc_write_amp_percent = 1001",
             "gc_pressure_rate_factor = 65",
             "throttle = 1",
         ] {
