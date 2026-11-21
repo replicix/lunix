@@ -57,11 +57,46 @@ fio_env() {
 }
 job_file() { if [ "$1" = raw ]; then echo "$JOBDIR/verify-raw.fio"; else echo "$JOBDIR/verify-fs.fio"; fi; }
 
+
+# ---- diagnostics of a verify failure (fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach) ----------------------
+# bad_blocks STDOUT: "file offset length" of every block the pass reported as bad
+bad_blocks() { grep -aE '^verify: bad ' "$1" 2>/dev/null | sed -nE 's/^verify: .* at file ([^ ]+) offset ([0-9]+), length ([0-9]+).*/\1 \2 \3/p'; }
+# diag_pass CELLDIR TAG STDOUT QD: the failing blocks of a pass, per file; FIEMAP state and a direct re-read of every block (a transient read
+# shows data now; a persistent zero in a mapped extent is data or file system state; a zero in an unwritten extent or a hole never had data)
+diag_pass() {
+  local d=$1 tag=$2 so=$3 qd=$4 n
+  bad_blocks "$so" > "$d/bad-$tag.txt"; n=$(wc -l < "$d/bad-$tag.txt")
+  [ "$n" -gt 0 ] || return 1
+  say "- diag $tag: $n bad blocks; per file (QD $qd): $(awk '{f=$1; sub(/.*\//,"",f); c[f]++} END{for(f in c) printf "%s=%d ", f, c[f]}' "$d/bad-$tag.txt")"
+  DIAG_SUM=$(python3 -I "$here/zerodiag.py" "$d/bad-$tag.txt" "$d/reread-$tag.jsonl")
+  say "- diag $tag: re-read now: $DIAG_SUM"
+  if [ "$CUR_TGT" = xfs ]; then
+    local f; for f in $(awk '{print $1}' "$d/bad-$tag.txt" | sort -u | head -3); do xfs_bmap -v "$f" > "$d/bmap-$tag-$(basename "$f").txt" 2>&1; done
+  fi
+  return 0
+}
+# first_pass_note CELL I JOBMIB: bytes written per main job in the first pass against the size of its file (did the first loop complete?)
+first_pass_note() {
+  local jf="$OUT/raw/fio-${1//\//_}-p$2.json" w ios
+  w=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576 | floor] | "\(min)/\($sz) MiB min..max \(max)"' 2>/dev/null)
+  ios=$(fio_json "$jf" 2>/dev/null | jq -r '[.jobs[] | select(.jobname=="main") | .write.total_ios] | join(",")' 2>/dev/null)
+  say "- p$2 first pass: written per job (min of $(fio_json "$jf" 2>/dev/null | jq '[.jobs[] | select(.jobname=="main")] | length' 2>/dev/null) jobs) $w; total_ios per job $ios"
+  FIRST_LOOP_DONE=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576] | if min >= $sz then "yes" else "no" end' 2>/dev/null)
+}
+# win_note STATUS_JSON: the journal window counters of the daemon (misses = guest reads that went to the ring files)
+win_note() { jq -r '.write_path | "hits=\(.window_hits) misses=\(.window_misses)"' "$1" 2>/dev/null || echo "n/a"; }
+# reattach_note VOL: the recovery report of the last attach in this cell's daemon log
+reattach_note() {
+  local l; l=$(grep -a 'volume opened' "$DLOG" | grep -a "volume=\"$1\"" | tail -1)
+  REPLAYED=$(printf '%s' "$l" | sed -nE 's/.* replayed=([0-9]+).*/\1/p'); REPLAYED=${REPLAYED:-n/a}
+  GAPS=$(grep -ac 'stopped at a gap' "$DLOG")
+}
+
 run_cell() { # target chunk mode
   local tgt=$1 chunk=$2 mode=$3
   local cell="fio-verify/$tgt/c$((chunk / 1024))k/$mode" vol="v$((chunk / 1024))$tgt$mode"
   vol=${vol:0:60}
-  local d; d=$(cell_dir "$cell"); local t0=$SECONDS bad=0 notes=""
+  local d; d=$(cell_dir "$cell"); local t0=$SECONDS bad=0 notes=""; CUR_TGT=$tgt
   say ""; say "## cell $cell"
   cell_begin "$vol" "$VOL_GIB" "$chunk" "$mode"
   # ADR-32 (research note 2026-11-18, section 9.4): the cell runs with `cache_max` set (default 48G, 150 % of the 32 GiB exit volume;
@@ -80,7 +115,7 @@ run_cell() { # target chunk mode
     mkfs_fs "$tgt" "$CUR_DEV" || { fail "$cell: mkfs"; rec "$cell" fail why=mkfs; return; }
     mount_fs "$tgt" "$CUR_DEV" "$MNT" || { fail "$cell: mount"; rec "$cell" fail why=mount; return; }
   fi
-  local i=0 p qd jobs
+  local i=0 p qd jobs fp_done="" rr_pre="" rr_post="" rr_again="" winpre="n/a" winpost="n/a" dm_rec="n/a" drc1="n/a" drc2="n/a"
   for p in "${PROF[@]}"; do
     qd=${p%%:*}; jobs=${p##*:}
     fio_env "$tgt" "$i" "$qd" "$jobs"
@@ -97,6 +132,7 @@ run_cell() { # target chunk mode
     fio_run "$cell-p$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i"; local frc=$?
     wait "$TC_PID"; local trc=$?
     local jf="$OUT/raw/fio-${cell//\//_}-p$i.json" errs; errs=$(fio_errors "$jf")
+    first_pass_note "$cell" "$i" $((PER_PROFILE_MIB / jobs)); fp_done="$fp_done p$i:$FIRST_LOOP_DONE"
     [ "$frc" = 0 ] && [ "$errs" = 0 ]; expect "$cell p$i: fio rc $frc, job errors $errs (zero verify failures)" $? || bad=1
     [ "$trc" = 0 ]; expect "$cell p$i: trimcheck (discard, write-zeroes) rc $trc" $? || bad=1
     [ "$frc" = 0 ] && [ "$errs" = 0 ] && [ "$trc" = 0 ] || bad=1
@@ -125,20 +161,29 @@ run_cell() { # target chunk mode
       local pjf="$OUT/raw/fio-${cell//\//_}-pre$i.json" perrs; perrs=$(fio_errors "$pjf")
       pre_errs="$pre_errs p$i:$perrs"
       [ "$prc" = 0 ] && [ "$perrs" = 0 ]; expect "$cell p$i: verify_only BEFORE the detach (same attach, caches dropped): rc $prc, errors $perrs" $? || badpre=1
+      if diag_pass "$d" "pre$i" "$OUT/raw/fio-${cell//\//_}-pre$i.stdout" "$qd"; then rr_pre="$rr_pre p$i:[$DIAG_SUM]"; fi
       i=$((i + 1))
     done
+    status_json "$vol" > "$d/status-pre.json" 2>/dev/null; winpre=$(win_note "$d/status-pre.json")
+    say "- journal window after the pre-detach verify_only: $winpre"
   fi
   # phase 2: stop, check, detach, attach, verify again
   if [ "$tgt" != raw ]; then
     umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after the runs" $? || bad=1
   fi
   status_json "$vol" > "$d/status-1.json" 2>/dev/null
-  cell_end "$vol" "$(basename "$d")-1" || bad=1
+  cell_end "$vol" "$(basename "$d")-1" || bad=1; drc1=$LAST_DETACH_RC
+  [ "$drc1" = 0 ] || { fail "$cell: the first detach exited $drc1"; bad=1; }
   local sb1; sb1=$(cat "$OUT/raw/store-bytes-$(basename "$d")-1.txt")
   if [ "$bad" = 0 ]; then
     attach_vol "$vol"; expect "$cell: attach again" $? || bad=1
     CUR_DEV=$(dev_of "$vol"); register_id "${CUR_DEV#/dev/ublkb}"
+    reattach_note "$vol"
+    say "- re-attach: replayed=$REPLAYED, 'journal recovery stopped at a gap' lines in the daemon log: $GAPS, detach exit code $drc1"
+    local dm0; dm0=$(dmesg | wc -l)
     [ "$tgt" = raw ] || mount_fs "$tgt" "$CUR_DEV" "$MNT" || bad=1
+    dmesg | tail -n +$((dm0 + 1)) > "$d/dmesg-remount.txt"; dm_rec=$(grep -aic 'recover' "$d/dmesg-remount.txt")
+    say "- dmesg at the re-mount: $dm_rec line(s) with 'recover' ($(grep -ai 'starting recovery' "$d/dmesg-remount.txt" | head -1))"
     i=0
     for p in "${PROF[@]:0:$profiles_done}"; do
       qd=${p%%:*}; jobs=${p##*:}
@@ -148,9 +193,24 @@ run_cell() { # target chunk mode
       local vjf="$OUT/raw/fio-${cell//\//_}-v$i.json" verrs; verrs=$(fio_errors "$vjf")
       post_errs="$post_errs p$i:$verrs"
       [ "$vrc" = 0 ] && [ "$verrs" = 0 ]; expect "$cell p$i: verify_only AFTER detach/attach: rc $vrc, errors $verrs" $? || bad=1
+      if diag_pass "$d" "v$i" "$OUT/raw/fio-${cell//\//_}-v$i.stdout" "$qd"; then rr_post="$rr_post p$i:[$DIAG_SUM]"; fi
       i=$((i + 1))
     done
+    status_json "$vol" > "$d/status-post.json" 2>/dev/null; winpost=$(win_note "$d/status-post.json")
+    say "- journal window after the post-detach verify_only: $winpost"
     [ "$tgt" = raw ] || { umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after verify_only" $? || bad=1; }
+    # failing blocks: look at the same blocks again after one more detach and attach (transient or persistent)
+    cat "$d"/bad-v[0-9].txt > "$d/bad-post-all.txt" 2>/dev/null
+    if [ -s "$d/bad-post-all.txt" ]; then
+      detach_vol "$vol"; say "- extra cycle for the re-read: detach exit code $?"
+      attach_vol "$vol"; expect "$cell: attach for the re-read" $? || bad=1
+      CUR_DEV=$(dev_of "$vol"); register_id "${CUR_DEV#/dev/ublkb}"; reattach_note "$vol"
+      say "- extra attach: replayed=$REPLAYED, gap lines $GAPS"
+      [ "$tgt" = raw ] || mount_fs "$tgt" "$CUR_DEV" "$MNT" || bad=1
+      rr_again=$(python3 -I "$here/zerodiag.py" "$d/bad-post-all.txt" "$d/reread-after-extra-cycle.jsonl")
+      say "- diag: the same blocks after another detach/attach: $rr_again"
+      [ "$tgt" = raw ] || umount_fs "$MNT"
+    fi
     # the store bound of the gate holds after a final pass and its grace: one explicit pass, FINAL_SETTLE seconds (default 120, past the
     # 60 s grace), then the collector state, the space ledger and the store size of the settled volume
     lx gc "$vol" --json > "$d/gc-final-pass.json" 2>&1
@@ -158,7 +218,7 @@ run_cell() { # target chunk mode
     lx gc "$vol" --status --json > "$d/gc-status-final.json" 2>&1
     sbs=$(store_bytes "$vol")
     status_json "$vol" > "$d/status-2.json" 2>/dev/null
-    detach_vol "$vol"; expect "$cell: detach" $? || bad=1
+    detach_vol "$vol"; drc2=$?; expect "$cell: detach (exit $drc2)" $drc2 || bad=1
     lunix_fsck "$vol" "$(basename "$d")-2"; expect "$cell: lunix fsck --deep clean (exit $FSCK_RC)" $? || bad=1
   fi
   local sb2; sb2=$(store_bytes "$vol")
@@ -185,7 +245,6 @@ run_cell() { # target chunk mode
   [ "$hung1" = "$hung0" ]; expect "$cell: no hung-task line in the kernel log" $? || bad=1
   local thr dly dmx
   [ -s "$d/status-2.json" ] || cp "$d/status-1.json" "$d/status-2.json" 2>/dev/null   # a cell that failed early has only the status of the end of the runs
-  [ -s "$d/status-2.json" ] || cp "$d/status-1.json" "$d/status-2.json" 2>/dev/null   # a cell that failed early has only the status taken after the runs
   thr=$(jq -r '[.. | .throttled_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null); dly=$(jq -r '[.. | .delayed_writes? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
   dmx=$(jq -r '[.. | .delay_max_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
   local ens; ens=$(jq -r '.throttle.enospc // ([.. | .enospc? // empty] | first) // 0' "$d/status-2.json" 2>/dev/null)
@@ -193,7 +252,7 @@ run_cell() { # target chunk mode
   say "- $cell: throttled_ms $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
-      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" notes="$notes"
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" first_loop_complete="${fp_done# }" replayed="${REPLAYED:-n/a}" recovery_gap_lines="${GAPS:-n/a}" detach1_rc="$drc1" detach2_rc="$drc2" window_pre="$winpre" window_post="$winpost" remount_recover_lines="$dm_rec" zero_pre="${rr_pre# }" zero_post="${rr_post# }" zero_again="$rr_again" notes="$notes"
   [ "$bad" = 0 ] || FAIL=1
 }
 

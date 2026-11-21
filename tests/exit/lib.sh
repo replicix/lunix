@@ -226,7 +226,7 @@ cell_reset() { # stop the daemon (nothing attached) and remove all volume and st
   rm -rf "${ST:?}/state" "${ST:?}/dev" "${VOLS:?}"; mkdir -p "$VOLS"
 }
 cell_end() { # NAME TAG: detach, deep fsck, record the store size, return the fsck verdict
-  detach_vol "$1"; expect "detach $1" $? || true
+  detach_vol "$1"; LAST_DETACH_RC=$?; expect "detach $1 (exit $LAST_DETACH_RC)" $LAST_DETACH_RC || true
   store_bytes "$1" > "$OUT/raw/store-bytes-$2.txt"
   lunix_fsck "$1" "$2"; local rc=$?
   expect "lunix fsck --deep clean after detach (exit $FSCK_RC) [$2]" $rc || true
