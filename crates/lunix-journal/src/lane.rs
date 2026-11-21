@@ -127,6 +127,8 @@ pub(crate) struct FileLane {
     cq: Vec<(u64, i32)>,
     inflight_writes: usize,
     inflight_reads: usize,
+    /// A read's `submit` failed after its entry was queued: `poll` retries.
+    submit_owed: bool,
     next_token: u64,
     /// Bytes of the pool this lane locked.
     locked: u64,
@@ -228,6 +230,7 @@ impl FileLane {
             cq: Vec::new(),
             inflight_writes: 0,
             inflight_reads: 0,
+            submit_owed: false,
             next_token: 1,
             locked,
         })
@@ -575,7 +578,7 @@ impl FileLane {
         }
         // The bytes are copied (or the read failed): reclaim may take the
         // file now.
-        file.reads.fetch_sub(1, Ordering::AcqRel);
+        file.unpin_read();
         self.out
             .push(JournalCompletion::Read { token, status, buf });
     }
@@ -784,9 +787,11 @@ impl JournalLane for FileLane {
             self.raise_wake();
             return Ok(());
         }
-        let hook = lock(&self.sh.read_gap_hook).clone();
-        if let Some(h) = hook {
-            h(loc);
+        if self.sh.read_gap_on.load(Ordering::Acquire) {
+            let hook = lock(&self.sh.read_gap_hook).clone();
+            if let Some(h) = hook {
+                h(loc);
+            }
         }
         // Pin the file before the read is queued. `find_in_use` above is only
         // a first look: reclaim may have taken the file since, and may zero it
@@ -812,7 +817,7 @@ impl JournalLane for FileLane {
             None => match AlignedBuf::zeroed(need) {
                 Ok(b) => b,
                 Err(e) => {
-                    file.reads.fetch_sub(1, Ordering::AcqRel);
+                    file.unpin_read();
                     return Err(Error::Io(e));
                 }
             },
@@ -837,31 +842,42 @@ impl JournalLane for FileLane {
             delta: (loc.offset - a0) as usize,
         });
         self.inflight_reads += 1;
-        if let Err(e) = self
-            .push_sqe(&sqe)
-            .and_then(|()| self.ring.submit().map(|_| ()))
-        {
-            // Nothing was queued (or it will complete harmlessly into a buffer
-            // we keep): hand the buffer back with an error.
+        if let Err(e) = self.push_sqe(&sqe) {
+            // Not in the submission queue: nothing can complete for this id.
+            // Hand the buffer back with an error and free the id.
             if let Some(req) = self.reads[id].take() {
                 self.inflight_reads -= 1;
-                req.file.reads.fetch_sub(1, Ordering::AcqRel);
+                req.file.unpin_read();
                 self.out.push(JournalCompletion::Read {
                     token,
                     status: IoStatus::err(e.raw_os_error().unwrap_or(libc::EIO)),
                     buf: req.buf,
                 });
-                // The aligned buffer may still be referenced by a queued
-                // entry: leak it rather than reuse it.
-                std::mem::forget(req.abuf);
             }
             self.raise_wake();
             self.read_free.push(id);
+            return Ok(());
+        }
+        // The entry is queued. If the submit fails it stays in the
+        // submission queue and goes out with a later submit: the request, its
+        // buffer, its id and its pin stay until its completion is reaped (the
+        // id must not be reused before: a stale completion would complete
+        // another read). `poll` retries.
+        let submitted = if self.sh.fail_read_submit.swap(false, Ordering::AcqRel) {
+            Err(std::io::Error::from_raw_os_error(libc::EAGAIN))
+        } else {
+            self.ring.submit().map(|_| ())
+        };
+        if submitted.is_err() {
+            self.submit_owed = true;
         }
         Ok(())
     }
 
     fn poll(&mut self, out: &mut Vec<JournalCompletion>) {
+        if self.submit_owed && self.ring.submit().is_ok() {
+            self.submit_owed = false;
+        }
         self.reap();
         // A failure here is recorded by `fail_batch` (poison and error
         // completions); there is nobody to return it to.
@@ -895,7 +911,7 @@ impl Drop for FileLane {
         // A read that never completed (a failed wait above) must not pin its
         // file for good.
         for r in self.reads.drain(..).flatten() {
-            r.file.reads.fetch_sub(1, Ordering::AcqRel);
+            r.file.unpin_read();
             // The kernel may still write into the buffer: keep it.
             std::mem::forget(r.abuf);
         }

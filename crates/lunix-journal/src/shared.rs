@@ -155,12 +155,32 @@ pub(crate) struct Shared {
     /// Called by a lane's `submit_read` after it found the file in use and
     /// before it pins it (test hook).
     pub read_gap_hook: Mutex<Option<ReadHook>>,
+    /// `read_gap_hook` is set (checked before the mutex: every window miss
+    /// asks).
+    pub read_gap_on: AtomicBool,
+    /// The next read queued by a lane fails its `submit` after the SQE was
+    /// pushed (test hook).
+    pub fail_read_submit: AtomicBool,
+    /// How long one reclaim call waits for reads queued on files it takes, in
+    /// ms (`DRAIN_LIMIT_MS` unless a test sets it).
+    pub drain_limit_ms: AtomicU64,
+    /// Called by reclaim when it starts waiting for reads on a file (test
+    /// hook).
+    pub drain_hook: Mutex<Option<DrainHook>>,
     /// The n-th file the next reclaim re-initialises fails (0: none; test
     /// hook).
     pub fail_reclaim_nth: std::sync::atomic::AtomicU32,
     /// Ring files freed so far, by lane (`Journal::freed_files_by_lane`).
     pub freed: Vec<AtomicU64>,
 }
+
+/// A test hook of reclaim's wait for reads: see [`Shared::drain_hook`].
+pub(crate) type DrainHook = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+/// Default of [`Shared::drain_limit_ms`]: one read is a single ring-file read,
+/// reaped on the lane's next wake; a queue thread that has not reaped it in
+/// this time is stuck, and reclaim moves on (the file stays `Used`).
+pub(crate) const DRAIN_LIMIT_MS: u64 = 2_000;
 
 /// A test hook of `submit_read`: see [`Shared::read_gap_hook`].
 pub(crate) type ReadHook = std::sync::Arc<dyn Fn(JournalLoc) + Send + Sync>;

@@ -95,6 +95,10 @@ pub(crate) struct SlotInfo {
     /// rename. The scan does not report such a file as damage when its body
     /// is zero (on-disk-formats §5.1).
     pub reinit: bool,
+    /// A re-initialisation of this file failed (the zeroing may have begun):
+    /// the file stays `Used` and a reclaim candidate, but no guest read is
+    /// pinned on it (the read takes the map: the file is below a cut).
+    pub dirty: bool,
 }
 
 /// One physical file. The descriptor lives as long as the journal; a recycle
@@ -127,6 +131,12 @@ impl RingFile {
             inflight: AtomicU32::new(0),
             reads: AtomicU32::new(0),
         }
+    }
+
+    /// Releases a pin taken by [`Rings::pin_read`].
+    pub(crate) fn unpin_read(&self) {
+        let before = self.reads.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(before > 0, "read pin released twice");
     }
 
     pub(crate) fn reset_counters(&self) {
@@ -219,19 +229,20 @@ impl Rings {
     /// The file holding `(lane, ordinal)` if it is in use, with a read pinned
     /// on it: the count is raised under the ring lock that reclaim takes to
     /// move the file out of use, so a pin is either refused (`None`) or seen
-    /// by reclaim, which then waits for [`Self::unpin_read`] before it zeroes
-    /// the file.
+    /// by reclaim, which then waits for [`RingFile::unpin_read`] before it zeroes
+    /// the file. A file whose re-initialisation failed is refused too.
     pub(crate) fn pin_read(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
         let ring = self.lanes.get(usize::from(lane))?;
         let inner = lock(&ring.inner);
         let slot = inner.slot_by_ordinal(ordinal)?;
-        match inner.slots[slot].role {
-            Role::Active | Role::Used => {
+        let s = &inner.slots[slot];
+        match s.role {
+            Role::Active | Role::Used if !s.dirty => {
                 let f = Arc::clone(&ring.files[slot]);
                 f.reads.fetch_add(1, Ordering::AcqRel);
                 Some(f)
             }
-            Role::Free | Role::Recycling => None,
+            Role::Active | Role::Used | Role::Free | Role::Recycling => None,
         }
     }
 
@@ -402,6 +413,7 @@ fn load_ring(
             role: Role::Used,
             bad,
             reinit,
+            dirty: false,
         });
     }
     let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
@@ -416,6 +428,7 @@ fn load_ring(
             role: Role::Free,
             bad: false,
             reinit: false,
+            dirty: false,
         });
         next_ordinal += 1;
     }

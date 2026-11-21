@@ -23,7 +23,7 @@ those files: this is the window M15's zeros fit.
   the pin is stored in the `ReadReq` and released in `finish_read` after the bytes are copied (or the read failed), on a
   failed submit, and for reads still queued when a lane is dropped.
 * `reclaim`: after the file is `Recycling` (no new pin possible) and the window entries are gone, it waits for
-  `reads == 0` (`wait_reads_drained`: yield, then 100 us sleeps) before it zeroes. The wait is bounded (10 s); on a
+  `reads == 0` (`wait_reads_drained`: yield, then 100 us sleeps) before it zeroes. The wait is bounded (2 s per reclaim call since the review round, see there); on a
   timeout the file and the not-yet-processed candidates go back to `Used` through the existing reclaim error path and the
   next cut retries.
 
@@ -43,7 +43,7 @@ the ring). New reads cannot pin the file once it is `Recycling`, so the wait can
 the reads that were already queued complete. The per-file wake is unchanged: the lane is woken right after the file's
 zeroing and rename, as before; the only change is that this moment is later by the duration of the in-flight reads of that
 file (zero in the common case). Parked writes are woken at the same points as before. A lane that never polls cannot hang
-the coordinator for good (10 s bound, then the file goes back to `Used`). No reclaim is skipped, so there is nothing to
+the coordinator for good (bounded, then the file goes back to `Used`). No reclaim is skipped, so there is nothing to
 retry "promptly".
 
 ### The map fallback returns committed data
@@ -76,7 +76,7 @@ Only an injected or real zeroing I/O error produces this, and nothing above the 
 |---|---|
 | `reclaim_in_the_gap_before_the_read_is_queued_never_yields_zeros` | the new hook `FileJournal::set_read_gap_hook` runs `tail_after` + `reclaim` to completion between `find_in_use` and the SQE; the read must complete `ENOENT` (the bytes it would otherwise return are zeros) |
 | `reclaim_waits_for_a_queued_read_and_the_read_sees_the_record` | a read is queued and not polled; reclaim runs on another thread and must not finish for 300 ms; after the poll the read returns the record, then reclaim finishes and the location is refused |
-| `reads_racing_reclaim_and_reuse_return_the_record_or_an_error` | 60 rounds: 10 records appended, 8 reads of older records queued, a thread reclaims the files below the cut while the lane keeps refilling the ring (reuse with other bytes); every completion is the exact record or ENOENT. Probabilistic (see below) |
+| (superseded by the review round) | the 60-round stress test of this row was dropped: it had no power (Mutation A passed it) |
 
 `crates/lunixd/tests/stack_jread.rs` (real stack, `plain`, `integrity`, `encrypted`, 64 KiB chunks, small ring): 40 full
 chunks in the map, then 300 4 KiB and 8 KiB writes into them that only the journal holds (every chunk partly overwritten),
@@ -92,7 +92,7 @@ makes no difference without a pin):
 
 * `reclaim_in_the_gap...` FAILED, `reclaim_waits...` FAILED (reclaim finished while the read was queued)
 * `stack_jread::{plain,integrity,encrypted}` all FAILED: `block 1 (<mode>)` differs (zeros returned with success)
-* `reads_racing...` passed: it is a statistical test and the race is too narrow to hit in 480 reads on this host; it guards
+* the stress test passed too (no power; dropped in the review round).
   the pin together with the others but is not the fail-without evidence.
 
 Mutation B (wait removed from reclaim, and the pin accepting any role): `reclaim_waits...` FAILED, the others passed:
@@ -123,7 +123,7 @@ The tree was restored after each mutation (checked by diff before the gate).
 2. **Test-only hook** `FileJournal::set_read_gap_hook` (`#[doc(hidden)]`, like the existing hooks) in `journal.rs`/`shared.rs`.
 3. **The lane-level reuse-with-other-bytes case is not deterministic.** The gap hook runs inside `submit_read` on the lane's
    own thread, which therefore cannot append into the freshly reclaimed file; the zero-bytes variant is the deterministic
-   one and the pin removes both outcomes by the same mechanism. Reuse is exercised by `reads_racing_...` (statistically).
+   one and the pin removes both outcomes by the same mechanism. (Superseded: the review round makes it deterministic with two lanes.)
 4. **No on-disk format, interface or protocol change.** `lunix-iface` untouched.
 5. **rust-skills conflicts:** none. (The wait uses `thread::sleep` on the coordinator thread, which is not async code;
    the 100 us poll avoids adding a condvar to every ring file for a rare wait.)
@@ -132,3 +132,77 @@ The tree was restored after each mutation (checked by diff before the gate).
 
 Peak use of the milestone directory: 22 GiB (debug and release targets, the two kill loops' scratch), above the 10 GiB budget: the
 release and debug targets plus two loops at once. Source, target and scratch were removed at the end.
+
+## Review round
+
+Review: `/data/cst/lunix-lead/01-p1-jread-review.md` (MERGE AFTER FIXES). All items done.
+
+### Changes
+
+* **M2 (timeout blast radius).** One deadline per `reclaim` call (`Instant` at entry, default 2 s, was 10 s per file). A file
+  whose reads are not drained by then goes back to `Used` untouched, together with the rest of its ring; the loop goes on with the
+  other lanes and the mark ring; the call returns `Err(TimedOut)` at the end ("retried at the next cut"). Files freed earlier in the
+  call stay freed, counted and woken.
+* **M3 (failed submit after a successful push).** `submit_read` now tells the two failures apart. A failed push queued nothing:
+  complete with the error, free the id, drop the pin (the buffer is no longer leaked). A failed `submit` after a successful
+  push keeps the request, buffer, id and pin and sets `submit_owed`; `poll` retries the submit (any later submit also flushes
+  the entry), and the read completes normally. The id is never freed while its entry may complete.
+* **L1 (reinit failure).** `SlotInfo::dirty`: set when a reinit fails (the zeroing may have begun), cleared when the slot is
+  freed. A dirty file stays `Used` and a reclaim candidate (a later call redoes it) but `pin_read` refuses it, so guest reads take
+  the map (the file is below a cut, so `write_seq <= durable_cut`).
+* **L2 (tests).** The powerless stress test is dropped. The reuse case is deterministic with two lanes (below). The 300 ms sleep is
+  replaced by a drain hook that fires when reclaim starts waiting.
+* **L3.** The `read_gap_hook` mutex is behind an `AtomicBool` (one relaxed-cost load per window miss). `RingFile::unpin_read` is a
+  real method used at all four release sites (debug-asserts against underflow) and the doc link is right.
+  **Not done as asked: stamping `cut_alive` during the wait.** The journal crate cannot reach the engine's progress state without
+  an `lunix-iface` change. Instead the limit is lowered to 2 s per call and the timeout path costs the coordinator at most that
+  once per call; a drain timeout frees no file, which the engine already counts as "no ring progress", and a read stuck for
+  2 s is a stuck queue thread. A `full_timeout` of 1 ms is allowed by the policy code, so no limit can be "below the smallest
+  `full_timeout`"; if the lead wants the stamp, it needs a provided method on `Journal` (not done: interfaces are frozen).
+
+### Tests (`crates/lunix-journal/tests/jread.rs`, 7 tests) and fail-without-the-rule evidence
+
+Each row: the rule removed alone, on the remote.
+
+| rule removed | tests that fail |
+|---|---|
+| original behaviour (no pin, file of the first lookup used) | gap test, cross-lane reuse test, reinit-failure test |
+| `Recycling` accepted by `pin_read` (M1) | `a_file_that_turns_recycling_in_the_gap_is_refused_at_the_pin` only |
+| `dirty` ignored by `pin_read` (L1) | `a_file_whose_reinit_failed_is_refused_to_reads_until_it_is_redone` only |
+| the drain wait removed | `reclaim_waits_for_a_queued_read...` (the drain hook never fires) and the timeout test |
+| a timeout aborts the whole call (old behaviour) | `a_drain_timeout_leaves_the_other_lanes_reclaimed...` only |
+| a failed submit completes with an error and frees the id (old behaviour) | `a_failed_submit_of_a_queued_read_does_not_recycle_its_id` only |
+
+* M1: `a_file_that_turns_recycling_in_the_gap_is_refused_at_the_pin`: the read gap hook starts a reclaim of two files on a
+  thread whose free hook blocks after the first, so the second is `Recycling` when the read pins; the first lookup (which also
+  refuses `Recycling`) had already passed. A plain read of a `Recycling` file is refused by `find_in_use` and cannot reach the
+  pin, which is why the earlier version of this test (read while blocked in the free hook) passed with the pin arm removed.
+* M2: two lanes, a read queued on lane 0's first file and never polled, a 300 ms limit: the call errors within the limit,
+  lane 1's files are freed in the same call, lane 0's file stays and reads right (`read_at`), lane 1 can append, the read is
+  then polled (right bytes) and a second call frees lane 0's file. The wake of a lane's parked writes is `wake_lane` right
+  after each freed file, unchanged and not asserted here (the wake fd belongs to the lane object); the lane-1 append and freed
+  counters show the files are usable.
+* M3: the submit of the first read is injected to fail (`fail_next_read_submit`), a second read follows at once; both complete
+  OK with the right bytes.
+* L1: `fail_nth_reclaim_file(1)` makes the first reinit fail; the read of that file is refused, the retry frees it.
+* L2: `a_cross_lane_read_of_a_file_reclaimed_and_reused_in_the_gap_is_refused`: lane 1 reads a record of lane 0's file; the gap
+  hook reclaims it and lane 0 (another object) appends until it rolls into a freed file; the read must be refused. With the
+  original behaviour it returns the success of the reused file.
+* The drain-wait test now waits on the hook instead of sleeping.
+
+`stack_jread` is unchanged and still fails without the fix.
+
+### Gates (review round)
+
+* `tools/ci.sh` on the remote, final tree: green (`jread ok`, `ci: all green`), 2 192 tests passed, 0 failed, 28 ignored. (A first
+  run of this round failed only `cargo fmt --check` on my new test file; formatted with `tools/remote.sh fmt`, the run above is the next.)
+* Kill loops one after the other (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`, release, `-j 8`):
+
+| loop | points | reached | runs / kills | partial cuts | kills inside a partial cut | result |
+|---|---|---|---|---|---|---|
+| plain 16 KiB | 55 | 52 | 54 / 54 | 10 | 40 of 41 points | ok (1 694 s) |
+| integrity 16 KiB | 55 | 52 | 57 / 57 | 10 | 40 of 41 | ok (1 989 s) |
+
+  (The ssh session timed out near the end of the second loop; the test process finished on the host and its log shows `ok`.)
+* Remote disk: the debug target was removed before the loops; the milestone directory peaked at 2.3 GiB after that
+  (about 10 GiB during the ci.sh run, debug plus release targets).
