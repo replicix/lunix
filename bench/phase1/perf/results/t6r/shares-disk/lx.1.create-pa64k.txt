@@ -1,0 +1,4 @@
+created volume pa64k (integrity, uuid 44c5d109-8d7b-45b6-a72a-4716833e489e)
+directory        $SCRATCH/m16-parta-vols/44c5d109-8d7b-45b6-a72a-4716833e489e
+key file         $SCRATCH/m16-parta-vols/44c5d109-8d7b-45b6-a72a-4716833e489e/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

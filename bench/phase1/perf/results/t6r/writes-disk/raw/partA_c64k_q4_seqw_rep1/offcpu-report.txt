@@ -1,0 +1,150 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 8K of event 'sched:sched_switch'
+# Event count (approx.): 8486
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    86.55%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --86.52%--schedule
+                          |          
+                          |--43.47%--io_schedule
+                          |          |          
+                          |          |--24.29%--folio_wait_bit_common
+                          |          |          |          
+                          |          |          |--14.88%--folio_wait_writeback
+                          |          |          |          __filemap_fdatawait_range
+                          |          |          |          filemap_fdatawait_range
+                          |          |          |          |          
+                          |          |          |           --14.82%--btrfs_wait_ordered_range
+                          |          |          |                     btrfs_sync_file
+                          |          |          |                     do_fsync
+                          |          |          |                     |          
+                          |          |          |                     |--11.96%--__x64_sys_fdatasync
+                          |          |          |                     |          __syscall_cancel_arch
+                          |          |          |                     |          fdatasync
+                          |          |          |                     |          |          
+                          |          |          |                     |           --7.35%--<std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+                          |          |          |                     |                     <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+                          |          |          |                     |                     std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+                          |          |          |                     |                     <std::sys::fs::unix::File>::datasync (inlined)
+                          |          |          |                     |                     <std::fs::File>::sync_data
+                          |          |          |                     |                     <lunix_store::container::ContainerWriter>::seal
+                          |          |          |                     |                     |          
+                          |          |          |                     |                     |--0.90%--0x1007f7d
+                          |          |          |                     |                     |          
+                          |          |          |                     |                      --0.51%--0x1007f8b
+                          |          |          |                     |          
+                          |          |          |                      --2.86%--__x64_sys_fsync
+                          |          |          |                                __syscall_cancel_arch
+                          |          |          |                                fsync
+                          |          |          |                                |          
+                          |          |          |                                 --2.76%--<std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+                          |          |          |                                           <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+                          |          |          |                                           std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+                          |          |          |                                           <std::sys::fs::unix::File>::fsync (inlined)
+                          |          |          |                                           <std::fs::File>::sync_all
+                          |          |          |                                           |          
+                          |          |          |                                            --2.73%--lunix_index::write_synced
+                          |          |          |          
+                          |          |          |--6.59%--write_all_supers
+                          |          |          |          btrfs_sync_log
+                          |          |          |          btrfs_sync_file
+                          |          |          |          do_fsync
+                          |          |          |          |          
+                          |          |          |          |--5.92%--__x64_sys_fsync
+                          |          |          |          |          do_syscall_64
+                          |          |          |          |          entry_SYSCALL_64_after_hwframe
+                          |          |          |          |          __syscall_cancel_arch
+                          |          |          |          |          fsync
+                          |          |          |          |          |          
+                          |          |          |          |           --5.22%--<std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+                          |          |          |          |                     <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+                          |          |          |          |                     std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+                          |          |          |          |                     <std::sys::fs::unix::File>::fsync (inlined)
+                          |          |          |          |                     <std::fs::File>::sync_all
+                          |          |          |          |                     |          
+                          |          |          |          |                     |--2.73%--lunix_index::write_synced
+                          |          |          |          |                     |          
+                          |          |          |          |                     |--1.39%--lunix_index::run::sync_dir
+                          |          |          |          |                     |          |          
+                          |          |          |          |                     |          |--0.67%--<lunix_index::LsmIndex as lunix_iface::index::ChunkIndex>::unmark_condemned
+                          |          |          |          |                     |          |          
+                          |          |          |          |                     |           --0.67%--<lunix_index::LsmIndex>::drop_locked
+                          |          |          |          |                     |          
+                          |          |          |          |                      --1.03%--<lunix_store::fsops::RealFs as lunix_store::fsops::FsOps>::fsync_dir
+                          |          |          |          |                                |          
+                          |          |          |          |                                 --0.75%--lunix_store::fsops::unlink_with
+                          |          |          |          |                                           |          
+                          |          |          |          |                                            --0.67%--lunix_store::fsops::unlink_segment_durable (inlined)
+                          |          |          |          |                                                      <lunix_store::volume::Inner>::delete_container_as
+                          |          |          |          |          
+                          |          |          |           --0.67%--__x64_sys_fdatasync
+                          |          |          |                     do_syscall_64
+                          |          |          |                     entry_SYSCALL_64_after_hwframe
+                          |          |          |                     __syscall_cancel_arch
+                          |          |          |                     fdatasync
+                          |          |          |          
+                          |          |           --2.82%--extent_write_cache_pages
+                          |          |                     btrfs_writepages
+                          |          |                     do_writepages
+                          |          |                     filemap_writeback
+                          |          |                     btrfs_fdatawrite_range
+                          |          |                     start_ordered_ops.constprop.0
+                          |          |                     btrfs_sync_file
+                          |          |                     __syscall_cancel_arch
+                          |          |                     |          
+                          |          |                      --2.80%--fsync
+                          |          |                                |          
+                          |          |                                 --2.73%--<std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+                          |          |                                           <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+                          |          |                                           std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+                          |          |                                           <std::sys::fs::unix::File>::fsync (inlined)
+                          |          |                                           <std::fs::File>::sync_all
+                          |          |                                           lunix_index::write_synced
+                          |          |          
+                          |           --18.55%--bit_wait_io
+                          |                     __wait_on_bit
+                          |                     out_of_line_wait_on_bit
+                          |                     btrfs_btree_wait_writeback_range
+                          |                     __btrfs_wait_marked_extents
+                          |                     btrfs_wait_tree_log_extents
+                          |                     btrfs_sync_log
+                          |                     btrfs_sync_file
+                          |                     __syscall_cancel_arch
+                          |                     |          
+                          |                     |--15.83%--fsync
+                          |                     |          |          
+                          |                     |           --13.88%--<std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+                          |                     |                     <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+                          |                     |                     std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+                          |                     |                     <std::sys::fs::unix::File>::fsync (inlined)
+                          |                     |                     <std::fs::File>::sync_all
+                          |                     |                     |          
+                          |                     |                     |--5.99%--lunix_index::write_synced
+                          |                     |                     |          
+                          |                     |                     |--4.95%--lunix_index::run::sync_dir
+                          |                     |                     |          |          
+                          |                     |                     |          |--2.40%--<lunix_index::LsmIndex as lunix_iface::index::ChunkIndex>::unmark_condemned
+                          |                     |                     |          |          
+                          |                     |                     |           --2.29%--<lunix_index::LsmIndex>::drop_locked
+                          |                     |                     |          
+                          |                     |                      --2.75%--<lunix_store::fsops::RealFs as lunix_store::fsops::FsOps>::fsync_dir
+                          |                     |                                |          
+                          |                     |                                |--1.77%--lunix_store::fsops::unlink_with
+                          |                     |                                |          |          
+                          |                     |                                |           --1.69%--lunix_store::fsops::unlink_segment_durable (inlined)
+                          |                     |                                |                     <lunix_store::volume::Inner>::delete_container_as
+                          |                     |                                |          
+                          |                     |                                 --0.84%--<lunix_store::container::ContainerWriter>::seal
+                          |                     |          
+                          |                      --2.72%--fdatasync
+                          |                                |          

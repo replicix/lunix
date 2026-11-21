@@ -1,0 +1,142 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 115K of event 'sched:sched_switch'
+# Event count (approx.): 115733
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    80.27%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --80.26%--schedule
+                          |          
+                          |--79.45%--futex_do_wait
+                          |          __futex_wait
+                          |          futex_wait
+                          |          do_futex
+                          |          __x64_sys_futex
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |          |--78.78%--syscall
+                          |          |          |          
+                          |          |           --9.50%--std::sys::pal::unix::futex::futex_wait (inlined)
+                          |          |                     |          
+                          |          |                     |--8.90%--<std::sys::sync::condvar::futex::Condvar>::wait_optional_timeout
+                          |          |                     |          |          
+                          |          |                     |           --8.90%--<std::sync::poison::condvar::Condvar>::wait_timeout::<lunix_destage::pipeline::PoolState> (inlined)
+                          |          |                     |                     |          
+                          |          |                     |                      --8.89%--<lunix_destage::pipeline::Pool>::run_worker
+                          |          |                     |          
+                          |          |                      --0.60%--<std::sys::sync::mutex::futex::Mutex>::lock_contended
+                          |          |                                <std::sys::sync::mutex::futex::Mutex>::lock (inlined)
+                          |          |                                |          
+                          |          |                                 --0.50%--<std::sys::sync::condvar::futex::Condvar>::wait_optional_timeout
+                          |          |                                           <std::sync::poison::condvar::Condvar>::wait_timeout::<lunix_destage::pipeline::PoolState> (inlined)
+                          |          |                                           |          
+                          |          |                                            --0.50%--<lunix_destage::pipeline::Pool>::run_worker
+                          |          |          
+                          |           --0.67%--__lll_lock_wait_private
+                          |          
+                           --0.52%--exit_to_user_mode_loop
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+
+     5.47%  lunix-space-tim  [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               |          
+                --5.46%--futex_do_wait
+                          __futex_wait
+                          futex_wait
+                          do_futex
+                          __x64_sys_futex
+                          do_syscall_64
+                          entry_SYSCALL_64_after_hwframe
+                          syscall
+
+     4.63%  lunix-q3         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --4.62%--schedule
+                          |          
+                          |--3.74%--io_cqring_wait
+                          |          __do_sys_io_uring_enter
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          syscall
+                          |          
+                           --0.85%--exit_to_user_mode_loop
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --0.83%--syscall
+
+     4.12%  lunix-q2         [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               |          
+                --4.11%--schedule
+                          |          
+                          |--3.25%--io_cqring_wait
+                          |          __do_sys_io_uring_enter
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          syscall
+                          |          
+                           --0.84%--exit_to_user_mode_loop
+                                     do_syscall_64
+                                     entry_SYSCALL_64_after_hwframe
+                                     |          
+                                      --0.83%--syscall
+
+     2.74%  iou-wrk-306087   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     2.60%  iou-wrk-306086   [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __traceiter_sched_switch
+               __schedule
+               schedule
+               schedule_timeout
+               io_wq_worker
+               ret_from_fork
+               ret_from_fork_asm
+
+     0.06%  lunixd-ctl       [k] perf_trace_sched_switch
+     0.05%  lunix-ring-time  [k] perf_trace_sched_switch
+     0.02%  lunix-q0         [k] perf_trace_sched_switch
+     0.02%  lunix-q1         [k] perf_trace_sched_switch
+     0.01%  lunixd           [k] perf_trace_sched_switch
+     0.00%  lunixd-call      [k] perf_trace_sched_switch
+     0.00%  lunixd-trim      [k] perf_trace_sched_switch
+     0.00%  iou-wrk-306067   [k] perf_trace_sched_switch
+
+
+#
+# (Tip: To compare scalability of two workload samples use perf diff -c ratio file1 file2)
+#
