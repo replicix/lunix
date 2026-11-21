@@ -95,6 +95,7 @@ impl FileJournal {
             reclaim_hook: Mutex::new(None),
             free_hook: Mutex::new(None),
             fail_reclaim_nth: std::sync::atomic::AtomicU32::new(0),
+            freed: (0..lanes).map(|_| AtomicU64::new(0)).collect(),
         });
         let worker = Arc::clone(&sh);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
@@ -121,6 +122,42 @@ impl FileJournal {
     /// stack (locked as touched) and its mark buffer.
     pub fn locked_bytes(&self) -> u64 {
         self.sh.locked.load(Ordering::Acquire)
+    }
+
+    /// How many ring files (of the lanes and of the mark ring) were
+    /// re-initialised so far by `FALLOC_FL_ZERO_RANGE` and by rewriting
+    /// zeros: `(range, rewrite)`.
+    pub fn reinit_counts(&self) -> (u64, u64) {
+        let r = &self.sh.rings;
+        (
+            r.zeroed_by_range.load(Ordering::Relaxed),
+            r.zeroed_by_rewrite.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Test hook: `FALLOC_FL_ZERO_RANGE` calls fail with this errno (`None`:
+    /// they do not), and how many were made so far.
+    #[doc(hidden)]
+    pub fn inject_zero_range_errno(&self, errno: Option<i32>) {
+        self.sh
+            .rings
+            .zero_inject_errno
+            .store(errno.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The errnos `FALLOC_FL_ZERO_RANGE` failed with so far (each once).
+    #[doc(hidden)]
+    pub fn zero_range_errnos(&self) -> Vec<i32> {
+        crate::ring::lock(&self.sh.rings.zero_logged)
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    /// `FALLOC_FL_ZERO_RANGE` calls made so far (failed ones included).
+    #[doc(hidden)]
+    pub fn zero_range_attempts(&self) -> u64 {
+        self.sh.rings.zero_attempts.load(Ordering::Relaxed)
     }
 
     /// Test hook: the next `append` on `lane` fails with an I/O error after
@@ -586,6 +623,10 @@ impl Journal for FileJournal {
                         if ring.kind == RingKind::Queue {
                             report.files += 1;
                             report.bytes += job.bytes;
+                            // Counted before the lane can see the file.
+                            if let Some(n) = self.sh.freed.get(usize::from(ring.lane)) {
+                                n.fetch_add(1, Ordering::Release);
+                            }
                             let hook = lock(&self.sh.free_hook).clone();
                             if let Some(h) = hook {
                                 h(ring.lane, report.files);
@@ -626,6 +667,14 @@ impl Journal for FileJournal {
             self.sh.coord.cv.notify_all();
         }
         Ok(report)
+    }
+
+    fn freed_files_by_lane(&self) -> Vec<u64> {
+        self.sh
+            .freed
+            .iter()
+            .map(|n| n.load(Ordering::Acquire))
+            .collect()
     }
 
     fn cut_freeing_file(&self) -> Option<WriteSeq> {

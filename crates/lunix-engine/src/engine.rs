@@ -210,6 +210,8 @@ pub(crate) struct Inner {
     pub(crate) jcharges: JournalCharges,
     /// Ring waits and the last cut (ADR-33), read without the coordinator.
     pub(crate) cuts: crate::cut::CutCounters,
+    /// Arrival-to-acknowledgement time of the writes (milestone jstall).
+    pub(crate) latency: crate::cut::LatencyHist,
     /// The last background tick committed: the next one follows at once while
     /// the ring is above the fill trigger (`coordinator_wait`).
     pub(crate) back_to_back: AtomicBool,
@@ -335,7 +337,7 @@ impl Inner {
 }
 
 /// The stop flag of the background coordinator and its thread.
-type Background = (Arc<(Mutex<bool>, Condvar)>, JoinHandle<()>);
+type Background = (Arc<(Mutex<bool>, Condvar)>, Vec<JoinHandle<()>>);
 
 /// The block engine of one volume.
 pub struct Engine {
@@ -437,9 +439,15 @@ impl Engine {
             throttle_watch: Mutex::new(crate::pressure::ThrottleWatch::default()),
             resize_hook: Mutex::new(None),
             report: rec.report,
-            full: FullState::new(cfg.full_timeout, rec.tip.common.commit_seq.0, rec.last_hole),
+            full: FullState::new(
+                cfg.full_timeout,
+                rec.tip.common.commit_seq.0,
+                rec.last_hole,
+                lanes,
+            ),
             jcharges: JournalCharges::new(lanes, rec.journal_charges),
             cuts: crate::cut::CutCounters::default(),
+            latency: crate::cut::LatencyHist::new(lanes),
             back_to_back: AtomicBool::new(false),
             coord_waiters: AtomicU64::new(0),
             cfg,
@@ -478,10 +486,6 @@ impl Engine {
                 let Some(inner) = weak.upgrade() else {
                     return;
                 };
-                // Writes parked for a full ring see their deadline, or the
-                // stopped engine, without new I/O (ADR-32); only the queues
-                // that hold one are woken.
-                inner.signal_ring_parked();
                 if inner.is_failed() {
                     // No more steps: back to the plain period.
                     inner.gc_busy.store(false, Ordering::Release);
@@ -490,7 +494,34 @@ impl Engine {
                 inner.background_tick();
             })
             .expect("spawn the coordinator thread");
-        *lock(&self.bg) = Some((stop, handle));
+        // The ring timer (milestone jstall): writes parked for a full ring
+        // see their deadline, or a stopped engine, on a clock of their own.
+        // The coordinator thread cannot do it: it sits inside a cut, holding
+        // the coordinator, for as long as the cut lasts (a stall of 30 s was
+        // seen), which is exactly when writes are parked. The timer takes no
+        // lock but the queue list's and only wakes the queues that hold a
+        // parked write, each of which judges all of its own.
+        let weak = Arc::downgrade(&self.inner);
+        let s = Arc::clone(&stop);
+        let watch = std::thread::Builder::new()
+            .name("lunix-ring-timer".into())
+            .spawn(move || loop {
+                {
+                    let g = lock(&s.0);
+                    let (g, _) =
+                        s.1.wait_timeout(g, period)
+                            .unwrap_or_else(|p| p.into_inner());
+                    if *g {
+                        return;
+                    }
+                }
+                let Some(inner) = weak.upgrade() else {
+                    return;
+                };
+                inner.signal_ring_parked();
+            })
+            .expect("spawn the ring timer thread");
+        *lock(&self.bg) = Some((stop, vec![handle, watch]));
     }
 
     /// What startup recovery found.
@@ -555,7 +586,25 @@ impl Engine {
     /// The write path's counters (ADR-33): ring waits and the last cut. Reads
     /// atomics only, never the coordinator's mutex.
     pub fn cut_stats(&self) -> crate::cut::CutStats {
-        self.inner.cuts.snapshot()
+        self.inner.cuts.snapshot(self.inner.clock.monotonic())
+    }
+
+    /// The ring files freed by lane and the write latency histogram
+    /// (milestone jstall). Reads atomics and the journal's counters; takes no
+    /// coordinator lock.
+    pub fn write_stats(&self) -> crate::cut::WriteStats {
+        crate::cut::WriteStats {
+            freed_files_by_lane: self.inner.journal.freed_files_by_lane(),
+            write_latency_log2_us: self.inner.latency.snapshot(),
+        }
+    }
+
+    /// One tick of the ring timer thread: wakes the queues that hold a write
+    /// parked for the ring, so each judges its parked writes against their
+    /// deadlines. For tests without the thread.
+    #[doc(hidden)]
+    pub fn ring_timer_tick(&self) {
+        self.inner.signal_ring_parked();
     }
 
     /// Checks the commit triggers (`T`, `B`, journal fill, a full ring,
@@ -664,10 +713,12 @@ impl Engine {
     }
 
     fn stop_threads(&self) {
-        if let Some((stop, h)) = lock(&self.bg).take() {
+        if let Some((stop, handles)) = lock(&self.bg).take() {
             *lock(&stop.0) = true;
             stop.1.notify_all();
-            let _ = h.join();
+            for h in handles {
+                let _ = h.join();
+            }
         }
         self.inner.pool.shutdown();
     }

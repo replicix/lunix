@@ -833,17 +833,48 @@ pub struct RollbackFloorView {
     pub tip_hash: String,
 }
 
-/// The write path's counters in `volume_status` (ADR-33). All start at the
-/// attach; the waits and the window's bytes are read without the
-/// coordinator's mutex, so they answer while a commit runs. All 0 when the
-/// volume is not attached.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// Buckets of [`WritePathStatus::write_latency_log2_us`].
+pub const WRITE_LATENCY_BUCKETS: usize = 32;
+
+/// The write path's counters in `volume_status` (ADR-33, milestone jstall).
+/// All start at the attach; they are read without the coordinator's mutex, so
+/// they answer while a commit runs. All 0 (the lists empty) when the volume
+/// is not attached.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WritePathStatus {
-    /// Writes parked now because the journal ring has no free file.
+    /// Writes waiting now because the journal ring has no free file: the ones
+    /// that were refused a ring slot (at most one per queue, the front of its
+    /// FIFO, plus a small write that overtook).
     pub ring_waiters: u64,
-    /// The longest a write has waited for the ring (one still waiting
-    /// included), milliseconds.
-    pub ring_wait_longest_ms: u64,
+    /// Every write parked now in a queue that is waiting for the ring: the
+    /// waiters and the writes (and holes) queued behind them.
+    pub ring_parked_writes: u64,
+    /// The longest any write has waited for the ring since the attach, from
+    /// the ring's first refusal to its admission or failure (the time in the
+    /// space gate before it is not in it; one still waiting included, as of
+    /// the last time it was judged), milliseconds.
+    pub ring_wait_max_since_attach_ms: u64,
+    /// The same over the last 60 s (five-second steps).
+    pub ring_wait_max_60s_ms: u64,
+    /// Ring files freed so far, by lane number.
+    pub freed_files_by_lane: Vec<u64>,
+    /// Writes by arrival-to-acknowledgement time inside the daemon: bucket
+    /// `b` counts the writes that took `2^(b-1) <= t < 2^b` microseconds
+    /// (bucket 0: under 1 us; the last bucket takes everything longer).
+    /// [`WRITE_LATENCY_BUCKETS`] entries.
+    pub write_latency_log2_us: Vec<u64>,
+    /// The rate the gate paces the admission of writes to now because the ring
+    /// is nearly full, bytes per second (0: no pace applied, also with the
+    /// band off).
+    pub ring_pace_rate: u64,
+    /// Writes the ring pace delayed in the gate (the space throttle's own
+    /// figures are in `throttle`), their summed wait, the longest wait, those
+    /// admitted by the delay cap and the FUA writes let through.
+    pub ring_paced_writes: u64,
+    pub ring_paced_ms: u64,
+    pub ring_pace_max_ms: u64,
+    pub ring_pace_capped: u64,
+    pub ring_pace_bypassed_fua: u64,
     /// Bytes of the resident journal window now (what the journal keeps in
     /// memory of what it wrote until the ring file is reclaimed).
     pub window_resident_bytes: u64,

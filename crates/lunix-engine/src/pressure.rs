@@ -34,6 +34,34 @@ pub const LOG_COALESCE: Duration = Duration::from_secs(5);
 /// How often a throttled volume logs a status line.
 pub const LOG_PERIOD: Duration = Duration::from_secs(30);
 
+/// The compaction rate while writes wait for the journal ring, as a divisor
+/// of the configured rate (milestone jstall).
+pub const YIELD_RATE_DIVISOR: u64 = 8;
+
+/// The least compaction rate while writes wait for the ring: the collector
+/// is slowed, never stopped (a rate of 0 stays 0).
+pub const YIELD_RATE_FLOOR: u64 = 4 << 20;
+
+/// The collector's settings while it yields the device to the cuts: the
+/// compaction rate is an eighth of the configured one, at least 4 MiB/s and
+/// never above the configured rate; 0 (no compaction) stays 0.
+#[must_use]
+pub fn yielding(base: GcParams) -> GcParams {
+    let rate = base.rate_bytes_per_s;
+    GcParams {
+        rate_bytes_per_s: if rate == 0 {
+            0
+        } else {
+            rate.min((rate / YIELD_RATE_DIVISOR).max(YIELD_RATE_FLOOR))
+        },
+        ..base
+    }
+}
+
+/// How long the collector keeps yielding after the last write that waited
+/// for the ring, milliseconds (milestone jstall: no flip-flop of the rate).
+pub const YIELD_HOLD_MS: u64 = 2_000;
+
 /// What the collector is getting.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum Pressure {
@@ -339,9 +367,34 @@ impl Inner {
     /// The collector's settings now.
     pub(crate) fn gc_params_now(&self) -> Option<GcParams> {
         self.cfg.gc_params.map(|p| {
-            self.pressure_now()
-                .params(p, self.cfg.gc_pressure_rate_factor)
+            let p = self
+                .pressure_now()
+                .params(p, self.cfg.gc_pressure_rate_factor);
+            if self.gc_yields_to_ring() {
+                yielding(p)
+            } else {
+                p
+            }
         })
+    }
+
+    /// True while the collector yields the device to the cuts: a write waits
+    /// for the journal ring and the space gate applies no pressure (milestone
+    /// jstall; under pressure the volume needs the collector more).
+    pub(crate) fn gc_yields_to_ring(&self) -> bool {
+        if self.pressure_now() != Pressure::Normal {
+            return false;
+        }
+        let now = u64::try_from(self.clock.monotonic().as_millis()).unwrap_or(u64::MAX);
+        if self.cuts.ring_waiters.load(Ordering::Relaxed) > 0 {
+            // The switch holds for `YIELD_HOLD` after the last waiter, so the
+            // compaction rate does not flip between two steps.
+            self.cuts
+                .yield_until_ms
+                .store(now.saturating_add(YIELD_HOLD_MS), Ordering::Relaxed);
+            return true;
+        }
+        now < self.cuts.yield_until_ms.load(Ordering::Relaxed)
     }
 
     /// Reads the gate at a tick: sets the collector's pressure and writes
@@ -468,6 +521,37 @@ mod tests {
             chunk_size: 65536,
             id_len: IdLen::Sixteen,
         }
+    }
+
+    #[test]
+    fn a_yielding_collector_compacts_at_an_eighth_of_its_rate_never_below_the_floor() {
+        let y = yielding(params());
+        assert_eq!(y.rate_bytes_per_s, 8 << 20, "an eighth of 64 MiB/s");
+        // The floor: an eighth of 16 MiB/s would be 2 MiB/s.
+        let low = GcParams {
+            rate_bytes_per_s: 16 << 20,
+            ..params()
+        };
+        assert_eq!(yielding(low).rate_bytes_per_s, YIELD_RATE_FLOOR);
+        // Never above what the volume configured.
+        let slow = GcParams {
+            rate_bytes_per_s: 1 << 20,
+            ..params()
+        };
+        assert_eq!(yielding(slow).rate_bytes_per_s, 1 << 20);
+        // No compaction stays none; nothing else changes.
+        let none = GcParams {
+            rate_bytes_per_s: 0,
+            ..params()
+        };
+        assert_eq!(yielding(none).rate_bytes_per_s, 0);
+        assert_eq!(
+            GcParams {
+                rate_bytes_per_s: 64 << 20,
+                ..y
+            },
+            params()
+        );
     }
 
     #[test]

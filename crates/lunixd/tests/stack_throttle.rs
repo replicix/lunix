@@ -53,6 +53,7 @@ use lunix_iface::block::{
 };
 use lunix_iface::gc::GcControl;
 use lunix_iface::space::SpaceGate;
+use lunix_store::{FsOps, RealFs};
 use lunixd::stack::{OpenParams, VolumeStack};
 use lunixd::testsupport::{close, fsck, fsck_binary, payload, Scratch, TestVolume, VolumeBuilder};
 
@@ -946,6 +947,155 @@ fn with_the_band_off_the_volume_is_never_paced() {
     }
     q.wait_all(Duration::from_secs(20));
     assert_eq!(stack.engine.gc_pressure(), lunix_engine::Pressure::Normal);
+    drop(q);
+    close(stack).expect("close");
+}
+
+// ------------------------------------------------------------------ ring pace
+//
+// Milestone jstall (T6): sustained ingest on a small ring with a slow drain,
+// on the real gate and engine. The coordinator hands the gate the drain rate
+// of its cuts while the ring is nearly full or a write waited for it; writes
+// see a short pace instead of the stop of two cuts. Nothing may fail with
+// `EIO`, the pace must engage and be counted apart from the space throttle,
+// and the longest completion stays near two cut durations plus the delay cap.
+
+/// The host file system with a slow `fdatasync` and directory sync: every
+/// seal and every commit object takes real time, so a cut is seconds long.
+#[derive(Debug)]
+struct SlowFs {
+    delay: Duration,
+}
+
+impl FsOps for SlowFs {
+    fn fdatasync(&self, file: &std::fs::File) -> std::io::Result<()> {
+        std::thread::sleep(self.delay);
+        RealFs.fdatasync(file)
+    }
+
+    fn rename(
+        &self,
+        from: &std::path::Path,
+        to: &std::path::Path,
+        noreplace: bool,
+    ) -> std::io::Result<()> {
+        RealFs.rename(from, to, noreplace)
+    }
+
+    fn fsync_dir(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        std::thread::sleep(self.delay);
+        RealFs.fsync_dir(dir)
+    }
+
+    fn unlink(&self, path: &std::path::Path) -> std::io::Result<()> {
+        RealFs.unlink(path)
+    }
+}
+
+fn ring_pace_volume(t: &Scratch) -> TestVolume {
+    let mut b = VolumeBuilder::new(t.path())
+        .mode(CryptoMode::Integrity)
+        .chunk_size(CS)
+        .size_bytes(SIZE);
+    b.engine = Some(Arc::new(gc_tune));
+    b.json = Some(Box::new(|j: &mut VolumeJson| {
+        // A cap far from the store: no space pressure, only the ring.
+        j.space.cache_max = Some(1 << 30);
+        j.space.on_full = OnFull::Wait;
+        j.space.full_timeout_ms = Some(FULL_TIMEOUT_MS);
+        j.commit.interval_ms = 1000;
+        j.max_io_buf_bytes = IO;
+    }));
+    b.create().expect("create")
+}
+
+#[test]
+fn sustained_ingest_on_a_small_ring_with_a_slow_drain_is_paced_and_never_fails() {
+    let t = Scratch::new("ring-pace");
+    let vol = ring_pace_volume(&t);
+    let stack = vol
+        .open_with(|o| {
+            o.store_fs = Some(Arc::new(SlowFs {
+                delay: Duration::from_millis(150),
+            }));
+            // Four ring files of 4 MiB: 16 MiB of ring against 4 MiB of
+            // writes in flight.
+            o.journal_tweak = Some(Arc::new(|j: &mut lunix_journal::JournalConfig| {
+                j.file_len = 4 << 20;
+                j.journal_max = 16 << 20;
+            }));
+        })
+        .expect("open");
+    let mut q = Queue::new(&stack);
+    let run = Duration::from_secs(25);
+    let started = Instant::now();
+    let mut sent: HashMap<Tag, Instant> = HashMap::new();
+    let (mut seed, mut writes, mut longest) = (1u64, 0u64, Duration::ZERO);
+    let (mut max_rate, mut max_cut_ms, mut max_waiters) = (0u64, 0u64, 0u64);
+    let mut last_sample = Instant::now();
+    loop {
+        let running = started.elapsed() < run;
+        // 16 writes of 256 KiB in flight, over a 32 MiB region.
+        while running && sent.len() < 16 {
+            let off = (seed % 128) * u64::from(IO);
+            let tag = q.write(off, seed);
+            sent.insert(tag, Instant::now());
+            seed += 1;
+        }
+        q.poll();
+        let tags: Vec<Tag> = sent.keys().copied().collect();
+        for tag in tags {
+            if let Some(st) = q.take(tag) {
+                assert!(st.is_ok(), "a write failed after {writes}: {st:?}");
+                longest = longest.max(sent.remove(&tag).expect("sent").elapsed());
+                writes += 1;
+            }
+        }
+        if last_sample.elapsed() > Duration::from_millis(100) {
+            last_sample = Instant::now();
+            let snap = stack.space.snapshot();
+            max_rate = max_rate.max(snap.throttle.ring_pace_rate);
+            let cuts = stack.engine.cut_stats();
+            max_cut_ms = max_cut_ms.max(cuts.last_cut_ms);
+            max_waiters = max_waiters.max(cuts.ring_waiters);
+        }
+        if !running && sent.is_empty() {
+            break;
+        }
+        assert!(
+            started.elapsed() < run + Duration::from_secs(90),
+            "the writes did not drain: {} in flight",
+            sent.len()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let snap = stack.space.snapshot();
+    let cuts = stack.engine.cut_stats();
+    let ws = stack.engine.write_stats();
+    eprintln!(
+        "ring pace: {writes} writes, longest {longest:?}, max pace {max_rate} B/s, \
+         max cut {max_cut_ms} ms, max ring waiters {max_waiters}, {:?}, {cuts:?}, freed {:?}",
+        snap.throttle, ws.freed_files_by_lane
+    );
+    assert!(writes > 100, "the volume took {writes} writes");
+    assert!(max_rate > 0, "the ring pace never engaged");
+    assert!(
+        snap.throttle.ring_paced_writes > 0,
+        "no write was delayed by the ring pace: {:?}",
+        snap.throttle
+    );
+    assert_eq!(
+        snap.throttle.state,
+        lunix_iface::space::ThrottleState::Open,
+        "the space throttle is not in play"
+    );
+    assert!(ws.freed_files_by_lane.iter().sum::<u64>() > 0);
+    // Two cuts (the one in flight and the next) plus the delay cap.
+    let bound = Duration::from_millis(2 * max_cut_ms) + Duration::from_secs(10) + SLACK;
+    assert!(
+        longest <= bound,
+        "the longest completion {longest:?} is above {bound:?} (cut {max_cut_ms} ms)"
+    );
     drop(q);
     close(stack).expect("close");
 }

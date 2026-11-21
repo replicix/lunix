@@ -89,13 +89,12 @@ fn floor_recs(r: &Running, scale: u64) -> u64 {
 fn the_cut_follows_the_drain_rate_of_the_last_cuts() {
     let v = ring(1, 64);
     let mut r = v.open().map_err(|e| e.0).expect("open");
-    // No history: the rate bounds nothing, the half ring is far away.
+    // The history starts with a whole cut (an explicit commit takes everything
+    // and feeds it; the first bounded cut after an attach is one ring file,
+    // see `the_first_cut_after_an_attach_is_one_ring_file`).
     writes(&mut r, 0, 1200);
     cut_takes(&v, Duration::from_secs(2));
-    assert_eq!(
-        cut_seq(r.engine.commit_bounded(false).expect("cut 1")),
-        1200
-    );
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("cut 1")), 1200);
     // 1200 records in 2 s: a 1 s target moves 600.
     writes(&mut r, 1200, 2400);
     cut_takes(&v, Duration::from_millis(500));
@@ -149,7 +148,7 @@ fn a_cut_is_at_least_one_ring_file_of_bytes() {
     let mut r = v.open().map_err(|e| e.0).expect("open");
     writes(&mut r, 0, 500);
     cut_takes(&v, Duration::from_secs(1));
-    assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut 1")), 500);
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("cut 1")), 500);
     // 500 records in 1 s at 50 ms: 25 records, a file is 253.
     writes(&mut r, 500, 600);
     let want = 500 + floor_recs(&r, 1);
@@ -163,7 +162,7 @@ fn a_cut_is_at_least_one_ring_file_of_bytes() {
     let mut r = z.open().map_err(|e| e.0).expect("open");
     writes(&mut r, 0, 100);
     cut_takes(&z, Duration::from_secs(1));
-    assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut 1")), 100);
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("cut 1")), 100);
     writes(&mut r, 100, 600);
     let want = 100 + floor_recs(&r, 1);
     assert_eq!(
@@ -178,10 +177,7 @@ fn cuts_without_journal_bytes_do_not_dilute_the_drain_rate() {
     let mut r = v.open().map_err(|e| e.0).expect("open");
     writes(&mut r, 0, 1200);
     cut_takes(&v, Duration::from_secs(2));
-    assert_eq!(
-        cut_seq(r.engine.commit_bounded(false).expect("cut 1")),
-        1200
-    );
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("cut 1")), 1200);
     // Three forced FULLs with nothing to cut, each slow: no journal bytes,
     // so they are not in the history.
     cut_takes(&v, Duration::from_secs(10));
@@ -219,7 +215,7 @@ fn a_cut_is_never_less_than_what_frees_a_ring_file() {
     let mut r = v.open().map_err(|e| e.0).expect("open");
     writes(&mut r, 0, 10);
     cut_takes(&v, Duration::from_secs(100));
-    assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("seed")), 10);
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("seed")), 10);
     writes(&mut r, 10, 4 * 700);
     let floor = r.journal.cut_freeing_file().expect("a sealed file").0;
     assert!(floor > 10 + FILE_RECS + 100, "{floor}");
@@ -236,11 +232,14 @@ fn a_cut_is_never_less_than_what_frees_a_ring_file() {
 fn a_cut_is_never_more_than_half_the_ring() {
     let v = ring(1, 16);
     let mut r = v.open().map_err(|e| e.0).expect("open");
-    writes(&mut r, 0, 2200);
-    // No history: only the half ring bounds.
-    let want = ceiling(&r).div_ceil(REC);
-    assert!(want < 2200, "the ceiling binds: {want}");
+    // A history of a very fast drain (4 GB per microsecond): only the half
+    // ring bounds.
+    writes(&mut r, 0, 10);
     cut_takes(&v, Duration::from_micros(1));
+    assert_eq!(cut_seq(r.engine.commit_now(false).expect("seed")), 10);
+    writes(&mut r, 10, 2190);
+    let want = 10 + ceiling(&r).div_ceil(REC);
+    assert!(want < 2200, "the ceiling binds: {want}");
     assert_eq!(cut_seq(r.engine.commit_bounded(false).expect("cut")), want);
     // A fast drain (4 GB per microsecond) does not lift it.
     writes(&mut r, 2200, 2200);
@@ -253,12 +252,14 @@ fn a_cut_is_never_more_than_half_the_ring() {
 }
 
 #[test]
-fn the_first_cut_after_an_attach_over_a_full_ring_is_bounded_by_the_ceiling() {
+fn the_first_cut_after_an_attach_is_one_ring_file() {
     // No history after a restart: the ring holds what recovery replays and the
-    // first cut is half the ring, not everything. The journal's files hold
-    // half as many record bytes as their length (`fill_scale`, as the real
-    // journal's batch padding can make it), so half the ring is half of that
-    // in record bytes.
+    // first cut is one ring file of records (or what frees the oldest sealed
+    // file, when that is later), not half the ring (milestone jstall; T6
+    // section 1.1: a 256 MiB first cut parked every write behind it for
+    // 20 s and more). The journal's files hold half as many record bytes as
+    // their length (`fill_scale`, as the real journal's batch padding can make
+    // it), so a file's worth is half a file's length in record bytes.
     let mut v = ring(1, 16);
     let mut r = v.open().map_err(|e| e.0).expect("open");
     writes(&mut r, 0, 3800);
@@ -271,15 +272,18 @@ fn the_first_cut_after_an_attach_over_a_full_ring_is_bounded_by_the_ceiling() {
     let r = v.open().map_err(|e| e.0).expect("reopen");
     let held = r.engine.journal_charged();
     assert!(held >= 3700 * REC, "the records were recovered: {held}");
-    let f = r.journal.fill();
-    let want_bytes =
-        u128::from(f.capacity_bytes / 2) * u128::from(held) / u128::from(2 * f.used_bytes);
-    let want = u64::try_from(want_bytes).expect("fits").div_ceil(REC);
-    assert!(want < 1200, "half of the unscaled ceiling: {want}");
+    let sealed = r.journal.cut_freeing_file().map_or(0, |w| w.0);
+    let want = floor_recs(&r, 2).max(sealed);
+    assert!(
+        want < ceiling(&r).div_ceil(REC) / 2,
+        "far below the half ring: {want}"
+    );
     assert_eq!(
         cut_seq(r.engine.commit_bounded(false).expect("first cut")),
         want
     );
+    // The second cut has a history and follows the rate.
+    assert!(r.engine.cut_stats().last_cut_bytes > 0);
 }
 
 #[test]
@@ -502,7 +506,7 @@ fn ring_waiters_and_the_longest_wait_are_counted() {
     }
     let st = r.engine.cut_stats();
     assert_eq!(st.ring_waiters, 1);
-    assert!(st.ring_wait_longest_ms >= 3000, "{st:?}");
+    assert!(st.ring_wait_max_since_attach_ms >= 3000, "{st:?}");
     // The ring frees: the write is admitted, the waiter count goes, the
     // longest wait stays.
     r.journal.set_nospace(false);
@@ -510,7 +514,7 @@ fn ring_waiters_and_the_longest_wait_are_counted() {
     assert!(r.wait(&[t])[0].0.is_ok());
     let st = r.engine.cut_stats();
     assert_eq!(st.ring_waiters, 0);
-    assert!(st.ring_wait_longest_ms >= 3000, "{st:?}");
+    assert!(st.ring_wait_max_since_attach_ms >= 3000, "{st:?}");
     assert!(st.last_cut_bytes > 0);
 }
 
@@ -525,5 +529,5 @@ fn a_failed_ring_wait_leaves_the_waiter_count() {
     assert_eq!(r.wait(&[t])[0].0.errno(), Some(5));
     let st = r.engine.cut_stats();
     assert_eq!(st.ring_waiters, 0);
-    assert!(st.ring_wait_longest_ms >= 60_000, "{st:?}");
+    assert!(st.ring_wait_max_since_attach_ms >= 60_000, "{st:?}");
 }

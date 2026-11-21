@@ -199,6 +199,13 @@ pub(crate) struct Counters {
     pub admitted: u64,
     /// Bytes of store released (segments, packs, runs, commits, cache).
     pub freed: u64,
+    /// The ring pace's share of the delay figures (milestone jstall): the
+    /// requests that waited only because of it.
+    pub ring_delayed_writes: u64,
+    pub ring_delayed_ms: u64,
+    pub ring_delay_max_ms: u64,
+    pub ring_capped: u64,
+    pub ring_bypassed_fua: u64,
 }
 
 /// The state and its bookkeeping: when it was entered and the time spent
@@ -317,6 +324,11 @@ pub(crate) fn figures(
         throttled_ms: u64::try_from(clock.throttled(now).as_millis()).unwrap_or(u64::MAX),
         ingest_rate,
         reclaim_rate,
+        ring_paced_writes: c.ring_delayed_writes,
+        ring_paced_ms: c.ring_delayed_ms,
+        ring_pace_max_ms: c.ring_delay_max_ms,
+        ring_pace_capped: c.ring_capped,
+        ring_pace_bypassed_fua: c.ring_bypassed_fua,
         ..ThrottleFigures::default()
     }
 }
