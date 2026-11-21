@@ -1,0 +1,148 @@
+# M15 fio verify (2026-11-20T07:07:19Z, kernel 7.0.0, 16 cpus; 3 cells, profiles: 1:1 32:1 128:1 1:8 32:8 128:8, runtime 600 s)
+- script cap 19000 s: run through the wrapper with LUNIX_ROOT_TIMEOUT >= 19600
+
+## cell fio-verify/raw/c64k/integrity
+- PASS create volume v64rawintegrity (32 GiB, chunk 65536, integrity)
+- PASS attach v64rawintegrity (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 40 GiB, space used 39 GiB, gc {"state":null,"condemned_pending":1249,"last_pass":{"pass":24,"dry_run":false,"segments_condemned":466,"segments_deleted":602,"packs_deleted":64,"runs_deleted":
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 41 GiB, space used 41 GiB, gc {"state":"deleting","condemned_pending":1515,"last_pass":{"pass":35,"dry_run":false,"segments_condemned":481,"segments_deleted":703,"packs_deleted":80,"runs_del
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 44 GiB, space used 43 GiB, gc {"state":"condemning","condemned_pending":1565,"last_pass":{"pass":48,"dry_run":false,"segments_condemned":279,"segments_deleted":466,"packs_deleted":42,"runs_d
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 40 GiB, space used 40 GiB, gc {"state":"deleting","condemned_pending":978,"last_pass":{"pass":64,"dry_run":false,"segments_condemned":222,"segments_deleted":0,"packs_deleted":0,"runs_deleted
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 45 GiB, space used 44 GiB, gc {"state":"condemning","condemned_pending":975,"last_pass":{"pass":87,"dry_run":false,"segments_condemned":202,"segments_deleted":201,"packs_deleted":31,"runs_de
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/raw/c64k/integrity p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/raw/c64k/integrity p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 45 GiB, space used 45 GiB, gc {"state":null,"condemned_pending":514,"last_pass":{"pass":112,"dry_run":false,"segments_condemned":208,"segments_deleted":109,"packs_deleted":17,"runs_deleted":
+- PASS detach v64rawintegrity
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_raw_c64k_integrity-1]
+- PASS fio-verify/raw/c64k/integrity: attach again
+- PASS fio-verify/raw/c64k/integrity p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/raw/c64k/integrity: detach
+- PASS fio-verify/raw/c64k/integrity: lunix fsck --deep clean (exit 0)
+- PASS fio-verify/raw/c64k/integrity: the store directory stayed under cache_max + reserve + journal ring + 1 GiB (48070 MiB of 50944 MiB)
+- PASS fio-verify/raw/c64k/integrity: fio's longest completion 0 ms is under full_timeout (30000 ms)
+- PASS fio-verify/raw/c64k/integrity: no write returned ENOSPC
+- PASS fio-verify/raw/c64k/integrity: no hung-task line in the kernel log
+- PASS fio-verify/raw/c64k/integrity: the gate refused no reservation for space (enospc counter 0)
+- fio-verify/raw/c64k/integrity: throttled_ms 91100, delayed_writes 0, delay_max_ms 0, cache_max 48G
+
+## cell fio-verify/ext4/c64k/integrity
+- PASS create volume v64ext4integrity (32 GiB, chunk 65536, integrity)
+- PASS attach v64ext4integrity (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 42 GiB, space used 41 GiB, gc {"state":"condemning","condemned_pending":2163,"last_pass":{"pass":25,"dry_run":false,"segments_condemned":715,"segments_deleted":300,"packs_deleted":55,"runs_d
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 42 GiB, space used 41 GiB, gc {"state":"deleting","condemned_pending":1711,"last_pass":{"pass":38,"dry_run":false,"segments_condemned":592,"segments_deleted":461,"packs_deleted":54,"runs_del
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 41 GiB, space used 41 GiB, gc {"state":"deleting","condemned_pending":1237,"last_pass":{"pass":55,"dry_run":false,"segments_condemned":409,"segments_deleted":398,"packs_deleted":44,"runs_del
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 45 GiB, space used 44 GiB, gc {"state":"marking","condemned_pending":617,"last_pass":{"pass":82,"dry_run":false,"segments_condemned":107,"segments_deleted":212,"packs_deleted":23,"runs_delet
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 45 GiB, space used 44 GiB, gc {"state":"deleting","condemned_pending":408,"last_pass":{"pass":110,"dry_run":false,"segments_condemned":124,"segments_deleted":60,"packs_deleted":20,"runs_dele
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/ext4/c64k/integrity p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/ext4/c64k/integrity p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 47 GiB, space used 46 GiB, gc {"state":null,"condemned_pending":172,"last_pass":{"pass":136,"dry_run":false,"segments_condemned":55,"segments_deleted":37,"packs_deleted":5,"runs_deleted":9,"
+- PASS fio-verify/ext4/c64k/integrity: guest fsck clean after the runs
+- PASS detach v64ext4integrity
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_ext4_c64k_integrity-1]
+- PASS fio-verify/ext4/c64k/integrity: attach again
+- PASS fio-verify/ext4/c64k/integrity p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/ext4/c64k/integrity: guest fsck clean after verify_only
+- PASS fio-verify/ext4/c64k/integrity: detach
+- PASS fio-verify/ext4/c64k/integrity: lunix fsck --deep clean (exit 0)
+- PASS fio-verify/ext4/c64k/integrity: the store directory stayed under cache_max + reserve + journal ring + 1 GiB (48904 MiB of 50944 MiB)
+- PASS fio-verify/ext4/c64k/integrity: fio's longest completion 0 ms is under full_timeout (30000 ms)
+- PASS fio-verify/ext4/c64k/integrity: no write returned ENOSPC
+- PASS fio-verify/ext4/c64k/integrity: no hung-task line in the kernel log
+- PASS fio-verify/ext4/c64k/integrity: the gate refused no reservation for space (enospc counter 0)
+- fio-verify/ext4/c64k/integrity: throttled_ms 256061, delayed_writes 0, delay_max_ms 0, cache_max 48G
+
+## cell fio-verify/xfs/c64k/integrity
+- PASS create volume v64xfsintegrity (32 GiB, chunk 65536, integrity)
+- PASS attach v64xfsintegrity (4 queues)
+- device /dev/ublkb0
+- profile 0: QD 1, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 43 GiB, space used 42 GiB, gc {"state":"deleting","condemned_pending":2030,"last_pass":{"pass":26,"dry_run":false,"segments_condemned":445,"segments_deleted":441,"packs_deleted":77,"runs_del
+- profile 1: QD 32, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p1: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p1: trimcheck (discard, write-zeroes) rc 0
+- p1: store 46 GiB, space used 45 GiB, gc {"state":"condemning","condemned_pending":1904,"last_pass":{"pass":43,"dry_run":false,"segments_condemned":414,"segments_deleted":0,"packs_deleted":0,"runs_dele
+- profile 2: QD 128, 1 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p2: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p2: trimcheck (discard, write-zeroes) rc 0
+- p2: store 44 GiB, space used 43 GiB, gc {"state":"marking","condemned_pending":520,"last_pass":{"pass":62,"dry_run":false,"segments_condemned":420,"segments_deleted":411,"packs_deleted":34,"runs_delet
+- profile 3: QD 1, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p3: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p3: trimcheck (discard, write-zeroes) rc 0
+- p3: store 45 GiB, space used 44 GiB, gc {"state":"condemning","condemned_pending":480,"last_pass":{"pass":90,"dry_run":false,"segments_condemned":83,"segments_deleted":337,"packs_deleted":13,"runs_del
+- profile 4: QD 32, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p4: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p4: trimcheck (discard, write-zeroes) rc 0
+- p4: store 45 GiB, space used 45 GiB, gc {"state":null,"condemned_pending":220,"last_pass":{"pass":121,"dry_run":false,"segments_condemned":82,"segments_deleted":103,"packs_deleted":7,"runs_deleted":0,
+- profile 5: QD 128, 8 job(s), 4096 MiB, 600 s
+- PASS fio-verify/xfs/c64k/integrity p5: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c64k/integrity p5: trimcheck (discard, write-zeroes) rc 0
+- p5: store 47 GiB, space used 46 GiB, gc {"state":null,"condemned_pending":157,"last_pass":{"pass":149,"dry_run":false,"segments_condemned":52,"segments_deleted":50,"packs_deleted":4,"runs_deleted":9,"
+- PASS fio-verify/xfs/c64k/integrity: guest fsck clean after the runs
+- PASS detach v64xfsintegrity
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_xfs_c64k_integrity-1]
+- PASS fio-verify/xfs/c64k/integrity: attach again
+- PASS fio-verify/xfs/c64k/integrity p0: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity p1: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity p2: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity p3: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity p4: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity p5: verify_only after detach/attach: rc 0, errors 0
+- PASS fio-verify/xfs/c64k/integrity: guest fsck clean after verify_only
+- PASS fio-verify/xfs/c64k/integrity: detach
+- PASS fio-verify/xfs/c64k/integrity: lunix fsck --deep clean (exit 0)
+- PASS fio-verify/xfs/c64k/integrity: the store directory stayed under cache_max + reserve + journal ring + 1 GiB (48766 MiB of 50944 MiB)
+- PASS fio-verify/xfs/c64k/integrity: fio's longest completion 0 ms is under full_timeout (30000 ms)
+- PASS fio-verify/xfs/c64k/integrity: no write returned ENOSPC
+- PASS fio-verify/xfs/c64k/integrity: no hung-task line in the kernel log
+- PASS fio-verify/xfs/c64k/integrity: the gate refused no reservation for space (enospc counter 0)
+- fio-verify/xfs/c64k/integrity: throttled_ms 242995, delayed_writes 1, delay_max_ms 62, cache_max 48G
+
+## end
+- PASS every cell produced a result record (3 of 3)
+overall FAIL=0

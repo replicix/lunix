@@ -1,0 +1,32 @@
+# M15 full-volume cell (2026-11-20T23:51:51Z, kernel 7.0.0): cap 8G, working set 16 GiB, full_timeout 5s
+- PASS create volume fullv (32 GiB, chunk 65536, integrity)
+- PASS attach fullv (4 queues)
+- device /dev/ublkb0
+- PASS set cache_max 8G, on_full wait, full_timeout 5s
+- fill: fio rc 1, errors 1, longest write completion 5004 ms
+- PASS fio saw write errors (ENOSPC) once the cap was reached
+- PASS no write completed later than full_timeout + 5 s (5004 ms)
+- PASS the errors are ENOSPC
+- gate state after the fill: full
+- PASS the status shows the gate full (got full)
+- PASS no hung-task line after the fill
+- PASS blkdiscard of half the device (rc 0)
+- writes after the discard: ok=1 after 42 s
+- PASS writes came back within 90 s of the discard (42 s)
+- state with writes parked: slowdown, waiters 1
+- PASS writes are parked at the cap
+- PASS SIGTERM with writes parked: the daemon exited in 3s (quiesce_timeout_ms 30 s)
+- PASS wrote space.on_full = error to volume.json
+- fio after the restart: rc 1
+- PASS fio ended after the kill -9 and the restart with on_full = error
+- PASS the device answers after the restart (a write succeeds or fails with ENOSPC, rc 1)
+- PASS a read succeeds
+- PASS no hung-task line in the whole cell
+- store after the full discard: used 3355 MiB of 8192 MiB
+- ext4 on the full volume: dd rc 1 (dd: IO error: Read-only file system), sync rc 0, touch rc 1, mount rw,
+- ext4 guest fsck after the error: rc 4
+- xfs on the full volume: dd rc 1 (dd: IO error: No space left on device), sync rc 0, touch rc 1, mount rw,
+- xfs guest fsck after the error: rc 0
+- PASS detach fullv
+- PASS lunix fsck --deep clean after detach (exit 0) [fullvol]
+overall FAIL=0

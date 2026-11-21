@@ -1,9 +1,24 @@
-# M15 results: phase 1 exit tests (DRAFT, 2026-11-18)
+# M15 results: phase 1 exit tests (2026-11-21)
 
-Status: fio verify and ratios are measured on the merged build (`03b858e`); the crash-point reruns and the 4096-byte-sector xfstests references are still running and
-are marked pending below. Everything else below was measured. Raw results (results.jsonl, results.md, stall tables,
-xfstests logs and the comparison, ratio JSON) are under `raw/`; the scripts are `tests/exit/*.sh`, the fio job files
+Status: every item was measured; which main commit built the binaries differs per item and is stated in the next table. Two things are open and are
+reported as findings, not hidden: (1) the fio-verify cells on `67c7769` fail ADR-32's "no write completion beyond `full_timeout`" check (data integrity is
+clean in every pass); (2) the crash loops, crash points, xfstests and negative controls were measured on `03b858e` and have not been rerun since the
+stall fixes. Raw results (results.jsonl, results.md, stall tables, xfstests logs and the comparison, ratio JSON) are under `raw/` (`raw/final-runs/`
+holds the runs of 2026-11-20/21, `raw/zero-blocks/` the zero-block episode); the scripts are `tests/exit/*.sh`, the fio job files
 `bench/phase1/exit/fio/*.fio`, the tables are made by `summarize.py` and `xfstests-compare.py`.
+
+## Which binaries measured what
+
+| item | main commit of the binaries | runs |
+|---|---|---|
+| 1 fio verify, final harness (loop-bounded write run, audit) | **`67c7769`** (p1/m15 merge `c3dea64`, harness `98dcd60`..`b0e0720`) | `newN1`-`newN3` (xfs 16K integrity, profile 128:8), `newG24` (raw 24G), `newF16` (all three targets, 16K integrity, 6 profiles) |
+| 1 fio verify, 12 cells + 24G (time-bounded write run) | `2083779` | `fvf-*` (q-r6) |
+| 3d tamper, full-volume cell, 4 ratios | `2083779` | `tamper-f`, `fullvol-f`, `fullvol-g`, `ratios-f` |
+| zero-block diagnosis (old binaries) | `2083779` | `oldA*`, `oldP*`, `oldS*`, `oldT*` |
+| 3a kill -9 loops, 3b crash points, 3c, xfstests, negative controls | `03b858e` | not rerun on a later main |
+
+`p1/jread` (main `80e1cd1`) was merged into the branch after the final cells had started; no cell was measured on it. Before the M15 merge the
+crash loops, crash points and xfstests should be rerun on the final main.
 
 ## Host (benchmark hygiene)
 
@@ -16,7 +31,7 @@ for the runs below; `6d16fbf` for the rerun). Exact fio job files: `bench/phase1
 
 | item | state | verdict |
 |---|---|---|
-| 1 fio verify | 12 cells on `03b858e` | **PASS** (zero errors, fsck clean, peak store 64 GiB); settled store bound not shown by these cells |
+| 1 fio verify | final harness on `67c7769`: 3 xfs reps PASS, raw 24G PASS, full 16K integrity 3 cells FAIL on the latency check only | integrity **PASS** (0 verify errors, pre and post detach, no block or extent changed across the detach); **FAIL** ADR-32 check: longest write completion 67 / 80 / 102 s against `full_timeout` 30 s, see below |
 | 2 xfstests | all six runs complete; comparison below | ext4: no Lunix-only failure but the reference fails 244 of 684 for an environment reason (needs a fix before it means anything); xfs: 3 Lunix-only (xfs/129, 234, 253), one reference hang excluded (xfs/118) |
 | 3a kill -9 loops | ext4 100 cycles, xfs 50 cycles | **PASS** |
 | 3b crash points | 79 points, 3 hits each (rerun on `03b858e`) plus scenarios | 211 PASS, 0 FAIL; 69 of 79 reached by the workload, the other 10 reached by scenarios (10 of 10 clean) |
@@ -53,6 +68,8 @@ blocks. N4 (new full-stack control) `LUNIX_UBLK_FAULT_DROP_WRITES` (file-armed h
 acknowledged and dropped): a verified write failed; without the file it passed.
 
 ## 4 ratios (one 4 GiB cell each, raw device, bs = chunk size)
+
+**Rerun `ratios-f` on `2083779` (`raw/final-runs/ratios-f`): both chunk sizes PASS the gate with the same figures to the third digit; the collector is settled (120 s) in every cell.**
 
 Measured dedup is the `lunix fsck --deep` recount; "nominal" is 1/(1-p). The data read back from the device
 (`chunkstat.py`) agrees with fsck to four digits, so fio's data is what the knobs say. Gate: dedup within 10 % of nominal,
@@ -146,6 +163,8 @@ detection: the new tamper cell, below.
 
 ## 3d tamper cell (integrity mode, both chunk sizes, `tamper.sh`)
 
+**Rerun `tamper-f` on `2083779` (2026-11-20, no stall in any cell, `raw/final-runs/tamper-f`): all six cells PASS with the same results as below.**
+
 After a 2 GiB incompressible sequential write (every chunk live) and the detach, `lunix fsck --deep` is clean; then one byte (XOR 0x01) in the middle of
 the largest segment (variant segment), of the tip commit (commit) or of the newest map pack (map) is flipped. Required: `fsck --deep` exits 2 with an
 authentication finding; attach is refused, or the attached device returns read errors for the damaged blocks and **no block with other bytes**
@@ -182,6 +201,8 @@ status trace and stacks are in the raw directories. Not in the crash-loop cells 
 
 ## 4' ADR-32 T7, the M15 parts (research note 2026-11-18 section 9.4)
 
+**Full-volume cell on `2083779` (`fullvol-f`, `fullvol-g`, `raw/final-runs/`): both PASS (ENOSPC within `full_timeout` + 5 s, blkdiscard of half the device restored writes after 42 s, SIGTERM with parked writes exited in 3 s, kill -9 with `on_full = error`, device answers, `lunix fsck --deep` clean; ext4 remounts read-only, xfs returns ENOSPC).**
+
 Implemented in the harness (`fio-verify.sh`, `fullvol.sh`), run on `03b858e` plus the merged main of 2026-11-19 (T3 to T5 of ADR-32 are not all merged: the
 status fields `delayed_ms`, `delayed_writes`, `delay_max_ms`, `enospc`, `throttle.state` are read when present and the cell says so when they are not):
 
@@ -204,7 +225,82 @@ or it is reported "throttled; not a §20 measurement", and each write cell sets 
 p99, p99.9, max latency, the store's maximum, GC write amplification and time per gate state, compared with `(cap - live store) / tau`; (4) the §20 sentence
 (a decision for the maintainer, not a script).
 
-## 1 fio verify (rerun on the merged build): PASS in all 12 cells
+## 1 fio verify, final harness (main `67c7769`)
+
+**Harness (commits `3331344`..`b0e0720`, `98dcd60`).** The write run is bounded by *loops* over each job's file (default per profile: 4, 10, 9, 4, 2, 1
+for QD:jobs 1:1, 32:1, 128:1, 1:8, 32:8, 128:8; about what the former 600 s run wrote), not by time; `RUNTIME` is now the length of the trim companion and
+`WRITE_CAP_S` (default 1800 s) is a safety net that fails the cell. The cell fails with "write run incomplete" (and never verifies) unless every job
+completed its loops. State-W (fio's verify state as the write run left it) is copied first; the pre-detach pass (guest caches dropped) and the
+post-detach pass each load a fresh copy with `verify_state_save=0`. Audit on by default for file cells: before the pre-detach pass and after the
+re-attach, FIEMAP extent state and a hash of every 4 KiB block of every job file (O_DIRECT) are taken and compared; a changed block or an
+extent going written -> unwritten stops the run (exit 5, a Lunix data-loss signal). Also logged per cell: `replayed` and "recovery stopped at a gap" lines of the re-attach,
+the exit code of both detaches, dmesg lines at the re-mount, the journal window counters, error-offset sets of both passes against the unwritten
+extents. The `fio's longest completion` check now fails when a profile report has no latency data (it used to pass on an empty answer: in the 2083779 cells
+below it printed 0 ms everywhere, i.e. it checked nothing).
+
+| run | target / chunk / mode | profiles | cap | result |
+|---|---|---|---|---|
+| newN1, newN2, newN3 | xfs, 16K, integrity, 128:8 (1 loop, the profile that failed on 2026-11-20) | 1 | 48G | **PASS x3**: pre and post verify_only 0 errors, 0 blocks changed, 0 extents changed, store max 12.4-12.9 GiB |
+| newG24 | raw, 64K, integrity, 128:8 | 1 | 24G (guard: live 5.3 GiB + 4 GiB headroom needed) | **PASS**: store max 16.1 GiB under bound 25.8 GiB, settled 7.9 GiB, longest completion 14.7 s |
+| newF16 | raw, ext4, xfs, 16K, integrity, all six profiles | 6 | 48G | integrity clean in all 3 cells (every profile 0 errors pre and post detach, fsck clean, audit clean); **each cell FAILS the longest-completion check** |
+
+newF16 per cell (all numbers from `raw/final-runs/newF16/results.jsonl`):
+
+| cell | verify errors pre / post | blocks changed / extents written->unwritten across the detach | longest fio completion | throttled (sum of the cell's end status) | max store sampled GiB (bound) | settled store GiB | live GiB (fsck) | segment bytes / live |
+|---|---|---|---|---|---|---|---|---|
+| raw 16K integrity | 0 / 0 in all 6 profiles | not audited (no files) | **67.0 s** (p5; p4 43.5 s) | 328 s | 47.8 (49.7) | 33.3 | 26.3 | 1.19 |
+| ext4 16K integrity | 0 / 0 | 0 / 0 (extent count 6 -> 133 in p0 after re-mount, states identical) | **80.5 s** (p5; p4 9.3 s) | 413 s | 48.2 (49.7) | 43.2 | 31.2 | 1.32 |
+| xfs 16K integrity | 0 / 0 | 0 / 0 | **102.4 s** (p5; p4 31.2 s) | 404 s | 48.2 (49.7) | 45.4 | 31.4 | 1.38 |
+
+**Finding (not fixed here).** In profiles 4 and 5 (QD 32 and 128, 8 jobs) of all three cells the writer sees completions of 31 to 102 s, above
+`full_timeout` (30 s), while the gate is in `slowdown` and no write returns ENOSPC (`enospc` 0, `stops` 0, `fulls` 0). The daemon's own numbers are
+much smaller: `delay_max_ms` 95-449 ms, journal ring wait at most 1.1 s since the attach, and the write-latency histogram's top bucket is 2^24 us (16.8-33.5 s).
+The guest-side latency is therefore larger than what the daemon accounts for (queueing in the ublk queues or between the submit and the daemon's
+accounting is the suspect; not diagnosed). Profiles 0 to 3 are all under 10 s. This check is the ADR-32 §9.4 one; it passed vacuously on the 2083779 cells.
+Binaries `67c7769`; whether `80e1cd1` changes it was not measured.
+
+### The 2083779 cells (time-bounded write run, before the harness change)
+
+All 12 cells plus `fvf-24g` ran on `2083779`. 11 of 12 passed; `fvf-16384-integrity` xfs failed the post-detach `verify_only` with 715 zero blocks and
+`fvf-24g` failed with ENOSPC. Both are explained below; the throttle numbers are real (the cap of 48G was reached and the band was exercised in every cell), the
+latency column of that harness was vacuous and is omitted.
+
+| cell | status | max store sampled GiB | bound GiB | settled store GiB (du) | live GiB (fsck) | segment GiB / live | throttled s | delayed writes | longest delay ms |
+|---|---|---|---|---|---|---|---|---|---|
+| raw/c64k/integrity | pass | 46.9 | 49.8 | 34.0 | 25.8 | 1.28 | 91 | 0 | 0 |
+| ext4/c64k/integrity | pass | 47.8 | 49.8 | 42.3 | 31.0 | 1.33 | 256 | 0 | 0 |
+| xfs/c64k/integrity | pass | 47.6 | 49.8 | 43.3 | 31.3 | 1.35 | 243 | 1 | 62 |
+| raw/c64k/encrypted | pass | 46.5 | 49.8 | 34.2 | 25.8 | 1.29 | 96 | 0 | 0 |
+| ext4/c64k/encrypted | pass | 48.0 | 49.8 | 42.2 | 31.0 | 1.33 | 255 | 0 | 0 |
+| xfs/c64k/encrypted | pass | 47.7 | 49.8 | 42.4 | 31.4 | 1.32 | 245 | 1 | 32 |
+| raw/c16k/integrity | pass | 48.1 | 49.8 | 35.0 | 25.8 | 1.29 | 273 | 0 | 0 |
+| ext4/c16k/integrity | pass | 48.1 | 49.8 | 43.6 | 30.7 | 1.35 | 396 | 0 | 0 |
+| xfs/c16k/integrity | fail | 48.4 | 49.8 | 42.7 | 30.6 | 1.34 | 413 | 1 | 101 |
+| raw/c16k/encrypted | pass | 48.0 | 49.8 | 39.3 | 25.8 | 1.44 | 281 | 0 | 0 |
+| ext4/c16k/encrypted | pass | 48.0 | 49.8 | 44.1 | 31.0 | 1.36 | 413 | 0 | 0 |
+| xfs/c16k/encrypted | pass | 48.4 | 49.8 | 44.9 | 31.0 | 1.39 | 492 | 1 | 249 |
+
+Store bound: the store stayed under cache_max + headroom + journal ring + 1 GiB in every cell (maximum sampled 48.4 GiB of a 49.8 GiB bound). After the final GC
+pass and the 120 s settle (past the 60 s grace) the store is 1.28-1.44 x the live data in segment bytes (`ratios.bytes.segments` / `unique_clen` of
+`lunix fsck --deep`); the M17.B oracle is 1.3 x, the cells end between 1.28 and 1.44 (encrypted raw 16K the highest). On `67c7769` (newF16) it is 1.19-1.38.
+**`fvf-24g` (2026-11-20):** six 4 GiB regions plus trims were live (about 25 GiB) under a 24 GiB cap, so ENOSPC was the designed answer (fio rc 9, job
+errors 252); the harness now refuses a cap below live data + 4 GiB and the cell is run with one profile (`newG24`, PASS).
+
+### The 715 zero blocks of `fvf-16384-integrity` (xfs, profile 5): a fio verify artefact, not Lunix
+
+What was seen: after the detach and re-attach `fio --verify_only` of profile 5 reported 715 blocks reading zeros (84 errors per job, 8 jobs), the same
+profile having passed its write run; raw and ext4 of the same chunk and mode passed. What it is: a `verify_only` of a state saved from a write run that was **cut off by its
+runtime inside its first loop**. fio then verifies blocks that the write run never wrote (it had counted them as issued): xfs preallocates the files, those blocks are **unwritten
+extents**, and they read as zeros. Evidence (all on the old binaries `2083779`, `raw/zero-blocks/`, evidence paths on the test host `evidence/fvf-16384-integrity-20261120`,
+`evidence/oldbin-partial-loop-20261121`, `evidence/audit-partial-loop-20261121`):
+- the original p5 wrote 394-488 MiB of each 512 MiB job file (first loop incomplete); p0-p4 wrote several loops; per job the bad blocks (27-114) never exceed the queue depth (128);
+- 12 repetitions on `2083779` with profile 128:8 and a 20 or 30 s runtime (`oldP1`..`oldP3`, `oldS1`..`oldS3`, `oldT1`..`oldT6`): **every repetition whose first loop was incomplete failed and every repetition whose first loop completed passed**; the full-length (600 s, about 16 loops) repetition `oldA1` passed;
+- with the pre-detach pass in place and a fresh copy of the state per pass (`oldT4`..`oldT6`): both passes fail with 672 errors, 100 % of the reported offsets (682 / 706, 669 / 703, 691 / 710) are inside unwritten extents of the snapshot taken before the detach; the reported sets differ by 40-120 blocks because `verify_fatal` stops each job at its first error with reads in flight;
+- across the detach: 0 blocks with changed content, 0 extents written -> unwritten, 0 hole changes (FIEMAP state and the hash of every 4 KiB block of every job file, `cmp-0.json`); `replayed=0`, no "journal recovery stopped at a gap", both detaches exit 0, no xfs recovery line at the re-mount, journal window misses 0; the blocks read zero again after a further detach/attach;
+- the early repetitions that showed "pre 0, post 672" (`oldP3`, `oldT2`) were a harness fault: the verify pass inherited the write run's `runtime=` and was cut off after verifying 32 MiB. Fixed (`VRUNTIME`).
+The harness fix is the loop-bounded write run above; no Lunix code was involved. With it, 3 repetitions of the failing cell on `67c7769` pass (`newN1`..`newN3`).
+
+## History: fio verify on `03b858e` (superseded by the sections above): PASS in all 12 cells
 
 **Build note:** these runs (and `ratios2`) used binaries of main `03b858e` (bstop, bstop-fu, gcrate merged), i.e. **before the later
 `pace`, `jwin` and `tipstat` changes**. A rerun on the final main is needed if those change the I/O path.
@@ -246,7 +342,7 @@ waited out the 60 s grace in the middle); `p1/gcrate` fixed that.
 
 ## Not done / pending, in order
 
-1. fio verify: a final GC pass and settle before the last detach, to show the 1.3 x store bound at the end of a cell (the cells above end under load).
-2. Crash points: the 13 failed cells, the 25 UNREACHED variants and the 13 new points, on the merged build.
-3. xfstests: the ext4 environment error, then both ext4 sides; the sector-size check for xfs/129, 234, 253.
-4. Ratios and kill loops are done; a GC pass per ratio cell for the store bound is part of the rerun with the merged build.
+1. The fio-verify longest-completion finding above (67 / 80 / 102 s against 30 s on `67c7769`); rerun the three cells on the final main.
+2. Crash loops (3a, 3c), crash points (3b) and xfstests were measured on `03b858e`; rerun on the final main before the M15 merge.
+3. M16 parts of ADR-32 §9.5 (before/after pair, throttled = 0 validity, sustained cell, the §20 sentence) are not implemented.
+4. xfstests: the ext4 reference environment error and the 4K-sector comparison are in `xfstests-compare.md`.

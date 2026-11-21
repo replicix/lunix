@@ -1,0 +1,55 @@
+start 2026-11-21T01:43:22Z: env LUNIX_ROOT_TESTS=1 LUNIX_SPIKE_DIR=<scratch> DAEMON_CPUS=0-3 FIO_CPUS=4-7 QUEUES=4 LUNIXD=<m15>/target/release/lunixd LUNIX=<m15>/target/release/lunix TESTD=<m15>/target/release/lunix-ublk-testd LUNIX_FSCK=<m15>/target/release/lunix-fsck LUNIXD_CP=<m15>/target-cp/release/lunixd XFSTESTS_DIR=<m15>/xfstests TARBALL=<home>/lunix-inputs/linux-6.12.tar.xz SCRIPT_CAP=2800 LUNIXD=<m15>/evidence/bin-2083779/lunixd LUNIX=<m15>/evidence/bin-2083779/lunix LUNIX_FSCK=<m15>/evidence/bin-2083779/lunix-fsck TESTD=<m15>/evidence/bin-2083779/lunix-ublk-testd CHUNKS=16384 MODES=integrity TARGETS=xfs PROFILES=128:8 RUNTIME=20 CACHE_MAX=48G OUT=<scratch>/m15-r-oldT5 bash tests/exit/fio-verify.sh
+note: module ublk_drv loaded
+ublk-leftovers: clean
+# M15 fio verify (2026-11-21T01:43:22Z, kernel 7.0.0, 16 cpus; 1 cells, profiles: 128:8, runtime 20 s)
+- script cap 2800 s: run through the wrapper with LUNIX_ROOT_TIMEOUT >= 3400
+
+## cell fio-verify/xfs/c16k/integrity
+- PASS create volume v16xfsintegrity (32 GiB, chunk 16384, integrity)
+- PASS attach v16xfsintegrity (4 queues)
+- device /dev/ublkb0
+df_guard: ok (252 GiB free, 40 GiB wanted)
+- profile 0: QD 128, 8 job(s), 4096 MiB, 20 s
+- p0 first pass: written per job (min of 8 jobs) 200/512 MiB min..max 320; total_ios per job 3290,2883,2686,2813,3559,1783,2753,3050
+- PASS fio-verify/xfs/c16k/integrity p0: fio rc 0, job errors 0 (zero verify failures)
+- PASS fio-verify/xfs/c16k/integrity p0: trimcheck (discard, write-zeroes) rc 0
+- p0: store 3 GiB, space used 3 GiB, gc {"state":null,"condemned_pending":0,"last_pass":{"pass":0,"dry_run":false,"segments_condemned":0,"segments_deleted":0,"packs_deleted":0,"runs_deleted":0,"commit
+- audit pre p0: snap 8 files, 1048576 blocks, 20521 extents
+- FAIL fio-verify/xfs/c16k/integrity p0: verify_only BEFORE the detach (same attach, caches dropped): rc 8, errors 672
+- diag pre0: 669 bad blocks; per file (QD 128): main.4.0=1 main.7.0=100 main.2.0=89 main.5.0=109 main.0.0=61 main.3.0=114 main.6.0=110 main.1.0=85 
+- diag pre0: re-read now: blocks 669: extent:unwritten=669 zero=669
+- journal window after the pre-detach verify_only: hits=251971 misses=0
+- PASS fio-verify/xfs/c16k/integrity: guest fsck clean after the runs
+- PASS detach v16xfsintegrity (exit 0)
+- PASS lunix fsck --deep clean after detach (exit 0) [fio-verify_xfs_c16k_integrity-1]
+- PASS fio-verify/xfs/c16k/integrity: attach again
+- re-attach: replayed=0, 'journal recovery stopped at a gap' lines in the daemon log: 0, detach exit code 0
+- audit post p0: snap 8 files, 1048576 blocks, 20521 extents
+- audit cmp p0 (before the detach vs after the attach): content_changed=0 written_to_unwritten=0 unwritten_to_written=0 hole_changes=0 extents_pre=20521 extents_post=20521 unwritten_blocks_pre=487762 post=487762
+- dmesg at the re-mount: 0 line(s) with 'recover' ()
+- FAIL fio-verify/xfs/c16k/integrity p0: verify_only AFTER detach/attach: rc 8, errors 672
+- diag v0: 703 bad blocks; per file (QD 128): main.4.0=26 main.7.0=110 main.2.0=102 main.5.0=75 main.0.0=102 main.3.0=108 main.6.0=90 main.1.0=90 
+- diag v0: re-read now: blocks 703: extent:unwritten=703 zero=703
+- error sets (offsets) pre vs post: p0:pre=669,post=703,only_pre=60,only_post=94,in_unwritten_pre=669,in_unwritten_post=703
+- journal window after the post-detach verify_only: hits=130 misses=0
+- PASS fio-verify/xfs/c16k/integrity: guest fsck clean after verify_only
+- extra cycle for the re-read: detach exit code 0
+- PASS fio-verify/xfs/c16k/integrity: attach for the re-read
+- extra attach: replayed=0, gap lines 0
+- diag: the same blocks after another detach/attach: blocks 703: extent:unwritten=703 zero=703
+- PASS fio-verify/xfs/c16k/integrity: detach (exit 0)
+- PASS fio-verify/xfs/c16k/integrity: lunix fsck --deep clean (exit 0)
+- PASS fio-verify/xfs/c16k/integrity: the store directory stayed under cache_max + reserve + journal ring + 1 GiB (4271 MiB of 50944 MiB)
+- PASS fio-verify/xfs/c16k/integrity: latency data found in 1 of 1 profile reports
+- PASS fio-verify/xfs/c16k/integrity: fio's longest completion 3668 ms is under full_timeout (30000 ms)
+- PASS fio-verify/xfs/c16k/integrity: no write returned ENOSPC
+- PASS fio-verify/xfs/c16k/integrity: no hung-task line in the kernel log
+- PASS fio-verify/xfs/c16k/integrity: the gate refused no reservation for space (enospc counter 0)
+- fio-verify/xfs/c16k/integrity: throttled_ms 0, delayed_writes 0, delay_max_ms 0, cache_max 48G
+
+## end
+- PASS every cell produced a result record (1 of 1)
+overall FAIL=1
+note: module ublk_drv loaded
+ublk-leftovers: clean
+EXIT 1
