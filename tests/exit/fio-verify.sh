@@ -37,6 +37,11 @@ MIB=$((1 << 20))
 NPROF=${#PROF[@]}
 NEED_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB))
 [ "$NEED_MIB" -le $((VOL_GIB * 1024 - 1024)) ] || { say "profiles do not fit the ${VOL_GIB} GiB volume ($NEED_MIB MiB)"; exit 2; }
+# A cap needs garbage room: the regions of the profiles stay live (raw: distinct regions; files: distinct files), so the live data of a cell is
+# NPROF x (PER_PROFILE + TRIM) + ZERO. The cell is refused when the cap leaves less than 4 GiB over it (fvf-24g, 2026-11-20: six 4 GiB regions
+# under a 24 GiB cap ended in ENOSPC by design). A small cap goes with few profiles (PROFILES="128:8").
+LIVE_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB)); CAP_MIB=$(( $(numfmt --from=iec "$CACHE_MAX") >> 20 ))
+[ "$CAP_MIB" -ge $((LIVE_MIB + 4096)) ] || { say "refusing: CACHE_MAX $CACHE_MAX leaves less than 4 GiB over the live data of $NPROF profile(s) ($LIVE_MIB MiB); use fewer profiles or a larger cap"; exit 2; }
 [ "$PER_PROFILE_MIB" -le 12288 ] || { say "PER_PROFILE_MIB above the plan's 12 GiB per job group"; exit 2; }
 
 # fio_env TARGET I QD JOBS: exports the variables of the job files
@@ -105,6 +110,24 @@ run_cell() { # target chunk mode
     i=$((i + 1))
   done
   local profiles_done=$i
+  # phase 1b (cp-s... fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach, none before): verify_only of every profile BEFORE the
+  # umount and the detach, on the same attach, after the guest page cache is dropped, so that a failure can be placed before or after the detach.
+  # (fio reads with O_DIRECT anyway; the daemon's own read cache is small against 4 GiB per profile.)
+  local badpre=0 pre_errs="" post_errs=""
+  if [ "$bad" = 0 ] && [ "${PRE_VERIFY:-1}" = 1 ]; then
+    sync; echo 3 > /proc/sys/vm/drop_caches
+    i=0
+    for p in "${PROF[@]:0:$profiles_done}"; do
+      qd=${p%%:*}; jobs=${p##*:}
+      fio_env "$tgt" "$i" "$qd" "$jobs"
+      local job; job=$(job_file "$tgt")
+      VONLY=1 LOOPS=1 fio_run "$cell-pre$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local prc=$?
+      local pjf="$OUT/raw/fio-${cell//\//_}-pre$i.json" perrs; perrs=$(fio_errors "$pjf")
+      pre_errs="$pre_errs p$i:$perrs"
+      [ "$prc" = 0 ] && [ "$perrs" = 0 ]; expect "$cell p$i: verify_only BEFORE the detach (same attach, caches dropped): rc $prc, errors $perrs" $? || badpre=1
+      i=$((i + 1))
+    done
+  fi
   # phase 2: stop, check, detach, attach, verify again
   if [ "$tgt" != raw ]; then
     umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after the runs" $? || bad=1
@@ -123,7 +146,8 @@ run_cell() { # target chunk mode
       local job; job=$(job_file "$tgt")
       VONLY=1 LOOPS=1 fio_run "$cell-v$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local vrc=$?
       local vjf="$OUT/raw/fio-${cell//\//_}-v$i.json" verrs; verrs=$(fio_errors "$vjf")
-      [ "$vrc" = 0 ] && [ "$verrs" = 0 ]; expect "$cell p$i: verify_only after detach/attach: rc $vrc, errors $verrs" $? || bad=1
+      post_errs="$post_errs p$i:$verrs"
+      [ "$vrc" = 0 ] && [ "$verrs" = 0 ]; expect "$cell p$i: verify_only AFTER detach/attach: rc $vrc, errors $verrs" $? || bad=1
       i=$((i + 1))
     done
     [ "$tgt" = raw ] || { umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after verify_only" $? || bad=1; }
@@ -138,20 +162,30 @@ run_cell() { # target chunk mode
     lunix_fsck "$vol" "$(basename "$d")-2"; expect "$cell: lunix fsck --deep clean (exit $FSCK_RC)" $? || bad=1
   fi
   local sb2; sb2=$(store_bytes "$vol")
+  [ "$badpre" = 0 ] || bad=1
   kill "$SAMPLER_PID" 2>/dev/null; wait "$SAMPLER_PID" 2>/dev/null
   local smax bound lat_ms hung1 enospc
   smax=$(sort -n "$d/store-samples.txt" | tail -1); smax=${smax:-0}
   # the dirty commit bytes are not in the status; the commit interval's worth of map dirt is small, 1 GiB is allowed for it and the journal ring
   bound=$((cmax + hdr + JOURNAL_MAX + (1 << 30)))
   [ "$smax" -le "$bound" ]; expect "$cell: the store directory stayed under cache_max + reserve + journal ring + 1 GiB ($((smax >> 20)) MiB of $((bound >> 20)) MiB)" $? || bad=1
-  lat_ms=$(cat "$OUT"/raw/fio-"${cell//\//_}"-p*.json 2>/dev/null | sed -n '/"fio version"/,$p' | jq -s '[.[]|.jobs[]|(.read.lat_ns.max // 0), (.write.lat_ns.max // 0)] | max / 1000000 | floor' 2>/dev/null)
-  lat_ms=${lat_ms:-0}
+  # the longest completion of every profile's run: every report must carry latency data, or the check fails (it used to pass on an empty answer)
+  lat_ms=0; local nlat=0 lf lm
+  for lf in "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].json; do
+    [ -e "$lf" ] || continue
+    lm=$(fio_json "$lf" | jq -r '[.jobs[] | (.read.lat_ns.max // 0), (.write.lat_ns.max // 0), (.trim.lat_ns.max // 0)] | max / 1000000 | floor' 2>/dev/null)
+    case "$lm" in ''|*[!0-9]*) continue ;; esac
+    nlat=$((nlat + 1)); [ "$lm" -le "$lat_ms" ] || lat_ms=$lm
+  done
+  [ "$nlat" -gt 0 ] && [ "$nlat" = "$profiles_done" ]; expect "$cell: latency data found in $nlat of $profiles_done profile reports" $? || bad=1
   [ "$lat_ms" -lt "$fto" ]; expect "$cell: fio's longest completion $lat_ms ms is under full_timeout ($fto ms)" $? || bad=1
-  enospc=$(grep -l 'No space left' "$OUT"/raw/fio-"${cell//\//_}"-*.stdout "$OUT"/raw/fio-"${cell//\//_}"-*.json 2>/dev/null | wc -l)
+  enospc=$(grep -l 'No space left' "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].stdout "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].json 2>/dev/null | wc -l)
   [ "$enospc" = 0 ]; expect "$cell: no write returned ENOSPC" $? || bad=1
   hung1=$(dmesg | grep -ciE 'hung task|blocked for more than')
   [ "$hung1" = "$hung0" ]; expect "$cell: no hung-task line in the kernel log" $? || bad=1
   local thr dly dmx
+  [ -s "$d/status-2.json" ] || cp "$d/status-1.json" "$d/status-2.json" 2>/dev/null   # a cell that failed early has only the status of the end of the runs
+  [ -s "$d/status-2.json" ] || cp "$d/status-1.json" "$d/status-2.json" 2>/dev/null   # a cell that failed early has only the status taken after the runs
   thr=$(jq -r '[.. | .throttled_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null); dly=$(jq -r '[.. | .delayed_writes? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
   dmx=$(jq -r '[.. | .delay_max_ms? // empty] | first // "n/a"' "$d/status-2.json" 2>/dev/null)
   local ens; ens=$(jq -r '.throttle.enospc // ([.. | .enospc? // empty] | first) // 0' "$d/status-2.json" 2>/dev/null)
@@ -159,7 +193,7 @@ run_cell() { # target chunk mode
   say "- $cell: throttled_ms $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
   local st=pass; [ "$bad" = 0 ] || st=fail
   rec "$cell" "$st" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
-      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" notes="$notes"
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" notes="$notes"
   [ "$bad" = 0 ] || FAIL=1
 }
 
