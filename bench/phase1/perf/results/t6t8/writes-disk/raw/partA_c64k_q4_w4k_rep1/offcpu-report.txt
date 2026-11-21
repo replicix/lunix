@@ -1,0 +1,150 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 10K of event 'sched:sched_switch'
+# Event count (approx.): 10102
+#
+# Overhead  Command          Symbol                     
+# ........  ...............  ...........................
+#
+    67.19%  lunix-coord      [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --67.16%--schedule
+                          |          
+                          |--65.06%--futex_do_wait
+                          |          __futex_wait
+                          |          futex_wait
+                          |          do_futex
+                          |          __x64_sys_futex
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |           --64.80%--syscall
+                          |                     std::sys::pal::unix::futex::futex_wait (inlined)
+                          |                     |          
+                          |                     |--59.99%--<std::sys::sync::condvar::futex::Condvar>::wait_optional_timeout
+                          |                     |          |          
+                          |                     |           --59.42%--<std::sync::poison::condvar::Condvar>::wait_timeout::<lunix_destage::pipeline::PoolState> (inlined)
+                          |                     |                     |          
+                          |                     |                      --59.38%--<lunix_destage::pipeline::Pool>::run_worker
+                          |                     |          
+                          |                      --4.81%--<std::sys::sync::mutex::futex::Mutex>::lock_contended
+                          |                                <std::sys::sync::mutex::futex::Mutex>::lock (inlined)
+                          |                                |          
+                          |                                 --4.31%--<std::sys::sync::condvar::futex::Condvar>::wait_optional_timeout
+                          |                                           <std::sync::poison::condvar::Condvar>::wait_timeout::<lunix_destage::pipeline::PoolState> (inlined)
+                          |                                           <lunix_destage::pipeline::Pool>::run_worker
+                          |          
+                          |--0.76%--irqentry_exit
+                          |          
+                          |--0.66%--exit_to_user_mode_loop
+                          |          do_syscall_64
+                          |          entry_SYSCALL_64_after_hwframe
+                          |          |          
+                          |           --0.55%--syscall
+                          |          
+                           --0.65%--io_schedule
+
+    15.68%  lunix-seal       [k] perf_trace_sched_switch
+            |
+            ---perf_trace_sched_switch
+               __schedule
+               |          
+                --15.65%--schedule
+                          |          
+                          |--14.39%--io_schedule
+                          |          |          
+                          |          |--7.26%--folio_wait_bit_common
+                          |          |          |          
+                          |          |          |--6.69%--folio_wait_writeback
+                          |          |          |          __filemap_fdatawait_range
+                          |          |          |          filemap_fdatawait_range
+                          |          |          |          btrfs_wait_ordered_range
+                          |          |          |          btrfs_sync_file
+                          |          |          |          do_fsync
+                          |          |          |          __x64_sys_fdatasync
+                          |          |          |          __syscall_cancel_arch
+                          |          |          |          fdatasync
+                          |          |          |          <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+                          |          |          |          <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+                          |          |          |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+                          |          |          |          <std::sys::fs::unix::File>::datasync (inlined)
+                          |          |          |          <std::fs::File>::sync_data
+                          |          |          |          <lunix_store::container::ContainerWriter>::seal
+                          |          |          |          |          
+                          |          |          |          |--1.02%--0x1007f5f
+                          |          |          |          |          
+                          |          |          |           --0.69%--0x1007f7b
+                          |          |          |          
+                          |          |           --0.56%--write_all_supers
+                          |          |                     |          
+                          |          |                      --0.53%--btrfs_sync_log
+                          |          |                                btrfs_sync_file
+                          |          |                                do_fsync
+                          |          |          
+                          |          |--4.32%--rq_qos_wait
+                          |          |          wbt_wait
+                          |          |          __rq_qos_throttle
+                          |          |          blk_mq_submit_bio
+                          |          |          submit_bio_noacct_nocheck
+                          |          |          |          
+                          |          |          |--3.27%--btrfs_submit_chunk
+                          |          |          |          btrfs_submit_bbio
+                          |          |          |          submit_one_bio
+                          |          |          |          __syscall_cancel_arch
+                          |          |          |          fdatasync
+                          |          |          |          <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+                          |          |          |          <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+                          |          |          |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+                          |          |          |          <std::sys::fs::unix::File>::datasync (inlined)
+                          |          |          |          <std::fs::File>::sync_data
+                          |          |          |          <lunix_store::container::ContainerWriter>::seal
+                          |          |          |          
+                          |          |           --0.81%--btrfs_submit_bio
+                          |          |                     btrfs_submit_chunk
+                          |          |                     btrfs_submit_bbio
+                          |          |                     __syscall_cancel_arch
+                          |          |                     |          
+                          |          |                      --0.62%--fdatasync
+                          |          |                                <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+                          |          |                                <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+                          |          |                                std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+                          |          |                                <std::sys::fs::unix::File>::datasync (inlined)
+                          |          |                                <std::fs::File>::sync_data
+                          |          |                                <lunix_store::container::ContainerWriter>::seal
+                          |          |          
+                          |           --2.82%--bit_wait_io
+                          |                     __wait_on_bit
+                          |                     out_of_line_wait_on_bit
+                          |                     |          
+                          |                      --2.81%--btrfs_btree_wait_writeback_range
+                          |                                __btrfs_wait_marked_extents
+                          |                                |          
+                          |                                 --2.64%--btrfs_wait_tree_log_extents
+                          |                                           btrfs_sync_log
+                          |                                           btrfs_sync_file
+                          |                                           __syscall_cancel_arch
+                          |                                           |          
+                          |                                           |--1.44%--fdatasync
+                          |                                           |          <std::sys::fs::unix::File>::datasync::os_datasync (inlined)
+                          |                                           |          <std::sys::fs::unix::File>::datasync::{closure#0} (inlined)
+                          |                                           |          std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::datasync::{closure#0}> (inlined)
+                          |                                           |          <std::sys::fs::unix::File>::datasync (inlined)
+                          |                                           |          <std::fs::File>::sync_data
+                          |                                           |          <lunix_store::container::ContainerWriter>::seal
+                          |                                           |          
+                          |                                            --1.21%--fsync
+                          |                                                      <std::sys::fs::unix::File>::fsync::os_fsync (inlined)
+                          |                                                      <std::sys::fs::unix::File>::fsync::{closure#0} (inlined)
+                          |                                                      std::sys::pal::unix::cvt_r::<i32, <std::sys::fs::unix::File>::fsync::{closure#0}> (inlined)
+                          |                                                      <std::sys::fs::unix::File>::fsync (inlined)
+                          |                                                      <std::fs::File>::sync_all
+                          |                                                      <lunix_store::fsops::RealFs as lunix_store::fsops::FsOps>::fsync_dir
+                          |                                                      <lunix_store::container::ContainerWriter>::seal
+                          |          
+                           --0.51%--wait_log_commit

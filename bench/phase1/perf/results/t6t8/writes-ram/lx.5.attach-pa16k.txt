@@ -1,0 +1,1 @@
+attached pa16k as /tmp/m16ramfs/m16-parta-state/dev/pa16k (4 queues, depth 128)

@@ -1,0 +1,10 @@
+- date: 2026-11-21T20:19:25Z
+- cpu: AMD EPYC 9R45, 16 cpus online, SMT: 0
+- kernel: 7.3.0, distro: Fedora Linux 46
+- memory: 31 GiB
+- governor: not exposed (virtual machine, no cpufreq)
+- io_uring_disabled: 0
+- fio: fio-3.43, e2fsprogs: e2fsck 1.47.4 (6-Mar-2025), xfsprogs: mkfs.xfs version 7.2.0
+- lunixd: $H/target/release/lunixd lunixd 0.1.0
+- cpu sets: daemon 0-7, fio 8-15; queues 2; journal_max 1073741824
+- git revision: uncommitted or unknown (the host copy has no .git)
