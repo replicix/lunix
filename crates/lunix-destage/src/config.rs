@@ -80,6 +80,12 @@ pub struct DestageConfig {
     /// A cut of more than this many bytes is stored raw. Must not be below
     /// `lz4_cut_bytes`.
     pub raw_cut_bytes: Option<u64>,
+    /// Segment seals (footer, `fdatasync`, rename, directory `fsync`) that
+    /// may run beside the packer at once; the packer waits for one to end when
+    /// the bound is reached. 0 seals inline on the packer thread. Each
+    /// in-flight seal holds an open file and the dirty pages of one segment.
+    /// Default 4.
+    pub max_seals_in_flight: usize,
     /// Bytes the `auto` probe compresses (default 4096).
     pub probe_len: usize,
     /// The probe must save at least this percentage of its input for `auto`
@@ -99,6 +105,7 @@ impl Default for DestageConfig {
             pressure: Pressure::None,
             lz4_cut_bytes: Some(4 << 30),
             raw_cut_bytes: Some(16 << 30),
+            max_seals_in_flight: 4,
             probe_len: 4096,
             probe_min_saving_percent: 6,
         }

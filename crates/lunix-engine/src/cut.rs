@@ -247,6 +247,13 @@ pub(crate) struct CutCounters {
     pub(crate) yield_until_ms: AtomicU64,
     pub(crate) last_cut_bytes: AtomicU64,
     pub(crate) last_cut_ms: AtomicU64,
+    /// Segment seals, all cuts (ADR-33 T8).
+    pub(crate) seals: AtomicU64,
+    /// The most seals in flight at once in any cut since the attach.
+    pub(crate) seal_in_flight_max: AtomicU64,
+    pub(crate) seal_busy_ns: AtomicU64,
+    pub(crate) seal_wait_ns: AtomicU64,
+    pub(crate) seal_stall_ns: AtomicU64,
 }
 
 impl CutCounters {
@@ -260,6 +267,11 @@ impl CutCounters {
             ring_pace_rate: self.ring_pace_rate.load(Ordering::Relaxed),
             last_cut_bytes: self.last_cut_bytes.load(Ordering::Relaxed),
             last_cut_ms: self.last_cut_ms.load(Ordering::Relaxed),
+            seals: self.seals.load(Ordering::Relaxed),
+            seal_in_flight_max: self.seal_in_flight_max.load(Ordering::Relaxed),
+            seal_busy_ms: self.seal_busy_ns.load(Ordering::Relaxed) / 1_000_000,
+            seal_wait_ms: self.seal_wait_ns.load(Ordering::Relaxed) / 1_000_000,
+            seal_stall_ms: self.seal_stall_ns.load(Ordering::Relaxed) / 1_000_000,
         }
     }
 }
@@ -288,6 +300,17 @@ pub struct CutStats {
     pub last_cut_bytes: u64,
     /// Its duration, C1 to C9, milliseconds.
     pub last_cut_ms: u64,
+    /// Segment seals run since the attach.
+    pub seals: u64,
+    /// The most seals in flight at once in one cut since the attach.
+    pub seal_in_flight_max: u64,
+    /// Summed duration of the seals (they overlap packing), milliseconds.
+    pub seal_busy_ms: u64,
+    /// Time cuts waited at the end of packing for seals still running,
+    /// milliseconds.
+    pub seal_wait_ms: u64,
+    /// Time packers waited for a free seal slot, milliseconds.
+    pub seal_stall_ms: u64,
 }
 
 /// The write path's per-lane and histogram figures (milestone jstall).

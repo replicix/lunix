@@ -188,7 +188,11 @@ pub fn destage_cut_with_cancel(
     cancel: Option<&AtomicBool>,
 ) -> Result<DestageOutcome, DestageError> {
     let started = Instant::now();
-    let mut packer = Packer::new(deps.segments, deps.params.id_len);
+    let mut packer = Packer::new(
+        deps.segments,
+        deps.params.id_len,
+        deps.config.max_seals_in_flight,
+    );
     let mut job_stats = DestageStats::default();
     let run = run(cut, deps, cancel, &mut packer, &mut job_stats);
     let mut stats = std::mem::take(&mut packer.stats);
@@ -338,10 +342,14 @@ fn run(
     totals.add(&lock(&pool.err_stats));
     packed?;
 
-    // The last segment is sealed before the map commit, so no map entry ever
-    // names a file that is still open (DESIGN section 5 step 7: seal at a
-    // commit cut).
+    // The last segment is handed to the sealer, then every seal of the cut is
+    // waited for and checked before the map commit, so no map entry ever names
+    // a file that is still open or not yet durable (DESIGN section 5 step 7:
+    // seal at a commit cut; ADR-33 T8).
     packer.seal_current().map_err(Failure::general)?;
+    lunix_iface::crashpoint!("destage.before_seals_wait");
+    packer.wait_sealed().map_err(Failure::general)?;
+    lunix_iface::crashpoint!("destage.after_seals_wait");
 
     // Step 8: the map update, all or nothing.
     let t = Instant::now();

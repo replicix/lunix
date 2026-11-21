@@ -125,6 +125,11 @@ pub fn map_outcome(o: M9Outcome) -> DestageOutcome {
         stored_clen: sum4(&s.clen_by_codec),
         cold_rmw: s.cold_rmw,
         stage_ns: [s.hash_ns, s.dedup_ns, s.compress_ns, s.seal_ns, s.append_ns],
+        seals: s.seals,
+        seal_in_flight_max: s.seal_in_flight_max,
+        seal_busy_ns: s.seal_busy_ns,
+        seal_wait_ns: s.seal_wait_ns,
+        seal_stall_ns: s.seal_stall_ns,
         extent_auth_failures: s.extent_auth_failures,
     }
 }

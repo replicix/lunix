@@ -821,6 +821,13 @@ impl Inner {
         for (a, v) in st.stage_ns.iter().zip(outcome.stage_ns) {
             add(a, v);
         }
+        add(&self.cuts.seals, outcome.seals);
+        self.cuts
+            .seal_in_flight_max
+            .fetch_max(outcome.seal_in_flight_max, Ordering::Relaxed);
+        add(&self.cuts.seal_busy_ns, outcome.seal_busy_ns);
+        add(&self.cuts.seal_wait_ns, outcome.seal_wait_ns);
+        add(&self.cuts.seal_stall_ns, outcome.seal_stall_ns);
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
         // C3, second: compaction re-hints, in their own transaction, only

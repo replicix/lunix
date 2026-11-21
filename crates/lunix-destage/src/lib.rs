@@ -73,6 +73,7 @@ mod outcome;
 mod pack;
 mod pipeline;
 mod read;
+mod seal;
 mod worker;
 
 pub mod scan;

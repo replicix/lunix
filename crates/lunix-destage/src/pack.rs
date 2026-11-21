@@ -13,6 +13,7 @@ use lunix_iface::store::{SegmentStore, SegmentWriter};
 use lunix_iface::{Error, Result};
 
 use crate::outcome::DestagedSegment;
+use crate::seal::{Sealer, Slot};
 use crate::stats::{codec_slot, ns, DestageStats};
 use crate::worker::{entry_for, Action, ChunkResult, SealSlot, Sealed};
 
@@ -31,10 +32,20 @@ struct Current {
     extent_bytes: u64,
 }
 
+/// A segment handed to the sealer, kept until its seal is collected.
+struct Pending {
+    seg: SegId,
+    writes: WriteSeqRange,
+    entries: Vec<(ChunkId, Hint)>,
+    extent_bytes: u64,
+}
+
 pub(crate) struct Packer<'a> {
     segments: &'a dyn SegmentStore,
     id_len: IdLen,
     cur: Option<Current>,
+    sealer: Sealer,
+    pending: Vec<Pending>,
     done: Vec<DestagedSegment>,
     /// Ids appended in this cut, for dedup against the cut's own extents (the
     /// index only learns them after the commit).
@@ -44,11 +55,17 @@ pub(crate) struct Packer<'a> {
 }
 
 impl<'a> Packer<'a> {
-    pub(crate) fn new(segments: &'a dyn SegmentStore, id_len: IdLen) -> Self {
+    pub(crate) fn new(
+        segments: &'a dyn SegmentStore,
+        id_len: IdLen,
+        max_seals_in_flight: usize,
+    ) -> Self {
         Self {
             segments,
             id_len,
             cur: None,
+            sealer: Sealer::new(max_seals_in_flight),
+            pending: Vec::new(),
             done: Vec::new(),
             appended: HashMap::new(),
             ops: Vec::new(),
@@ -127,22 +144,61 @@ impl<'a> Packer<'a> {
         Ok(hint)
     }
 
-    /// Seals the segment being written, if any (its file is durable and named
-    /// `segments/<id>` when this returns).
+    /// Hands the segment being written, if any, to the sealer: it runs
+    /// beside the packing of the next segment. Its file is durable and named
+    /// `segments/<id>` only once [`wait_sealed`](Self::wait_sealed) returned.
+    ///
+    /// # Errors
+    /// The error of an earlier seal that failed.
     pub(crate) fn seal_current(&mut self) -> Result<()> {
         let Some(cur) = self.cur.take() else {
             return Ok(());
         };
-        let sealed = cur.writer.seal(Some(cur.writes))?;
-        lunix_iface::crashpoint!("destage.after_segment_seal");
-        self.done.push(DestagedSegment {
+        self.sealer.submit(cur.writer, cur.writes)?;
+        self.pending.push(Pending {
             seg: cur.seg,
             writes: cur.writes,
             entries: cur.entries,
             extent_bytes: cur.extent_bytes,
-            sealed,
         });
+        lunix_iface::crashpoint!("destage.seal_submitted");
         Ok(())
+    }
+
+    /// Waits for every seal handed out and collects the ones that succeeded
+    /// (in segment order) into the sealed list, so a failed cut deletes them.
+    ///
+    /// # Errors
+    /// The first seal error not reported before.
+    pub(crate) fn wait_sealed(&mut self) -> Result<()> {
+        let t = Instant::now();
+        let slots = self.sealer.wait_all();
+        self.stats.seal_wait_ns += ns(t.elapsed());
+        let f = self.sealer.figures();
+        self.stats.seals = f.seals;
+        self.stats.seal_in_flight_max = f.in_flight_max;
+        self.stats.seal_busy_ns = f.busy_ns;
+        self.stats.seal_stall_ns = f.stall_ns;
+        let mut first = None;
+        for (p, slot) in self.pending.drain(..).zip(slots) {
+            match slot {
+                Slot::Done(sealed) => self.done.push(DestagedSegment {
+                    seg: p.seg,
+                    writes: p.writes,
+                    entries: p.entries,
+                    extent_bytes: p.extent_bytes,
+                    sealed,
+                }),
+                Slot::Failed(e) => {
+                    first.get_or_insert(e);
+                }
+                Slot::Pending | Slot::Taken => {}
+            }
+        }
+        match first {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// The map updates, consumed once the whole cut is packed.
@@ -152,7 +208,10 @@ impl<'a> Packer<'a> {
 
     /// Ends the pack. A segment still being written is abandoned (the store
     /// removes the file); the sealed ones are returned.
-    pub(crate) fn finish(self) -> Vec<DestagedSegment> {
+    /// Waits for the seals still running first, so that every file the cut
+    /// sealed is in the list.
+    pub(crate) fn finish(mut self) -> Vec<DestagedSegment> {
+        let _ = self.wait_sealed();
         self.done
     }
 }
