@@ -9,6 +9,10 @@ use crate::compress::Pressure;
 /// 4 KiB: the overlay's block size.
 pub(crate) const BLOCK: u64 = 4096;
 
+/// The most segment seals a cut may run at once (a thread and a file
+/// descriptor each).
+pub const MAX_SEALS_IN_FLIGHT: usize = 64;
+
 /// What the pipeline needs of the volume descriptor.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DestageParams {
@@ -80,6 +84,12 @@ pub struct DestageConfig {
     /// A cut of more than this many bytes is stored raw. Must not be below
     /// `lz4_cut_bytes`.
     pub raw_cut_bytes: Option<u64>,
+    /// Segment seals (footer, `fdatasync`, rename, directory `fsync`) that
+    /// may run beside the packer at once; the packer waits for one to end when
+    /// the bound is reached. 0 seals inline on the packer thread. Each
+    /// in-flight seal holds an open file and the dirty pages of one segment.
+    /// Default 4.
+    pub max_seals_in_flight: usize,
     /// Bytes the `auto` probe compresses (default 4096).
     pub probe_len: usize,
     /// The probe must save at least this percentage of its input for `auto`
@@ -99,6 +109,7 @@ impl Default for DestageConfig {
             pressure: Pressure::None,
             lz4_cut_bytes: Some(4 << 30),
             raw_cut_bytes: Some(16 << 30),
+            max_seals_in_flight: 4,
             probe_len: 4096,
             probe_min_saving_percent: 6,
         }
@@ -110,7 +121,7 @@ impl DestageConfig {
     ///
     /// # Errors
     /// `Invalid` for a zero worker count or batch, a result window below the worker count, a probe length of
-    /// zero or a saving above 100, or `raw_cut_bytes` below `lz4_cut_bytes`.
+    /// zero or a saving above 100, more than [`MAX_SEALS_IN_FLIGHT`] seals in flight, or `raw_cut_bytes` below `lz4_cut_bytes`.
     pub fn validate(&self) -> Result<()> {
         let depths_ok = match (self.lz4_cut_bytes, self.raw_cut_bytes) {
             (Some(l), Some(r)) => l <= r,
@@ -120,6 +131,7 @@ impl DestageConfig {
             && self.batch_chunks >= 1
             && self.batch_bytes >= 1
             && self.result_window >= self.workers
+            && self.max_seals_in_flight <= MAX_SEALS_IN_FLIGHT
             && self.probe_len >= 1
             && self.probe_min_saving_percent <= 100
             && depths_ok;

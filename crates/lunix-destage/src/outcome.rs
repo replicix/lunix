@@ -105,6 +105,9 @@ pub struct Partial {
     pub freed_bytes: u64,
     /// Counters up to the failure.
     pub stats: DestageStats,
+    /// Seal errors after the one the cut failed with (several seals can fail
+    /// in one cut).
+    pub more_seal_errors: Vec<String>,
 }
 
 impl fmt::Debug for Partial {
@@ -114,6 +117,7 @@ impl fmt::Debug for Partial {
             .field("undeleted", &self.undeleted)
             .field("freed_bytes", &self.freed_bytes)
             .field("stats", &self.stats)
+            .field("more_seal_errors", &self.more_seal_errors)
             .finish()
     }
 }
