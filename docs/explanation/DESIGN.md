@@ -443,9 +443,12 @@ journal):
     (`throttle_min_rate`): unbounded at the soft mark, `r_mid` in the
     middle of the band, `r_min` near the limit;
   - one request is delayed at most `throttle_max_delay_ms` (10 s) from its
-    arrival; past that it is admitted if it fits and the bucket carries
-    the debt, so the band can be overrun by many large requests in flight
-    and the hard mark then does the pacing;
+    arrival at its queue, the time it stood behind other requests of the
+    queue included; past that it is admitted if it fits, together with what
+    stands before it, and the bucket carries the debt (at most one second
+    of the rate), so the band can be overrun by many large requests in
+    flight and the hard mark then does the pacing; `delay_max_ms` reports
+    such waits from arrival, counted only while the pace is active;
   - never paced: reads; FLUSH (it reserves nothing); a FUA write of at
     most 256 KiB, the write an fsync waits on (admitted at once, charged
     to the bucket; at the hard mark it waits like any write); discards and

@@ -64,6 +64,17 @@ pub struct DestageStats {
     pub degraded_raw: u64,
     /// Segments the cut appended to.
     pub segments: u64,
+    /// Segment seals run (off the packer thread unless the bound is 0).
+    pub seals: u64,
+    /// Most seals in flight at once.
+    pub seal_in_flight_max: u64,
+    /// Summed duration of the segment seals, wherever they ran.
+    pub seal_busy_ns: u64,
+    /// Time the packer waited at the end of the pack for the seals still
+    /// running.
+    pub seal_wait_ns: u64,
+    /// Time the packer waited for a free seal slot while packing.
+    pub seal_stall_ns: u64,
     /// Wall time of the whole cut.
     pub wall_ns: u64,
     /// Assemble stage (journal reads, base read).
@@ -111,6 +122,10 @@ impl DestageStats {
             degraded_lz4,
             degraded_raw,
             segments,
+            seals,
+            seal_busy_ns,
+            seal_wait_ns,
+            seal_stall_ns,
             wall_ns,
             assemble_ns,
             scan_ns,
@@ -121,6 +136,7 @@ impl DestageStats {
             append_ns,
             map_ns,
         );
+        self.seal_in_flight_max = self.seal_in_flight_max.max(o.seal_in_flight_max);
         for i in 0..CODEC_SLOTS {
             self.ulen_by_codec[i] += o.ulen_by_codec[i];
             self.clen_by_codec[i] += o.clen_by_codec[i];

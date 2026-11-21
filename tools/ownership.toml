@@ -444,6 +444,45 @@ paths = [
   "tools/ownership.toml",
 ]
 
+# jread: a guest journal read pins its ring file so reclaim cannot zero or reuse
+# it under the read (H1 of the M15 zero-blocks audit).
+[jread]
+paths = [
+  "crates/lunix-journal/src/journal.rs",
+  "crates/lunix-journal/src/lane.rs",
+  "crates/lunix-journal/src/ring.rs",
+  "crates/lunix-journal/src/shared.rs",
+  "crates/lunix-journal/tests/jread.rs",
+  "crates/lunixd/tests/stack_jread.rs",
+  "docs/plans/v1/reports/p1-jread.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
+# seal: ADR-33 T8 (segment seals off the packer thread).
+[seal]
+paths = [
+  "crates/lunix-destage/src/config.rs",
+  "crates/lunix-destage/src/lib.rs",
+  "crates/lunix-destage/src/outcome.rs",
+  "crates/lunix-destage/src/pack.rs",
+  "crates/lunix-destage/src/pipeline.rs",
+  "crates/lunix-destage/src/seal.rs",
+  "crates/lunix-destage/src/stats.rs",
+  "crates/lunix-destage/tests/seal.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/cut.rs",
+  "crates/lunix-engine/src/destage.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/destage.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_seal.rs",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
 [m15]
 paths = ["tests/exit/**", "bench/phase1/exit/**"]
 
@@ -493,5 +532,18 @@ paths = [
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/tests/status_lockfree.rs",
   "tools/ci.sh",
+  "tools/ownership.toml",
+]
+
+# gate: the M15 latency diagnosis, part 1: a write's pacing delay counts from
+# its arrival (the collector sizing is parked on p1/gate-gc).
+[gate]
+paths = [
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/tests/pace.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-gate.md",
   "tools/ownership.toml",
 ]

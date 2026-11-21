@@ -275,11 +275,16 @@ pub struct ThrottleFigures {
     pub paced_waiters: u64,
     /// Requests waiting for space.
     pub space_waiters: u64,
-    /// Requests that waited in the gate and were admitted.
+    /// Requests that waited in the gate, for tokens or for space, or stood
+    /// in their queue while the pace was active, and were admitted. Their
+    /// wait counts from their arrival at the queue. A wait in a queue while
+    /// nothing paces (behind a request parked for the journal ring, a slow
+    /// append) is not counted here.
     pub delayed_writes: u64,
     /// The summed wait of those, in milliseconds.
     pub delayed_ms: u64,
-    /// The longest wait in the gate of one request (admitted or failed), ms.
+    /// The longest wait of one request (admitted or failed) from its arrival
+    /// at its queue, ms: the time it stood behind others included.
     pub delay_max_ms: u64,
     /// Requests admitted by the delay cap.
     pub delay_capped: u64,

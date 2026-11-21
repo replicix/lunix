@@ -2365,7 +2365,8 @@ is not an anchor.
 **Status: accepted (2026-11-18, the maintainer, every recommended option
 M1-M9; the cap percentage in `volume.json`, FREEZE rule change F2,
 2026-11-18).** Implemented: T1, T2 and T6 (`p1/bstop`, `p1/bstop-fu`), T3 to
-T5 (`p1/pace`, 2026-11-19). Open: T7, the M15 and M16 harness changes. It amends ADR-14 (the ladder's order and
+T5 (`p1/pace`, 2026-11-19); the delay figures from arrival (`p1/gate`,
+2026-11-21, see the amendment). Open: T7, the M15 and M16 harness changes. It amends ADR-14 (the ladder's order and
 `on_full`) and DESIGN §2, §4.3, §19 and §20. The evidence, the analysis, the
 prior art, the alternatives in full, the test list and the implementation
 sketch are in
@@ -2536,6 +2537,33 @@ percentage and stays fixed. Both keys are required in `volume.json`, at most
 one non-null; no backward compatibility (the maintainer: "no need for
 backwards compatibility").
 
+**Amendment (2026-11-21, `p1/gate`; the maintainer approved the fix).**
+The delay cap and the delay figures both count from arrival.
+`throttle_max_delay_ms` counts from a write's arrival at its queue,
+including the time it stood behind other requests of that queue. A request
+that reaches the gate past its cap is admitted at once, together with what
+stands before it. While the gate paces, the timer wakes at the earliest cap
+among the requests before the first one that does not fit. The pace holds a
+write at most `throttle_max_delay_ms` plus its own service. A write that
+waits for space (one that does not fit, or stands behind one) still waits
+up to `full_timeout`. `delay_max_ms`, `delayed_ms` and `delayed_writes`
+count from arrival. They cover requests that waited in the gate, and
+requests admitted at first contact after standing in their queue while the
+pace is active; a wait under 1 ms is not a delay. In the band, a wait behind
+a ring-parked head of the same queue counts as a gate delay. With nothing
+pacing, a wait in a queue (behind a ring-parked request or a slow append) is
+not a gate delay. A `Retry` or a FUA write admitted at once (its head fits)
+is not counted either; when the head does not fit, they park and are
+counted. Unchanged: past the cap a request is admitted if it fits and the
+bucket carries the debt, at most one second of the rate. The ring pace
+composes the same way, and a `Retry` with a fitting head pays no tokens.
+Known limit, not changed: the cap counts the wait for space too, so after a
+stop of 10 s or more every queued write is past its cap and is admitted at
+once when headroom returns, the debt clamped at one second of the rate.
+Counting from `max(arrival, the gate's last exit from stop)` is a separate
+decision. Sizing GC to the ingest rate was tried, showed no gain in the M15
+cell, and is parked on `p1/gate-gc`.
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |
@@ -2561,9 +2589,10 @@ and the M16 validity rule with the sustained cell.
 W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
 Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
 2026-11-20); T6 measured (`p1/m16`); the stall fixes it led to, with T9 as
-`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20). T7 not needed; T8 deferred.
-Open: the T6 re-run on the merged tree, a dm-log-writes check of the zeroing
-order before the FREEZE sign-off, and T10.**
+`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20); the T6 re-run after them
+(`p1/m16`); T8, segment seals off the packer thread (`p1/seal`, 2026-11-21).
+T7 not needed. Open: a T6 measurement with T8 on a real device, a
+dm-log-writes check of the zeroing order before the FREEZE sign-off, and T10.**
 It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
 DESIGN §4.1, §5, §8.1, §8.2 and §20. The root-cause analysis with the code
 references, the options in full, the throughput model and the test list are in
