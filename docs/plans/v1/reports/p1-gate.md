@@ -79,8 +79,7 @@ Final tree = main `e675b2f` (with T8) + this branch, CPUs 0-7, `-j 8`.
 | plain 16 KiB | 55 of 58 | 57 / 57 | ok (1 813 s) |
 | integrity 16 KiB | 55 of 58 | 60 / 60 | ok (2 040 s) |
 
-Remote disk: the target directory was cleaned before CI (it stayed under about 12 GiB with the debug and release builds of CI; the 10 GiB figure
-was exceeded by CI's own debug build, as in the first round). The whole remote directory was removed at the end; nothing of mine is left.
+Remote disk: not sampled this round; CI's debug and release builds on a fresh target are known (round 1) to exceed 10 GiB. The whole remote directory was removed at the end; nothing of mine is left.
 
 ## Deviations
 
