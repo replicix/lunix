@@ -108,10 +108,15 @@ Mutation runs: logs of each mutation (patch applied on the host copy, tests run,
 
 ## Gates
 
-* `tools/ci.sh` on the head of `ca22aa3` (CPUs 0-7, `-j 8`): green, `check-ownership: gate ok (20 changed paths)`, `ci: all green`; 2 220 tests
-  passed, 0 failed, 28 ignored (sum of the `test result` lines). The commit after it changes only casts in a test file and this report
+`origin/main` moved during the work (to `e675b2f`, milestone seal, 21 files, no conflict). Because the branch was already pushed and force-push is
+not allowed, main was **merged into the branch** (signed merge commit) instead of rebasing it, and the gate below was re-run on the merged tree.
+
+* `tools/ci.sh` on the code of `ca22aa3` (CPUs 0-7, `-j 8`): green, `check-ownership: gate ok (20 changed paths)`, `ci: all green`; 2 220 tests
+  passed, 0 failed, 28 ignored (sum of the `test result` lines). `tools/ci.sh` again on the merged tree (main `e675b2f` + this branch): green, `gate ok (21 changed paths)`, `ci: all green`; 2 249
+  passed, 0 failed, 30 ignored. The commit after the first run changes only casts in a test file and this report
   (`gate_equilibrium.rs` re-run: 2 passed; clippy `-D warnings` on `lunixd` clean).
-* Kill loops, by hand on the same code, one at a time (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`,
+* Kill loops, by hand on the code of `ca22aa3` (before the merge of main; **not re-run on the merged tree**, whose seal changes touch the cut and
+  destage paths: the lead may want them re-run), one at a time (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`,
   `cargo test --release -p lunixd --features testsupport,crashpoints --test stack_kill`):
 
 | loop | points reached | runs / kills | kills inside a partial cut | result |
