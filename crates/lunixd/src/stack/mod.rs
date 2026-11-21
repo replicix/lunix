@@ -479,6 +479,9 @@ pub struct OpenParams {
     pub tweak: Option<EngineTweak>,
     /// The destage pool's worker threads (`None`: M9's default).
     pub destage_workers: Option<usize>,
+    /// Segment seals that may run beside the destage packer (`None`: M9's
+    /// default; 0 seals on the packer thread, as before ADR-33 T8).
+    pub destage_seals: Option<usize>,
     /// Operator override of `ForkUnverifiable` (ADR-31); the caller audits it.
     pub allow_unverifiable_fork: bool,
     /// Lock the journal's I/O memory (DESIGN §3, W7); the daemon sets it when
@@ -527,6 +530,7 @@ impl OpenParams {
             on_journal_damage: OnJournalDamage::Wipe,
             tweak: None,
             destage_workers: None,
+            destage_seals: None,
             allow_unverifiable_fork: false,
             lock_memory: false,
             store_fs: None,
@@ -838,6 +842,9 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     if let Some(w) = p.destage_workers {
         dcfg.workers = w.max(1);
         dcfg.result_window = dcfg.result_window.max(dcfg.workers);
+    }
+    if let Some(n) = p.destage_seals {
+        dcfg.max_seals_in_flight = n;
     }
     let destager = PipelineDestager::new(DestageParams::from_descriptor(&desc), dcfg);
 

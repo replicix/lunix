@@ -886,6 +886,19 @@ pub struct WritePathStatus {
     pub last_cut_bytes: u64,
     /// How long the last cut took, C1 to C9, milliseconds.
     pub last_cut_ms: u64,
+    /// Segment seals run since the attach (ADR-33 T8: they run beside the
+    /// packer, up to a bound).
+    pub seals: u64,
+    /// The most seals in flight at once in one cut since the attach.
+    pub seal_in_flight_max: u64,
+    /// Summed duration of the seals, milliseconds. Above `seal_wait_ms` by
+    /// what the overlap with packing saved.
+    pub seal_busy_ms: u64,
+    /// Time cuts waited at the end of packing for seals still running,
+    /// milliseconds.
+    pub seal_wait_ms: u64,
+    /// Time packers waited for a free seal slot, milliseconds.
+    pub seal_stall_ms: u64,
 }
 
 /// `volume_status`.

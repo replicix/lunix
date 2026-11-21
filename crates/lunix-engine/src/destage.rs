@@ -82,6 +82,16 @@ pub struct DestageOutcome {
     pub cold_rmw: u64,
     /// Nanoseconds per stage: hash, dedup, compress, seal, append.
     pub stage_ns: [u64; 5],
+    /// Segment seals the cut ran (ADR-33 T8: off the packer thread).
+    pub seals: u64,
+    /// Most seals in flight at once during the cut.
+    pub seal_in_flight_max: u64,
+    /// Summed duration of the seals.
+    pub seal_busy_ns: u64,
+    /// Time the cut waited for the seals still running at the end of packing.
+    pub seal_wait_ns: u64,
+    /// Time the packer waited for a free seal slot.
+    pub seal_stall_ns: u64,
     /// Extents whose tag, AEAD or id failed in the pipeline's own reads
     /// (base reads, dedup confirmation). Reads through `DestageCtx::reader`
     /// are already counted by the engine and must not be added here.
