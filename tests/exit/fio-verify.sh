@@ -106,6 +106,7 @@ run_cell() { # target chunk mode
   lx space "$vol" --cache-max "$CACHE_MAX" --json > "$d/space-set.json" 2>&1
   local cmax hdr fto vdir; cmax=$(jq -r '.settings.cache_max // empty' "$d/space-set.json" 2>/dev/null); hdr=$(jq -r '.settings.headroom // 268435456' "$d/space-set.json" 2>/dev/null)
   fto=$(jq -r '.settings.full_timeout_ms // 30000' "$d/space-set.json" 2>/dev/null); vdir=$(vol_dir "$vol")
+  [ -n "$fto" ] || fto=30000
   [ -n "$cmax" ] || cmax=$(numfmt --from=iec "$CACHE_MAX")
   local hung0; hung0=$(dmesg | grep -ciE 'hung task|blocked for more than')
   : > "$d/store-samples.txt"
