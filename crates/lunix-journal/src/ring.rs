@@ -95,6 +95,10 @@ pub(crate) struct SlotInfo {
     /// rename. The scan does not report such a file as damage when its body
     /// is zero (on-disk-formats §5.1).
     pub reinit: bool,
+    /// A re-initialisation of this file failed (the zeroing may have begun):
+    /// the file stays `Used` and a reclaim candidate, but no guest read is
+    /// pinned on it (the read takes the map: the file is below a cut).
+    pub dirty: bool,
 }
 
 /// One physical file. The descriptor lives as long as the journal; a recycle
@@ -110,6 +114,11 @@ pub(crate) struct RingFile {
     pub hi_off: AtomicU64,
     /// Batch writes queued and not yet reaped.
     pub inflight: AtomicU32,
+    /// Guest reads queued on this file and not yet reaped. Taken under the
+    /// ring lock while the file is in use ([`Rings::pin_read`]); reclaim
+    /// waits for it to reach zero after the file left use and before it
+    /// zeroes it.
+    pub reads: AtomicU32,
 }
 
 impl RingFile {
@@ -120,7 +129,14 @@ impl RingFile {
             rec_bytes: AtomicU64::new(0),
             hi_off: AtomicU64::new(B),
             inflight: AtomicU32::new(0),
+            reads: AtomicU32::new(0),
         }
+    }
+
+    /// Releases a pin taken by [`Rings::pin_read`].
+    pub(crate) fn unpin_read(&self) {
+        let before = self.reads.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(before > 0, "read pin released twice");
     }
 
     pub(crate) fn reset_counters(&self) {
@@ -208,6 +224,26 @@ impl Rings {
     /// recycled).
     pub(crate) fn find_in_use(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
         self.find_in_use_gen(lane, ordinal).map(|(f, _)| f)
+    }
+
+    /// The file holding `(lane, ordinal)` if it is in use, with a read pinned
+    /// on it: the count is raised under the ring lock that reclaim takes to
+    /// move the file out of use, so a pin is either refused (`None`) or seen
+    /// by reclaim, which then waits for [`RingFile::unpin_read`] before it zeroes
+    /// the file. A file whose re-initialisation failed is refused too.
+    pub(crate) fn pin_read(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
+        let ring = self.lanes.get(usize::from(lane))?;
+        let inner = lock(&ring.inner);
+        let slot = inner.slot_by_ordinal(ordinal)?;
+        let s = &inner.slots[slot];
+        match s.role {
+            Role::Active | Role::Used if !s.dirty => {
+                let f = Arc::clone(&ring.files[slot]);
+                f.reads.fetch_add(1, Ordering::AcqRel);
+                Some(f)
+            }
+            Role::Active | Role::Used | Role::Free | Role::Recycling => None,
+        }
     }
 
     /// [`Self::find_in_use`] with the file's generation (the `gen` its
@@ -377,6 +413,7 @@ fn load_ring(
             role: Role::Used,
             bad,
             reinit,
+            dirty: false,
         });
     }
     let mut next_ordinal = ordinals.last().map_or(1, |o| o + 1);
@@ -391,6 +428,7 @@ fn load_ring(
             role: Role::Free,
             bad: false,
             reinit: false,
+            dirty: false,
         });
         next_ordinal += 1;
     }
