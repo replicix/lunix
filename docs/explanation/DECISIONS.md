@@ -2561,9 +2561,10 @@ and the M16 validity rule with the sustained cell.
 W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
 Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
 2026-11-20); T6 measured (`p1/m16`); the stall fixes it led to, with T9 as
-`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20). T7 not needed; T8 deferred.
-Open: the T6 re-run on the merged tree, a dm-log-writes check of the zeroing
-order before the FREEZE sign-off, and T10.**
+`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20); the T6 re-run after them
+(`p1/m16`); T8, segment seals off the packer thread (`p1/seal`, 2026-11-21).
+T7 not needed. Open: a T6 measurement with T8 on a real device, a
+dm-log-writes check of the zeroing order before the FREEZE sign-off, and T10.**
 It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
 DESIGN §4.1, §5, §8.1, §8.2 and §20. The root-cause analysis with the code
 references, the options in full, the throughput model and the test list are in
