@@ -533,3 +533,19 @@ paths = [
   "docs/plans/v1/reports/p1-gate.md",
   "tools/ownership.toml",
 ]
+
+# leadzone: a lead zone before the admission band: GC pressure and the floor
+# grace start at soft + lead (lead = ingest x the reclaim dead time).
+[leadzone]
+paths = [
+  "crates/lunix-engine/src/pressure.rs",
+  "crates/lunix-engine/tests/pressure.rs",
+  "crates/lunix-testkit/src/space.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunixd/src/daemon.rs",
+  "docs/reference/gc.md",
+  "docs/plans/v1/reports/p1-leadzone.md",
+  "tools/ownership.toml",
+]
