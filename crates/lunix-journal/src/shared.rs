@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
-use lunix_iface::journal::FlushDone;
+use lunix_iface::journal::{FlushDone, JournalLoc};
 use lunix_iface::wake::WakeFd;
 use lunix_iface::Error;
 
@@ -152,12 +152,18 @@ pub(crate) struct Shared {
     /// Called as soon as a queue file is on the free list, before its lane is
     /// signalled (test hook).
     pub free_hook: Mutex<Option<ReclaimHook>>,
+    /// Called by a lane's `submit_read` after it found the file in use and
+    /// before it pins it (test hook).
+    pub read_gap_hook: Mutex<Option<ReadHook>>,
     /// The n-th file the next reclaim re-initialises fails (0: none; test
     /// hook).
     pub fail_reclaim_nth: std::sync::atomic::AtomicU32,
     /// Ring files freed so far, by lane (`Journal::freed_files_by_lane`).
     pub freed: Vec<AtomicU64>,
 }
+
+/// A test hook of `submit_read`: see [`Shared::read_gap_hook`].
+pub(crate) type ReadHook = std::sync::Arc<dyn Fn(JournalLoc) + Send + Sync>;
 
 /// A test hook of reclaim: see [`Shared::reclaim_hook`].
 pub(crate) type ReclaimHook = std::sync::Arc<dyn Fn(u16, u32) + Send + Sync>;

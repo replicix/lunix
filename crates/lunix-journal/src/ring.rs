@@ -110,6 +110,11 @@ pub(crate) struct RingFile {
     pub hi_off: AtomicU64,
     /// Batch writes queued and not yet reaped.
     pub inflight: AtomicU32,
+    /// Guest reads queued on this file and not yet reaped. Taken under the
+    /// ring lock while the file is in use ([`Rings::pin_read`]); reclaim
+    /// waits for it to reach zero after the file left use and before it
+    /// zeroes it.
+    pub reads: AtomicU32,
 }
 
 impl RingFile {
@@ -120,6 +125,7 @@ impl RingFile {
             rec_bytes: AtomicU64::new(0),
             hi_off: AtomicU64::new(B),
             inflight: AtomicU32::new(0),
+            reads: AtomicU32::new(0),
         }
     }
 
@@ -208,6 +214,25 @@ impl Rings {
     /// recycled).
     pub(crate) fn find_in_use(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
         self.find_in_use_gen(lane, ordinal).map(|(f, _)| f)
+    }
+
+    /// The file holding `(lane, ordinal)` if it is in use, with a read pinned
+    /// on it: the count is raised under the ring lock that reclaim takes to
+    /// move the file out of use, so a pin is either refused (`None`) or seen
+    /// by reclaim, which then waits for [`Self::unpin_read`] before it zeroes
+    /// the file.
+    pub(crate) fn pin_read(&self, lane: u16, ordinal: u32) -> Option<Arc<RingFile>> {
+        let ring = self.lanes.get(usize::from(lane))?;
+        let inner = lock(&ring.inner);
+        let slot = inner.slot_by_ordinal(ordinal)?;
+        match inner.slots[slot].role {
+            Role::Active | Role::Used => {
+                let f = Arc::clone(&ring.files[slot]);
+                f.reads.fetch_add(1, Ordering::AcqRel);
+                Some(f)
+            }
+            Role::Free | Role::Recycling => None,
+        }
     }
 
     /// [`Self::find_in_use`] with the file's generation (the `gen` its

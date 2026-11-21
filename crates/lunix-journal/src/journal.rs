@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lunix_format::local::CheckpointSlot;
 use lunix_format::WriteSeq;
@@ -19,7 +19,7 @@ use crate::aligned::AlignedBuf;
 use crate::config::JournalConfig;
 use crate::coord;
 use crate::lane::FileLane;
-use crate::ring::{io_err, lock, open_rings, LaneRing, Reinit, RingKind, Role};
+use crate::ring::{io_err, lock, open_rings, LaneRing, Reinit, RingFile, RingKind, Role};
 use crate::scan::{self, LanePlan, Plan};
 use crate::shared::{Coord, LaneFlight, MarkDue, Shared, State, NOT_POISONED};
 use crate::sys::{self, B, ZERO_LEN};
@@ -94,6 +94,7 @@ impl FileJournal {
             wakes: (0..lanes).map(|_| Mutex::new(None)).collect(),
             reclaim_hook: Mutex::new(None),
             free_hook: Mutex::new(None),
+            read_gap_hook: Mutex::new(None),
             fail_reclaim_nth: std::sync::atomic::AtomicU32::new(0),
             freed: (0..lanes).map(|_| AtomicU64::new(0)).collect(),
         });
@@ -209,6 +210,14 @@ impl FileJournal {
         self.sh
             .fail_reclaim_nth
             .store(n, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Test hook: `f(loc)` is called by a lane's `submit_read` after it found
+    /// the file in use and before the read is pinned and queued; reclaim may
+    /// run to completion in it.
+    #[doc(hidden)]
+    pub fn set_read_gap_hook(&self, f: Option<std::sync::Arc<dyn Fn(JournalLoc) + Send + Sync>>) {
+        *lock(&self.sh.read_gap_hook) = f;
     }
 
     /// Test hook: `f(lane, freed)` is called by `reclaim` right after a queue
@@ -587,7 +596,13 @@ impl Journal for FileJournal {
             while let Some(job) = jobs.next() {
                 let file = &ring.files[job.slot];
                 lunix_iface::crashpoint!("journal.before_reclaim_delete");
-                let done = if self.sh.inject_reclaim_failure() {
+                // The file is out of use (`Recycling`): no read can be pinned
+                // on it any more. Reads already queued finish first; zeroing
+                // under them would hand the guest zeros (or the next
+                // incarnation's bytes) with a success status.
+                let done = if let Err(e) = wait_reads_drained(file) {
+                    Err(e)
+                } else if self.sh.inject_reclaim_failure() {
                     Err(std::io::Error::other("injected reclaim failure"))
                 } else {
                     rings
@@ -724,4 +739,32 @@ impl Journal for FileJournal {
             file_bytes: len,
         }
     }
+}
+
+/// How long reclaim waits for the guest reads queued on a file that left use.
+/// A read is one ring-file read of at most a few blocks: it finishes in
+/// microseconds, and its lane reaps it on its next wake. The bound only keeps
+/// a stuck device from hanging the coordinator; the file then goes back to
+/// `Used` and the next cut retries it.
+const READ_DRAIN_LIMIT: Duration = Duration::from_secs(10);
+
+/// Waits until no guest read is queued on `file`.
+fn wait_reads_drained(file: &RingFile) -> std::io::Result<()> {
+    let start = Instant::now();
+    let mut spins = 0u32;
+    while file.reads.load(Ordering::Acquire) != 0 {
+        if start.elapsed() > READ_DRAIN_LIMIT {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "guest reads still in flight on a ring file",
+            ));
+        }
+        spins += 1;
+        if spins < 64 {
+            std::thread::yield_now();
+        } else {
+            std::thread::sleep(Duration::from_micros(100));
+        }
+    }
+    Ok(())
 }

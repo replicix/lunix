@@ -93,6 +93,9 @@ struct Batch {
 }
 
 struct ReadReq {
+    /// The ring file, pinned until the read is reaped: reclaim does not
+    /// zero a file with a read in flight.
+    file: Arc<RingFile>,
     abuf: AlignedBuf,
     buf: Vec<u8>,
     token: Token,
@@ -552,6 +555,7 @@ impl FileLane {
         self.read_free.push(id);
         self.inflight_reads -= 1;
         let ReadReq {
+            file,
             abuf,
             mut buf,
             token,
@@ -569,6 +573,9 @@ impl FileLane {
         if self.read_cache.len() < MAX_CACHED_READ_BUFS {
             self.read_cache.push(abuf);
         }
+        // The bytes are copied (or the read failed): reclaim may take the
+        // file now.
+        file.reads.fetch_sub(1, Ordering::AcqRel);
         self.out
             .push(JournalCompletion::Read { token, status, buf });
     }
@@ -745,7 +752,7 @@ impl JournalLane for FileLane {
         if loc.offset < B || end > rings.file_len {
             return Err(Error::invalid("journal location outside the ring file"));
         }
-        let Some(file) = rings.find_in_use(loc.lane.0, loc.ordinal) else {
+        if rings.find_in_use(loc.lane.0, loc.ordinal).is_none() {
             // Reclaimed (or never in use): an error completion, as documented.
             self.out.push(JournalCompletion::Read {
                 token,
@@ -754,7 +761,7 @@ impl JournalLane for FileLane {
             });
             self.raise_wake();
             return Ok(());
-        };
+        }
         if buf.is_empty() {
             self.out.push(JournalCompletion::Read {
                 token,
@@ -777,12 +784,38 @@ impl JournalLane for FileLane {
             self.raise_wake();
             return Ok(());
         }
+        let hook = lock(&self.sh.read_gap_hook).clone();
+        if let Some(h) = hook {
+            h(loc);
+        }
+        // Pin the file before the read is queued. `find_in_use` above is only
+        // a first look: reclaim may have taken the file since, and may zero it
+        // and hand it to a lane again before the kernel runs a read queued
+        // without a pin, which would return zeros or a newer incarnation's
+        // bytes with a success status. The pin is taken under the lock that
+        // reclaim takes to move the file out of use: refused here (the caller
+        // reads the map), or seen by reclaim, which waits for it to drop.
+        let Some(file) = rings.pin_read(loc.lane.0, loc.ordinal) else {
+            self.out.push(JournalCompletion::Read {
+                token,
+                status: IoStatus::err(libc::ENOENT),
+                buf,
+            });
+            self.raise_wake();
+            return Ok(());
+        };
         let a0 = crate::sys::floor4k(loc.offset);
         let a1 = round4k(end);
         let need = (a1 - a0) as usize;
         let mut abuf = match self.read_cache.iter().position(|b| b.len() >= need) {
             Some(i) => self.read_cache.swap_remove(i),
-            None => AlignedBuf::zeroed(need).map_err(Error::Io)?,
+            None => match AlignedBuf::zeroed(need) {
+                Ok(b) => b,
+                Err(e) => {
+                    file.reads.fetch_sub(1, Ordering::AcqRel);
+                    return Err(Error::Io(e));
+                }
+            },
         };
         let ptr = abuf.as_mut_ptr();
         let id = match self.read_free.pop() {
@@ -797,6 +830,7 @@ impl JournalLane for FileLane {
             .build()
             .user_data(READ_BIT | id as u64);
         self.reads[id] = Some(ReadReq {
+            file,
             abuf,
             buf,
             token,
@@ -811,6 +845,7 @@ impl JournalLane for FileLane {
             // we keep): hand the buffer back with an error.
             if let Some(req) = self.reads[id].take() {
                 self.inflight_reads -= 1;
+                req.file.reads.fetch_sub(1, Ordering::AcqRel);
                 self.out.push(JournalCompletion::Read {
                     token,
                     status: IoStatus::err(e.raw_os_error().unwrap_or(libc::EIO)),
@@ -856,6 +891,13 @@ impl Drop for FileLane {
                 break;
             }
             self.reap();
+        }
+        // A read that never completed (a failed wait above) must not pin its
+        // file for good.
+        for r in self.reads.drain(..).flatten() {
+            r.file.reads.fetch_sub(1, Ordering::AcqRel);
+            // The kernel may still write into the buffer: keep it.
+            std::mem::forget(r.abuf);
         }
         // A write that never completed (a failed wait above) leaves its
         // copy's reservation behind: give it back.
