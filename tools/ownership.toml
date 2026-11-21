@@ -520,3 +520,16 @@ paths = [
   "tools/ci.sh",
   "tools/ownership.toml",
 ]
+
+# gate: the M15 latency diagnosis, part 1: a write's pacing delay counts from
+# its arrival (the collector sizing is parked on p1/gate-gc).
+[gate]
+paths = [
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/tests/pace.rs",
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-gate.md",
+  "tools/ownership.toml",
+]
