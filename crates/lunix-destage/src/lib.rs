@@ -80,7 +80,7 @@ pub mod scan;
 pub mod stats;
 
 pub use compress::Pressure;
-pub use config::{DestageConfig, DestageParams};
+pub use config::{DestageConfig, DestageParams, MAX_SEALS_IN_FLIGHT};
 pub use deps::DestageDeps;
 pub use outcome::{DestageError, DestageOutcome, DestagedSegment, ErrorClass, Partial};
 pub use pipeline::{destage_cut, destage_cut_with_cancel};

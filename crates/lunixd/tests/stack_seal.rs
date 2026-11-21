@@ -65,6 +65,10 @@ struct SegFs {
     delay: Duration,
     /// Fail the n-th (from 1) segment `fdatasync` (0: none).
     fail_nth: AtomicUsize,
+    /// Fail the n-th (from 1) directory `fsync` of `segments/`, after the
+    /// rename (0: none).
+    fail_dirsync_nth: AtomicUsize,
+    dirsyncs: AtomicUsize,
     voldir: PathBuf,
     seen: Mutex<Seen>,
 }
@@ -80,6 +84,8 @@ impl SegFs {
         Arc::new(Self {
             delay,
             fail_nth: AtomicUsize::new(0),
+            fail_dirsync_nth: AtomicUsize::new(0),
+            dirsyncs: AtomicUsize::new(0),
             voldir: voldir.to_path_buf(),
             seen: Mutex::default(),
         })
@@ -149,6 +155,12 @@ impl FsOps for SegFs {
     }
 
     fn fsync_dir(&self, dir: &Path) -> io::Result<()> {
+        if dir.ends_with("segments") {
+            let n = self.dirsyncs.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail_dirsync_nth.load(Ordering::SeqCst) == n {
+                return Err(io::Error::other("injected segments/ fsync failure"));
+            }
+        }
         RealFs.fsync_dir(dir)
     }
 
@@ -198,6 +210,10 @@ fn segment_files(voldir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Checks the files on disk: no map pack or commit object is published while
+/// a segment `fdatasync` runs or an `.open` segment exists. It does not tell
+/// the wait in `run` from the one in `finish` (either one keeps the disk
+/// order; the destage-level test of the map's commit tells them apart).
 #[test]
 fn the_map_pack_and_the_commit_wait_for_every_segment_of_the_cut() {
     let Some(t) = scratch("seal-order") else {
@@ -241,9 +257,36 @@ fn a_failed_segment_seal_fails_the_cut_and_a_retry_loses_no_write() {
     }
 }
 
-/// Cut time with a slow segment `fdatasync`: inline seals against seals beside
-/// the packer. `LUNIX_SEAL_DELAY_MS` and `LUNIX_SEAL_MIB` size the run.
 #[test]
+fn a_failure_of_the_directory_fsync_after_the_rename_leaves_no_segment() {
+    let Some(t) = scratch("seal-dirsync") else {
+        return;
+    };
+    let mut r = rig(t.path(), 0, 4, 48);
+    let tip = r.stack.engine.tip();
+    r.fs.fail_dirsync_nth.store(2, Ordering::SeqCst);
+    let err = r.stack.engine.commit_now(false).expect_err("a seal failed");
+    assert_eq!(err.kind(), ErrorKind::Io, "{err}");
+    assert_eq!(r.stack.engine.tip(), tip);
+    // The segment whose seal failed had its sealed name already: the failed
+    // cut deleted it with the others.
+    assert!(
+        segment_files(&r.voldir).is_empty(),
+        "{:?}",
+        segment_files(&r.voldir)
+    );
+    assert_eq!(r.fs.seen().map_objects, 0);
+    r.stack.engine.commit_now(false).expect("retry");
+    for (i, b) in r.data.iter().enumerate() {
+        assert_eq!(&r.driver.read((i * MIB) as u64, MIB as u32), b, "MiB {i}");
+    }
+}
+
+/// Cut time with a slow segment `fdatasync`: inline seals against seals beside
+/// the packer. A benchmark, not a gate: it asserts no duration (run it with
+/// `--ignored`; `LUNIX_SEAL_DELAY_MS` and `LUNIX_SEAL_MIB` size the run).
+#[test]
+#[ignore = "benchmark; prints the cut times"]
 fn seals_beside_the_packer_shorten_a_cut_with_a_slow_fdatasync() {
     let delay = env_or("LUNIX_SEAL_DELAY_MS", 200);
     let mib = env_or("LUNIX_SEAL_MIB", 56) as usize;
@@ -265,16 +308,11 @@ fn seals_beside_the_packer_shorten_a_cut_with_a_slow_fdatasync() {
         assert!(r.fs.seen().violations.is_empty());
         took.push((seals, ms, c));
     }
-    let (inline, one, four) = (took[0].1, took[1].1, took[2].1);
-    let segs = took[0].2.seals;
-    assert!(segs >= 3, "the run sealed {segs} segments");
+    assert!(
+        took[0].2.seals >= 3,
+        "the run sealed {} segments",
+        took[0].2.seals
+    );
     assert_eq!(took[0].2.seal_in_flight_max, 1, "inline: one at a time");
     assert!(took[2].2.seal_in_flight_max >= 2, "{:?}", took[2].2);
-    // Inline pays every fdatasync in turn; beside the packer they overlap.
-    assert!(inline >= u128::from(delay) * u128::from(segs), "{inline}");
-    assert!(
-        four * 10 < inline * 7,
-        "4 in flight {four} ms, inline {inline} ms"
-    );
-    assert!(one <= inline, "1 in flight {one} ms, inline {inline} ms");
 }

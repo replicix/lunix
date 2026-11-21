@@ -2561,8 +2561,7 @@ and the M16 validity rule with the sustained cell.
 W1-W5, W7 and W8; the alternative for W6; W9 replaced by relative targets).
 Implemented: T1 and T2 (`p1/jwin`), T5 (`p1/tipstat`), T3 and T4 (`p1/jcut`,
 2026-11-20); T6 measured (`p1/m16`); the stall fixes it led to, with T9 as
-`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20). T7 not needed; T8
-(segment seals off the packer thread) implemented on `p1/seal` (2026-11-21).
+`FALLOC_FL_ZERO_RANGE` (`p1/jstall`, 2026-11-20). T7 not needed; T8 deferred.
 Open: the T6 re-run on the merged tree, a dm-log-writes check of the zeroing
 order before the FREEZE sign-off, and T10.**
 It amends ADR-4 (what the journal keeps in memory, how a cut is sized) and
@@ -2769,10 +2768,7 @@ noted):
   share of the zero rewrite, of C5-C9, of the packer and of the urgent mark.
   Its report decides T7 to T9.
 - **T7 to T9, conditional on T6:** the urgent mark in steps (W8); segment
-  seals off the packer thread (T8, done: a seal runs on a short-lived sealer
-  thread, at most 4 in flight, and the cut waits for all of them before its
-  map transaction; [p1-seal](../plans/v1/reports/p1-seal.md)); the zero
-  rewrite (W7, only with the sign-off).
+  seals off the packer thread; the zero rewrite (W7, only with the sign-off).
 - **T10, documents**: DESIGN §4.1, §5, §8, and §20 rewritten as relative
   targets (W9) with the percentages from T6.
 

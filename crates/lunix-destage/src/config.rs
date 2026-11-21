@@ -9,6 +9,10 @@ use crate::compress::Pressure;
 /// 4 KiB: the overlay's block size.
 pub(crate) const BLOCK: u64 = 4096;
 
+/// The most segment seals a cut may run at once (a thread and a file
+/// descriptor each).
+pub const MAX_SEALS_IN_FLIGHT: usize = 64;
+
 /// What the pipeline needs of the volume descriptor.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DestageParams {
@@ -117,7 +121,7 @@ impl DestageConfig {
     ///
     /// # Errors
     /// `Invalid` for a zero worker count or batch, a result window below the worker count, a probe length of
-    /// zero or a saving above 100, or `raw_cut_bytes` below `lz4_cut_bytes`.
+    /// zero or a saving above 100, more than [`MAX_SEALS_IN_FLIGHT`] seals in flight, or `raw_cut_bytes` below `lz4_cut_bytes`.
     pub fn validate(&self) -> Result<()> {
         let depths_ok = match (self.lz4_cut_bytes, self.raw_cut_bytes) {
             (Some(l), Some(r)) => l <= r,
@@ -127,6 +131,7 @@ impl DestageConfig {
             && self.batch_chunks >= 1
             && self.batch_bytes >= 1
             && self.result_window >= self.workers
+            && self.max_seals_in_flight <= MAX_SEALS_IN_FLIGHT
             && self.probe_len >= 1
             && self.probe_min_saving_percent <= 100
             && depths_ok;

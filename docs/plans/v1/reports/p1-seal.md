@@ -134,14 +134,65 @@ bounded by how much its `fdatasync`s can overlap (to be measured there: `seal_bu
 
 ## Deviations and choices
 
-1. **Ownership table:** `tools/ownership.toml` had no `[seal]` entry (`remote.sh` refuses an unknown milestone); I added one (the paths changed, plus
-   `tools/ci.sh` for the new stack test, `lunixd/src/stack/mod.rs` for `OpenParams::destage_seals`, `DECISIONS.md` for the T8 status).
+1. **Ownership table:** `tools/ownership.toml` had no `[seal]` entry (`remote.sh` refuses an unknown milestone); I added one (see the review round for the trimmed list).
 2. **Interface:** `WritePathStatus` in `lunix-iface` gained five fields (above). Nothing else in `lunix-iface` changed.
 3. A seal that panics becomes an error (class Never) instead of unwinding on the packer thread.
 4. No `sync_file_range`, no `lunixd.toml` key for the bound (default 4), see Design.
 5. Error-path counters: a failed cut's seal figures are not added to the status (the stats of a failed cut are not, today either).
 6. rust-skills: no conflict with the project's conventions found; `Sealer` uses `std::thread::Builder` and a poisoned-lock-tolerant `lock`, as the
    crate does; the one `unwrap_or_else(into_inner)` on the condvar wait mirrors `worker.rs`.
-7. ADR-33's status line and T7-T9 bullet in `DECISIONS.md` now say T8 is done.
+7. (First round only; reverted in the review round: the `DECISIONS.md` status edits.)
 
 Remote disk: the build tree and scratch of this milestone, about 6 GiB (removed at the end).
+
+## Review round
+
+Findings F1-F7 of `01-p1-seal-review.md`, fixed on `p1/seal`.
+
+| # | change |
+|---|---|
+| F1 | `Sealer` keeps the `JoinHandle`s and joins them in `wait_all` and in `Drop` (after `in_flight == 0`): no seal thread outlives its cut on any path. `Packer` has a `Drop`: a packer dropped without `finish` (a worker panic unwinding out of `destage_cut`) waits for its seals and deletes the segments they sealed, which nothing names. `finish` empties the packer first, so its drop does nothing. |
+| F4 | `wait_sealed` deletes the segment of every `Failed` or `Taken` slot, best effort (idempotent; its thread has ended): a seal that failed after the rename (the directory `fsync`) or panicked after it no longer leaves a sealed file. What can still remain: a segment whose delete itself fails stays for the open-time sweep or GC, as for any segment of a failed cut. |
+| F5 | `Slot::Pending`, an unreported `Taken` slot and a slot/segment count mismatch are hard errors in the collection loop: `panic!` in a debug build, `Invalid` and a failed cut in a release build (`invariant()` in `pack.rs`). Not reachable, so not testable. |
+| F6 | `Packer::finish` returns the segments, the counters and the seal errors after the first; the error path now keeps the seal figures (`Partial::stats`) and `Partial::more_seal_errors` lists the further errors (the lunixd adapter logs them at `warn`). `DestageConfig::validate` refuses `max_seals_in_flight > MAX_SEALS_IN_FLIGHT` (64). `in_flight_max` no longer uses `as`. |
+| F7 | Both `DECISIONS.md` hunks reverted (the file is identical to main). `[seal]` in `tools/ownership.toml` lists exactly the 19 files the branch changes, no `DECISIONS.md`. The five `WritePathStatus` fields stay (signed off). |
+| F2 | The destage tests no longer assert a duration: a seal that must be slow blocks on a latch (`Gate`) that a helper thread releases when the state the test waits for is reached (`wait_for`, a bounded poll of the store's counters). The `one <= inline` assertion and every other timing assertion are gone. The benchmark is `#[ignore]` (run with `--ignored`); the other stack tests keep only their disk-order and error assertions. |
+| F3 | New tests below; the doc comment of the stack ordering test now says it does not tell the wait in `run` from the one in `finish`. |
+
+Tests of the round and their fail-without-rule evidence (mutations run on the host with `cargo test -p lunix-destage --test seal`; "hang" = the test binary did not
+finish in 60 s and was killed: the broken rule loses a wake-up or a count):
+
+| rule | test | mutation | result |
+|---|---|---|---|
+| no seal thread outlives a cut that unwinds; what it sealed is deleted (F1) | `a_worker_panic_unwinding_out_of_the_cut_leaves_no_seal_thread_and_no_sealed_file` (a worker panics at its 60th chunk seal with seals in flight, two held, one sleeping) | `Packer::drop` and `Sealer::drop` emptied | fails (a seal still runs, or a segment is left, on return) |
+| a cancel with seals in flight waits for them and deletes what they sealed | `a_cancel_with_seals_in_flight_ends_the_cut_after_they_ended` (128 segments, window 3, seal 1 held, seal 2 sleeping 400 ms, flag set while the packer waits for a slot) | the wait in `finish` and the drops emptied | fails (a seal still runs on return); it passes with the drops alone emptied, because `finish` waits |
+| a seal that panics becomes `Invalid`, the next cut works (F3) | `a_panicking_seal_fails_the_cut_with_invalid_and_the_next_cut_works` | `Completion::drop` returns early on a missing outcome | hang |
+| a seal failure while the packer waits for a slot fails the cut (F3) | `a_seal_that_fails_while_the_packer_waits_for_a_slot_fails_the_cut` (bound 1, seal 1 held, then fails) | the wake-up of waiters after a seal removed | hang |
+| a failure after the rename leaves no sealed file (F4) | `a_seal_that_fails_after_the_rename_leaves_no_sealed_file` (the seal renames, then reports an error); on the real store `stack_seal::a_failure_of_the_directory_fsync_after_the_rename_leaves_no_segment` (injected `segments/` `fsync` failure) | the deletes of `Failed` slots removed | fails (a segment is left in the store) |
+| all failed seals are reported (F6) | `several_failed_seals_are_all_reported` (two fail; one error is returned, one more listed; the figures count 4 seals) | the list of further errors dropped | fails |
+| the in-flight bound has an upper limit (F6) | `the_seals_in_flight_have_an_upper_bound` | the check removed | fails |
+| first-round rules, now with latches | `the_map_commits_only_after_every_seal_of_the_cut_is_done` | `wait_sealed` removed from `run` | fails (four tests do) |
+| | `seals_overlap_packing_and_each_other` (seal 1 held: the other three must pack and seal) | sealer inline | fails (waits 3 s for a state that cannot come) |
+| | `the_seals_in_flight_are_bounded` (two held; the third must not start) | bound removed | fails (the cancel test too) |
+| | `a_failed_seal_fails_the_cut_and_leaves_nothing_a_retry_cannot_redo` (first and last seal; no write lost; retry reads back) | seal errors ignored | fails (first round) |
+
+The spawn failure of the sealer thread stays untested (it cannot be injected). Gates of the round:
+
+- `tools/ci.sh` (CPUs 8-15, `-j 8`) on the code of the round: **green**, `check-ownership: seal ok (19 changed paths)`, `ci: all green`; 2 221 tests passed,
+  0 failed, 30 ignored (sum of the `test result` lines; the ignored ones include the new benchmark).
+- Kill loops by hand on the same code, as in the first round (`LUNIX_KILL_CUT_MS=1 LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`), one at a time, each
+  started detached on the host and polled (58 points registered, 55 reached in each):
+
+| loop | runs / kills | partial cuts | kills inside a partial cut | result |
+|---|---|---|---|---|
+| plain 16 KiB | 57 / 57 | 10 | 43 of 44 points | ok (1 773 s) |
+| integrity 16 KiB | 60 / 60 | 10 | 43 of 44 | ok (2 061 s) |
+| encrypted 16 KiB | 57 / 57 | 10 | 43 of 45 | ok (1 913 s) |
+| plain 64 KiB | 57 / 57 | 10 | 43 of 45 | ok (1 855 s) |
+
+## Deviations of the round
+
+1. The stall test and the panicking-seal test show a lost wake-up or count as a hang, not as an assertion; the harness cannot do better without a timeout in the code under test.
+2. `Partial` (public in `lunix-destage`) gained `more_seal_errors`; the lunixd adapter logs it. No `lunix-iface` change beyond the five signed-off status fields.
+3. A segment whose best-effort delete after a failed seal fails is not in `Partial::undeleted` (its id is not in the sealed list); it stays for the open-time sweep or GC.
+4. `git checkout <sha> --` with no paths detached my worktree for part of the round; I put it back on `p1/seal`. Nothing was committed while detached and the tree content was the same, but one CI run and the first kill loop synced the tree while the report file was absent (no code effect).

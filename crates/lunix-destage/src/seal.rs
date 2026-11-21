@@ -71,6 +71,9 @@ pub(crate) struct Sealer {
     max_in_flight: usize,
     shared: Arc<Shared>,
     stall_ns: u64,
+    /// The sealer threads, joined by `wait_all` and on drop: none outlives
+    /// the cut, whatever way the cut ends.
+    handles: Vec<thread::JoinHandle<()>>,
 }
 
 /// Records the outcome of a seal even if the seal panics.
@@ -127,6 +130,7 @@ impl Sealer {
                 cv: Condvar::new(),
             }),
             stall_ns: 0,
+            handles: Vec::new(),
         }
     }
 
@@ -161,7 +165,9 @@ impl Sealer {
             ticket = g.slots.len();
             g.slots.push(Slot::Pending);
             g.in_flight += 1;
-            g.in_flight_max = g.in_flight_max.max(g.in_flight as u64);
+            g.in_flight_max = g
+                .in_flight_max
+                .max(u64::try_from(g.in_flight).unwrap_or(u64::MAX));
         }
         if self.max_in_flight == 0 {
             run_seal(Arc::clone(&self.shared), ticket, writer, writes);
@@ -171,24 +177,39 @@ impl Sealer {
         let spawned = thread::Builder::new()
             .name("lunix-seal".into())
             .spawn(move || run_seal(shared, ticket, writer, writes));
-        if let Err(e) = spawned {
-            // The closure (and the writer in it) is gone: the file is
-            // abandoned, the cut fails as for a failed seal.
-            let mut g = lock(&self.shared.st);
-            g.slots[ticket] = Slot::Failed(Error::Io(e));
-            g.in_flight -= 1;
-            self.shared.cv.notify_all();
+        match spawned {
+            Ok(h) => self.handles.push(h),
+            Err(e) => {
+                // The closure (and the writer in it) is gone: the file is
+                // abandoned, the cut fails as for a failed seal.
+                let mut g = lock(&self.shared.st);
+                g.slots[ticket] = Slot::Failed(Error::Io(e));
+                g.in_flight -= 1;
+                self.shared.cv.notify_all();
+            }
         }
         Ok(())
     }
 
-    /// Waits until no seal runs and returns the outcomes in submit order.
+    /// Waits until no seal runs, joins the threads and returns the outcomes
+    /// in submit order.
     pub(crate) fn wait_all(&mut self) -> Vec<Slot> {
-        let mut g = lock(&self.shared.st);
-        while g.in_flight > 0 {
-            g = self.shared.cv.wait(g).unwrap_or_else(|p| p.into_inner());
+        self.quiesce();
+        std::mem::take(&mut lock(&self.shared.st).slots)
+    }
+
+    /// No seal runs and no sealer thread is left.
+    fn quiesce(&mut self) {
+        {
+            let mut g = lock(&self.shared.st);
+            while g.in_flight > 0 {
+                g = self.shared.cv.wait(g).unwrap_or_else(|p| p.into_inner());
+            }
         }
-        std::mem::take(&mut g.slots)
+        for h in self.handles.drain(..) {
+            // A panic of the seal was recorded as its outcome.
+            let _ = h.join();
+        }
     }
 
     pub(crate) fn figures(&self) -> SealFigures {
@@ -199,5 +220,12 @@ impl Sealer {
             busy_ns: g.busy_ns,
             stall_ns: self.stall_ns,
         }
+    }
+}
+
+impl Drop for Sealer {
+    /// No sealer thread outlives its cut, also when the cut unwinds.
+    fn drop(&mut self) {
+        self.quiesce();
     }
 }

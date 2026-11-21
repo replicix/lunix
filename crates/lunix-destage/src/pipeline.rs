@@ -195,14 +195,16 @@ pub fn destage_cut_with_cancel(
     );
     let mut job_stats = DestageStats::default();
     let run = run(cut, deps, cancel, &mut packer, &mut job_stats);
-    let mut stats = std::mem::take(&mut packer.stats);
+    // Waits for the seals still running: every file the cut sealed is listed.
+    let fin = packer.finish();
+    let mut stats = fin.stats;
     stats.add(&job_stats);
     match run {
         Ok(map) => {
             stats.wall_ns = ns(started.elapsed());
             Ok(DestageOutcome {
                 cut_seq: cut.cut_seq,
-                segments: packer.finish(),
+                segments: fin.segments,
                 map,
                 stats,
             })
@@ -214,7 +216,7 @@ pub fn destage_cut_with_cancel(
             let class = classify(&f.error, deps.map.dirty_leaf_count() > 0);
             // Nothing durable names the segments this cut sealed: delete them
             // now rather than leave them to the next open (best effort).
-            let segments = packer.finish();
+            let segments = fin.segments;
             let mut freed_bytes = 0;
             let mut undeleted = Vec::new();
             for s in &segments {
@@ -233,6 +235,7 @@ pub fn destage_cut_with_cancel(
                     undeleted,
                     freed_bytes,
                     stats,
+                    more_seal_errors: fin.more_errors,
                 }),
             })
         }

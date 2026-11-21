@@ -32,6 +32,16 @@ struct Current {
     extent_bytes: u64,
 }
 
+/// A broken invariant of the seal collection: a bug, which a debug build
+/// refuses loudly and a release build turns into a failed cut (the one place
+/// the durability rule depends on).
+fn invariant(msg: &'static str) -> Error {
+    if cfg!(debug_assertions) {
+        panic!("{msg}");
+    }
+    Error::invalid(msg)
+}
+
 /// A segment handed to the sealer, kept until its seal is collected.
 struct Pending {
     seg: SegId,
@@ -46,6 +56,10 @@ pub(crate) struct Packer<'a> {
     cur: Option<Current>,
     sealer: Sealer,
     pending: Vec<Pending>,
+    /// A seal failure `submit` handed to the caller.
+    error_reported: bool,
+    /// Seal errors after the first.
+    more_errors: Vec<String>,
     done: Vec<DestagedSegment>,
     /// Ids appended in this cut, for dedup against the cut's own extents (the
     /// index only learns them after the commit).
@@ -66,6 +80,8 @@ impl<'a> Packer<'a> {
             cur: None,
             sealer: Sealer::new(max_seals_in_flight),
             pending: Vec::new(),
+            error_reported: false,
+            more_errors: Vec::new(),
             done: Vec::new(),
             appended: HashMap::new(),
             ops: Vec::new(),
@@ -154,7 +170,10 @@ impl<'a> Packer<'a> {
         let Some(cur) = self.cur.take() else {
             return Ok(());
         };
-        self.sealer.submit(cur.writer, cur.writes)?;
+        if let Err(e) = self.sealer.submit(cur.writer, cur.writes) {
+            self.error_reported = true;
+            return Err(e);
+        }
         self.pending.push(Pending {
             seg: cur.seg,
             writes: cur.writes,
@@ -167,9 +186,14 @@ impl<'a> Packer<'a> {
 
     /// Waits for every seal handed out and collects the ones that succeeded
     /// (in segment order) into the sealed list, so a failed cut deletes them.
+    /// A segment whose seal failed is deleted at once, best effort: the seal
+    /// may have failed after the rename (the directory `fsync`), and nothing
+    /// durable names it.
     ///
     /// # Errors
-    /// The first seal error not reported before.
+    /// The first seal error not reported before; later ones are kept for
+    /// [`finish`](Self::finish). `Invalid` if a seal's outcome is missing,
+    /// which would otherwise drop a segment the map names.
     pub(crate) fn wait_sealed(&mut self) -> Result<()> {
         let t = Instant::now();
         let slots = self.sealer.wait_all();
@@ -179,8 +203,22 @@ impl<'a> Packer<'a> {
         self.stats.seal_in_flight_max = f.in_flight_max;
         self.stats.seal_busy_ns = f.busy_ns;
         self.stats.seal_stall_ns = f.stall_ns;
-        let mut first = None;
-        for (p, slot) in self.pending.drain(..).zip(slots) {
+        let mut first: Option<Error> = None;
+        let mut note = |e: Error, more: &mut Vec<String>| {
+            if first.is_none() {
+                first = Some(e);
+            } else {
+                more.push(e.to_string());
+            }
+        };
+        let pending = std::mem::take(&mut self.pending);
+        if slots.len() != pending.len() {
+            note(
+                invariant("seal outcomes and segments differ in number"),
+                &mut self.more_errors,
+            );
+        }
+        for (p, slot) in pending.into_iter().zip(slots) {
             match slot {
                 Slot::Done(sealed) => self.done.push(DestagedSegment {
                     seg: p.seg,
@@ -190,9 +228,22 @@ impl<'a> Packer<'a> {
                     sealed,
                 }),
                 Slot::Failed(e) => {
-                    first.get_or_insert(e);
+                    let _ = self.segments.delete(p.seg);
+                    note(e, &mut self.more_errors);
                 }
-                Slot::Pending | Slot::Taken => {}
+                Slot::Taken => {
+                    // Its error was handed to the caller by `submit`.
+                    let _ = self.segments.delete(p.seg);
+                    if !self.error_reported {
+                        note(invariant("a seal failure was lost"), &mut self.more_errors);
+                    }
+                }
+                Slot::Pending => {
+                    note(
+                        invariant("a seal is pending after the wait"),
+                        &mut self.more_errors,
+                    );
+                }
             }
         }
         match first {
@@ -206,12 +257,35 @@ impl<'a> Packer<'a> {
         std::mem::take(&mut self.ops)
     }
 
-    /// Ends the pack. A segment still being written is abandoned (the store
-    /// removes the file); the sealed ones are returned.
-    /// Waits for the seals still running first, so that every file the cut
-    /// sealed is in the list.
-    pub(crate) fn finish(mut self) -> Vec<DestagedSegment> {
+    /// Ends the pack: waits for the seals still running (so that every file
+    /// the cut sealed is in the list), and returns the sealed segments, the
+    /// counters and the seal errors after the first. A segment still being
+    /// written is abandoned (the store removes the file).
+    pub(crate) fn finish(mut self) -> Finished {
         let _ = self.wait_sealed();
-        self.done
+        Finished {
+            segments: std::mem::take(&mut self.done),
+            stats: std::mem::take(&mut self.stats),
+            more_errors: std::mem::take(&mut self.more_errors),
+        }
+    }
+}
+
+/// What [`Packer::finish`] hands back.
+pub(crate) struct Finished {
+    pub(crate) segments: Vec<DestagedSegment>,
+    pub(crate) stats: DestageStats,
+    pub(crate) more_errors: Vec<String>,
+}
+
+impl Drop for Packer<'_> {
+    /// A packer dropped without `finish` (a panic unwinding out of the cut):
+    /// no seal thread outlives it, and what it sealed, which nothing names, is
+    /// deleted (best effort; the open-time sweep removes the rest).
+    fn drop(&mut self) {
+        let _ = self.wait_sealed();
+        for s in self.done.drain(..) {
+            let _ = self.segments.delete(s.seg);
+        }
     }
 }

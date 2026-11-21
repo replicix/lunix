@@ -152,6 +152,12 @@ pub fn map_error(e: DestageError) -> DestageFailure {
             "segments of a failed cut could not be deleted; GC (or the open-time sweep, above the high-water mark) removes them"
         );
     }
+    if !e.partial.more_seal_errors.is_empty() {
+        tracing::warn!(
+            errors = %e.partial.more_seal_errors.join("; "),
+            "more segment seals of a failed cut failed"
+        );
+    }
     DestageFailure {
         retry: retry_of(e.class),
         chunk: e.chunk,

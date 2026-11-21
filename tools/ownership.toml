@@ -462,20 +462,23 @@ paths = [
 # seal: ADR-33 T8 (segment seals off the packer thread).
 [seal]
 paths = [
-  "crates/lunix-destage/src/**",
+  "crates/lunix-destage/src/config.rs",
+  "crates/lunix-destage/src/lib.rs",
+  "crates/lunix-destage/src/outcome.rs",
+  "crates/lunix-destage/src/pack.rs",
+  "crates/lunix-destage/src/pipeline.rs",
+  "crates/lunix-destage/src/seal.rs",
+  "crates/lunix-destage/src/stats.rs",
   "crates/lunix-destage/tests/seal.rs",
-  "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/destage.rs",
-  "crates/lunix-engine/tests/seal.rs",
   "crates/lunix-iface/src/ctl/msg.rs",
   "crates/lunix-iface/tests/ctl.rs",
   "crates/lunixd/src/daemon.rs",
   "crates/lunixd/src/stack/destage.rs",
   "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_seal.rs",
-  "crates/lunixd/tests/status_lockfree.rs",
-  "docs/explanation/DECISIONS.md",
   "tools/ci.sh",
   "tools/ownership.toml",
 ]
