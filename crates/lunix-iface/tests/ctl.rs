@@ -208,6 +208,7 @@ fn throttle() -> impl Strategy<Value = ThrottleStatus> {
         ],
         prop_oneof![
             Just(GcPressure::Normal),
+            Just(GcPressure::Lead),
             Just(GcPressure::Raised),
             Just(GcPressure::Urgent)
         ],

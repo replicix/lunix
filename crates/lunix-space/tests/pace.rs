@@ -86,6 +86,38 @@ fn above_the_soft_mark_nothing_is_paced_and_nothing_is_counted() {
 }
 
 #[test]
+fn the_gate_does_not_pace_in_the_lead_zone_above_the_soft_mark() {
+    // The engine's lead zone (GC pressure from `soft + lead`) is no concern
+    // of the gate: at a heavy ingest with the headroom between the soft mark
+    // and twice of it (the largest lead) every write is admitted at once, the
+    // state stays `open` and nothing is counted as a delay.
+    let ck = clock();
+    let g = at_headroom(SOFT * 2, cfg(None, |_| {}), &ck);
+    let rec = 256 * KIB;
+    for _ in 0..30 {
+        ck.advance(Duration::from_secs(1));
+        // 100 MiB/s, the headroom falling from 2 x soft towards the mark.
+        for _ in 0..(100 * MIB / rec) {
+            reserved(g.reserve(K, rec, None).unwrap());
+        }
+        g.tick();
+        let t = g.snapshot().throttle;
+        assert_eq!(t.state, ThrottleState::Open, "headroom {}", t.headroom);
+        assert_eq!(t.rate, None);
+        assert_eq!((t.delayed_writes, t.delayed_ms, t.delay_max_ms), (0, 0, 0));
+        assert_eq!(t.paced_waiters, 0);
+        assert!(t.headroom >= SOFT, "still above the soft mark");
+        // Stop before the mark: the zone is the part of the band's far side.
+        if t.headroom < SOFT + 200 * MIB {
+            break;
+        }
+    }
+    let t = g.snapshot().throttle;
+    assert!(t.ingest_rate > 0, "a writer is measured: {}", t.ingest_rate);
+    assert!(t.headroom < SOFT * 2 && t.headroom >= SOFT);
+}
+
+#[test]
 fn inside_the_band_the_bucket_admits_the_curve_rate() {
     for pct in [25u64, 50, 75] {
         let ck = clock();

@@ -93,6 +93,8 @@ struct State {
     throttle: ThrottleState,
     /// No writer: the snapshot reports no bytes admitted lately.
     idle: bool,
+    /// Scripted `(headroom, soft, ingest_rate)` of the throttle figures.
+    figures: Option<(u64, u64, u64)>,
     /// Scripted pacing: a bulk request that fits waits (`Paced`) until the
     /// script ends it; a `Sync` one that fits is admitted at once.
     pacing: bool,
@@ -187,6 +189,7 @@ impl MemSpace {
                 full: false,
                 throttle: ThrottleState::Open,
                 idle: false,
+                figures: None,
                 pacing: false,
                 ring_pace: None,
                 ring_pace_sets: 0,
@@ -200,6 +203,14 @@ impl MemSpace {
     /// it to put the collector under pressure.
     pub fn set_throttle_state(&self, state: ThrottleState) {
         lock(&self.st).throttle = state;
+    }
+
+    /// Scripts the headroom, the soft mark and the ingest rate (bytes per
+    /// second) the snapshot reports, for the lead zone's engine tests (the
+    /// ingest then replaces the idle script). `None` goes back to the
+    /// defaults.
+    pub fn set_throttle_figures(&self, figures: Option<(u64, u64, u64)>) {
+        lock(&self.st).figures = figures;
     }
 
     /// Scripts whether a writer is active (bytes admitted in the last 10 s):
@@ -428,7 +439,9 @@ impl SpaceGate for MemSpace {
                 } else {
                     st.throttle
                 },
-                ingest_rate: u64::from(!st.idle),
+                ingest_rate: st.figures.map_or(u64::from(!st.idle), |f| f.2),
+                headroom: st.figures.map_or(0, |f| f.0),
+                soft: st.figures.map_or(0, |f| f.1),
                 ..ThrottleFigures::default()
             },
         }

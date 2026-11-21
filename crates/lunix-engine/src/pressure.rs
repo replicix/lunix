@@ -9,6 +9,13 @@
 //! with hysteresis: the engine returns to the normal figures after the gate
 //! has been open for [`HOLD`].
 //!
+//! Before the band there is a lead zone: while the gate is open but the
+//! headroom is below `soft + lead` (`lead` = the recent ingest times the
+//! dead time of one reclaim, bounded), the collector gets the floor grace
+//! only ([`Pressure::Lead`]), so garbage condemned earlier is deletable by
+//! the time the headroom reaches the soft mark. The gate does not pace
+//! there.
+//!
 //! Both pieces here are plain state machines: the engine feeds them the
 //! gate's snapshot and the clock and acts on what they return.
 
@@ -24,6 +31,19 @@ use crate::engine::{lock, Inner};
 /// How long the gate must stay open before the collector goes back to its
 /// normal figures.
 pub const HOLD: Duration = Duration::from_secs(5);
+
+/// One collector pass period as the lead zone counts it: the daemon's
+/// `busy_interval` (5 s, `GcConfig::daemon`), the time between passes while
+/// garbage keeps coming.
+pub const LEAD_PASS_PERIOD: Duration = Duration::from_secs(5);
+
+/// Pass periods in one reclaim's dead time: a pass finds the garbage up to
+/// one period after it died, the next one after its grace deletes it.
+pub const LEAD_PASS_PERIODS: u32 = 2;
+
+/// The lead zone is left only this far above its entry mark, as a divisor
+/// of the lead (a margin of a quarter of the lead).
+pub const LEAD_EXIT_MARGIN_DIVISOR: u64 = 4;
 
 /// The step budget's multiple under pressure.
 pub const BUDGET_FACTOR: u32 = 4;
@@ -63,11 +83,14 @@ pub fn yielding(base: GcParams) -> GcParams {
 pub const YIELD_HOLD_MS: u64 = 2_000;
 
 /// What the collector is getting.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub enum Pressure {
     /// The configured budget, rate and grace.
     #[default]
     Normal,
+    /// The lead zone, headroom below `soft + lead` with the gate still
+    /// open: the floor grace, the budget and the rate unchanged.
+    Lead,
     /// Writes are paced (`slowdown`): 4 x the budget, the rate times the
     /// factor, the floor grace.
     Raised,
@@ -81,6 +104,7 @@ impl Pressure {
     pub fn name(self) -> &'static str {
         match self {
             Self::Normal => "normal",
+            Self::Lead => "lead",
             Self::Raised => "raised",
             Self::Urgent => "urgent",
         }
@@ -89,7 +113,7 @@ impl Pressure {
     /// The step budget at this pressure.
     #[must_use]
     pub fn budget(self, base: GcBudget) -> GcBudget {
-        if self == Self::Normal {
+        if matches!(self, Self::Normal | Self::Lead) {
             return base;
         }
         GcBudget {
@@ -107,9 +131,12 @@ impl Pressure {
         if self == Self::Normal {
             return base;
         }
-        let floor = Duration::from_secs(10).saturating_add(base.read_timeout.saturating_mul(2));
+        let grace = base.grace.min(grace_floor(&base));
+        if self == Self::Lead {
+            return GcParams { grace, ..base };
+        }
         GcParams {
-            grace: base.grace.min(floor),
+            grace,
             // A rate of 0 means "no compaction" and stays 0 (the volume's
             // choice outranks the pressure).
             rate_bytes_per_s: if base.rate_bytes_per_s == 0 {
@@ -124,35 +151,124 @@ impl Pressure {
     }
 }
 
+/// The grace floor: 10 s plus twice `read_timeout` (the urgent pass's rule).
+#[must_use]
+pub fn grace_floor(base: &GcParams) -> Duration {
+    Duration::from_secs(10).saturating_add(base.read_timeout.saturating_mul(2))
+}
+
+/// The dead time of one reclaim at the grace the lead zone applies: the
+/// floor grace (never longer than the configured one) plus
+/// [`LEAD_PASS_PERIODS`] passes.
+#[must_use]
+pub fn lead_window(base: &GcParams) -> Duration {
+    base.grace
+        .min(grace_floor(base))
+        .saturating_add(LEAD_PASS_PERIOD.saturating_mul(LEAD_PASS_PERIODS))
+}
+
+/// The lead in bytes of headroom: `ingest x window`, at most the soft mark
+/// and a quarter of the limit; 0 for an idle writer (`ingest` 0) and with
+/// the band off (`soft` 0), by the product and the bound.
+#[must_use]
+pub fn lead_bytes(ingest_rate: u64, window: Duration, soft: u64, limit: u64) -> u64 {
+    let raw = u128::from(ingest_rate).saturating_mul(window.as_millis()) / 1000;
+    u64::try_from(raw)
+        .unwrap_or(u64::MAX)
+        .min(soft)
+        .min(limit / 4)
+}
+
+/// What the lead zone needs of the gate's snapshot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Lead {
+    /// `limit - used`.
+    pub headroom: u64,
+    /// The soft mark (0 with the band off).
+    pub soft: u64,
+    /// The lead ([`lead_bytes`]); 0 turns the zone off.
+    pub bytes: u64,
+}
+
+impl Lead {
+    /// No lead zone.
+    pub const NONE: Self = Self {
+        headroom: 0,
+        soft: 0,
+        bytes: 0,
+    };
+
+    /// From a snapshot and the collector's settings (no settings, no lead).
+    #[must_use]
+    pub fn of(snap: &SpaceSnapshot, params: Option<&GcParams>) -> Self {
+        let t = &snap.throttle;
+        let bytes = params.map_or(0, |p| {
+            lead_bytes(t.ingest_rate, lead_window(p), t.soft, snap.limit)
+        });
+        Self {
+            headroom: t.headroom,
+            soft: t.soft,
+            bytes,
+        }
+    }
+
+    /// The headroom below which the zone is entered.
+    fn entry(self) -> u64 {
+        self.soft.saturating_add(self.bytes)
+    }
+
+    /// The headroom below which a zone already entered is kept.
+    fn exit(self) -> u64 {
+        self.entry()
+            .saturating_add(self.bytes / LEAD_EXIT_MARGIN_DIVISOR)
+    }
+}
+
 /// The pressure from the gate's state, with the hold.
 #[derive(Debug, Default)]
 pub struct PressureTracker {
     level: Pressure,
-    open_since: Option<Duration>,
+    /// Since when a lower level than the current one has been wanted.
+    low_since: Option<Duration>,
 }
 
 impl PressureTracker {
-    /// The pressure at `now` given the gate's `state`: it rises at once and
-    /// falls to `Normal` once the gate has been open for [`HOLD`]. A volume
-    /// that rests inside the band with no writer (`active` false: nothing
-    /// admitted in the last 10 s, nothing waiting) counts as open, so the
-    /// pressure ends there too (review m4); `stop` and `full` stay urgent,
-    /// since writers are waiting or failing.
-    pub fn observe(&mut self, state: ThrottleState, active: bool, now: Duration) -> Pressure {
+    /// The pressure at `now` given the gate's `state` and the lead zone
+    /// (`lead`): it rises at once; it falls to a lower level once that
+    /// level has been wanted for [`HOLD`] (the exception, `Urgent` to
+    /// `Raised`, is at once). A volume that rests inside the band with no
+    /// writer (`active` false: nothing admitted in the last 10 s, nothing
+    /// waiting) counts as open, so the pressure ends there too (review m4);
+    /// `stop` and `full` stay urgent, since writers are waiting or failing.
+    /// While the gate is open the lead zone is entered below `soft + lead`
+    /// and left above that mark plus a quarter of the lead.
+    pub fn observe(
+        &mut self,
+        state: ThrottleState,
+        active: bool,
+        lead: Lead,
+        now: Duration,
+    ) -> Pressure {
+        let in_zone = |was: bool| {
+            lead.bytes > 0 && lead.headroom < if was { lead.exit() } else { lead.entry() }
+        };
         let want = match state {
+            ThrottleState::Open | ThrottleState::Slowdown if !active => Pressure::Normal,
+            ThrottleState::Open if in_zone(self.level != Pressure::Normal) => Pressure::Lead,
             ThrottleState::Open => Pressure::Normal,
-            ThrottleState::Slowdown if !active => Pressure::Normal,
             ThrottleState::Slowdown => Pressure::Raised,
             ThrottleState::Stop | ThrottleState::Full => Pressure::Urgent,
         };
-        if want != Pressure::Normal {
+        let at_once =
+            want >= self.level || (want == Pressure::Raised && self.level == Pressure::Urgent);
+        if at_once {
             self.level = want;
-            self.open_since = None;
-        } else if self.level != Pressure::Normal {
-            let since = *self.open_since.get_or_insert(now);
+            self.low_since = None;
+        } else {
+            let since = *self.low_since.get_or_insert(now);
             if now.saturating_sub(since) >= HOLD {
-                self.level = Pressure::Normal;
-                self.open_since = None;
+                self.level = want;
+                self.low_since = None;
             }
         }
         self.level
@@ -339,15 +455,17 @@ impl Pressure {
     fn code(self) -> u8 {
         match self {
             Self::Normal => 0,
-            Self::Raised => 1,
-            Self::Urgent => 2,
+            Self::Lead => 1,
+            Self::Raised => 2,
+            Self::Urgent => 3,
         }
     }
 
     fn from_code(c: u8) -> Self {
         match c {
             0 => Self::Normal,
-            1 => Self::Raised,
+            1 => Self::Lead,
+            2 => Self::Raised,
             _ => Self::Urgent,
         }
     }
@@ -379,10 +497,12 @@ impl Inner {
     }
 
     /// True while the collector yields the device to the cuts: a write waits
-    /// for the journal ring and the space gate applies no pressure (milestone
-    /// jstall; under pressure the volume needs the collector more).
+    /// for the journal ring and the space gate applies no pressure beyond
+    /// the lead zone (milestone jstall; under pressure the volume needs the
+    /// collector more). The lead zone changes only the grace, so the yield
+    /// holds there.
     pub(crate) fn gc_yields_to_ring(&self) -> bool {
-        if self.pressure_now() != Pressure::Normal {
+        if self.pressure_now() > Pressure::Lead {
             return false;
         }
         let now = u64::try_from(self.clock.monotonic().as_millis()).unwrap_or(u64::MAX);
@@ -397,12 +517,14 @@ impl Inner {
         now < self.cuts.yield_until_ms.load(Ordering::Relaxed)
     }
 
-    /// Reads the gate at a tick: sets the collector's pressure and writes
+    /// Reads the gate at a tick: sets the collector's pressure (the lead
+    /// zone included) and writes
     /// the throttle's log lines.
     pub(crate) fn update_pressure(&self) {
         let snap = self.space.snapshot();
         let now = self.clock.monotonic();
-        let level = lock(&self.pressure).observe(snap.throttle.state, active(&snap), now);
+        let lead = Lead::of(&snap, self.cfg.gc_params.as_ref());
+        let level = lock(&self.pressure).observe(snap.throttle.state, active(&snap), lead, now);
         self.pressure_level.store(level.code(), Ordering::Release);
         let lines = lock(&self.throttle_watch).observe(&snap, level, now);
         for l in lines {
@@ -558,61 +680,61 @@ mod tests {
     fn pressure_rises_at_once_and_falls_after_the_hold() {
         let mut t = PressureTracker::default();
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(0)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(0)),
             Pressure::Normal
         );
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(1)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(1)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Stop, true, secs(2)),
+            t.observe(ThrottleState::Stop, true, Lead::NONE, secs(2)),
             Pressure::Urgent
         );
         assert_eq!(
-            t.observe(ThrottleState::Full, true, secs(3)),
+            t.observe(ThrottleState::Full, true, Lead::NONE, secs(3)),
             Pressure::Urgent
         );
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(4)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(4)),
             Pressure::Raised
         );
         // Open, but the hold has not run.
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(5)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(5)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(9)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(9)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(10)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(10)),
             Pressure::Normal
         );
         // A slowdown inside the hold restarts it.
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(11)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(11)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(12)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(12)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(15)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(15)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(16)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(16)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(20)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(20)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Open, true, secs(21)),
+            t.observe(ThrottleState::Open, true, Lead::NONE, secs(21)),
             Pressure::Normal
         );
     }
@@ -727,33 +849,33 @@ mod tests {
     fn a_volume_resting_inside_the_band_has_no_pressure_after_the_hold() {
         let mut t = PressureTracker::default();
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(0)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(0)),
             Pressure::Raised
         );
         // The writer stops; the headroom stays under the soft mark.
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, false, secs(10)),
+            t.observe(ThrottleState::Slowdown, false, Lead::NONE, secs(10)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, false, secs(14)),
+            t.observe(ThrottleState::Slowdown, false, Lead::NONE, secs(14)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, false, secs(15)),
+            t.observe(ThrottleState::Slowdown, false, Lead::NONE, secs(15)),
             Pressure::Normal
         );
         // A writer again: raised at once. Stop and full never decay.
         assert_eq!(
-            t.observe(ThrottleState::Slowdown, true, secs(16)),
+            t.observe(ThrottleState::Slowdown, true, Lead::NONE, secs(16)),
             Pressure::Raised
         );
         assert_eq!(
-            t.observe(ThrottleState::Stop, false, secs(100)),
+            t.observe(ThrottleState::Stop, false, Lead::NONE, secs(100)),
             Pressure::Urgent
         );
         assert_eq!(
-            t.observe(ThrottleState::Full, false, secs(200)),
+            t.observe(ThrottleState::Full, false, Lead::NONE, secs(200)),
             Pressure::Urgent
         );
     }
@@ -796,5 +918,223 @@ mod tests {
         // The way out is written once it is due.
         let l = w.observe(&s, Pressure::Urgent, secs(20));
         assert!(matches!(l.as_slice(), [LogLine::NotFull { .. }]), "{l:?}");
+    }
+
+    // ------------------------------------------------------------ lead zone
+
+    const GIB: u64 = 1 << 30;
+    const MIB: u64 = 1 << 20;
+
+    #[test]
+    fn the_lead_window_is_the_floor_grace_plus_two_pass_periods() {
+        // 10 s + 2 x 10 s read_timeout = 30 s, plus 2 x 5 s.
+        assert_eq!(lead_window(&params()), secs(40));
+        // The configured grace is the floor or longer: the floor counts.
+        let slow = GcParams {
+            read_timeout: secs(30),
+            grace: secs(120),
+            ..params()
+        };
+        assert_eq!(lead_window(&slow), secs(80), "70 s floor + 10 s");
+        // A grace shorter than the floor is kept (as `Pressure::params`).
+        let short = GcParams {
+            grace: secs(20),
+            ..params()
+        };
+        assert_eq!(lead_window(&short), secs(30));
+    }
+
+    #[test]
+    fn the_lead_is_the_ingest_times_the_window() {
+        // 100 MiB/s for 40 s, well under the soft mark and a quarter of the limit.
+        assert_eq!(
+            lead_bytes(100 * MIB, secs(40), 10 * GIB, 100 * GIB),
+            4000 * MIB
+        );
+        // Linear in the ingest and in the window.
+        assert_eq!(
+            lead_bytes(50 * MIB, secs(40), 10 * GIB, 100 * GIB),
+            2000 * MIB
+        );
+        assert_eq!(
+            lead_bytes(100 * MIB, secs(20), 10 * GIB, 100 * GIB),
+            2000 * MIB
+        );
+    }
+
+    #[test]
+    fn the_lead_is_zero_for_an_idle_writer_and_with_the_band_off() {
+        assert_eq!(lead_bytes(0, secs(40), 10 * GIB, 100 * GIB), 0);
+        assert_eq!(lead_bytes(100 * MIB, secs(40), 0, 100 * GIB), 0);
+    }
+
+    #[test]
+    fn the_lead_is_bounded_by_the_soft_mark_and_a_quarter_of_the_limit() {
+        // 1 GiB/s for 40 s would be 40 GiB: the soft mark caps it.
+        assert_eq!(lead_bytes(GIB, secs(40), 6 * GIB, 100 * GIB), 6 * GIB);
+        // A small limit (soft = limit / 2): a quarter of the limit caps it.
+        assert_eq!(lead_bytes(GIB, secs(40), 4 * GIB, 8 * GIB), 2 * GIB);
+        // Nothing overflows.
+        assert_eq!(
+            lead_bytes(u64::MAX, Duration::MAX, u64::MAX, u64::MAX),
+            u64::MAX / 4
+        );
+    }
+
+    #[test]
+    fn the_lead_of_a_snapshot_uses_the_ingest_the_soft_mark_and_the_settings() {
+        let mut s = snap(ThrottleState::Open);
+        s.limit = 100 * GIB;
+        s.throttle.ingest_rate = 100 * MIB;
+        s.throttle.soft = 10 * GIB;
+        s.throttle.headroom = 12 * GIB;
+        let l = Lead::of(&s, Some(&params()));
+        assert_eq!(
+            l,
+            Lead {
+                headroom: 12 * GIB,
+                soft: 10 * GIB,
+                bytes: 4000 * MIB
+            }
+        );
+        // No collector settings: no collector, no lead.
+        assert_eq!(Lead::of(&s, None).bytes, 0);
+    }
+
+    fn lead(headroom: u64) -> Lead {
+        Lead {
+            headroom,
+            soft: 1000,
+            bytes: 400,
+        }
+    }
+
+    #[test]
+    fn the_lead_zone_starts_below_soft_plus_lead_and_only_while_the_gate_is_open() {
+        let mut t = PressureTracker::default();
+        let mut at = |h: u64, state, now| t.observe(state, true, lead(h), secs(now));
+        // soft + lead = 1400: at the mark is outside, one below is inside.
+        assert_eq!(at(1400, ThrottleState::Open, 0), Pressure::Normal);
+        assert_eq!(at(1399, ThrottleState::Open, 1), Pressure::Lead);
+        // The band is raised as ever, whatever the lead says.
+        assert_eq!(at(999, ThrottleState::Slowdown, 2), Pressure::Raised);
+        assert_eq!(at(10, ThrottleState::Stop, 3), Pressure::Urgent);
+    }
+
+    #[test]
+    fn the_lead_zone_is_kept_up_to_a_quarter_of_the_lead_above_its_entry() {
+        let mut t = PressureTracker::default();
+        let mut at = |h: u64, now| t.observe(ThrottleState::Open, true, lead(h), secs(now));
+        assert_eq!(at(1399, 0), Pressure::Lead);
+        // The exit mark is 1400 + 100 = 1500: inside it the level stays for
+        // ever, however long.
+        for now in 1..=30 {
+            assert_eq!(at(1499, now), Pressure::Lead, "{now}");
+        }
+        // Past it the level falls only after the hold.
+        assert_eq!(at(1500, 31), Pressure::Lead);
+        assert_eq!(at(1500, 35), Pressure::Lead);
+        assert_eq!(at(1500, 36), Pressure::Normal);
+        // And a volume at 1450 that was never in the zone does not enter it.
+        assert_eq!(at(1450, 37), Pressure::Normal);
+    }
+
+    #[test]
+    fn a_headroom_that_wobbles_around_the_mark_does_not_flap_the_level() {
+        let mut t = PressureTracker::default();
+        let mut at = |h: u64, now| t.observe(ThrottleState::Open, true, lead(h), secs(now));
+        assert_eq!(at(1399, 0), Pressure::Lead);
+        for now in 1..=20 {
+            let h = if now % 2 == 0 { 1390 } else { 1480 };
+            assert_eq!(at(h, now), Pressure::Lead, "{now}");
+        }
+        // Out for 3 s, in again: the hold starts over.
+        assert_eq!(at(1600, 21), Pressure::Lead);
+        assert_eq!(at(1600, 24), Pressure::Lead);
+        assert_eq!(at(1450, 25), Pressure::Lead);
+        assert_eq!(at(1600, 26), Pressure::Lead);
+        assert_eq!(at(1600, 30), Pressure::Lead, "4 s into the second hold");
+        assert_eq!(at(1600, 31), Pressure::Normal);
+    }
+
+    #[test]
+    fn the_level_falls_from_the_band_to_the_lead_zone_after_the_hold() {
+        let mut t = PressureTracker::default();
+        let mut at = |h: u64, state, now| t.observe(state, true, lead(h), secs(now));
+        assert_eq!(at(900, ThrottleState::Slowdown, 0), Pressure::Raised);
+        // The gate is open again with the headroom still in the lead zone:
+        // raised for the hold, then the lead level, not normal.
+        assert_eq!(at(1100, ThrottleState::Open, 1), Pressure::Raised);
+        assert_eq!(at(1100, ThrottleState::Open, 5), Pressure::Raised);
+        assert_eq!(at(1100, ThrottleState::Open, 6), Pressure::Lead);
+        // Stop falls to raised at once, to the lead zone after the hold.
+        assert_eq!(at(10, ThrottleState::Stop, 7), Pressure::Urgent);
+        assert_eq!(at(900, ThrottleState::Slowdown, 8), Pressure::Raised);
+        assert_eq!(at(1100, ThrottleState::Open, 9), Pressure::Raised);
+        assert_eq!(at(1100, ThrottleState::Open, 14), Pressure::Lead);
+    }
+
+    #[test]
+    fn a_writer_that_stops_ends_the_lead_zone_after_the_hold() {
+        // The lead is 0 for an idle writer (see `Lead::of`): the zone ends.
+        let mut t = PressureTracker::default();
+        assert_eq!(
+            t.observe(ThrottleState::Open, true, lead(1100), secs(0)),
+            Pressure::Lead
+        );
+        let idle = Lead {
+            bytes: 0,
+            ..lead(1100)
+        };
+        assert_eq!(
+            t.observe(ThrottleState::Open, false, idle, secs(1)),
+            Pressure::Lead
+        );
+        assert_eq!(
+            t.observe(ThrottleState::Open, false, idle, secs(6)),
+            Pressure::Normal
+        );
+    }
+
+    #[test]
+    fn the_lead_level_changes_the_grace_only() {
+        let n = params();
+        let l = Pressure::Lead.params(n, 4);
+        assert_eq!(l.grace, secs(30), "10 s + 2 x read_timeout");
+        assert_eq!(
+            GcParams {
+                grace: n.grace,
+                ..l
+            },
+            n,
+            "nothing else moves"
+        );
+        let base = GcBudget {
+            max_duration: Duration::from_millis(50),
+            max_bytes: 64 << 20,
+        };
+        assert_eq!(Pressure::Lead.budget(base), base);
+        // Never longer than the configured grace.
+        let short = GcParams {
+            grace: secs(20),
+            ..n
+        };
+        assert_eq!(Pressure::Lead.params(short, 4).grace, secs(20));
+    }
+
+    #[test]
+    fn the_levels_are_ordered_and_their_names_are_the_status_names() {
+        assert!(Pressure::Normal < Pressure::Lead);
+        assert!(Pressure::Lead < Pressure::Raised);
+        assert!(Pressure::Raised < Pressure::Urgent);
+        assert_eq!(Pressure::Lead.name(), "lead");
+        for p in [
+            Pressure::Normal,
+            Pressure::Lead,
+            Pressure::Raised,
+            Pressure::Urgent,
+        ] {
+            assert_eq!(Pressure::from_code(p.code()), p);
+        }
     }
 }

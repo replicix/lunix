@@ -131,12 +131,22 @@ changes: `GcBudget` and `GcParams` are built per step.
 | gate state | step budget | compaction rate | grace | passes |
 |---|---|---|---|---|
 | `open` | `gc_step_budget_ms` (50 ms), `gc_rate` bytes | `gc_rate` | `gc_grace_ms` (60 s) | the pipelined schedule |
+| `open`, in the lead zone (headroom below `soft + lead`) | as `open` | as `open` | the floor, never longer than `gc_grace_ms` | as `open` |
 | `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms` | the same, always busy |
 | `stop`, `full` | as `slowdown` | uncapped | the floor | and the ladder's urgent pass, with its back-off |
 
 - The pressure rises at once and ends with a hold: the engine returns to the
   normal figures after the gate has been `open` for 5 s (`lunix status` shows
-  `gc_pressure`: `normal`, `raised`, `urgent`).
+  `gc_pressure`: `normal`, `lead`, `raised`, `urgent`).
+- The lead zone starts the floor grace before the band, so garbage condemned
+  earlier is deletable when the headroom reaches the soft mark (at the soft
+  mark the reclaim is otherwise zero for the grace plus a pass). `lead =
+  min(ingest x (grace + 2 x 5 s), soft, limit / 4)`, where the grace is the
+  floor and `ingest` is the admitted rate of the last 10 s; 0 with no writer.
+  The zone is entered below `soft + lead` and left above `soft + lead x 1.25`,
+  and the level falls only after 5 s of the lower one. Only the grace
+  changes: the budget, the rate, the yield to a full journal ring and the
+  gate (no pacing) stay as at `open`.
 - The floor grace is the urgent pass's rule, argued safe below ("Why a stale
   mark is safe"): the recheck's roots are pinned after the flag and the
   grace, and the floor covers in-flight cuts, destage and reads. The

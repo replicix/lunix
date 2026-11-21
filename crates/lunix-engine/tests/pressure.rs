@@ -259,3 +259,87 @@ fn a_volume_resting_in_the_band_with_no_writer_loses_its_pressure() {
     step(&r, &seen);
     assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
 }
+
+// ------------------------------------------------------------------ lead zone
+
+/// The soft mark of the scripted gate: 4 GiB.
+const SOFT: u64 = 4096 * MIB;
+/// 100 MiB/s of ingest and the 40 s window (floor grace 30 s + 2 x 5 s) make a
+/// lead of 4000 MiB.
+const INGEST: u64 = 100 * MIB;
+const LEAD: u64 = 4000 * MIB;
+
+fn figures(r: &Running, headroom: u64, ingest: u64) {
+    r.space.set_throttle_figures(Some((headroom, SOFT, ingest)));
+}
+
+#[test]
+fn the_floor_grace_starts_in_the_lead_zone_before_the_band() {
+    let (v, r, seen) = setup();
+    // Open, headroom one MiB above soft + lead: nothing yet.
+    figures(&r, SOFT + LEAD + MIB, INGEST);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Normal);
+    normal(b, p);
+
+    // One MiB inside the lead zone, the gate still open: the grace is the
+    // floor (30 s) and nothing else of the step changes.
+    figures(&r, SOFT + LEAD - MIB, INGEST);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Lead);
+    assert_eq!(p.grace, Duration::from_secs(30));
+    assert_eq!(b.max_duration, Duration::from_millis(50), "budget as open");
+    assert_eq!(b.max_bytes, MIB);
+    assert_eq!(p.rate_bytes_per_s, 64 * MIB, "rate as open");
+    assert_eq!(p.retain_last, 2);
+
+    // The band is the raised level as ever.
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    figures(&r, SOFT - MIB, INGEST);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
+    assert_eq!(b.max_duration, Duration::from_millis(200));
+    assert_eq!(p.rate_bytes_per_s, 256 * MIB);
+
+    // Back above the soft mark, still inside the lead zone: raised for the
+    // hold, then the lead level, never the normal figures on the way.
+    r.space.set_throttle_state(ThrottleState::Open);
+    figures(&r, SOFT + MIB, INGEST);
+    let (b, _) = step(&r, &seen);
+    assert_eq!(b.max_duration, Duration::from_millis(200), "held");
+    v.clock.advance(Duration::from_secs(5));
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Lead);
+    assert_eq!(b.max_duration, Duration::from_millis(50));
+    assert_eq!(p.grace, Duration::from_secs(30));
+}
+
+#[test]
+fn the_lead_zone_ends_with_the_writer_and_keeps_its_hysteresis() {
+    let (v, r, seen) = setup();
+    figures(&r, SOFT + LEAD - MIB, INGEST);
+    step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Lead);
+
+    // A quarter of the lead above the entry mark is still inside.
+    figures(&r, SOFT + LEAD + LEAD / 4 - MIB, INGEST);
+    v.clock.advance(Duration::from_secs(60));
+    let (_, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Lead);
+    assert_eq!(p.grace, Duration::from_secs(30));
+
+    // The writer stops (no ingest, so no lead): the normal grace after the hold.
+    figures(&r, SOFT + LEAD - MIB, 0);
+    let (_, p) = step(&r, &seen);
+    assert_eq!(p.grace, Duration::from_secs(30), "held");
+    v.clock.advance(Duration::from_secs(5));
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Normal);
+    normal(b, p);
+
+    // No scripted figures, no lead zone.
+    r.space.set_throttle_figures(None);
+    let (b, p) = step(&r, &seen);
+    assert_eq!(r.engine.gc_pressure(), Pressure::Normal);
+    normal(b, p);
+}

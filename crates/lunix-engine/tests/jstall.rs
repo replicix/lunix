@@ -831,3 +831,20 @@ fn space_pressure_keeps_the_collector_whole_while_a_write_waits_for_the_ring() {
     // Raised: 4 x the rate, not an eighth.
     assert_eq!(script.rate.load(Ordering::SeqCst), 4 * GC_RATE);
 }
+
+#[test]
+fn the_lead_zone_keeps_the_yield_to_a_ring_parked_write() {
+    // The lead zone changes the grace only: while a write waits for the ring
+    // the collector still yields (one share step, an eighth of the rate), as
+    // it does with the gate far from the band. (`Raised` and `Urgent` still
+    // do not yield: the test above.)
+    let (_v, mut r, script) = gc_setup();
+    park_one(&mut r);
+    // soft 4 GiB, 100 MiB/s: the lead is 4000 MiB; the headroom is inside it.
+    r.space
+        .set_throttle_figures(Some((4096 * (1 << 20) + (1 << 20), 4096 << 20, 100 << 20)));
+    let yielded = tick_steps(&r, &script, 3);
+    assert_eq!(r.engine.gc_pressure(), lunix_engine::Pressure::Lead);
+    assert_eq!(yielded, vec![2, 2, 2], "one share step after each cut");
+    assert_eq!(script.rate.load(Ordering::SeqCst), GC_RATE / 8);
+}

@@ -693,6 +693,8 @@ pub enum GcPressure {
     /// The configured budget, rate and grace.
     #[default]
     Normal,
+    /// The lead zone, before the band: the floor grace only.
+    Lead,
     /// Writes are paced: more budget, rate and the floor grace.
     Raised,
     /// Writes wait or fail for space: as raised, the rate uncapped.

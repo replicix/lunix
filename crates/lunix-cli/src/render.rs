@@ -284,6 +284,7 @@ fn throttle(out: &mut dyn Write, t: &ThrottleStatus) -> io::Result<()> {
             ", gc {}",
             match t.gc_pressure {
                 GcPressure::Normal => "normal",
+                GcPressure::Lead => "lead",
                 GcPressure::Raised => "raised",
                 GcPressure::Urgent => "urgent",
             }

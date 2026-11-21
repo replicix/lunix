@@ -540,6 +540,8 @@ paths = [
 paths = [
   "crates/lunix-engine/src/pressure.rs",
   "crates/lunix-engine/tests/pressure.rs",
+  "crates/lunix-engine/tests/jstall.rs",
+  "crates/lunix-space/tests/pace.rs",
   "crates/lunix-testkit/src/space.rs",
   "crates/lunix-iface/src/ctl/msg.rs",
   "crates/lunix-iface/tests/ctl.rs",

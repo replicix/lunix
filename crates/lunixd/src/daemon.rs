@@ -684,6 +684,7 @@ impl Daemon {
                     u64::try_from(SystemClock.monotonic().as_millis()).unwrap_or(u64::MAX),
                     match s.engine.gc_pressure() {
                         Pressure::Normal => GcPressure::Normal,
+                        Pressure::Lead => GcPressure::Lead,
                         Pressure::Raised => GcPressure::Raised,
                         Pressure::Urgent => GcPressure::Urgent,
                     },
