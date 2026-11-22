@@ -24,6 +24,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use lunix_format::{ChunkId, Hint, IdPrefix, RunId, SegId};
@@ -78,6 +79,18 @@ pub struct MemIndex {
     ids: Arc<dyn IdAllocator>,
     state: Mutex<State>,
     faults: Faults,
+    /// Calls of the batch updates, for tests that count them.
+    batches: BatchCalls,
+}
+
+#[derive(Default)]
+struct BatchCalls {
+    condemn: AtomicU64,
+    retire: AtomicU64,
+    uncondemn: AtomicU64,
+    /// Calls of the single-segment `mark_condemned`, `unmark_condemned` and
+    /// `drop_segment`.
+    singles: AtomicU64,
 }
 
 impl std::fmt::Debug for MemIndex {
@@ -98,6 +111,26 @@ impl MemIndex {
     /// An empty index; run ids come from `ids` (share the store's allocator).
     pub fn new(ids: Arc<dyn IdAllocator>) -> Self {
         Self::from_image(ids, &IndexImage::default())
+    }
+
+    /// How many times `mark_condemned_all` and `retire_segments` were called.
+    pub fn batch_calls(&self) -> (u64, u64) {
+        (
+            self.batches.condemn.load(Ordering::Relaxed),
+            self.batches.retire.load(Ordering::Relaxed),
+        )
+    }
+
+    /// How many times `unmark_condemned_all` was called.
+    pub fn uncondemn_calls(&self) -> u64 {
+        self.batches.uncondemn.load(Ordering::Relaxed)
+    }
+
+    /// How many times the single-segment `mark_condemned`, `unmark_condemned`
+    /// and `drop_segment` were called (by anyone, the batch methods of this
+    /// type excluded).
+    pub fn single_calls(&self) -> u64 {
+        self.batches.singles.load(Ordering::Relaxed)
     }
 
     /// Opens a crash image: the live table is what the named runs hold.
@@ -129,6 +162,7 @@ impl MemIndex {
                 image: image.clone(),
             }),
             faults: Faults::default(),
+            batches: BatchCalls::default(),
         }
     }
 
@@ -237,12 +271,56 @@ impl ChunkIndex for MemIndex {
     }
 
     fn mark_condemned(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.condemn.before")?;
         lock(&self.state).image.condemned.insert(seg.raw());
         Ok(())
     }
 
+    fn mark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        self.batches.condemn.fetch_add(1, Ordering::Relaxed);
+        if segs.is_empty() {
+            return Ok(());
+        }
+        // One durable update: all or none.
+        self.faults.point("index.condemn.before")?;
+        let mut st = lock(&self.state);
+        st.image.condemned.extend(segs.iter().map(|s| s.raw()));
+        Ok(())
+    }
+
+    fn retire_segments(&self, segs: &[SegId]) -> Result<()> {
+        self.batches.retire.fetch_add(1, Ordering::Relaxed);
+        if segs.is_empty() {
+            return Ok(());
+        }
+        // One durable update: the entries go and the flags clear together.
+        self.faults.point("index.drop.before")?;
+        let mut st = lock(&self.state);
+        let gone: BTreeSet<SegId> = segs.iter().copied().collect();
+        st.live.retain(|_, l| !gone.contains(&l.hint.seg));
+        for seg in &gone {
+            st.image.dropped.insert(seg.raw());
+            st.image.condemned.remove(&seg.raw());
+        }
+        Ok(())
+    }
+
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        self.batches.uncondemn.fetch_add(1, Ordering::Relaxed);
+        if segs.is_empty() {
+            return Ok(());
+        }
+        self.faults.point("index.condemn.before")?;
+        let mut st = lock(&self.state);
+        for s in segs {
+            st.image.condemned.remove(&s.raw());
+        }
+        Ok(())
+    }
+
     fn unmark_condemned(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.condemn.before")?;
         lock(&self.state).image.condemned.remove(&seg.raw());
         Ok(())
@@ -259,6 +337,7 @@ impl ChunkIndex for MemIndex {
     }
 
     fn drop_segment(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.drop.before")?;
         let mut st = lock(&self.state);
         st.live.retain(|_, l| l.hint.seg != seg);

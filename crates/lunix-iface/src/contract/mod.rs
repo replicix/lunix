@@ -183,6 +183,7 @@ macro_rules! contract_index_suite {
                     relocated_entries_wait_for_their_segment,
                     all_runs_lists_every_run_file,
                     drop_segment_removes_entries,
+                    batch_updates_equal_the_single_calls,
                     catch_up_ingests_only_named_segments,
                     rebuild_equals_incremental,
                 ]

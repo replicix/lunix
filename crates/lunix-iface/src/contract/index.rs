@@ -153,6 +153,56 @@ pub fn drop_segment_removes_entries<F: IndexFixture>(f: &mut F) {
     assert!(ix.get(&id(2)).expect("get").is_some());
 }
 
+/// `mark_condemned_all` and `retire_segments` do what the single calls do,
+/// for any number of segments, idempotently, and the result survives a
+/// reopen: a retired segment's entries are gone and its flag is cleared; a
+/// flagged one stays readable and out of dedup.
+pub fn batch_updates_equal_the_single_calls<F: IndexFixture>(f: &mut F) {
+    for n in 1..=3u8 {
+        f.index()
+            .insert(id(n), hint(u64::from(n), 0))
+            .expect("insert");
+    }
+    f.index().persist(seg(3)).expect("persist");
+    f.index().mark_condemned_all(&[]).expect("empty condemn");
+    f.index().retire_segments(&[]).expect("empty retire");
+    f.index()
+        .mark_condemned_all(&[seg(1), seg(2)])
+        .expect("condemn");
+    f.index()
+        .mark_condemned_all(&[seg(2), seg(1)])
+        .expect("condemn again");
+    for reopen in [false, true] {
+        if reopen {
+            f.reopen();
+        }
+        let ix = f.index();
+        assert_eq!(ix.condemned().expect("list"), vec![seg(1), seg(2)]);
+        assert_eq!(ix.get_for_dedup(&id(1)).expect("dedup"), None);
+        assert_eq!(ix.get_for_dedup(&id(2)).expect("dedup"), None);
+        assert!(ix.get_for_dedup(&id(3)).expect("dedup").is_some());
+        assert!(ix.get(&id(2)).expect("get").expect("entry").condemned);
+    }
+    f.index().retire_segments(&[seg(1)]).expect("retire one");
+    assert_eq!(f.index().get(&id(1)).expect("get"), None);
+    assert_eq!(f.index().condemned().expect("list"), vec![seg(2)]);
+    assert!(f.index().get(&id(2)).expect("get").is_some());
+    // An unflagged segment retires too, and retiring twice is harmless.
+    f.index()
+        .retire_segments(&[seg(2), seg(3), seg(1)])
+        .expect("retire rest");
+    for reopen in [false, true] {
+        if reopen {
+            f.reopen();
+        }
+        let ix = f.index();
+        assert!(ix.condemned().expect("list").is_empty());
+        for n in 1..=3u8 {
+            assert_eq!(ix.get(&id(n)).expect("get"), None, "entry {n} is gone");
+        }
+    }
+}
+
 /// `catch_up` ingests the footers of the named segments only, and drops
 /// entries whose segment is gone.
 pub fn catch_up_ingests_only_named_segments<F: IndexFixture>(f: &mut F) {

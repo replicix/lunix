@@ -515,37 +515,56 @@ impl LsmIndex {
         }
     }
 
-    /// Drops `segs` from lookups and records them in the manifest.
-    fn drop_locked(&self, committed: &mut Manifest, segs: &[SegId]) -> Result<u64> {
-        if segs.is_empty() {
-            return Ok(0);
-        }
+    /// The number of entries `segs` hold in the memtable and the runs: a scan
+    /// of every run that covers one of them. Only `catch_up` reports it.
+    fn count_entries(&self, segs: &[SegId]) -> Result<u64> {
+        let g = self.rd();
         let mut removed = 0u64;
-        {
-            let g = self.rd();
-            for &seg in segs {
-                removed += g.mem.values().filter(|h| h.seg == seg).count() as u64;
-                for r in g
-                    .runs
-                    .iter()
-                    .filter(|r| r.covered.binary_search(&seg).is_ok())
-                {
-                    for e in r.iter_from(None) {
-                        if e?.seg == seg {
-                            removed += 1;
-                        }
+        for &seg in segs {
+            removed += g.mem.values().filter(|h| h.seg == seg).count() as u64;
+            for r in g
+                .runs
+                .iter()
+                .filter(|r| r.covered.binary_search(&seg).is_ok())
+            {
+                for e in r.iter_from(None) {
+                    if e?.seg == seg {
+                        removed += 1;
                     }
                 }
             }
         }
+        Ok(removed)
+    }
+
+    /// Drops `segs` from lookups and, with `unflag`, clears their condemned
+    /// flags, in one manifest swap (none when nothing changes).
+    fn retire_locked(&self, committed: &mut Manifest, segs: &[SegId], unflag: bool) -> Result<()> {
+        if segs.is_empty() {
+            return Ok(());
+        }
         let mut next = committed.clone();
         next.dropped.extend(segs.iter().copied());
-        swap_manifest(&self.dir, committed, next)?;
+        if unflag {
+            for s in segs {
+                next.condemned.remove(s);
+            }
+        }
+        if next.dropped != committed.dropped || next.condemned != committed.condemned {
+            // The files of `segs` are gone (the GC's delete follow-up, or
+            // `catch_up`); the entries are still reachable until the swap.
+            crashpoint!("index.retire.before_swap");
+            swap_manifest(&self.dir, committed, next)?;
+            crashpoint!("index.retire.after_swap");
+        }
         let mut g = self.wr();
         for &seg in segs {
             apply_drop(&mut g, seg);
+            if unflag {
+                g.condemned.remove(&seg);
+            }
         }
-        Ok(removed)
+        Ok(())
     }
 }
 
@@ -616,27 +635,55 @@ impl ChunkIndex for LsmIndex {
     }
 
     fn mark_condemned(&self, seg: SegId) -> Result<()> {
+        self.mark_condemned_all(&[seg])
+    }
+
+    fn mark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
         let mut c = self.writer();
-        if c.condemned.contains(&seg) {
+        let fresh: Vec<SegId> = segs
+            .iter()
+            .copied()
+            .filter(|s| !c.condemned.contains(s))
+            .collect();
+        if fresh.is_empty() {
             return Ok(());
         }
         let mut next = c.clone();
-        next.condemned.insert(seg);
+        next.condemned.extend(fresh.iter().copied());
         swap_manifest(&self.dir, &mut c, next)?;
-        self.wr().condemned.insert(seg);
+        self.wr().condemned.extend(fresh);
         crashpoint!("index.after_condemn_flag");
         Ok(())
     }
 
-    fn unmark_condemned(&self, seg: SegId) -> Result<()> {
+    fn retire_segments(&self, segs: &[SegId]) -> Result<()> {
         let mut c = self.writer();
-        if !c.condemned.contains(&seg) {
+        self.retire_locked(&mut c, segs, true)
+    }
+
+    fn unmark_condemned(&self, seg: SegId) -> Result<()> {
+        self.unmark_condemned_all(&[seg])
+    }
+
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        let mut c = self.writer();
+        let set: Vec<SegId> = segs
+            .iter()
+            .copied()
+            .filter(|s| c.condemned.contains(s))
+            .collect();
+        if set.is_empty() {
             return Ok(());
         }
         let mut next = c.clone();
-        next.condemned.remove(&seg);
+        for s in &set {
+            next.condemned.remove(s);
+        }
         swap_manifest(&self.dir, &mut c, next)?;
-        self.wr().condemned.remove(&seg);
+        let mut g = self.wr();
+        for s in &set {
+            g.condemned.remove(s);
+        }
         Ok(())
     }
 
@@ -646,7 +693,7 @@ impl ChunkIndex for LsmIndex {
 
     fn drop_segment(&self, seg: SegId) -> Result<()> {
         let mut c = self.writer();
-        self.drop_locked(&mut c, &[seg]).map(|_| ())
+        self.retire_locked(&mut c, &[seg], false)
     }
 
     fn persist(&self, upto_seg: SegId) -> Result<Vec<RunRef>> {
@@ -838,7 +885,8 @@ impl ChunkIndex for LsmIndex {
                 .filter(|s| !g.dropped.contains(s))
                 .collect()
         };
-        report.dropped = self.drop_locked(&mut committed, &gone)?;
+        report.dropped = self.count_entries(&gone)?;
+        self.retire_locked(&mut committed, &gone, false)?;
         Ok(report)
     }
 

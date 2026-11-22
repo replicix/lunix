@@ -319,7 +319,7 @@ pub(crate) struct Mark {
 impl Mark {
     pub(crate) fn new(cfg: GcConfig) -> Self {
         Self {
-            footers: FooterCache::new(cfg.footer_cache),
+            footers: FooterCache::new(cfg.footer_cache_bytes),
             cfg,
             stage: Stage::Init,
             root_idx: 0,

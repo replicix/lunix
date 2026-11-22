@@ -66,8 +66,12 @@ pub struct GcConfig {
     /// Live extents one finishing unit of a mark sorts (default 262 144).
     pub finish_per_unit: usize,
 
-    /// Decoded segment footers kept by the mark (default 32).
-    pub footer_cache: usize,
+    /// Memory the mark may spend on decoded segment footers, in bytes
+    /// (default 32 MiB; 16 to 256 MiB is the useful range). A footer costs
+    /// 40 bytes per extent of its segment, so the default holds a few
+    /// hundred segments of 16 KiB chunks and thousands of 64 KiB ones; a
+    /// mark that touches more segments than fit reloads the oldest.
+    pub footer_cache_bytes: usize,
 
     /// Overlap the grace with the next passes (default off; the daemon turns
     /// it on, [`GcConfig::daemon`]). Off, a pass marks, condemns, waits out
@@ -97,7 +101,7 @@ impl Default for GcConfig {
             compact_per_pass: 1 << 30,
             leaves_per_unit: 32,
             finish_per_unit: 1 << 18,
-            footer_cache: 32,
+            footer_cache_bytes: 32 << 20,
             pipeline: false,
             busy_interval: Duration::from_secs(5),
         }

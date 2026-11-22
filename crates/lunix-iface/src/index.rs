@@ -101,6 +101,34 @@ pub trait ChunkIndex: Send + Sync {
     /// Clears the flag (a recheck found a new reference).
     fn unmark_condemned(&self, seg: SegId) -> Result<()>;
 
+    /// Flags every segment of `segs` as condemned, durably. Equivalent to
+    /// `mark_condemned` on each. An implementation with a durable manifest
+    /// should make it **one** update (none or all of the flags after a crash);
+    /// the default flags them one by one and is not atomic.
+    fn mark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        segs.iter().try_for_each(|&s| self.mark_condemned(s))
+    }
+
+    /// Clears the flags of `segs` (rechecks found new references), as
+    /// `unmark_condemned` on each. One update where the implementation can;
+    /// the default is one by one and not atomic.
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        segs.iter().try_for_each(|&s| self.unmark_condemned(s))
+    }
+
+    /// Removes every segment of `segs` from lookups and clears its condemned
+    /// flag, as one durable update (the GC's delete follow-up: the entries
+    /// are dropped in the same step that clears the flag, so a flag is never
+    /// cleared while entries point in). Equivalent to `drop_segment` then
+    /// `unmark_condemned` on each; the default does exactly that.
+    fn retire_segments(&self, segs: &[SegId]) -> Result<()> {
+        for &s in segs {
+            self.drop_segment(s)?;
+            self.unmark_condemned(s)?;
+        }
+        Ok(())
+    }
+
     /// The condemned segments.
     fn condemned(&self) -> Result<Vec<SegId>>;
 
