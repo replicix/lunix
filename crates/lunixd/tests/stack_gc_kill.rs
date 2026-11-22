@@ -54,8 +54,9 @@ const QUEUES: u16 = 2;
 /// is sealed.
 const PREP_KILL: &str = "destage.after_segment_seal:1";
 /// The points only GC reaches.
-const PREFIXES: [&str; 5] = [
+const PREFIXES: [&str; 6] = [
     "gc.",
+    "index.retire.",
     "store.evidence.",
     "store.delete.",
     "store.segment_delete.",
@@ -674,13 +675,95 @@ struct Tally {
 ///   are gone).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
 const ALLOWED_AFTER_KILL: &[&str] = &["leftover", "crash_leftover", "orphan", "index_missing"];
-const ALLOWED_AFTER_UNLINK: &[&str] = &[
+const ALLOWED_IN_THE_WINDOW: &[&str] = &[
     "leftover",
     "crash_leftover",
     "orphan",
     "index_missing",
     "index_extra",
+    "index_stale",
 ];
+/// Segments one delete step may leave recorded late: the collector's
+/// `RETIRE_BATCH`.
+const RETIRE_BATCH: usize = 256;
+
+/// An id allocator for opening a copy of the index (the allocator is only
+/// asked to observe ids).
+#[derive(Debug, Default)]
+struct Ids(std::sync::atomic::AtomicU64);
+
+impl lunix_iface::store::IdAllocator for Ids {
+    fn allocate(&self) -> lunix_iface::Result<lunix_format::ObjId> {
+        Ok(lunix_format::ObjId::new(
+            0,
+            self.0.fetch_add(1, Ordering::SeqCst) + 1,
+        )?)
+    }
+    fn high_water(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+    fn observe(&self, raw: u64) {
+        self.0
+            .fetch_max(raw & lunix_format::ObjId::MAX_COUNTER, Ordering::SeqCst);
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("mkdir");
+    for e in std::fs::read_dir(from).expect("readdir").flatten() {
+        let dest = to.join(e.file_name());
+        if e.file_type().expect("type").is_dir() {
+            copy_tree(&e.path(), &dest);
+        } else {
+            std::fs::copy(e.path(), dest).expect("copy");
+        }
+    }
+}
+
+/// On a copy of the killed volume's index: whether it has entries into
+/// segments that have no file. Panics unless every such entry's segment is
+/// flagged condemned (dedup never reaches it) and at most `RETIRE_BATCH`
+/// segments are in that state.
+fn entries_into_missing_segments(vol: &TestVolume, what: &str) -> bool {
+    let existing: BTreeSet<u64> = std::fs::read_dir(vol.voldir.join("segments"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            u64::from_str_radix(n.split('.').next()?, 16).ok()
+        })
+        .collect();
+    let t = Scratch::new("gckwin");
+    copy_tree(&vol.voldir.join("index"), &t.path().join("index"));
+    let ix = lunix_index::LsmIndex::open(t.path(), Arc::new(Ids::default()), vol.builder.id_len)
+        .unwrap_or_else(|e| panic!("{what}: open a copy of the killed index: {e}"));
+    let mut missing: BTreeMap<u64, bool> = BTreeMap::new();
+    lunix_iface::index::ChunkIndex::iter_entries(&ix, &mut |e| {
+        let seg = e.hint.seg.raw();
+        if !existing.contains(&seg) {
+            let flagged = missing.entry(seg).or_insert(true);
+            *flagged &= e.condemned;
+        }
+    })
+    .expect("iter_entries");
+    let unflagged: Vec<u64> = missing
+        .iter()
+        .filter(|(_, f)| !**f)
+        .map(|(s, _)| *s)
+        .collect();
+    assert!(
+        unflagged.is_empty(),
+        "{what}: entries into segments with no file whose flag is not set: {unflagged:x?}"
+    );
+    assert!(
+        missing.len() <= RETIRE_BATCH,
+        "{what}: {} segments with entries and no file (limit {RETIRE_BATCH})",
+        missing.len()
+    );
+    !missing.is_empty()
+}
+
 const ALLOWED_AT_REST: &[&str] = &[];
 
 fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally: &mut Tally) {
@@ -720,19 +803,14 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     // A step unlinks its segments and records them in the index in one
-    // update at its end (at most `RETIRE_BATCH` segments later), so a kill
-    // anywhere in the delete phase can leave several unlinked segments whose
-    // entries are still there: `index_extra`, completed by the next pass.
-    let in_delete_phase = [
-        "gc.delete.",
-        "gc.commit_delete.",
-        "store.delete.",
-        "store.segment_delete.",
-    ]
-    .iter()
-    .any(|p| what.contains(p));
-    let allowed = if in_delete_phase {
-        ALLOWED_AFTER_UNLINK
+    // update at its end, so a kill in a delete phase can leave unlinked
+    // segments whose entries are still there (`index_extra`, `index_stale`
+    // when another copy of an id exists), completed by the next pass. What
+    // makes that safe is checked on the killed image, not by the kill point's
+    // name: every such entry's segment is still flagged, and at most
+    // `RETIRE_BATCH` segments are in that state.
+    let allowed = if entries_into_missing_segments(&p.vol, what) {
+        ALLOWED_IN_THE_WINDOW
     } else {
         ALLOWED_AFTER_KILL
     };

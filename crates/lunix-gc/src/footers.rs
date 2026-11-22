@@ -33,13 +33,13 @@ impl FooterIndex {
     }
 }
 
-/// What a cached "no such segment" is charged (its map slot and queue entry).
-const ABSENT_COST: usize = 64;
+/// What every cache slot is charged besides its footer's bytes (its map slot
+/// and queue entry), and all a cached "no such segment" costs.
+const SLOT_COST: usize = 64;
 
 /// The charge of one cache slot: the footer's heap bytes plus the slot.
-fn cost_of(f: &Option<Arc<FooterIndex>>) -> usize {
-    f.as_ref()
-        .map_or(ABSENT_COST, |f| f.heap_bytes() + ABSENT_COST)
+fn cost_of(f: Option<&Arc<FooterIndex>>) -> usize {
+    f.map_or(SLOT_COST, |f| f.heap_bytes() + SLOT_COST)
 }
 
 /// The cache. `None` caches a segment that does not exist.
@@ -91,16 +91,16 @@ impl FooterCache {
             Err(e) if e.kind() == ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
-        let cost = cost_of(&loaded);
+        let cost = cost_of(loaded.as_ref());
         while self.bytes.saturating_add(cost) > self.cap_bytes {
             let Some(old) = self.order.pop_front() else {
                 break;
             };
             if let Some(f) = self.map.remove(&old) {
-                self.bytes = self.bytes.saturating_sub(cost_of(&f));
+                self.bytes = self.bytes.saturating_sub(cost_of(f.as_ref()));
             }
         }
-        self.bytes += cost;
+        self.bytes = self.bytes.saturating_add(cost);
         self.order.push_back(seg);
         self.map.insert(seg, loaded.clone());
         Ok(loaded)
@@ -165,7 +165,7 @@ mod tests {
         }
 
         // Room for exactly two footers of this size.
-        let one = cost_of(&Some(first[0].clone()));
+        let one = cost_of(Some(&first[0]));
         let mut small = FooterCache::new(2 * one);
         let a = get(&mut small, segs[0]);
         let b = get(&mut small, segs[1]);
@@ -188,6 +188,6 @@ mod tests {
         let t = get(&mut tiny, segs[0]);
         assert!(Arc::ptr_eq(&t, &get(&mut tiny, segs[0])));
         let _ = get(&mut tiny, segs[1]);
-        assert!(tiny.map.len() == 1 && tiny.bytes <= one + ABSENT_COST);
+        assert!(tiny.map.len() == 1 && tiny.bytes <= one + SLOT_COST);
     }
 }

@@ -232,8 +232,11 @@ their map roots are not roots, so their data may go.
 3. **Recheck.** A new mark from roots pinned after the grace. Each listed
    object is then decided in its own unit, against the facts of that step: an
    object the mark finds referenced (or named by a retained commit, above the
-   high-water mark, or an unnamed output) is un-condemned, its index flag
-   cleared and the list stored at once.
+   high-water mark, or an unnamed output) is un-condemned: it leaves the list in
+   memory, and at the end of the step the flags of all the segments so
+   un-condemned are cleared in one index update and the list is stored once (the
+   flags first: a crash in between leaves a live segment flagged and listed,
+   which the next recheck un-condemns again).
 4. **Delete.** Unlink and directory `fsync` in the store, the ledger
    `release` of the bytes freed. The index follow-up of the deleted segments
    is queued and made in one durable update (`retire_segments`: the entries
@@ -243,7 +246,7 @@ their map roots are not roots, so their data may go.
    while index entries may still point into it.** A failed call, an abandoned
    pass or a crash leaves the objects listed or flagged; the next pass finds
    them gone, drops their entries, clears the flags, and releases the listed
-   size if the earlier call may have deleted it. A segment that stale hints point into is deleted only
+   size if the earlier call may have deleted it. The index update runs after the step's time check, so a step that deletes may overrun its budget by one manifest swap. A segment that stale hints point into is deleted only
    while the live copy of every id they resolve to is in a segment a durable
    FULL has named (the delete-time index invariant): at or below the highest
    id named by a FULL that has a successor FULL (the collector reads each new

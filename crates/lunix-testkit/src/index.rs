@@ -87,6 +87,10 @@ pub struct MemIndex {
 struct BatchCalls {
     condemn: AtomicU64,
     retire: AtomicU64,
+    uncondemn: AtomicU64,
+    /// Calls of the single-segment `mark_condemned`, `unmark_condemned` and
+    /// `drop_segment`.
+    singles: AtomicU64,
 }
 
 impl std::fmt::Debug for MemIndex {
@@ -115,6 +119,18 @@ impl MemIndex {
             self.batches.condemn.load(Ordering::Relaxed),
             self.batches.retire.load(Ordering::Relaxed),
         )
+    }
+
+    /// How many times `unmark_condemned_all` was called.
+    pub fn uncondemn_calls(&self) -> u64 {
+        self.batches.uncondemn.load(Ordering::Relaxed)
+    }
+
+    /// How many times the single-segment `mark_condemned`, `unmark_condemned`
+    /// and `drop_segment` were called (by anyone, the batch methods of this
+    /// type excluded).
+    pub fn single_calls(&self) -> u64 {
+        self.batches.singles.load(Ordering::Relaxed)
     }
 
     /// Opens a crash image: the live table is what the named runs hold.
@@ -255,6 +271,7 @@ impl ChunkIndex for MemIndex {
     }
 
     fn mark_condemned(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.condemn.before")?;
         lock(&self.state).image.condemned.insert(seg.raw());
         Ok(())
@@ -289,7 +306,21 @@ impl ChunkIndex for MemIndex {
         Ok(())
     }
 
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        self.batches.uncondemn.fetch_add(1, Ordering::Relaxed);
+        if segs.is_empty() {
+            return Ok(());
+        }
+        self.faults.point("index.condemn.before")?;
+        let mut st = lock(&self.state);
+        for s in segs {
+            st.image.condemned.remove(&s.raw());
+        }
+        Ok(())
+    }
+
     fn unmark_condemned(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.condemn.before")?;
         lock(&self.state).image.condemned.remove(&seg.raw());
         Ok(())
@@ -306,6 +337,7 @@ impl ChunkIndex for MemIndex {
     }
 
     fn drop_segment(&self, seg: SegId) -> Result<()> {
+        self.batches.singles.fetch_add(1, Ordering::Relaxed);
         self.faults.point("index.drop.before")?;
         let mut st = lock(&self.state);
         st.live.retain(|_, l| l.hint.seg != seg);

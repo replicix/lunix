@@ -131,6 +131,10 @@ impl ChunkIndex for CostIndex<'_> {
         self.1.ns(200_000);
         self.0.mark_condemned_all(segs)
     }
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        self.1.ns(200_000);
+        self.0.unmark_condemned_all(segs)
+    }
     fn retire_segments(&self, segs: &[SegId]) -> Result<()> {
         self.1.ns(200_000);
         self.0.retire_segments(segs)

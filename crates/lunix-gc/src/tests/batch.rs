@@ -4,12 +4,17 @@
 
 use std::collections::BTreeSet;
 
-use lunix_format::{IdLen, SegId};
+use std::time::Duration;
+
+use lunix_format::{ExtentKind, IdLen, SegId};
+use lunix_iface::crypto::ExtentCodec;
+use lunix_iface::gc::GcState;
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::store::SegmentStore;
 
 use super::oracle::check_quiescent;
-use super::sim::{Sim, SimCfg, GRACE};
+use super::sim::{data_of, Sim, SimCfg, GRACE};
+use crate::condemned::ObjectRef;
 
 const CS: u32 = 16 << 10;
 
@@ -30,6 +35,10 @@ fn segs(s: &Sim) -> BTreeSet<SegId> {
 
 /// `n` segments of one chunk each, all overwritten (so dead once the
 /// retained window passes the overwrite).
+fn id_of(seed: u64) -> lunix_format::ChunkId {
+    lunix_testkit::PlainCodec::new().chunk_id(ExtentKind::Data, &data_of(seed, CS))
+}
+
 fn make_dead(s: &mut Sim, n: u64) -> BTreeSet<SegId> {
     for i in 0..n {
         s.write(i, 1_000 + i);
@@ -93,6 +102,7 @@ fn a_pass_condemns_and_retires_its_segments_in_one_index_update_each() {
             (1, 1),
             "one condemn update and one retire update (pipeline {pipeline})"
         );
+        assert_eq!(s.index.single_calls(), 0, "no per-segment index call");
         assert_index_consistent(&s, "after the quiesce");
     }
 }
@@ -106,6 +116,7 @@ fn deletes_are_batched_up_to_a_bound() {
     s.quiesce().unwrap();
     assert!(old.iter().all(|g| !segs(&s).contains(g)));
     assert_eq!(s.index.batch_calls(), (1, 3));
+    assert_eq!(s.index.single_calls(), 0, "no per-segment index call");
     assert_index_consistent(&s, "after 600 deletes");
 }
 
@@ -150,6 +161,12 @@ fn a_crash_inside_a_delete_batch_is_completed_by_the_next_passes() {
         for k in 1..=6u64 {
             let mut s = sim(64, pipeline);
             let old = make_dead(&mut s, 8);
+            let ids: Vec<(SegId, _)> = (0..8)
+                .map(|i| {
+                    let id = id_of(1_000 + i);
+                    (s.index.get(&id).unwrap().expect("indexed").hint.seg, id)
+                })
+                .collect();
             // Window past the retention; the deletes come in the whole
             // pass itself, or in the pass after the condemning one.
             for _ in 0..4 {
@@ -174,9 +191,17 @@ fn a_crash_inside_a_delete_batch_is_completed_by_the_next_passes() {
                 old.iter().filter(|g| !segs(&s).contains(g)).count(),
                 k as usize
             );
+            // In the window: no dedup hit into an unlinked segment.
+            for (g, id) in &ids {
+                if !segs(&s).contains(g) {
+                    assert!(
+                        s.index.get_for_dedup(id).unwrap().is_none(),
+                        "a dedup hit into the unlinked segment {g:?}"
+                    );
+                }
+            }
             s.crash_reopen(k).unwrap();
             s.check_roots().unwrap();
-            // The reopened index still refuses dedup into the missing segments.
             s.clock.advance(GRACE * 2);
             s.commit().unwrap();
             s.pass().unwrap();
@@ -189,8 +214,8 @@ fn a_crash_inside_a_delete_batch_is_completed_by_the_next_passes() {
     }
 }
 
-/// Rule 4 (an abandoned pass loses nothing): an error in the retire update
-/// leaves the segments flagged; the next pass redoes the follow-up from the
+/// Rule 4 (an abandoned pass loses nothing): errors in the retire update and
+/// in the abandoned pass's retry leave the segments flagged; the next pass redoes the follow-up from the
 /// flags and the index ends consistent.
 #[test]
 fn a_failed_retire_update_is_redone_by_the_next_pass() {
@@ -200,7 +225,9 @@ fn a_failed_retire_update_is_redone_by_the_next_pass() {
         s.commit().unwrap();
     }
     s.clock.advance(GRACE * 2);
+    // The update fails, and so does the retry of the abandoned pass.
     s.arm_fault("index.drop.before", 1, false);
+    s.arm_fault("index.drop.before", 2, false);
     let failed = s.pass().is_err();
     s.disarm_faults();
     assert!(failed, "the retire update failed once");
@@ -217,4 +244,83 @@ fn a_failed_retire_update_is_redone_by_the_next_pass() {
         s.pass().unwrap();
     }
     assert_index_consistent(&s, "after the retry");
+}
+
+/// S1: an error in a delete step (here the unlink of the fourth segment)
+/// abandons the pass, but the segments it had already unlinked are recorded
+/// by the abort's one try, not left flagged until the next pass.
+#[test]
+fn an_error_in_a_delete_step_still_records_the_segments_it_unlinked() {
+    let mut s = sim(64, false);
+    let old = make_dead(&mut s, 8);
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(GRACE * 2);
+    s.arm_fault("segment.delete.before", 4, false);
+    let failed = s.pass().is_err();
+    s.disarm_faults();
+    assert!(failed, "the fourth unlink failed");
+    let gone = old.iter().filter(|g| !segs(&s).contains(g)).count();
+    assert_eq!(gone, 3, "three segments were unlinked");
+    assert_eq!(flagged_missing(&s), 0, "and recorded at the abort");
+    assert_index_consistent(&s, "after the failed step");
+    for _ in 0..6 {
+        s.clock.advance(GRACE * 2);
+        s.commit().unwrap();
+        s.pass().unwrap();
+    }
+    assert!(old.iter().all(|g| !segs(&s).contains(g)));
+    assert_index_consistent(&s, "after the retries");
+}
+
+/// N2: the segments a recheck un-condemns are unflagged by one index update
+/// and the list is stored once, however many. Five listed segments get a
+/// dedup hit between the mark and the flags (the pipelined order), so the
+/// pass after the grace finds them referenced.
+#[test]
+fn rechecks_uncondemn_their_segments_in_one_update() {
+    let mut s = sim(64, true);
+    s.cfg.gc.pass_interval = Duration::from_secs(1);
+    let old = make_dead(&mut s, 5);
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(Duration::from_secs(5));
+    let listed = |s: &Sim| {
+        old.iter()
+            .all(|g| s.gc.condemned().contains(&ObjectRef::Segment(*g)))
+    };
+    for _ in 0..100_000 {
+        let p = s.unit().unwrap();
+        if p.state == GcState::Condemning && listed(&s) {
+            break;
+        }
+        assert!(!p.done, "the pass ended before the list held the segments");
+    }
+    assert!(s.index.condemned().unwrap().is_empty(), "flagged already");
+    // The same content again, cut: dedup hits on the listed segments.
+    for i in 0..5 {
+        s.write(20 + i, 1_000 + i);
+    }
+    s.commit().unwrap();
+    for _ in 0..100_000 {
+        let p = s.unit().unwrap();
+        if p.done || p.state == GcState::Idle {
+            break;
+        }
+    }
+    assert_eq!(s.index.condemned().unwrap().len(), 5);
+    s.clock.advance(GRACE + Duration::from_secs(1));
+    for i in 0..5 {
+        s.write(40 + i, 9_000 + i);
+    }
+    s.commit().unwrap();
+    s.pass().unwrap();
+    assert!(old.iter().all(|g| segs(&s).contains(g)), "all five kept");
+    assert!(s.index.condemned().unwrap().is_empty(), "flags cleared");
+    assert_eq!(s.index.uncondemn_calls(), 1, "one update for the five");
+    assert_eq!(s.index.single_calls(), 0);
+    s.check_roots().unwrap();
+    s.check_ledger().unwrap();
 }

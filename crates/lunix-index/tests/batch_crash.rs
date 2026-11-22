@@ -147,6 +147,8 @@ fn a_kill_around_the_retire_swap_never_clears_a_flag_over_live_entries() {
     for (point, retired) in [
         ("index.before_manifest_swap", false),
         ("index.after_manifest_swap", true),
+        ("index.retire.before_swap", false),
+        ("index.retire.after_swap", true),
     ] {
         let dir = tempfile::tempdir().expect("tmp");
         prepare(dir.path(), true);

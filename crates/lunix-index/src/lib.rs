@@ -537,8 +537,8 @@ impl LsmIndex {
         Ok(removed)
     }
 
-    /// Drops `segs` from lookups and clears the condemned flag of those in
-    /// `unflag`, in one manifest swap (none when nothing changes).
+    /// Drops `segs` from lookups and, with `unflag`, clears their condemned
+    /// flags, in one manifest swap (none when nothing changes).
     fn retire_locked(&self, committed: &mut Manifest, segs: &[SegId], unflag: bool) -> Result<()> {
         if segs.is_empty() {
             return Ok(());
@@ -551,7 +551,11 @@ impl LsmIndex {
             }
         }
         if next.dropped != committed.dropped || next.condemned != committed.condemned {
+            // The files of `segs` are gone (the GC's delete follow-up, or
+            // `catch_up`); the entries are still reachable until the swap.
+            crashpoint!("index.retire.before_swap");
             swap_manifest(&self.dir, committed, next)?;
+            crashpoint!("index.retire.after_swap");
         }
         let mut g = self.wr();
         for &seg in segs {
@@ -658,14 +662,28 @@ impl ChunkIndex for LsmIndex {
     }
 
     fn unmark_condemned(&self, seg: SegId) -> Result<()> {
+        self.unmark_condemned_all(&[seg])
+    }
+
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
         let mut c = self.writer();
-        if !c.condemned.contains(&seg) {
+        let set: Vec<SegId> = segs
+            .iter()
+            .copied()
+            .filter(|s| c.condemned.contains(s))
+            .collect();
+        if set.is_empty() {
             return Ok(());
         }
         let mut next = c.clone();
-        next.condemned.remove(&seg);
+        for s in &set {
+            next.condemned.remove(s);
+        }
         swap_manifest(&self.dir, &mut c, next)?;
-        self.wr().condemned.remove(&seg);
+        let mut g = self.wr();
+        for s in &set {
+            g.condemned.remove(s);
+        }
         Ok(())
     }
 

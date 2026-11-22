@@ -2,14 +2,17 @@
 //! not what it does. Seeded random volumes (writes, overwrites, discards,
 //! cuts, budgeted steps, urgent passes, retention changes, clock jumps) are
 //! driven through the collector and, after every call, the objects that exist,
-//! the index flags, the condemned list and the call's progress are folded
-//! into one digest per seed. The expected digests were produced by the
+//! the index flags, the segments the index has entries into that no longer
+//! exist (the follow-up of a delete), the condemned list and the call's
+//! progress are folded into one digest per seed. Each seed must delete segments,
+//! or it pins nothing about deletes. The expected digests were produced by the
 //! per-object collector (commit 1738f2e, before the change) running this
 //! same workload; the batched collector must reproduce them exactly: the
 //! same objects condemned and deleted at the same points.
 //!
 //! `LUNIX_GC_DIGESTS=print` prints the digests instead of comparing.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use lunix_format::IdLen;
@@ -42,15 +45,30 @@ fn observe(s: &Sim, d: &mut Digest) {
     d.put(&format!("{:?}", s.existing()));
     d.put(&format!("{:?}", s.index.condemned().expect("flags")));
     d.put(&format!("{:?}", s.gc.condemned()));
+    // Entries into segments with no file: none for the per-object collector
+    // at any call, and for the batched one only between a delete and the end
+    // of its step.
+    let here: BTreeSet<_> = s.existing().into_iter().filter(|(k, _)| *k == 1).collect();
+    let mut gone = BTreeSet::new();
+    s.index
+        .iter_entries(&mut |e| {
+            if !here.contains(&(1, e.hint.seg.raw())) {
+                gone.insert(e.hint.seg.raw());
+            }
+        })
+        .expect("entries");
+    d.put(&format!("{gone:?}"));
 }
 
-fn trace(seed: u64, pipeline: bool, chunk_size: u32) -> u64 {
+fn trace(seed: u64, pipeline: bool, chunk_size: u32) -> (u64, u64) {
     let mut cfg = SimCfg::new(chunk_size, IdLen::Sixteen);
     cfg.gc.pipeline = pipeline;
     cfg.chunk_count = 96;
     let mut s = Sim::new(cfg);
     let mut z = seed;
     let mut d = Digest(0xcbf2_9ce4_8422_2325);
+    let mut deleted = 0;
+    let mut before: BTreeSet<(u8, u64)> = BTreeSet::new();
     for _ in 0..400 {
         let r = next(&mut z) % 100;
         match r {
@@ -74,27 +92,43 @@ fn trace(seed: u64, pipeline: bool, chunk_size: u32) -> u64 {
             _ => s.pass().expect("pass"),
         }
         observe(&s, &mut d);
+        let now: BTreeSet<_> = s.existing().into_iter().filter(|(k, _)| *k == 1).collect();
+        deleted += before.difference(&now).count() as u64;
+        before = now;
     }
     s.quiesce().expect("quiesce");
     observe(&s, &mut d);
-    d.0
+    let now: BTreeSet<_> = s.existing().into_iter().filter(|(k, _)| *k == 1).collect();
+    deleted += before.difference(&now).count() as u64;
+    (d.0, deleted)
 }
 
 const SEEDS: u64 = 12;
 
-fn digests(pipeline: bool, chunk_size: u32) -> Vec<u64> {
+fn digests(pipeline: bool, chunk_size: u32) -> Vec<(u64, u64)> {
     (0..SEEDS)
         .map(|k| trace(0x6763_6261_7463_6800 + k, pipeline, chunk_size))
         .collect()
 }
 
-fn check(name: &str, got: &[u64], want: &[u64]) {
+fn check(name: &str, got: &[(u64, u64)], want: &[u64]) {
+    let digests: Vec<u64> = got.iter().map(|g| g.0).collect();
     if std::env::var("LUNIX_GC_DIGESTS").is_ok_and(|v| v == "print") {
-        eprintln!("DIGESTS {name} {got:#x?}");
+        let idle: Vec<usize> = got
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.1 == 0)
+            .map(|(i, _)| i)
+            .collect();
+        eprintln!("DIGESTS {name} {digests:#x?} seeds that delete no segment: {idle:?}");
         return;
     }
+    assert!(
+        got.iter().all(|g| g.1 > 0),
+        "{name}: a seed deletes no segment: {got:?}"
+    );
     assert_eq!(
-        got, want,
+        digests, want,
         "{name}: the collector's observable behaviour changed"
     );
 }
@@ -114,45 +148,45 @@ fn pipelined_passes_64k_match_the_per_object_collector() {
     check("pipelined_64k", &digests(true, 64 << 10), &PIPELINED_64K);
 }
 
-const WHOLE_16K: [u64; 12] = [
-    612844424699793436,
-    18006824350806627123,
-    4580476386957499193,
-    172857680477355618,
-    15213540151460675862,
-    9380260420232306636,
-    5487669908520053746,
-    17389320951358881008,
-    6855468807149403526,
-    15739128925605048348,
-    12011226105290940595,
-    11003734656755560509,
-];
 const PIPELINED_16K: [u64; 12] = [
-    4394852085295473258,
-    11568133837111888827,
-    17461653064766327737,
-    9361518550086293736,
-    16127445191366084523,
-    13756943279411243736,
-    15623065082414817654,
-    808217575163533452,
-    8605576278565566807,
-    7806507486412530092,
-    15782508021711220530,
-    5750446730878635747,
+    11838385640782921851,
+    12015783355913402454,
+    18195595722017657706,
+    12730649140715374883,
+    18303281722859845342,
+    11487029666268145741,
+    2427264855359187231,
+    17713181731897616089,
+    5803104700612107110,
+    17397157759735394813,
+    12037204598047661019,
+    7459656548615221218,
 ];
 const PIPELINED_64K: [u64; 12] = [
-    897695586466580832,
-    13165085180012601707,
-    11108870199421189377,
-    11640417125915983233,
-    13871300170816336458,
-    5530106467113365984,
-    10851106168117719719,
-    981160336815861794,
-    4109212094454554432,
-    2501401681119798169,
-    15782508021711220530,
-    10239751018482542141,
+    2417252883962830031,
+    1915748981740358712,
+    13647065932547179976,
+    5910612645936589384,
+    7779516139830359395,
+    1039211265857033615,
+    15726039369745758544,
+    2058589337004930411,
+    6841662282672422327,
+    17964102502592398728,
+    12037204598047661019,
+    2785328998942951164,
+];
+const WHOLE_16K: [u64; 12] = [
+    13681658128094051329,
+    1241784618532613024,
+    3907129506239904488,
+    11289416236110711171,
+    4539599748269809987,
+    4417702069135488003,
+    2137198271182498911,
+    18113578616279462741,
+    7783413334470055111,
+    15913237111870611313,
+    7742289507471666892,
+    8143370713091996198,
 ];

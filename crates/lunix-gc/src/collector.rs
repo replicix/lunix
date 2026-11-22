@@ -131,8 +131,10 @@ enum Phase {
     Marking(Box<Mark>),
     Condemning {
         todo: Vec<(ObjectRef, u64)>,
+        /// The list is written.
         listed: bool,
-        next: usize,
+        /// The index flags are set.
+        flagged: bool,
         /// What follows the condemn.
         then: AfterCondemn,
     },
@@ -568,6 +570,11 @@ pub struct Gc {
     /// abandoned pass loses nothing (`reconcile` and the verdict `Gone` redo
     /// it from the list and the flags).
     retired: Vec<SegId>,
+    /// Segments a recheck un-condemned: their flags are cleared, and the list
+    /// (already changed in memory) stored, by the same flush.
+    uncondemned: Vec<SegId>,
+    /// The list differs from the stored one (an un-condemn is queued).
+    list_dirty: bool,
     /// Compaction sources with an extent that does not open.
     bad_sources: BTreeSet<SegId>,
     outbox: Vec<Moved>,
@@ -624,6 +631,21 @@ impl std::fmt::Debug for Gc {
     }
 }
 
+/// Flags the segments among `todo` in the index, in one durable update.
+fn flag_segments(view: &GcView<'_>, todo: &[(ObjectRef, u64)]) -> Result<()> {
+    let segs: Vec<SegId> = todo
+        .iter()
+        .filter_map(|&(obj, _)| match obj {
+            ObjectRef::Segment(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    if segs.is_empty() {
+        return Ok(());
+    }
+    view.index.mark_condemned_all(&segs)
+}
+
 /// Segments whose index follow-up one update covers at most (a delete phase
 /// and a step flush theirs at their end too).
 const RETIRE_BATCH: usize = 256;
@@ -651,6 +673,8 @@ impl Gc {
             facts: None,
             uncertain: BTreeMap::new(),
             retired: Vec::new(),
+            uncondemned: Vec::new(),
+            list_dirty: false,
             bad_sources: BTreeSet::new(),
             outbox: Vec::new(),
             forced: false,
@@ -1037,10 +1061,17 @@ impl Gc {
                 }
             }
         }
-        // Deleted segments whose index follow-up did not run stay flagged;
-        // `reconcile` of the next pass finds them (flagged, no file) and
-        // retires them.
+        // The queued index follow-up gets one try, so an error in a delete
+        // step does not leave the segments it already unlinked flagged until
+        // the next pass; what still fails is found by `reconcile` (flagged,
+        // no file).
+        if self.points.alive().is_ok() {
+            if let Err(e) = self.flush_index(view) {
+                tracing::warn!(error = %e, "gc: the index follow-up of deleted segments is left to the next pass");
+            }
+        }
         self.retired.clear();
+        self.uncondemned.clear();
         self.phase = Phase::Idle;
         self.last_end = Some(view.clock.monotonic());
         // An abandoned pass may have done part of its work (a delete whose
@@ -1236,7 +1267,7 @@ impl Gc {
                             Phase::Condemning {
                                 todo,
                                 listed: false,
-                                next: 0,
+                                flagged: false,
                                 then: AfterCondemn::Grace,
                             }
                         }
@@ -1252,7 +1283,7 @@ impl Gc {
                             Phase::Condemning {
                                 todo,
                                 listed: false,
-                                next: 0,
+                                flagged: false,
                                 then: AfterCondemn::Delete(queue),
                             }
                         } else {
@@ -1267,7 +1298,7 @@ impl Gc {
             Phase::Condemning {
                 todo,
                 listed,
-                next,
+                flagged,
                 then,
             } => {
                 if !listed {
@@ -1275,26 +1306,17 @@ impl Gc {
                     self.phase = Phase::Condemning {
                         todo,
                         listed: true,
-                        next: 0,
+                        flagged: false,
                         then,
                     };
-                } else if next < todo.len() {
+                } else if !flagged {
                     // One durable index update flags every segment of the
                     // pass; the list written first is authoritative.
-                    let segs: Vec<SegId> = todo
-                        .iter()
-                        .filter_map(|&(obj, _)| match obj {
-                            ObjectRef::Segment(s) => Some(s),
-                            _ => None,
-                        })
-                        .collect();
-                    if !segs.is_empty() {
-                        view.index.mark_condemned_all(&segs)?;
-                    }
+                    flag_segments(view, &todo)?;
                     self.phase = Phase::Condemning {
-                        next: todo.len(),
                         todo,
                         listed: true,
+                        flagged: true,
                         then,
                     };
                 } else {
@@ -1365,7 +1387,7 @@ impl Gc {
                         };
                     }
                     None => {
-                        self.flush_retired(view)?;
+                        self.flush_index(view)?;
                         // Deletes only remove entries: an unchanged length
                         // is an unchanged list (un-condemns stored theirs).
                         if !pipelined || self.list.entries.len() != start_len {
@@ -1498,13 +1520,19 @@ impl Gc {
                 Ok(0)
             }
             Verdict::Uncondemn(keep) => {
+                // The flag and the list change together at the end of the
+                // step (`flush_index`): the flag first, then the list, so a
+                // crash in between re-flags a segment the next recheck
+                // un-condemns again, never deletes it.
                 if let ObjectRef::Segment(s) = obj {
-                    view.index.unmark_condemned(s)?;
+                    self.uncondemned.push(s);
                 }
                 self.list.entries.remove(&obj);
                 self.grace.remove(&obj);
-                // Durable at once: a crash must not re-flag a live segment.
-                self.store_list(view)?;
+                self.list_dirty = true;
+                if self.uncondemned.len() >= RETIRE_BATCH {
+                    self.flush_index(view)?;
+                }
                 self.evidence(view, Action::Uncondemn, obj, 0, keep.reason());
                 Ok(0)
             }
@@ -1518,20 +1546,29 @@ impl Gc {
     fn retire(&mut self, view: &GcView<'_>, seg: SegId) -> Result<()> {
         self.retired.push(seg);
         if self.retired.len() >= RETIRE_BATCH {
-            self.flush_retired(view)?;
+            self.flush_index(view)?;
         }
         Ok(())
     }
 
-    /// The index follow-up of every segment deleted since the last call:
-    /// drops their entries and clears their flags in one durable update. On
-    /// an error the segments stay queued for the next call.
-    fn flush_retired(&mut self, view: &GcView<'_>) -> Result<()> {
-        if self.retired.is_empty() {
-            return Ok(());
+    /// The queued index work, in one durable update each: the follow-up of
+    /// every segment deleted since the last call (entries dropped and flags
+    /// cleared together), then the flags of the segments un-condemned, then
+    /// the list when an un-condemn changed it. On an error what was not done
+    /// stays queued.
+    fn flush_index(&mut self, view: &GcView<'_>) -> Result<()> {
+        if !self.retired.is_empty() {
+            view.index.retire_segments(&self.retired)?;
+            self.retired.clear();
         }
-        view.index.retire_segments(&self.retired)?;
-        self.retired.clear();
+        if !self.uncondemned.is_empty() {
+            view.index.unmark_condemned_all(&self.uncondemned)?;
+            self.uncondemned.clear();
+        }
+        if self.list_dirty {
+            self.store_list(view)?;
+            self.list_dirty = false;
+        }
         Ok(())
     }
 
@@ -1842,22 +1879,6 @@ impl Gc {
     }
 
     fn run_units(&mut self, view: &GcView<'_>, budget: &GcBudget, freed: &mut u64) -> Result<bool> {
-        let res = self.run_units_inner(view, budget, freed);
-        // Nothing stays queued between steps. Not after a stop at a crash
-        // point (a killed process does no more), and an error already ends
-        // the pass (`reconcile` finds what is left).
-        if res.is_ok() && self.points.alive().is_ok() {
-            self.flush_retired(view)?;
-        }
-        res
-    }
-
-    fn run_units_inner(
-        &mut self,
-        view: &GcView<'_>,
-        budget: &GcBudget,
-        freed: &mut u64,
-    ) -> Result<bool> {
         let deadline = view.clock.monotonic().saturating_add(budget.max_duration);
         let mut step_bytes = 0u64;
         self.load(view)?;
@@ -1866,13 +1887,25 @@ impl Gc {
         loop {
             match self.unit(view, budget, freed, &mut step_bytes)? {
                 Flow::Continue => {}
-                Flow::Yield => return Ok(false),
+                Flow::Yield => return self.end_step(view, false),
                 Flow::PassDone => return Ok(true),
             }
             if view.clock.monotonic() >= deadline {
-                return Ok(false);
+                return self.end_step(view, false);
             }
         }
+    }
+
+    /// Ends a step that leaves the pass in progress: nothing stays queued
+    /// between steps (a clean close then leaves none). Not after a stop at a
+    /// crash point (a killed process does no more). A finished pass has
+    /// flushed already (the delete phase does), and an error ends the pass
+    /// (`abort_pass` tries once more).
+    fn end_step(&mut self, view: &GcView<'_>, done: bool) -> Result<bool> {
+        if self.points.alive().is_ok() {
+            self.flush_index(view)?;
+        }
+        Ok(done)
     }
 
     // ------------------------------------------------------------ urgent
@@ -1920,20 +1953,11 @@ impl Gc {
             }
             *freed += self.apply_verdict(view, obj, v)?;
         }
-        self.flush_retired(view)?;
+        self.flush_index(view)?;
         // New dead objects start their (floor) grace now.
         if !todo.is_empty() {
             self.list_condemned(view, &todo)?;
-            let segs: Vec<SegId> = todo
-                .iter()
-                .filter_map(|&(obj, _)| match obj {
-                    ObjectRef::Segment(s) => Some(s),
-                    _ => None,
-                })
-                .collect();
-            if !segs.is_empty() {
-                view.index.mark_condemned_all(&segs)?;
-            }
+            flag_segments(view, &todo)?;
             self.start_graces(view, &todo);
         }
         self.store_list(view)?;

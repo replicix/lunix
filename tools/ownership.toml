@@ -217,7 +217,6 @@ paths = [
   "crates/lunixd/tests/control.rs",
   "crates/lunixd/tests/control_gc.rs",
   "crates/lunixd/tests/stack_gc_kill.rs",
-  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "crates/lunix-cli/tests/socket.rs",
   "crates/lunix-cli/tests/snapshots/gc-status.txt",
@@ -242,7 +241,6 @@ paths = [
   "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_gc.rs",
   "crates/lunixd/tests/stack_gc_kill.rs",
-  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "crates/lunixd/tests/stack_gc_rate.rs",
   "crates/lunixd/tests/stack_throttle.rs",
@@ -259,7 +257,6 @@ paths = [
 [bstop]
 paths = [
   "crates/lunixd/tests/stack_gc_kill.rs",
-  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "docs/explanation/DECISIONS.md",
   "crates/lunix-format/src/local.rs",
@@ -537,33 +534,6 @@ paths = [
   "tools/ownership.toml",
 ]
 
-# gcbatch: G1, one index manifest update per GC pass for condemn and for
-# delete; no run scan in drop_segment; footer cache sized in bytes.
-[gcbatch]
-paths = [
-  "crates/lunix-engine/tests/common/mod.rs",
-  "crates/lunix-gc/src/collector.rs",
-  "crates/lunix-gc/src/config.rs",
-  "crates/lunix-gc/src/footers.rs",
-  "crates/lunix-gc/src/mark.rs",
-  "crates/lunix-gc/src/tests/batch.rs",
-  "crates/lunix-gc/src/tests/equivalence.rs",
-  "crates/lunix-gc/src/tests/mod.rs",
-  "crates/lunix-gc/src/tests/scale.rs",
-  "crates/lunix-gc/src/tests/scenarios.rs",
-  "crates/lunix-iface/src/contract/index.rs",
-  "crates/lunix-iface/src/contract/mod.rs",
-  "crates/lunix-iface/src/index.rs",
-  "crates/lunix-index/src/lib.rs",
-  "crates/lunix-index/tests/batch.rs",
-  "crates/lunix-index/tests/batch_crash.rs",
-  "crates/lunix-testkit/src/index.rs",
-  "crates/lunixd/tests/stack_gc_cost.rs",
-  "crates/lunixd/tests/stack_gc_kill.rs",
-  "docs/reference/gc.md",
-  "docs/plans/v1/reports/p1-gcbatch.md",
-  "tools/ci.sh",
-
 # pacea: P1', the space gate paces in store bytes (store factor A_hat per
 # cut, projected headroom), behind `throttle_pace_store_bytes`.
 [pacea]
@@ -588,3 +558,31 @@ paths = [
   "docs/explanation/DESIGN.md",
   "tools/ownership.toml",
 ]
+
+# gcbatch: G1, one index manifest update per GC pass for condemn and for
+# delete; no run scan in drop_segment; footer cache sized in bytes.
+[gcbatch]
+paths = [
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/footers.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/batch.rs",
+  "crates/lunix-gc/src/tests/equivalence.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/scale.rs",
+  "crates/lunix-gc/src/tests/scenarios.rs",
+  "crates/lunix-iface/src/contract/index.rs",
+  "crates/lunix-iface/src/contract/mod.rs",
+  "crates/lunix-iface/src/index.rs",
+  "crates/lunix-index/src/lib.rs",
+  "crates/lunix-index/tests/batch.rs",
+  "crates/lunix-index/tests/batch_crash.rs",
+  "crates/lunix-testkit/src/index.rs",
+  "crates/lunixd/tests/stack_gc_cost.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_kill.rs",
+  "docs/reference/gc.md",
+  "docs/plans/v1/reports/p1-gcbatch.md",
+  "tools/ci.sh",

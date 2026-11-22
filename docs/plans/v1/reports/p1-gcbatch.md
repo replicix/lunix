@@ -25,9 +25,12 @@ Code:
 * `lunix-gc` collector: the `Condemning` phase flags the whole pass in one call; deleted segments go to
   `Gc::retired` and are flushed by `flush_retired` (end of the delete phase, end of every step in
   `run_units`, 256 queued, the urgent pass). A stop at a crash point flushes nothing (a killed process does no
-  more). `abort_pass` drops the queue: `reconcile` of the next pass finds the segments (flagged, no file) and
-  retires them in one call as well. Un-condemn (rare: a recheck found a new reference) is still one
-  `unmark_condemned` swap each.
+  more). `abort_pass` first tries to flush the queue (review S1; a failed
+  delete step no longer leaves the segments it had unlinked flagged until the next pass), then drops it:
+  `reconcile` of the next pass finds what is left (flagged, no file) and retires it in one call as well.
+  Un-condemns (review N2) are queued too: one `unmark_condemned_all` swap and one list write per step, flag
+  first, list second (a crash between leaves a live segment flagged and listed; the next recheck un-condemns it
+  again).
 * `footers.rs`: `FooterCache::new(cap_bytes)`; `GcConfig::footer_cache` (count) became `footer_cache_bytes`.
 * `lunix-testkit` `MemIndex`: atomic overrides of the two calls plus a call counter for the tests.
 * `docs/reference/gc.md`: the delete and condemn text, the crash table, the footer cache line.
@@ -51,8 +54,9 @@ which tuples can exist **at the same time**, not which tuples exist:
   that swap leaves `k` segments in the tuple (no file, flagged, entries present, listed): the state the old
   path had for the one object in flight, now for several. Dedup never reaches them (the flag stays until the
   entries are dropped: the rule B1), `catch_up` drops the entries at open, `reconcile`/`Gone` retires them.
-  The swap writes `dropped` and clears the flags in **one** manifest, so there is no state "dropped but still
-  flagged" either, and never "flag cleared with entries reachable" (the invariant "a segment's flag is never
+  The swap writes `dropped` and clears the flags in **one** manifest, so the retire itself never
+  leaves "dropped but still flagged" (that state exists only after `catch_up` dropped a crashed batch and before
+  the first pass's `reconcile`, and is harmless), and never "flag cleared with entries reachable" (the invariant "a segment's flag is never
   cleared while entries may still point into it").
 * **Flush at step end.** The queue is flushed at the end of every `step`, so nothing is pending while the
   collector is not running. This matters for a clean close: a first version flushed only at the end of the
@@ -65,9 +69,10 @@ which tuples can exist **at the same time**, not which tuples exist:
   index, so segments whose follow-up is queued do not change another segment's verdict. The randomized
   equivalence test below includes heavily deduplicated volumes.
 * **fsck.** `index_extra` after a kill inside a delete phase was already legal after the one object in flight;
-  now it can name several segments. `stack_gc_kill` allows it after kills at `gc.delete.*`,
-  `gc.commit_delete.*`, `store.delete.*` and `store.segment_delete.*` (it allowed it only after
-  `gc.delete.after_unlink` and the two `store.segment_delete` points), and at rest still allows nothing.
+  now it can name several segments. `stack_gc_kill` no longer allows it by the name of the kill point: after
+  every kill it opens a copy of the killed index and requires every entry into a segment with no file to be
+  flagged condemned (and at most 256 such segments); only an image in that state may show `index_extra` or
+  `index_stale` (another copy of the id exists). At rest it still allows nothing.
 
 ## Rule to test
 
@@ -78,7 +83,7 @@ which tuples can exist **at the same time**, not which tuples exist:
 | nothing stays queued between steps | `batch::a_step_never_leaves_a_deleted_segment_unrecorded` (unit steps, no flagged segment without a file after any call) | no flush at step end (M) |
 | a crash after the k-th unlink of a batch is completed by the next passes | `batch::a_crash_inside_a_delete_batch_is_completed_by_the_next_passes` (k = 1..6, whole and pipelined; asserts `k` flagged-missing at the crash, then roots read, ledger equals the files, convergence, no flag or entry for a missing segment) | batch of 1 (B) |
 | a failed retire update loses nothing | `batch::a_failed_retire_update_is_redone_by_the_next_pass` | batch of 1 (B), the queue never flushed (N), no retire in reconcile (I), condemn only the first (G) |
-| same objects condemned and deleted at the same points | `equivalence::{whole,pipelined}_passes_16k`, `pipelined_passes_64k` (12 seeded random volumes each: writes, discards, cuts, steps, urgent passes, retention changes, clock jumps; a digest of the objects that exist, the index flags, the condemned list and each call's progress after every call; **the expected digests come from the per-object collector at `1738f2e`**) | the queue never flushed (N), condemn only the first segment (G) |
+| same objects condemned and deleted at the same points | `equivalence::{whole,pipelined}_passes_16k`, `pipelined_passes_64k` (12 seeded random volumes each: writes, discards, cuts, steps, urgent passes, retention changes, clock jumps; a digest of the objects that exist, the index flags, the segments the index has entries into that have no file, the condemned list and each call's progress after every call; every seed must delete segments; the index entries themselves (dedup, `get`) are pinned by the `lunix-index` proptest below, not by the digest; **the expected digests come from the per-object collector at `1738f2e`**) | the queue never flushed (N), condemn only the first segment (G) |
 | the batch is the single-segment calls (`LsmIndex`) | `lunix-index` `batch::batch_updates_leave_the_state_the_single_calls_leave` (proptest, 48 cases, random inserts, persists, batches, reopens; `get`, `get_for_dedup`, flags, `iter_entries` equal) and the contract case `batch_updates_equal_the_single_calls` (every `ChunkIndex` implementation) | a retire that keeps the flags (D) |
 | entries and flag go together | `batch::retired_segments_lose_entries_and_flags_together` | D |
 | a batch is one manifest swap | `batch_crash::a_batch_is_one_manifest_swap_however_many_segments` (child process, 12 segments, hit counts of `index.before/after_manifest_swap`) | per-segment swaps (J), two swaps (E) |
@@ -86,6 +91,10 @@ which tuples can exist **at the same time**, not which tuples exist:
 | no run scan in `drop_segment`/`retire_segments` | `batch::retiring_a_segment_does_not_read_the_runs` (the run file is overwritten in place, any block read fails its CRC) | a scan back in (K) |
 | crash point names are unique | `batch_crash::the_index_crash_points_have_unique_names` | two sites with one name (L; the kill loop counted wrongly until this was fixed) |
 | footer cache holds bytes, evicts oldest first, serves an oversize footer | `footers::tests::the_cache_is_bounded_by_bytes_and_evicts_the_oldest`; `scale::a_pass_over_four_million_chunks_...` (peak heap) | never evicting (H) |
+| an error in a delete step records what the step unlinked | `batch::an_error_in_a_delete_step_still_records_the_segments_it_unlinked` (EIO on the fourth unlink: three segments unlinked, no flagged-missing segment after the failed step) | no flush in `abort_pass` (P) |
+| un-condemns are one update | `batch::rechecks_uncondemn_their_segments_in_one_update` (five listed segments get a dedup hit between mark and flags; one `unmark_condemned_all`, no single calls, flags cleared, files kept) | one swap per segment (Q) |
+| the killed image's window is safe | `stack_gc_kill::entries_into_missing_segments`: on a copy of every killed image, every index entry into a segment with no file has its flag set and at most 256 such segments exist; only then are `index_extra`/`index_stale` allowed | a flag cleared over live entries |
+| kills inside the retire swap | crash points `index.retire.before_swap`/`after_swap` (one site each; reached by `stack_gc_kill`, killed in `batch_crash` and the GC loop) | |
 | reconcile retires a gone flagged segment | existing `directed::reconcile_drops_the_entries_of_a_gone_flagged_segment_before_clearing_its_flag`, `review::a_drop_segment_error_after_the_unlink_...` | no retire in reconcile (I) |
 
 Mutations (each applied alone to the final code, the named tests run on the remote host; letters as in the
@@ -206,12 +215,14 @@ Medians over the six cells:
 | condemn phase per segment condemned | 0.026 ms | below 1 ms per pass (rounds to 0) |
 | coordinator time held by GC (sum of the phase times of the passes, share of the window) | 7.9 % | 6.2 % |
 | gate stops per cell | 2.5 | 2.5 |
-| write IOPS | 12 593 | 11 509 |
+| write IOPS (inconclusive, see below) | 12 593 | 11 509 |
 
 On tmpfs a manifest swap costs no syncs, so the saving is the CPU of the swaps and the run scan (the scan
 grows with the index): 2.0 ms per deleted segment, and the held time falls by about a fifth. The
-stop counts and the IOPS are workload noise (compaction share and the amplification of 3 to 12 differ from
-cell to cell); the cell does not show a change in either, and was not meant to.
+stop counts differ from cell to cell with the compaction share and the amplification (3 to 12). **The IOPS
+comparison is inconclusive**: the after cell was faster in only 6 of 36 base/after pairs (median 9 % lower, not
+significant, not nothing) on a loaded host, and there is no mechanism on tmpfs (the GC held time fell). It must
+not be used as a baseline; the quiet-host A/B will re-measure.
 
 **Footer cache.** The mark time per pass is 15 % lower in the median (base 47 to 104 ms, after 50 to 76 ms
 over six cells each), which is the direction the note predicted (the leaf walk resolves entries scattered over
@@ -236,8 +247,10 @@ and a 64 MiB cache made it 66 MiB. 32 MiB holds the footers of about 3 000 segme
   for any implementation; `LsmIndex` and `MemIndex` override). Wrappers in `lunix-engine` and `lunix-gc` tests
   forward them.
 * **`stack_gc_kill` allows `index_extra` after more kill points** (above). Nothing is allowed at rest.
-* **Un-condemn** is not batched (one swap per un-condemned segment): rare, and its list write must be durable
-  before it returns.
+* **Un-condemn is batched** (review N2) with the flags cleared before the list is stored, both at the end of the
+  step; `unmark_condemned_all` is a third `ChunkIndex` method with a default body. A failed update leaves the
+  segment flagged and unlisted, which `reconcile` adopts with a fresh grace and the next recheck un-condemns
+  again.
 * **`catch_up` still scans the runs** to fill `CatchUpReport::dropped` (once per open; the report and its
   contract test use it).
 * **Footer cache default 32 MiB** instead of 64 MiB (above); `GcConfig::footer_cache` is renamed

@@ -84,8 +84,9 @@ const PREFIXES: [&str; 5] = ["engine.", "store.", "journal.", "index.", "destage
 /// Points of the prefixes above that only GC reaches (`stack_gc_kill.rs`).
 /// Unlinks happen here only when GC deletes, at wall-clock times: their
 /// counts are not reproducible from run to run (re-review M-5.4).
-const GC_ONLY: [&str; 4] = [
+const GC_ONLY: [&str; 5] = [
     "index.after_condemn_flag",
+    "index.retire.",
     "store.evidence.",
     "store.delete.",
     "store.segment_delete.",

@@ -584,6 +584,9 @@ impl ChunkIndex for SealedFirst {
     fn mark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
         self.inner.mark_condemned_all(segs)
     }
+    fn unmark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
+        self.inner.unmark_condemned_all(segs)
+    }
     fn retire_segments(&self, segs: &[SegId]) -> Result<()> {
         self.inner.retire_segments(segs)
     }
