@@ -46,46 +46,89 @@ reclaim rate at the first band entry, peak `used`/limit, delayed and capped writ
 GC write amplification, reclaim by path (whole-dead vs compaction sources), victims by live fraction, collector busy share, the dead-time split
 (retention, detection, grace, recheck), first condemn and first delete, first-fill and steady-state windows, and a per-second CSV.
 
-## Calibration (policy `main`; 8 seeds, the phase of the collector's idle cadence drawn from the seed; sim = median (min-max))
+## The uncounted host-file-system bytes (finding)
+
+The measured `limit` fell from 19.0 GiB (t = 10-16 s) to 16.5-17.1 GiB at the stop. From the t6t8 status series (`partA_c64k_q4_w4k_rep1/2`):
+`external = total - fs_free - used` is **1023-1034 MiB at every sample with the journal ledger at 0** (stop and idle states, both repetitions) and about 1 GiB
+minus the ledger's journal bytes otherwise; it is negative (-0.2 to -1.4 GiB) in samples taken while a cut is in flight.
+
+* **Ring files: 1 GiB = `journal_max`.** The journal's ring files are preallocated and zero-filled at `journal_max` (`lunix-journal/src/lib.rs:4`, 64 MiB files; `sys.rs:240`
+  `KEEP_SIZE` allocation), so the host holds all of them whatever the ledger says; the ledger counts only the records (`JournalReserved`). The gate's limit is
+  `used_mark + fs_free - floor - reserve` (`lunix-space/src/ledger.rs:108`), so these bytes are accounted correctly **through the probe**, not through the ledger. The
+  consequence is that `cache_max` bounds the ledger, not the disk: a capped volume can hold `cache_max + reserve + journal_max - records` on the host (ADR-32's "store <=
+  cache_max + the reserved region + one cut" does not mention the ring). Not a bug of the limit; a documentation point for the cap and for the M15 cells.
+* **The C2 bound over-counts while a cut runs.** `reserve_bounds` (`lunix-engine/src/coord.rs:299-340`) reserves `n x (chunk_size + ovh + 64)`: the **uncompressed** size,
+  about twice the stored size at the measured 1.97 compression, from C2 to the true-up at C4. The ledger's `used` is inflated by the difference for the length of the cut (0.5 s),
+  which is why the measured `space.used` exceeds the disk (negative `external`) and why the writes stop at the gate for that time. Because the free-space anchor is
+  `used_mark` (`ledger.rs:108`, `gate.rs` `refresh`), a reading taken during a cut also **raises the limit by the over-count** (the 19.0 GiB), and the limit then
+  falls back when the cut ends. So a volume can start a cut under an inflated limit and end it above the true limit. If anything in the product is to change,
+  it is this: reserve the bound with the expected compressed size (or true up at C3), or anchor the limit on the disk figure alone. Not changed here.
+* **Left over, not explained:** at the first stop sample (rep 1, t = 21 s) `external` is 1657 MiB, 0.6 GiB more than the ring; at no other stop sample. Candidates are
+  an open segment being written, an index run or a compaction output before the ledger charge; it cannot be told apart from the status alone.
+
+The simulation now takes these bytes from the code's rules: the probe reports `total - (segments on disk + the cut's output as it is written + journal_max + 10 MiB)`,
+so the inflated and the true limit both emerge from the real gate code.
+
+## Calibration (policy `main`; 8 seeds with the collector cadence phase drawn from the seed; sim = median (min-max))
+
+Round 2 changed three things: the host bytes above; `cut_trigger` 0.08 (a cut starts at about 36 MiB of journal records, from the measured median `last_cut_bytes` of 30 MiB
+and 7 629 writes per cut in `tables-writes-ram.md`; before, cuts were whole-ring); `ring_park` 448 MiB (the peak of the measured `space.journal` over the series, 456 MiB).
 
 | cell | measured | simulated | verdict |
 |---|---|---|---|
-| RAM 64 KiB w4k, reclaim_rate at first band entry | 0 in 12 of 12 volumes (leadzone report) | 5 (0-6) MB/s | match |
-| store bytes per admitted byte before the band | about 2.8 (t6t8 rep 1: used +10.2 GB for 3.5 GB admitted in the first 11 s; later 1.7-2.4) | 2.7 (2.7) | match |
-| sustained IOPS | 24-25 K (leadzone), 21.5-32.7 K (t6t8) | 26.1 K (18.6-33.8) | match (within 10 %) |
-| stops per cell | 1-7 (1-4 in t6t8) | 1 (0-3) | low end only |
-| first stop | 12-15 s into the overwrite (brief); about 20-27 s by the t6t8 series | 23 s (seen in 1 of 8 first cells) | not reproduced as a gate `stop` (see below) |
-| max completion per cell | about 18-33 s | 7.1 s (0.7-40.5); first cells 8.2 (0.7-32.3) | the long stall exists but is a ring/commit stall in most seeds, not a gate stop |
-| first condemn / first delete | the first condemn is the urgent pass at the stop; the first delete a floor grace later (stop 25-30 s) | condemn 13.6 s (7.7-26.7), delete 55.9 s (40.0-58.7); delete minus condemn at least 30 s in every run | consistent |
-| RAM 16 KiB w4k | stops 4 in 9 cells, max 5.8 s (1.5-24.5), 43.6 K IOPS | stops 1 (0-3), max 6.6 s (0.4-38.8), 42.9 K IOPS | IOPS and max match; stops fewer |
-| network volume 64 / 16 KiB | 0 stops, 0 delayed, 3.3 K / 8.7 K IOPS, max 20 / 5 s | 0 stops, 0 delayed, 1.0 K / 1.7 K IOPS, max 6.2 / 2.6 s | gate not involved: match; throughput 3-5x low (the shared-bandwidth model is crude) |
-| M15 8 GiB cap, 16 KiB | stops 0-2 (base), longest completion 14-38 s, reclaim 0 at first entry | stops 3 (0-7), longest 36.9 s, reclaim 0 | longest and reclaim match; stops high; the cell's workload shape is assumed |
+| RAM 64K first stop | 12-15 s (brief), 20-27 s (t6t8 series) | 12.7 s (10.1-13.9) in 8 of 8 first cells | match (brief) |
+| RAM 64K stops per cell | 1-7 (1-4 t6t8) | 4 (1-7); first cell 2 (1-4) | match |
+| RAM 64K max completion | about 18-33 s | 19.7 s (0.9-33.1); first cell 20.4 (0.9-32.1) | match |
+| RAM 64K reclaim_rate at first band entry | 0 | 0 (0-0) MB/s | match |
+| RAM 64K sustained IOPS | 24-25 K | 16.5 K (6.9-29.8) | 33 % low |
+| RAM 64K store bytes per admitted byte before the band | about 2.8 | 4.2 (4.0-4.3) | 50 % high |
+| RAM 16K | 4 stops in 9 cells, max 5.8 s, 43.6 K IOPS | stops 1 (0-3), max 5.9 s (0.6-12.9), 35.7 K IOPS | max match; IOPS 18 % low; first stop 39.6 s |
+| network volume 64K / 16K | 0 stops, 0 delayed, 3.3 K / 8.7 K IOPS, max 20 / 5 s | 0 stops, 0 delayed, 1.3 K / 3.6 K IOPS, max 3.9 / 1.1 s | gate match; IOPS 2.5x low (item 4) |
+| M15 8 GiB cap, 16K | stops 0-2 (base), longest 14-38 s, first stop 15 s after entry, reclaim 0 | stops 7 (5-10), longest 32.6 s (28.9-33.7), first stop 17.5 s, reclaim 0 | longest, timing, reclaim match; stops 3x high |
 
-Tolerances the regression test enforces (`tests/calibration.rs`, 4 seeds, no wall clock): reclaim at band entry under 50 MB/s; amplification 2.2-3.6;
-grace under pressure exactly 30 s and delete at least 30 s after condemn; at least one stop and a longest completion of 15-70 s over the runs; median IOPS
-15-40 K; network volume: no band entry, 0 stops, 0 delayed; same seed gives the same trace.
+**Null results.** `gate-gc`: stops per cell 3 (0-8), first cell 2 (0-4), longest completion 20.0 s (1.0-31.4) against `main` 4 (1-7), 2 (1-4), 19.7 s;
+IOPS 20.3 K against 16.5 K (inside the run-to-run spread of 7-30 K); reclaim at entry 0 (0-19) MB/s. `leadzone`: 3 (1-6), 2 (1-4), 20.4 s, 16.7 K IOPS, reclaim 0: no change. M15:
+stops 6 (4-7) and 7 (5-10) against 7 (5-10), longest 40.5 s and 32.6 s against 32.6 s. No material improvement from either.
 
-**Null results for `gate-gc` and `leadzone` (calibration data, as measured):** RAM 64 KiB: stops per cell 1 (0-3) and 1 (0-3) against 1 (0-3) for `main`,
-longest completion 7.9 and 7.1 s against 7.1 s, IOPS 26.4 K and 26.1 K against 26.1 K, reclaim at entry 5 MB/s for all. M15: stops 5 and 3 against 3. The
-mechanism the simulation shows is the one the maintainer diagnosed: the first condemn comes from the first pass that finds wholly dead segments (idle cadence,
-0-30 s into the overwrite) or the urgent pass, and nothing becomes deletable until a grace later; `leadzone` changes the grace of objects that were not yet
-condemned, `gate-gc` sizes a collector that has nothing deletable to delete.
+**Which comes first, in the simulation and in the measurement.** With whole-ring cuts (round 1) the cut's C2 bound (up to 2 GB uncompressed) did not fit under `limit + reserve`
+near the limit, the commit failed for space, the ring filled and the writers parked in the ring while the gate stayed in `slowdown`: a reservation failure first.
+With cuts of the measured size (36 MiB, bound 0.25 GB) the bound fits until `used` is at the limit, the band is crossed in about 5 s at the store amplification
+(the gate paces journal bytes while the headroom burns at 4x), and the gate stops first with the ring nearly empty, as measured (journal 0 at the stop). The stop then lasts
+until the first condemned segments pass their floor grace: that is the 20-33 s stall. The result is sensitive to the cut size: whole-ring cuts do not stop at the gate.
 
-### What does not reproduce, and why
+**Sensitivity of the fitted or measured-but-uncertain constants** (`sweep`, first cell 60 s, 6 seeds, +-50 %; stops per cell / longest completion s / IOPS):
 
-* **The gate `stop` of 25-30 s.** In the measured cell the gate is in `stop` (`used` above the limit, ingest 0) for a grace. In the simulation the same
-  stall appears (ring-parked writes while the cut cannot reserve its bound; `commit failed for space`), but in most seeds `used` stays under the limit and the
-  gate stays in `slowdown`, so the stop counter and its episode durations are low. Measured: the limit itself fell from 19.0 to 16.5 GiB between two status
-  samples (`used + fs_free - limit` rose from 1.2 to 2.3 GiB), i.e. the host file system held about 1.5 GiB that the ledger does not count at the stop (ring
-  files rewritten with zeros on tmpfs, the model's `zero_alloc`, explains part; early in the cell the ledger over-counts instead). The model has the ring
-  allocation but not the rest; what is missing is the file system's real accounting (open-but-unlinked segments, page-cache style holds). This is the main open
-  calibration item.
-* **Network-volume throughput** is 3-5x low: one shared bandwidth and a fixed cut cost; the seal `fdatasync` behaviour (T8 measurements) is not modelled.
-* **M15** workload shape and device are assumed.
+| constant | -50 % | default | +50 % |
+|---|---|---|---|
+| `engine_iops` 110 K (burst ceiling 65-100 K, fitted to the 77 K average) | 3 / 19.5 / 17.5 K | 2 / 20 / 16 K | 3 / 26.0 / 29.4 K |
+| `ring_park` 448 MiB (peak of `space.journal`) | 2 / 31.2 / 17.8 K | 2 / 20 / 16 K | 2 / 20.6 / 31.3 K |
+| `store_bw` 1.9 GB/s (528 ms for 345 MiB of journal, from the cut stats) | 4 / 19.0 / 19.0 K | 2 / 20 / 16 K | 4 / 26.2 / 24.4 K |
+| `gc_bw` 0.8 GB/s (fitted) | 3 / 20.3 / 28.2 K | 2 / 20 / 16 K | 4 / 20.4 / 28.2 K |
+| `cut_trigger` 0.08 (from the measured cut size) | 2 / 31.3 / 26.9 K | 2 / 20 / 16 K | 2 / 25.8 / 28.3 K |
 
-Constants fitted rather than measured: `engine_iops` 110 K and `ring_park` 384 MiB (so that the ingest before the band is about 300 MB/s and the store grows
-2.7-2.9x the admitted bytes); `cut_fixed_ms`, `store_bw` 1.9 GB/s (from the cuts in the t6t8 status: 345 MiB journal in 528 ms), `gc_bw`. Nothing else was tuned,
-and the unreproduced items above were left as they are.
+The stall (stops 2-4 per first cell, longest completion 19-31 s) holds across the +-50 % ranges; the sustained IOPS moves 16-31 K and is what the constants decide
+(`engine_iops` and `ring_park` the most): the 24-25 K measured is inside the range. Still fitted: `engine_iops`, `gc_bw`, `cut_fixed_ms`. Code or trace derived: `ring_park`
+(peak of the ledger's journal), `cut_trigger` (median cut), `store_bw` (cut durations), the 1 GiB ring files, the C2 bound, compression 0.506 (`stored_clen/stored_ulen`).
+
+**Network volume (item 4).** The shared device is now work-conserving by shares (cuts 60 %, journal 40 % while a cut runs) with the cut size taken from the measured 14 K writes
+per cut. IOPS rose from 1.0 K / 1.7 K to 1.3 K / 3.6 K against 3.3 K / 8.7 K, which is still 2.5x low, not within 1.5x. The model charges every cut's store bytes to the one
+bandwidth at the amplification of the cut (4.7 bytes per journal byte at 64K) and gives 2.9 K IOPS in the closed form; the remaining factor is the ring stall while a cut
+holds the device, and the real volume's seal and `fdatasync` overlap (T8 shows the seals not scaling with parallel seals) which the model does not have. The gate is not engaged in
+either case, as measured.
+
+**Distribution over 8 seeds (RAM 64K, `main`).** First stop at 10.1-13.9 s (8 of 8 first cells stop); stops per cell 1-7 (median 4); the t6t8 series' 20-27 s first stop is not
+what the model gives (it gives the brief's 12-15 s); the two measurements disagree with each other by that factor, and the series' first sample is 11 s after the start, so its
+first stop is bracketed late.
+
+### What still does not reproduce
+
+* **Amplification before the band: 4.2 against 2.8 measured, and sustained IOPS 33 % low.** The measured cuts are small (n = 7.6 K) yet the store grew 2.8x the admitted bytes;
+  uniform random overwrite of 7.6 K writes over 32 K chunks would write 6.9 K chunks per cut (7x). Something deduplicates or merges the writes of consecutive cuts in the real
+  system (the overlay holds the dirty chunks until the cut; chunks are re-dirtied while the cut is in flight, and a cut may cover a prefix by chunk) that the model does not.
+  The stop timing matches because the headroom burn is dominated by the journal debt, not by this ratio.
+* **Condemned garbage at the stop:** measured `condemned_pending` is about 1 GB at the first stop; the model condemns far more wholly-dead segments (it has up to 11 GB), because
+  its per-cut death probability is higher than the real one. Same root cause as the first item. The stall length is nevertheless set by the grace, as measured.
+* **Network-volume IOPS** (above), **M15 stops** (7 against 0-2; the cell's workload is assumed), **RAM 16K first stop** (39.6 s, measured stops in 4 of 9 cells).
 
 ## Model limits
 

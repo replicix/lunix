@@ -320,7 +320,8 @@ impl Store {
                         .get(usize::try_from(s.died_cut + retain).unwrap_or(usize::MAX))
                         .copied()
                         .unwrap_or(at)
-                        .clamp(died, at);
+                        .max(died)
+                        .min(at.max(died));
                     out.push(DeadTime {
                         retention: eligible.saturating_sub(died).as_secs_f64(),
                         detection: at.saturating_sub(eligible).as_secs_f64(),

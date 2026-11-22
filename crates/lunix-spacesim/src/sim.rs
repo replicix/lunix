@@ -19,7 +19,7 @@ use lunix_iface::gc::{GcBudget, GcParams};
 use lunix_iface::space::{
     ReserveClass, ReserveOutcome, SpaceGate, SpaceKind, ThrottleState, Waiter, WaiterState,
 };
-use lunix_space::{LunixSpace, SimFs, SpaceConfig, ThrottleConfig};
+use lunix_space::{LunixSpace, ManualFs, SpaceConfig, ThrottleConfig};
 
 use crate::gc::{Books, Gc, GcCfg, GcEnv, Phase};
 use crate::params::{Pattern, Scenario};
@@ -100,9 +100,8 @@ struct Sim<'p> {
     sc: Scenario,
     policy: &'p mut dyn Policy,
     clock: Arc<ManualClock>,
-    fs: Arc<SimFs>,
+    fs: Arc<ManualFs>,
     gate: Arc<LunixSpace>,
-    ring_alloc: u64,
     rng: Rng,
     now: Duration,
     base: Duration,
@@ -185,7 +184,7 @@ impl<'p> Sim<'p> {
         let clock = Arc::new(ManualClock::new(TimeMs(0)));
         let base = Duration::from_secs(BASE_SECS);
         clock.advance(base);
-        let fs = Arc::new(SimFs::new(sc.fs_total, sc.fs_external));
+        let fs = Arc::new(ManualFs::new(sc.fs_total, sc.fs_total));
         let throttle = policy.gate(
             ThrottleConfig {
                 enabled: sc.throttle,
@@ -207,7 +206,6 @@ impl<'p> Sim<'p> {
         };
         let dyn_clock: Arc<dyn Clock> = clock.clone();
         let gate = LunixSpace::new(cfg, fs.clone(), dyn_clock).map_err(|e| anyhow!("gate: {e}"))?;
-        fs.attach(&gate);
         let mut rng = Rng::new(sc.seed);
         let wc = sc.ws_chunks();
         let mut store = Store::new(wc, sc.chunk_stored(), sc.segment as f64, sc.pattern);
@@ -269,7 +267,6 @@ impl<'p> Sim<'p> {
             clock,
             fs,
             gate,
-            ring_alloc: 0,
             rng,
             now,
             base,
@@ -418,11 +415,8 @@ impl<'p> Sim<'p> {
         self.clock.advance(self.dt);
         self.now = self.clock.monotonic();
         let on = self.workload_on();
+        self.update_disk();
         if self.now.saturating_sub(self.last_refresh) >= Duration::from_secs(1) {
-            if self.sc.zero_alloc {
-                let held = self.ring_alloc.saturating_sub(self.ring_reserved);
-                self.fs.set_external(self.sc.fs_external + held);
-            }
             self.gate.refresh();
             self.last_refresh = self.now;
         }
@@ -444,6 +438,23 @@ impl<'p> Sim<'p> {
             self.gc_step(dt);
         }
         self.sample(&snap);
+    }
+
+    /// What the host file system holds, as `statvfs` would say: the segments
+    /// on disk (condemned ones until they are deleted, the cut's output as it
+    /// is written), the preallocated ring files (`journal_max`, of which the
+    /// ledger counts only the records) and what others hold. The ledger's
+    /// over-count (the C2 bound while a cut runs) is not on disk.
+    fn update_disk(&mut self) {
+        let mut disk =
+            self.store.disk_bytes() + self.sc.journal_max as f64 + self.sc.fs_external as f64;
+        if let Coord::Cutting(job) = &self.coord {
+            let total = job.end.saturating_sub(job.start).as_secs_f64().max(1e-9);
+            let done = (self.now.saturating_sub(job.start).as_secs_f64() / total).clamp(0.0, 1.0);
+            disk += job.store_bytes * done;
+        }
+        let free = (self.sc.fs_total as f64 - disk).max(0.0) as u64;
+        self.fs.set_free(free);
     }
 
     fn track_state(&mut self, snap: &lunix_iface::space::SpaceSnapshot) {
@@ -668,7 +679,7 @@ impl<'p> Sim<'p> {
         };
         let jbw = if d.shared_bw > 0.0 {
             if matches!(self.coord, Coord::Cutting(_)) {
-                d.shared_bw * 0.25
+                d.shared_bw * 0.4
             } else {
                 d.shared_bw
             }
@@ -847,7 +858,7 @@ impl<'p> Sim<'p> {
         }
         let d = &self.sc.device;
         let bw = if d.shared_bw > 0.0 {
-            d.shared_bw * 0.75
+            d.shared_bw * 0.6
         } else {
             d.store_bw
         };
@@ -875,7 +886,6 @@ impl<'p> Sim<'p> {
             self.gate.release(SpaceKind::JournalReserved, job.bytes);
         }
         self.ring_reserved = self.ring_reserved.saturating_sub(job.bytes);
-        self.ring_alloc = (self.ring_alloc + job.bytes).min(self.sc.journal_max);
         self.ring_appended = self.ring_appended.saturating_sub(job.bytes);
         self.store.write_segments(job.distinct, job.distinct, false);
         self.store.cut_done(job.distinct, self.now, &mut self.rng);

@@ -108,12 +108,9 @@ pub struct Scenario {
     pub stored_ratio: f64,
     /// Size of the host file system, bytes.
     pub fs_total: u64,
-    /// Bytes of the file system used by others (ring files, scratch).
+    /// Bytes of the file system used by others, apart from the ring files
+    /// (which are preallocated at `journal_max` and counted by the probe).
     pub fs_external: u64,
-    /// Reclaimed ring files are zero-rewritten and stay allocated (a file
-    /// system without `FALLOC_FL_ZERO_RANGE`, tmpfs): the space they hold
-    /// is not in the ledger and lowers the limit.
-    pub zero_alloc: bool,
     /// The volume's cap (`cache_max`), bytes; none = the file system decides.
     pub cache_max: Option<u64>,
     /// The reserved headroom region, bytes.
@@ -242,18 +239,17 @@ impl Scenario {
             chunk: 65_536,
             stored_ratio: 0.506,
             fs_total: 20 * GIB,
-            fs_external: 640 * MIB,
-            zero_alloc: true,
+            fs_external: 10 * MIB,
             cache_max: Some(32 * GIB),
             headroom: 256 * MIB,
             segment: 16 * MIB,
             full_timeout_s: 60.0,
             journal_max: GIB,
-            ring_park: 384 * MIB,
+            ring_park: 448 * MIB,
             ring_file: 32 * MIB,
             cut_target_s: 1.0,
             commit_interval_s: 30.0,
-            cut_trigger: 1.0,
+            cut_trigger: 0.08,
             meta_per_cut: MIB,
             gc_rate: 64 * MIB,
             gc_grace_s: 60.0,
@@ -299,10 +295,10 @@ impl Scenario {
             ws_bytes: 4 * GIB,
             chunk,
             fs_total: 400 * GIB,
-            fs_external: 4 * GIB,
-            zero_alloc: false,
+            fs_external: 10 * MIB,
             cache_max: Some(64 * GIB),
             device: Device::netvol(),
+            cut_trigger: 0.13,
             ..Self::ram_64k()
         }
     }
@@ -380,7 +376,6 @@ impl Scenario {
             "stored_ratio" => self.stored_ratio = f()?,
             "fs_total" => self.fs_total = b()?,
             "fs_external" => self.fs_external = b()?,
-            "zero_alloc" => self.zero_alloc = parse_bool(val)?,
             "cache_max" => self.cache_max = if val == "none" { None } else { Some(b()?) },
             "headroom" => self.headroom = b()?,
             "segment" => self.segment = b()?,
