@@ -1,4 +1,5 @@
-//! A small LRU of decoded segment footers, indexed by extent offset.
+//! A FIFO of decoded segment footers, indexed by extent offset, bounded in
+//! bytes of memory.
 //!
 //! The mark resolves a map entry's hint against the **authenticated footer**
 //! of its segment (R3: `SegmentStore::footer` returns it only after the
@@ -32,18 +33,33 @@ impl FooterIndex {
     }
 }
 
+/// What a cached "no such segment" is charged (its map slot and queue entry).
+const ABSENT_COST: usize = 64;
+
+/// The charge of one cache slot: the footer's heap bytes plus the slot.
+fn cost_of(f: &Option<Arc<FooterIndex>>) -> usize {
+    f.as_ref()
+        .map_or(ABSENT_COST, |f| f.heap_bytes() + ABSENT_COST)
+}
+
 /// The cache. `None` caches a segment that does not exist.
 #[derive(Debug)]
 pub(crate) struct FooterCache {
-    cap: usize,
+    /// Bound on the bytes the cached footers hold.
+    cap_bytes: usize,
+    /// Bytes held now (the sum of `cost_of` over `map`).
+    bytes: usize,
     map: HashMap<SegId, Option<Arc<FooterIndex>>>,
     order: VecDeque<SegId>,
 }
 
 impl FooterCache {
-    pub(crate) fn new(cap: usize) -> Self {
+    /// A cache that holds at most `cap_bytes` of footers (the newest footer
+    /// is kept even when it alone is larger).
+    pub(crate) fn new(cap_bytes: usize) -> Self {
         Self {
-            cap: cap.max(1),
+            cap_bytes,
+            bytes: 0,
             map: HashMap::new(),
             order: VecDeque::new(),
         }
@@ -75,11 +91,16 @@ impl FooterCache {
             Err(e) if e.kind() == ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
-        if self.order.len() >= self.cap {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
+        let cost = cost_of(&loaded);
+        while self.bytes.saturating_add(cost) > self.cap_bytes {
+            let Some(old) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(f) = self.map.remove(&old) {
+                self.bytes = self.bytes.saturating_sub(cost_of(&f));
             }
         }
+        self.bytes += cost;
         self.order.push_back(seg);
         self.map.insert(seg, loaded.clone());
         Ok(loaded)
@@ -89,6 +110,7 @@ impl FooterCache {
     pub(crate) fn clear(&mut self) {
         self.map.clear();
         self.order.clear();
+        self.bytes = 0;
     }
 
     pub(crate) fn heap_bytes(&self) -> usize {
@@ -98,5 +120,74 @@ impl FooterCache {
             .map(|f| f.heap_bytes())
             .sum::<usize>()
             + self.map.capacity() * 48
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use lunix_format::IdLen;
+    use lunix_iface::store::SegmentStore;
+
+    use super::*;
+    use crate::tests::sim::{Sim, SimCfg};
+
+    fn volume_segments(n: u64) -> (Sim, Vec<SegId>) {
+        let mut cfg = SimCfg::new(16 << 10, IdLen::Sixteen);
+        cfg.chunk_count = 64;
+        let mut s = Sim::new(cfg);
+        for i in 0..n {
+            s.write(i, 100 + i);
+            s.commit().expect("commit");
+        }
+        let segs = SegmentStore::list(&s.store)
+            .expect("list")
+            .iter()
+            .map(|x| x.seg)
+            .collect();
+        (s, segs)
+    }
+
+    /// The cache is bounded in bytes: it keeps the footers that fit, evicts
+    /// the oldest first, and still returns a footer larger than the bound.
+    #[test]
+    fn the_cache_is_bounded_by_bytes_and_evicts_the_oldest() {
+        let (s, segs) = volume_segments(6);
+        assert!(segs.len() >= 4);
+        let get = |c: &mut FooterCache, seg| c.get(&s.store, seg).expect("footer").expect("exists");
+
+        // Room for all: every second get is a hit.
+        let mut big = FooterCache::new(1 << 20);
+        let first: Vec<_> = segs.iter().map(|&g| get(&mut big, g)).collect();
+        for (g, f) in segs.iter().zip(&first) {
+            assert!(Arc::ptr_eq(f, &get(&mut big, *g)), "{g:?} stays cached");
+        }
+
+        // Room for exactly two footers of this size.
+        let one = cost_of(&Some(first[0].clone()));
+        let mut small = FooterCache::new(2 * one);
+        let a = get(&mut small, segs[0]);
+        let b = get(&mut small, segs[1]);
+        let c = get(&mut small, segs[2]);
+        assert!(
+            !Arc::ptr_eq(&a, &get(&mut small, segs[0])),
+            "oldest evicted"
+        );
+        // Loading segs[0] again evicted segs[1]; segs[2] is still there.
+        assert!(!Arc::ptr_eq(&b, &get(&mut small, segs[1])));
+        assert!(
+            small.bytes <= 2 * one,
+            "bytes {} over the bound",
+            small.bytes
+        );
+        let _ = c;
+
+        // A bound below one footer still serves it (the newest is kept).
+        let mut tiny = FooterCache::new(1);
+        let t = get(&mut tiny, segs[0]);
+        assert!(Arc::ptr_eq(&t, &get(&mut tiny, segs[0])));
+        let _ = get(&mut tiny, segs[1]);
+        assert!(tiny.map.len() == 1 && tiny.bytes <= one + ABSENT_COST);
     }
 }

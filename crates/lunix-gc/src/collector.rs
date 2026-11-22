@@ -559,6 +559,13 @@ pub struct Gc {
     /// Objects whose delete call failed: the file may be gone without its
     /// bytes released. Released when a later recheck finds it gone.
     uncertain: BTreeMap<ObjectRef, u64>,
+    /// Segments whose file is gone and whose index follow-up (drop the
+    /// entries, clear the flag) is still to do: one index update for the
+    /// whole delete phase (`flush_retired`). Until then the flag stays, so
+    /// dedup never reaches them; a crash or an abandoned pass loses nothing
+    /// (`reconcile` and the verdict `Gone` redo it from the list and the
+    /// flags).
+    retired: Vec<SegId>,
     /// Compaction sources with an extent that does not open.
     bad_sources: BTreeSet<SegId>,
     outbox: Vec<Moved>,
@@ -615,6 +622,10 @@ impl std::fmt::Debug for Gc {
     }
 }
 
+/// Segments whose index follow-up one update covers at most (a delete phase
+/// is flushed at its end too).
+const RETIRE_BATCH: usize = 256;
+
 impl Gc {
     /// A collector. `floor` is where the rollback floor is read (the volume
     /// directory in production).
@@ -637,6 +648,7 @@ impl Gc {
             retained_cache: None,
             facts: None,
             uncertain: BTreeMap::new(),
+            retired: Vec::new(),
             bad_sources: BTreeSet::new(),
             outbox: Vec::new(),
             forced: false,
@@ -812,10 +824,11 @@ impl Gc {
             .map(|s| (s.seg, s.size_bytes))
             .collect();
         let mut changed = false;
+        let mut unflagged = Vec::new();
         for obj in self.list.entries.keys().copied().collect::<Vec<_>>() {
             if let ObjectRef::Segment(s) = obj {
                 if !flagged.contains(&s) && existing.contains_key(&s) {
-                    view.index.mark_condemned(s)?;
+                    unflagged.push(s);
                     self.grace.insert(obj, now);
                 }
             }
@@ -825,6 +838,10 @@ impl Gc {
                 *g = now;
             }
         }
+        if !unflagged.is_empty() {
+            view.index.mark_condemned_all(&unflagged)?;
+        }
+        let mut gone = Vec::new();
         for s in flagged {
             let obj = ObjectRef::Segment(s);
             if self.list.entries.contains_key(&obj) {
@@ -843,11 +860,14 @@ impl Gc {
                     changed = true;
                 }
                 None => {
-                    // Never clear the flag while entries may still point in.
-                    view.index.drop_segment(s)?;
-                    view.index.unmark_condemned(s)?;
+                    gone.push(s);
                 }
             }
+        }
+        // Never clear a flag while entries may still point in: the update
+        // drops the entries and clears the flags together.
+        if !gone.is_empty() {
+            view.index.retire_segments(&gone)?;
         }
         if changed {
             self.store_list(view)?;
@@ -1015,6 +1035,10 @@ impl Gc {
                 }
             }
         }
+        // Deleted segments whose index follow-up did not run stay flagged;
+        // `reconcile` of the next pass finds them (flagged, no file) and
+        // retires them.
+        self.retired.clear();
         self.phase = Phase::Idle;
         self.last_end = Some(view.clock.monotonic());
         // An abandoned pass may have done part of its work (a delete whose
@@ -1252,14 +1276,23 @@ impl Gc {
                         next: 0,
                         then,
                     };
-                } else if let Some(&(obj, _)) = todo.get(next) {
-                    if let ObjectRef::Segment(s) = obj {
-                        view.index.mark_condemned(s)?;
+                } else if next < todo.len() {
+                    // One durable index update flags every segment of the
+                    // pass; the list written first is authoritative.
+                    let segs: Vec<SegId> = todo
+                        .iter()
+                        .filter_map(|&(obj, _)| match obj {
+                            ObjectRef::Segment(s) => Some(s),
+                            _ => None,
+                        })
+                        .collect();
+                    if !segs.is_empty() {
+                        view.index.mark_condemned_all(&segs)?;
                     }
                     self.phase = Phase::Condemning {
+                        next: todo.len(),
                         todo,
                         listed: true,
-                        next: next + 1,
                         then,
                     };
                 } else {
@@ -1330,6 +1363,7 @@ impl Gc {
                         };
                     }
                     None => {
+                        self.flush_retired(view)?;
                         // Deletes only remove entries: an unchanged length
                         // is an unchanged list (un-condemns stored theirs).
                         if !pipelined || self.list.entries.len() != start_len {
@@ -1476,14 +1510,36 @@ impl Gc {
         }
     }
 
+    /// Queues the index follow-up of a deleted segment; a full batch is
+    /// flushed at once so the window of unlinked-but-unrecorded segments
+    /// stays bounded.
+    fn retire(&mut self, view: &GcView<'_>, seg: SegId) -> Result<()> {
+        self.retired.push(seg);
+        if self.retired.len() >= RETIRE_BATCH {
+            self.flush_retired(view)?;
+        }
+        Ok(())
+    }
+
+    /// The index follow-up of every segment deleted since the last call:
+    /// drops their entries and clears their flags in one durable update. On
+    /// an error the segments stay queued for the next call.
+    fn flush_retired(&mut self, view: &GcView<'_>) -> Result<()> {
+        if self.retired.is_empty() {
+            return Ok(());
+        }
+        view.index.retire_segments(&self.retired)?;
+        self.retired.clear();
+        Ok(())
+    }
+
     /// Removes a listed object that no longer exists. A segment's index
     /// entries are dropped before its flag is cleared, and an error leaves
     /// both for the next pass. Bytes of an earlier failed delete call are
     /// released now.
     fn forget(&mut self, view: &GcView<'_>, obj: ObjectRef) -> Result<u64> {
         if let ObjectRef::Segment(s) = obj {
-            view.index.drop_segment(s)?;
-            view.index.unmark_condemned(s)?;
+            self.retire(view, s)?;
         }
         self.list.entries.remove(&obj);
         self.grace.remove(&obj);
@@ -1561,9 +1617,9 @@ impl Gc {
             point!(self.points, "gc.delete.after_unlink");
         }
         if let ObjectRef::Segment(s) = obj {
-            // The flag stays until the entries are gone (B1).
-            view.index.drop_segment(s)?;
-            view.index.unmark_condemned(s)?;
+            // The flag stays until the entries are gone (B1): both follow in
+            // one update when the phase ends.
+            self.retire(view, s)?;
         }
         if !matches!(obj, ObjectRef::Commit(_)) {
             point!(self.points, "gc.delete.after_dirsync");
@@ -1846,13 +1902,19 @@ impl Gc {
             }
             *freed += self.apply_verdict(view, obj, v)?;
         }
+        self.flush_retired(view)?;
         // New dead objects start their (floor) grace now.
         if !todo.is_empty() {
             self.list_condemned(view, &todo)?;
-            for &(obj, _) in &todo {
-                if let ObjectRef::Segment(s) = obj {
-                    view.index.mark_condemned(s)?;
-                }
+            let segs: Vec<SegId> = todo
+                .iter()
+                .filter_map(|&(obj, _)| match obj {
+                    ObjectRef::Segment(s) => Some(s),
+                    _ => None,
+                })
+                .collect();
+            if !segs.is_empty() {
+                view.index.mark_condemned_all(&segs)?;
             }
             self.start_graces(view, &todo);
         }

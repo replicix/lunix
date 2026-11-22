@@ -533,3 +533,29 @@ paths = [
   "docs/plans/v1/reports/p1-gate.md",
   "tools/ownership.toml",
 ]
+
+# gcbatch: G1, one index manifest update per GC pass for condemn and for
+# delete; no run scan in drop_segment; footer cache sized in bytes.
+[gcbatch]
+paths = [
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/footers.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/batch.rs",
+  "crates/lunix-gc/src/tests/equivalence.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/scale.rs",
+  "crates/lunix-gc/src/tests/scenarios.rs",
+  "crates/lunix-iface/src/contract/index.rs",
+  "crates/lunix-iface/src/contract/mod.rs",
+  "crates/lunix-iface/src/index.rs",
+  "crates/lunix-index/src/lib.rs",
+  "crates/lunix-index/tests/batch.rs",
+  "crates/lunix-index/tests/batch_crash.rs",
+  "crates/lunix-testkit/src/index.rs",
+  "docs/plans/v1/reports/p1-gcbatch.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]
