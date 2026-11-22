@@ -586,3 +586,5 @@ paths = [
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-gcbatch.md",
   "tools/ci.sh",
+  "tools/ownership.toml",
+]
