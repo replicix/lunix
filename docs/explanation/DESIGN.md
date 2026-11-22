@@ -443,19 +443,27 @@ journal):
     (`throttle_min_rate`): unbounded at the soft mark, `r_mid` in the
     middle of the band, `r_min` near the limit;
   - with `throttle_pace_store_bytes` (off by default; P1') the curve is in
-    store bytes: each journal byte becomes `A_hat` store bytes at the cut
-    (the engine measures `A_hat` per cut: the larger of the byte-weighted
-    mean of the last 8 cuts and the last cut's own, clamped to 1 ..= 8; the
-    gate biases it high by `throttle_pace_store_margin_percent`, default 115,
-    because a low `A_hat` costs far more than a high one, and clamps again),
-    so the curve reads the projected headroom `H - (A_hat - 1) * J` (`J`: the
-    journal bytes not yet in a cut; the cut in flight holds its segment
-    bound already) and the rate is divided by `A_hat`, at least
-    `throttle_min_rate`. The state (open, slowdown, stop), the soft mark and
-    the collector's pressure stay on the raw `H`; the bucket and the delay
-    cap below are the same. The volume status reports `A_hat`, `J`, the
-    biased `A_hat`, the projected headroom and, per cut, the raw `A_hat` at its start against the factor
-    it measured (`write_path.store_*`);
+    store bytes: each journal byte becomes `A_hat` store bytes at the cut.
+    The engine measures `A_hat` per cut (the larger of the byte-weighted
+    mean of the last 8 cuts and the last cut's own, the last one only for a
+    cut that is not tiny; clamped to 1 ..= 16; 2.0 before the first
+    measured cut). The gate biases it high by
+    `throttle_pace_store_margin_percent` (default 115), because a low
+    `A_hat` costs far more than a high one, and the curve reads the
+    projected headroom `H - (A - 1) * J` (`J`: the journal bytes not yet in
+    a cut; the cut in flight holds its segment bound already). The rate is
+    that curve divided by `A`, at least `throttle_min_rate`, through the
+    same bucket and delay cap. It applies whenever the projected headroom
+    is below the soft mark, so it begins above the raw soft mark when the
+    journal in the ring will cost the band; the state (`open` there, then
+    `slowdown`, `stop`), the soft mark and the collector's pressure stay on
+    the raw `H`. Above the soft mark a wait counts in `delayed_*`
+    (never in the ring pace's figures) and in `store_delayed_*`. The status
+    reports the raw and biased `A_hat`, `J`, the projected headroom, whether
+    the pace applies above the mark and for how long, and per cut the raw
+    `A_hat` at its start against the factor it measured
+    (`write_path.store_*`). Large-block loads reach the floor early and can
+    pass the delay cap (`delay_capped`) without a fault;
   - one request is delayed at most `throttle_max_delay_ms` (10 s) from its
     arrival at its queue, the time it stood behind other requests of the
     queue included; past that it is admitted if it fits, together with what

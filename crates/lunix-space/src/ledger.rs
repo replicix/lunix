@@ -8,13 +8,14 @@ use std::time::Duration;
 use lunix_format::local::OnFull;
 use lunix_iface::space::{
     ReserveClass, ReserveOutcome, SpaceKind, SpaceSnapshot, ThrottleState, Waiter, WaiterState,
+    FACTOR_INITIAL, FACTOR_MAX, FACTOR_ONE,
 };
 use lunix_iface::wake::WakeFd;
 use lunix_iface::{Error, Result};
 
 use crate::policy::Policy;
 use crate::probe::FsStat;
-use crate::throttle::{Bucket, Counters, Meter, StateClock, ThrottleConfig, FACTOR_ONE};
+use crate::throttle::{Bucket, Counters, Meter, StateClock, ThrottleConfig};
 
 const HEADROOM: usize = SpaceKind::Headroom as usize;
 
@@ -69,6 +70,10 @@ pub(crate) struct Ledger {
     pub store_factor: u64,
     /// The journal bytes of the cut in flight (0 between cuts).
     pub store_in_flight: u64,
+    /// Since when the store pace has applied above the soft mark, and the
+    /// time of the episodes before.
+    above_soft_since: Option<Duration>,
+    above_soft_total: Duration,
     pub bucket: Bucket,
     pub counters: Counters,
     pub state: StateClock,
@@ -89,8 +94,10 @@ impl Ledger {
             fulls: 0,
             throttle,
             ring_pace: None,
-            store_factor: FACTOR_ONE,
+            store_factor: FACTOR_INITIAL,
             store_in_flight: 0,
+            above_soft_since: None,
+            above_soft_total: Duration::ZERO,
             bucket: Bucket::new(),
             counters: Counters::default(),
             state: StateClock::new(now),
@@ -213,19 +220,42 @@ impl Ledger {
         self.throttle.soft_mark(self.limit())
     }
 
-    /// The band's rate now, bytes per second: `None` above the soft mark,
-    /// with the band off, or once a quiesce began (it admits everything that
-    /// fits).
+    /// The band's rate on the **raw** headroom, bytes per second: `None`
+    /// above the soft mark, with the band off, or once a quiesce began (it
+    /// admits everything that fits). The throttle state (and through it the
+    /// collector's pressure) follows this and nothing else, with the store
+    /// pace on or off.
     pub fn band_rate(&self) -> Option<u64> {
         if self.closing {
             return None;
         }
-        self.throttle.paced_rate(
+        self.throttle.rate(self.headroom(), self.soft())
+    }
+
+    /// The space side of the pace: the plain band's rate, or with
+    /// `pace_store_bytes` the store pace (P1'), which applies whenever the
+    /// *projected* headroom is below the soft mark, so also while the raw
+    /// headroom is above it (the state is then `open` and `store_paced_above_soft`
+    /// says so). Below the raw soft mark it is never faster than the band's.
+    /// Off, it is the band's rate and nothing is evaluated for the store.
+    pub fn space_rate(&self) -> Option<u64> {
+        if !self.throttle.pace_store_bytes {
+            return self.band_rate();
+        }
+        if self.closing {
+            return None;
+        }
+        self.throttle.store_rate(
             self.headroom(),
             self.soft(),
             self.biased_factor(),
             self.pending_journal(),
         )
+    }
+
+    /// True while the store pace applies above the raw soft mark.
+    fn paced_above_soft(&self) -> bool {
+        self.throttle.pace_store_bytes && self.band_rate().is_none() && self.space_rate().is_some()
     }
 
     /// The factor the curve reads: the engine's `A_hat` with the margin.
@@ -251,7 +281,7 @@ impl Ledger {
     /// Records the store factor and the cut in flight; true when either
     /// changed and the pace may be different now.
     pub fn set_store_pace(&mut self, factor_milli: u64, in_flight: u64) -> bool {
-        let factor = factor_milli.max(FACTOR_ONE);
+        let factor = factor_milli.clamp(FACTOR_ONE, FACTOR_MAX);
         if self.store_factor == factor && self.store_in_flight == in_flight {
             return false;
         }
@@ -260,15 +290,16 @@ impl Ledger {
         self.throttle.pace_store_bytes
     }
 
-    /// The rate admissions are paced at now: the space curve's and the ring
-    /// pace's, the slower of the two. `None` when neither paces, with the band
-    /// off, or once a quiesce began. The throttle state follows
-    /// [`band_rate`](Self::band_rate) only.
+    /// The rate admissions are paced at now: the space side's
+    /// ([`space_rate`](Self::space_rate)) and the ring pace's, the slower of
+    /// the two. `None` when neither paces, with the band off, or once a
+    /// quiesce began. The throttle state follows [`band_rate`](Self::band_rate)
+    /// only.
     pub fn pace_rate(&self) -> Option<u64> {
         if self.closing || !self.throttle.enabled {
             return None;
         }
-        match (self.band_rate(), self.ring_pace) {
+        match (self.space_rate(), self.ring_pace) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
@@ -303,8 +334,19 @@ impl Ledger {
     /// the band is left. Returns true when the state changed.
     pub fn note_state(&mut self, now: Duration) -> bool {
         let to = self.throttle_state();
+        // The bucket lives while any pace applies: with the store pace that
+        // includes the time above the soft mark, while the state is open.
         if self.pace_rate().is_none() {
             self.bucket.deactivate();
+        }
+        let above = to == ThrottleState::Open && self.paced_above_soft();
+        match (above, self.above_soft_since) {
+            (true, None) => self.above_soft_since = Some(now),
+            (false, Some(t)) => {
+                self.above_soft_total = self.above_soft_total.saturating_add(now.saturating_sub(t));
+                self.above_soft_since = None;
+            }
+            _ => {}
         }
         self.meter.sample(now, &self.counters);
         self.state.enter(to, now, &mut self.counters)
@@ -329,6 +371,7 @@ impl Ledger {
             } else {
                 self.counters.delayed_writes += 1;
                 self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
+                self.note_store_delay(ms);
             }
             self.counters.admitted = self.counters.admitted.saturating_add(p.bytes);
         }
@@ -353,12 +396,25 @@ impl Ledger {
             self.counters.delay_max_ms = self.counters.delay_max_ms.max(ms);
             self.counters.delayed_writes += 1;
             self.counters.delayed_ms = self.counters.delayed_ms.saturating_add(ms);
+            self.note_store_delay(ms);
         }
     }
 
-    /// True when the ring pace alone paces now (the space curve does not).
+    /// A delay that counts as the space throttle's is also the store pace's
+    /// when the raw headroom is at or above the soft mark: the plain band
+    /// could not have delayed it. Decided when the request is admitted.
+    fn note_store_delay(&mut self, ms: u64) {
+        if self.paced_above_soft() {
+            self.counters.store_delayed_writes += 1;
+            self.counters.store_delayed_ms = self.counters.store_delayed_ms.saturating_add(ms);
+        }
+    }
+
+    /// True when the ring pace alone paces now (the space side does not): a
+    /// store pace above the soft mark is the space side's (`delayed_*`,
+    /// `delay_capped`), not the ring's.
     fn ring_only(&self) -> bool {
-        self.band_rate().is_none() && self.pace_rate().is_some()
+        self.space_rate().is_none() && self.pace_rate().is_some()
     }
 
     /// The time at which the delay cap admits a request that arrived at
@@ -816,12 +872,22 @@ impl Ledger {
         t.headroom = self.headroom();
         t.soft = self.soft();
         t.resume = self.resume_mark();
-        t.rate = self.band_rate();
+        t.rate = self.space_rate();
         t.ring_pace_rate = self.pace_rate().and(self.ring_pace).unwrap_or(0);
         t.store_factor_milli = self.store_factor;
         t.store_factor_biased_milli = self.biased_factor();
-        t.store_pending = self.pending_journal();
-        t.h_proj = self.projected_headroom();
+        t.journal_uncut = self.pending_journal();
+        t.store_h_proj = self.projected_headroom();
+        t.store_paced_above_soft = self.above_soft_since.is_some();
+        t.store_above_soft_ms = u64::try_from(
+            self.above_soft_total
+                .saturating_add(
+                    self.above_soft_since
+                        .map_or(Duration::ZERO, |t| now.saturating_sub(t)),
+                )
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
         t.paced_waiters = paced;
         t.space_waiters = space;
         SpaceSnapshot {

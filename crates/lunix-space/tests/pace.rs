@@ -1637,48 +1637,122 @@ fn a_write_that_stood_in_its_queue_at_an_open_gate_is_no_delay_of_the_gate() {
     );
 }
 
-/// P1': a gate in the band with 100 MiB of journal charged, headroom 500 MiB.
-fn store_gate(on: bool, ck: &Arc<ManualClock>) -> Arc<LunixSpace> {
+// --------------------------------------------------------------- P1' store pace
+
+/// A gate with the store pace `on` and no margin (the factor the curve reads
+/// is the factor pushed), at `headroom` after `journal` bytes were charged
+/// as journal.
+fn store_gate(
+    on: bool,
+    headroom: u64,
+    journal: u64,
+    tweak: impl FnOnce(&mut SpaceConfig),
+    ck: &Arc<ManualClock>,
+) -> Arc<LunixSpace> {
     let g = at_headroom(
-        600 * MIB,
+        headroom + journal,
         cfg(None, |c| {
             c.throttle.pace_store_bytes = on;
             c.throttle.store_margin_percent = 100;
+            tweak(c);
         }),
         ck,
     );
-    g.charge(K, 100 * MIB).expect("charge");
-    assert_eq!(g.snapshot().throttle.headroom, 500 * MIB);
+    g.charge(K, journal).expect("charge");
+    assert_eq!(g.snapshot().throttle.headroom, headroom);
     g
+}
+
+/// The curve at `h` of the soft mark, over the factor `a` (thousandths).
+fn curve(h: u64, a: u64) -> u64 {
+    64 * MIB * h / (SOFT - h) * 1000 / a
 }
 
 #[test]
 fn with_the_store_pace_off_the_factor_is_only_reported() {
     let ck = clock();
-    let g = store_gate(false, &ck);
+    let g = store_gate(false, 500 * MIB, 100 * MIB, |_| {}, &ck);
+    assert!(!g.store_pace_enabled());
     let plain = g.snapshot().throttle.rate.expect("in the band");
+    assert_eq!(g.snapshot().throttle.store_factor_milli, 2000, "initial");
     g.set_store_pace(2500, 0);
     let t = g.snapshot().throttle;
     assert_eq!(t.rate, Some(plain), "the pace does not move");
     assert_eq!(t.state, ThrottleState::Slowdown);
     assert_eq!(t.store_factor_milli, 2500);
-    assert_eq!(t.store_pending, 100 * MIB);
-    assert_eq!(t.h_proj, 350 * MIB, "computed whether or not it paces");
+    assert_eq!(t.journal_uncut, 100 * MIB);
+    assert_eq!(
+        t.store_h_proj,
+        350 * MIB,
+        "computed whether or not it paces"
+    );
+    assert!(!t.store_paced_above_soft);
+}
+
+#[test]
+fn with_the_store_pace_off_nothing_changes_whatever_the_engine_says() {
+    // Two gates, one told a wild factor and cut in flight at every step: the
+    // throttle figures (the store ones apart) and every outcome are equal.
+    let (ca, cb) = (clock(), clock());
+    let a = store_gate(false, 600 * MIB, 0, |_| {}, &ca);
+    let b = store_gate(false, 600 * MIB, 0, |_| {}, &cb);
+    let mut wa = Vec::new();
+    let mut wb = Vec::new();
+    for step in 0..400u64 {
+        b.set_store_pace(1000 + (step * 37) % 15_000, (step * MIB) % (50 * MIB));
+        let rec = 256 * KIB;
+        match (
+            a.reserve(K, rec, None).unwrap(),
+            b.reserve(K, rec, None).unwrap(),
+        ) {
+            (ReserveOutcome::Reserved, ReserveOutcome::Reserved) => {}
+            (ReserveOutcome::Paced(x), ReserveOutcome::Paced(y)) => {
+                wa.push(x);
+                wb.push(y);
+            }
+            (x, y) => panic!("{x:?} against {y:?}"),
+        }
+        ca.advance(Duration::from_millis(7));
+        cb.advance(Duration::from_millis(7));
+        a.tick();
+        b.tick();
+        assert_eq!(
+            wa.iter().map(Waiter::state).collect::<Vec<_>>(),
+            wb.iter().map(Waiter::state).collect::<Vec<_>>(),
+            "step {step}"
+        );
+        if step % 3 == 0 {
+            a.release(K, rec);
+            b.release(K, rec);
+        }
+        let strip = |mut t: lunix_iface::space::ThrottleFigures| {
+            t.store_factor_milli = 0;
+            t.store_factor_biased_milli = 0;
+            t.store_h_proj = 0;
+            t.journal_uncut = 0;
+            t
+        };
+        assert_eq!(
+            strip(a.snapshot().throttle),
+            strip(b.snapshot().throttle),
+            "step {step}"
+        );
+    }
 }
 
 #[test]
 fn with_the_store_pace_on_the_rate_reads_the_projected_headroom() {
     let ck = clock();
-    let g = store_gate(true, &ck);
-    let plain = g.snapshot().throttle.rate.expect("in the band");
-    // Before the engine says anything the factor is one.
-    assert_eq!(g.snapshot().throttle.store_factor_milli, 1000);
+    let g = store_gate(true, 500 * MIB, 100 * MIB, |_| {}, &ck);
+    assert!(g.store_pace_enabled());
+    let plain = curve(500 * MIB, 1000);
+    // Before the engine says anything the factor is the initial two.
+    assert_eq!(g.snapshot().throttle.store_factor_milli, 2000);
     g.set_store_pace(2500, 0);
     let t = g.snapshot().throttle;
     let h = 350 * MIB;
-    let want = 64 * MIB * h / (SOFT - h) * 1000 / 2500;
-    assert_eq!(t.rate, Some(want));
-    assert!(want < plain);
+    assert_eq!(t.rate, Some(curve(h, 2500)));
+    assert!(curve(h, 2500) < plain);
     // The state and the soft mark stay on the raw headroom.
     assert_eq!(
         (t.state, t.headroom, t.soft),
@@ -1687,46 +1761,166 @@ fn with_the_store_pace_on_the_rate_reads_the_projected_headroom() {
     // The cut in flight is not counted twice: its journal bytes leave J.
     g.set_store_pace(2500, 100 * MIB);
     let t = g.snapshot().throttle;
-    assert_eq!((t.store_pending, t.h_proj), (0, 500 * MIB));
-    assert_eq!(
-        t.rate,
-        Some(64 * MIB * 500 * MIB / (SOFT - 500 * MIB) * 1000 / 2500)
-    );
-    // Back to a factor of one: the plain curve.
+    assert_eq!((t.journal_uncut, t.store_h_proj), (0, 500 * MIB));
+    assert_eq!(t.rate, Some(curve(500 * MIB, 2500)));
+    // A factor of one: the plain curve.
     g.set_store_pace(1000, 0);
     assert_eq!(g.snapshot().throttle.rate, Some(plain));
 }
 
 #[test]
-fn the_store_pace_never_paces_above_the_soft_mark_and_keeps_the_floor() {
+fn with_the_store_pace_on_the_pace_starts_above_the_raw_soft_mark() {
+    // 1800 MiB of headroom is above the 1536 MiB mark; 300 MiB of journal at
+    // 3.0 projects 1200 MiB, inside the band.
     let ck = clock();
-    let g = at_headroom(
-        SOFT + 10 * MIB,
-        cfg(None, |c| {
-            c.throttle.pace_store_bytes = true;
-            c.throttle.store_margin_percent = 100;
-        }),
-        &ck,
-    );
-    g.charge(K, 5 * MIB).expect("charge");
-    g.set_store_pace(8000, 0);
+    let g = store_gate(true, 1800 * MIB, 300 * MIB, |_| {}, &ck);
+    g.set_store_pace(3000, 0);
     let t = g.snapshot().throttle;
-    assert_eq!((t.state, t.rate), (ThrottleState::Open, None));
-    // Inside the band with everything pending: the floor.
-    let g = at_headroom(
-        SOFT / 2,
-        cfg(None, |c| {
-            c.throttle.pace_store_bytes = true;
-            c.throttle.store_margin_percent = 100;
-        }),
-        &ck,
-    );
-    g.charge(K, 100 * MIB).expect("charge");
-    g.set_store_pace(8000, 0);
     assert_eq!(
-        g.snapshot().throttle.rate,
-        Some(ThrottleConfig::default().min_rate)
+        t.state,
+        ThrottleState::Open,
+        "the state is on the raw headroom"
     );
+    assert_eq!(t.rate, Some(curve(1200 * MIB, 3000)));
+    assert!(t.store_paced_above_soft);
+    assert_eq!(t.store_h_proj, 1200 * MIB);
+    // It paces: the bucket (one MiB) pays, the rest waits.
+    let rec = 256 * KIB;
+    let mut waiting = Vec::new();
+    for _ in 0..40 {
+        match g.reserve(K, rec, None).unwrap() {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => waiting.push(w),
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!(!waiting.is_empty() && waiting.len() < 40);
+    assert_eq!(g.snapshot().throttle.state, ThrottleState::Open);
+    ck.advance(Duration::from_secs(1));
+    g.tick();
+    let t = g.snapshot().throttle;
+    assert!(waiting.iter().any(|w| w.state() == WaiterState::Granted));
+    // The wait is the space throttle's (not the ring's) and the store pace's.
+    assert!(t.delayed_writes > 0);
+    assert_eq!(t.store_delayed_writes, t.delayed_writes);
+    assert!(t.store_delayed_ms > 0);
+    assert_eq!(t.ring_paced_writes, 0);
+    assert!(t.store_above_soft_ms >= 1000, "{t:?}");
+    // With the key off the same gate admits all of it at once.
+    let ck = clock();
+    let off = store_gate(false, 1800 * MIB, 300 * MIB, |_| {}, &ck);
+    off.set_store_pace(3000, 0);
+    for _ in 0..40 {
+        reserved(off.reserve(K, rec, None).unwrap());
+    }
+    let t = off.snapshot().throttle;
+    assert_eq!(
+        (t.rate, t.delayed_writes, t.store_delayed_writes),
+        (None, 0, 0)
+    );
+    // And once the journal is cut (nothing in J) the pace ends above the mark.
+    g.set_store_pace(3000, 300 * MIB + 40 * rec);
+    let t = g.snapshot().throttle;
+    assert_eq!((t.rate, t.store_paced_above_soft), (None, false));
+}
+
+#[test]
+fn a_pace_above_the_soft_mark_is_counted_as_the_space_side_not_the_ring() {
+    let ck = clock();
+    let g = store_gate(true, 1800 * MIB, 300 * MIB, |_| {}, &ck);
+    g.set_store_pace(3000, 0);
+    // A ring pace slower than the store pace: the slower one rules, the wait
+    // is attributed to the space side (the ring pace alone is `ring_only`).
+    g.set_ring_pace(Some(8 * MIB));
+    let t = g.snapshot().throttle;
+    assert_eq!(
+        t.rate,
+        Some(curve(1200 * MIB, 3000)),
+        "the space side's rate"
+    );
+    assert_eq!(t.ring_pace_rate, 8 * MIB);
+    let rec = MIB;
+    let mut waiting = Vec::new();
+    for _ in 0..20 {
+        if let ReserveOutcome::Paced(w) = g.reserve(K, rec, None).unwrap() {
+            waiting.push(w);
+        }
+    }
+    assert!(!waiting.is_empty());
+    ck.advance(Duration::from_secs(2));
+    g.tick();
+    let t = g.snapshot().throttle;
+    assert!(t.delayed_writes > 0);
+    assert_eq!(t.ring_paced_writes, 0);
+}
+
+#[test]
+fn the_delay_cap_still_admits_a_queue_the_store_pace_holds_past_it() {
+    // A = 16 and 100 MiB of journal project nothing: the floor, 4 MiB/s. Fifty
+    // 1 MiB requests would take 12 s; the cap is 10 s.
+    let ck = clock();
+    let g = store_gate(true, 700 * MIB, 100 * MIB, |_| {}, &ck);
+    g.set_store_pace(16_000, 0);
+    assert_eq!(g.snapshot().throttle.rate, Some(4 * MIB));
+    let mut ws = Vec::new();
+    for _ in 0..50 {
+        match g.reserve(K, MIB, None).unwrap() {
+            ReserveOutcome::Reserved => {}
+            ReserveOutcome::Paced(w) => ws.push(w),
+            other => panic!("{other:?}"),
+        }
+    }
+    ck.advance(Duration::from_millis(10_500));
+    g.tick();
+    assert!(ws.iter().all(|w| w.state() == WaiterState::Granted));
+    let t = g.snapshot().throttle;
+    assert!(t.delay_capped > 0, "{t:?}");
+    assert_eq!(t.enospc, 0);
+    assert!(!g.is_full());
+}
+
+#[test]
+fn parked_requests_follow_the_pace_when_the_cut_in_flight_or_the_factor_changes() {
+    let ck = clock();
+    let g = store_gate(true, 600 * MIB, 200 * MIB, |_| {}, &ck);
+    g.set_store_pace(4000, 0);
+    // h_proj = 600 - 3 * 200 = 0: the floor.
+    assert_eq!(g.snapshot().throttle.rate, Some(4 * MIB));
+    let rec = MIB;
+    let mut ws = Vec::new();
+    for _ in 0..8 {
+        if let ReserveOutcome::Paced(w) = g.reserve(K, rec, None).unwrap() {
+            ws.push(w);
+        }
+    }
+    assert!(ws.len() >= 6);
+    ck.advance(Duration::from_millis(250));
+    g.tick();
+    let granted = |ws: &[Waiter]| {
+        ws.iter()
+            .filter(|w| w.state() == WaiterState::Granted)
+            .count()
+    };
+    let before = granted(&ws);
+    assert!(before < ws.len());
+    // The cut that holds the 200 MiB starts: J falls, the projection rises to
+    // the raw headroom and the parked requests are re-judged at once.
+    g.set_store_pace(4000, 200 * MIB + 8 * MIB);
+    let t = g.snapshot().throttle;
+    assert_eq!(t.journal_uncut, 0);
+    assert!(t.rate > Some(4 * MIB), "{t:?}");
+    ck.advance(Duration::from_millis(250));
+    g.tick();
+    assert!(granted(&ws) > before, "{} against {before}", granted(&ws));
+    // The cut ends (its bytes are released, nothing in flight): the factor
+    // moves and the rate with it, in one call.
+    g.release(K, 200 * MIB);
+    g.set_store_pace(1000, 0);
+    for _ in 0..100 {
+        ck.advance(Duration::from_millis(10));
+        g.tick();
+    }
+    assert!(ws.iter().all(|w| w.state() == WaiterState::Granted));
 }
 
 #[test]
@@ -1746,14 +1940,17 @@ fn the_default_margin_biases_the_factor_the_curve_reads_and_the_status_has_both(
         (2000, 2300)
     );
     // h_proj = 500 - 1.3 * 100 = 370 MiB.
-    assert_eq!(t.h_proj, 370 * MIB);
-    let h = 370 * MIB;
-    assert_eq!(t.rate, Some(64 * MIB * h / (SOFT - h) * 1000 / 2300));
-    // Before the engine says anything: one, biased to 1.15.
+    assert_eq!(t.store_h_proj, 370 * MIB);
+    assert_eq!(t.rate, Some(curve(370 * MIB, 2300)));
+    // Before the engine says anything: the initial 2.0, biased to 2.3.
     let g2 = at_headroom(
         600 * MIB,
         cfg(None, |c| c.throttle.pace_store_bytes = true),
         &ck,
     );
-    assert_eq!(g2.snapshot().throttle.store_factor_biased_milli, 1150);
+    assert_eq!(g2.snapshot().throttle.store_factor_biased_milli, 2300);
+    // A factor past the engine's clamp is clamped, then biased.
+    g2.set_store_pace(99_000, 0);
+    assert_eq!(g2.snapshot().throttle.store_factor_milli, 16_000);
+    assert_eq!(g2.snapshot().throttle.store_factor_biased_milli, 18_400);
 }

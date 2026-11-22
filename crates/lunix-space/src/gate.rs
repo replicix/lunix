@@ -85,6 +85,8 @@ struct Shared {
     clock: Arc<dyn Clock>,
     probe: Arc<dyn FsProbe>,
     timers: bool,
+    /// The band is on and paces by store bytes (`SpaceGate::store_pace_enabled`).
+    throttle_store: bool,
     /// The daemon's default `full_timeout` (for a null `full_timeout_ms`).
     default_timeout: Duration,
     st: Mutex<State>,
@@ -296,6 +298,7 @@ impl LunixSpace {
             clock,
             probe,
             timers: config.background_timers,
+            throttle_store: config.throttle.enabled && config.throttle.pace_store_bytes,
             default_timeout: config.full_timeout,
             st: Mutex::new(State {
                 ledger,
@@ -583,6 +586,10 @@ impl SpaceGate for LunixSpace {
             st.ledger.grant_waiters(now);
             self.sh.cv.notify_all();
         }
+    }
+
+    fn store_pace_enabled(&self) -> bool {
+        self.sh.throttle_store
     }
 
     /// Re-judges every parked request under the new policy (ADR-32):

@@ -16,6 +16,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
+use lunix_iface::space::{FACTOR_INITIAL, FACTOR_MAX, FACTOR_ONE};
+
 /// Cuts the drain rate is averaged over.
 pub(crate) const HISTORY: usize = 4;
 
@@ -69,13 +71,9 @@ impl DrainHistory {
 /// Cuts the store factor is averaged over (P1').
 pub(crate) const FACTOR_HISTORY: usize = 8;
 
-/// One store byte per journal byte, in thousandths: the factor before any
-/// cut and its lower clamp.
-pub(crate) const FACTOR_ONE: u64 = 1000;
-
-/// The upper clamp of the factor, thousandths: eight store bytes per journal
-/// byte.
-pub(crate) const FACTOR_MAX: u64 = 8000;
+/// A cut counts as the "last" factor only with at least this many journal
+/// bytes (see [`StoreFactor`]).
+pub(crate) const LAST_MIN_BYTES: u64 = 1 << 20;
 
 /// The store factor `A_hat` (P1'): how many store bytes (segments, map packs
 /// and the commit) one journal byte becomes at the cut. The space gate
@@ -83,10 +81,21 @@ pub(crate) const FACTOR_MAX: u64 = 8000;
 /// factor times what was admitted, a cut at a time.
 ///
 /// `A_hat = max(byte-weighted mean of the last [`FACTOR_HISTORY`] cuts, the
-/// last cut's own factor)`, clamped to `[1, 8]`, in thousandths (fixed point:
-/// the gate compares and divides it, and no float crosses the trait). It is
-/// 1 before the first cut. A cut without journal bytes (a forced FULL, GC
-/// moves) says nothing and is not noted.
+/// last cut's own factor)`, clamped to `[FACTOR_ONE, FACTOR_MAX]` (1 to 16),
+/// in thousandths (fixed point: the gate compares and divides it, and no
+/// float crosses the trait); [`FACTOR_INITIAL`] (2.0) before the first
+/// measured cut.
+///
+/// The last cut's own factor counts only when the cut was not tiny: at least
+/// [`LAST_MIN_BYTES`] of journal and a quarter of the mean cut of the window.
+/// A small cut divides the fixed costs of a cut (a segment's footer, the
+/// map's path to the root, the commit) by few journal bytes and would pin
+/// `A_hat` at the clamp until the next big cut (it still weighs in the mean,
+/// by its bytes). Only cuts that wrote segments are measured: a cut of hole
+/// records only has no store bytes of its own to divide. Not in the figure:
+/// the index run written at C8 (a few percent of the cut's store bytes) and
+/// the map leaves a compaction re-hint dirtied (they do count, as the map
+/// packs): the two are small and of opposite signs.
 #[derive(Debug, Default)]
 pub(crate) struct StoreFactor {
     /// Journal bytes and settled store bytes of the last cuts.
@@ -117,7 +126,7 @@ impl StoreFactor {
     /// `A_hat` in thousandths.
     pub(crate) fn a_hat(&self) -> u64 {
         let Some(&(last_j, last_s)) = self.cuts.back() else {
-            return FACTOR_ONE;
+            return FACTOR_INITIAL;
         };
         let journal: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
         let store: u128 = self.cuts.iter().map(|c| u128::from(c.1)).sum();
@@ -125,8 +134,14 @@ impl StoreFactor {
             u64::try_from(journal).unwrap_or(u64::MAX),
             u64::try_from(store).unwrap_or(u64::MAX),
         );
-        mean.max(Self::ratio(last_j, last_s))
-            .clamp(FACTOR_ONE, FACTOR_MAX)
+        let n = self.cuts.len() as u128;
+        let big = last_j >= LAST_MIN_BYTES && u128::from(last_j) * 4 * n >= journal;
+        let a = if big {
+            mean.max(Self::ratio(last_j, last_s))
+        } else {
+            mean
+        };
+        a.clamp(FACTOR_ONE, FACTOR_MAX)
     }
 }
 
@@ -407,11 +422,11 @@ mod tests {
     }
 
     #[test]
-    fn the_store_factor_is_one_before_a_cut_and_a_cut_without_journal_bytes_says_nothing() {
+    fn the_store_factor_is_two_before_a_cut_and_a_cut_without_journal_bytes_says_nothing() {
         let mut f = StoreFactor::default();
-        assert_eq!(f.a_hat(), 1000);
+        assert_eq!(f.a_hat(), 2000);
         assert_eq!(f.push(0, 5 << 20), None);
-        assert_eq!(f.a_hat(), 1000);
+        assert_eq!(f.a_hat(), 2000);
     }
 
     #[test]
@@ -423,26 +438,51 @@ mod tests {
         assert_eq!(f.push(10 << 20, 20 << 20), Some(2000));
         // The mean is 270 / 110 = 2.454; the last cut's 2.0 is below it.
         assert_eq!(f.a_hat(), 2454);
-        // A last cut above the mean wins: the factor rises at once.
-        assert_eq!(f.push(1 << 20, 4 << 20), Some(4000));
+        // A last cut above the mean wins: the factor rises at once (50 MiB
+        // is a big cut against a mean of 55 MiB).
+        assert_eq!(f.push(50 << 20, 200 << 20), Some(4000));
         assert_eq!(f.a_hat(), 4000);
     }
 
     #[test]
-    fn the_store_factor_forgets_cuts_older_than_eight_and_stays_within_one_and_eight() {
+    fn a_tiny_cut_after_large_ones_does_not_pin_the_factor() {
         let mut f = StoreFactor::default();
-        f.push(1 << 20, 7 << 20);
+        for _ in 0..4 {
+            f.push(200 << 20, 500 << 20);
+        }
+        assert_eq!(f.a_hat(), 2500);
+        // 40 KiB of journal that wrote a 64 KiB chunk and three map nodes.
+        f.push(40 << 10, 300 << 10);
+        assert!(f.a_hat() <= 2501, "{}", f.a_hat());
+        assert!(f.a_hat() >= 2499, "{}", f.a_hat());
+        // Even 4 MiB, under a quarter of the 200 MiB mean, does not.
+        f.push(4 << 20, 60 << 20);
+        assert!(f.a_hat() < 2600, "{}", f.a_hat());
+        // But a light steady load of small cuts is its own mean and last.
+        let mut g = StoreFactor::default();
+        for _ in 0..8 {
+            g.push(2 << 20, 9 << 20);
+        }
+        assert_eq!(g.a_hat(), 4500);
+        g.push(2 << 20, 12 << 20);
+        assert_eq!(g.a_hat(), 6000, "a 2 MiB cut of a 2 MiB mean is big");
+    }
+
+    #[test]
+    fn the_store_factor_forgets_cuts_older_than_eight_and_stays_within_one_and_sixteen() {
+        let mut f = StoreFactor::default();
+        f.push(8 << 20, 56 << 20);
         for _ in 0..FACTOR_HISTORY {
-            f.push(1 << 20, 2 << 20);
+            f.push(8 << 20, 16 << 20);
         }
         assert_eq!(f.a_hat(), 2000, "the first cut left the window");
         // Below one (a cut that deduplicated or compressed): one.
         let mut f = StoreFactor::default();
         f.push(10 << 20, 3 << 20);
         assert_eq!(f.a_hat(), 1000);
-        // Above eight: eight.
-        f.push(1 << 20, 50 << 20);
-        assert_eq!(f.a_hat(), 8000);
+        // Above sixteen: sixteen.
+        f.push(100 << 20, 5000 << 20);
+        assert_eq!(f.a_hat(), 16_000);
     }
 
     #[test]
