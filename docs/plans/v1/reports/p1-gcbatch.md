@@ -108,32 +108,36 @@ tests a step runs to the end of the phase), so it is kept as the one that does n
 
 ## Gates
 
-Remote host, CPUs 8-15, `-j 8`, on the final code (`LUNIX_CPUS=8-15`):
+Remote host, CPUs 8-15, `-j 8`, on the final code (after the merge of `origin/main` @ `32f686f`, review
+follow-up included):
 
 * `tools/ci.sh` (fmt, clippy `-D warnings` on all targets and with `crashpoints`, `cargo test --workspace`,
   the crashpoints suites including `lunix-index --test rebuild_crash --test batch_crash`, the stack tests with
-  `lunix-fsck`, ownership `gcbatch ok (22 changed paths)`): **all green, 2 254 tests passed, 0 failed, 30
-  ignored** (sum of the `test result` lines). An earlier run on the first commit was green too.
+  `lunix-fsck`, ownership `gcbatch ok`): **all green, 2 314 tests passed, 0 failed, 30 ignored** (sum of the
+  `test result` lines).
 * Kill loops, one at a time, `LUNIX_KILL_HITS=first LUNIX_STACK_REQUIRE_FSCK=1`
   (`cargo test --release -p lunixd --features testsupport,crashpoints`):
 
 | loop | result |
 |---|---|
-| `stack_kill kill_loop_plain_16k` (`LUNIX_KILL_CUT_MS=1`) | ok: 58 points, 55 reached, 57 kills, 1 793 s |
-| `stack_kill kill_loop_integrity_16k` (`LUNIX_KILL_CUT_MS=1`) | ok: 58 points, 55 reached, 60 kills, 2 046 s |
-| `stack_gc_kill gc_kill_loop_plain_16k` (the GC-specific kill loop: every `gc.*`, `store.delete.*`, `store.segment_delete.*`, `store.evidence.*` and `index.after_condemn_flag` point) | ok: 21 of 21 points reached, 21 kills, 1 041 s |
-| `stack_gc_kill gc_kill_loop_integrity_16k` | ok: 21 of 21, 21 kills, 990 s |
+| `stack_gc_kill gc_kill_loop_plain_16k` (the GC-specific kill loop: every `gc.*`, `index.retire.*`, `store.delete.*`, `store.segment_delete.*`, `store.evidence.*` and `index.after_condemn_flag` point) | ok: 23 of 23 points reached, 23 kills, 1 040 s |
+| `stack_gc_kill gc_kill_loop_integrity_16k` | ok, 1 040 s |
+| `stack_kill kill_loop_plain_16k` (`LUNIX_KILL_CUT_MS=1`) | ok, 1 815 s |
+| `stack_kill kill_loop_integrity_16k` (`LUNIX_KILL_CUT_MS=1`) | ok, 2 018 s |
+| `stack_gc_kill gc_kill_loop_plain_64k` | ok, 1 035 s |
 
-  Each kill is followed by fsck (no error, no `index_lost`, `index_extra` only after the kill points of a
-  delete phase), recovery under `refuse`, the oracle, GC ticked to an empty condemned list, a clean close,
-  and fsck at rest (nothing allowed). The first run of `gc_kill_loop_*` failed its last assertion
-  ("registered crash points the workload no longer reaches: `index.after_condemn_flag` twice"): the batch call
-  had a second site with the name of the single call, and the loop counts hits by name. Fixed (one site) and
-  covered by `the_index_crash_points_have_unique_names`.
-* `lunix fsck --deep` after every measurement volume: clean (the four RAM cells with `lunix fsck --deep`; the
-  stack runs with `lunix-fsck` on the volume). The first round of (b) produced one `index_extra` after a clean
-  detach, the finding that led to the step-end flush; none after it.
-* The other kill loops of `stack_kill` and `stack_gc_kill` (64 KiB, encrypted) were not run.
+  Each kill is followed by: fsck (no error, no `index_lost`; `index_extra`/`index_stale` only on an image whose
+  entries into missing segments are all flagged and at most 256 segments, checked on a copy of the killed
+  index), recovery under `refuse`, the oracle, GC ticked to an empty condemned list, a clean close, and fsck at
+  rest (nothing allowed). The first version of the GC loop failed its last assertion ("registered crash points
+  the workload no longer reaches: `index.after_condemn_flag` twice"): the batch call had a second site with the
+  name of the single call, and the loop counts hits by name. Fixed (one site), covered by
+  `the_index_crash_points_have_unique_names`.
+* `lunix fsck --deep` after every measurement volume: clean (the measurements of the first review round, run
+  on the code before the follow-up; the follow-up changed the abort and un-condemn paths, not the delete
+  path measured). The first round of (b) produced one `index_extra` after a clean detach, the finding that led
+  to the step-end flush; none after it.
+* The 64 KiB `stack_kill` and the encrypted loops were not run.
 
 ## Measurement
 
