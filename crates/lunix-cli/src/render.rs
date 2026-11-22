@@ -226,6 +226,16 @@ pub fn status(out: &mut dyn Write, s: &VolumeStatusBody) -> io::Result<()> {
             &format!("{} extents failed verification", st.extent_auth_failures),
         )?;
     }
+    if st.read_revalidated > 0 || st.read_revalidate_exhausted > 0 {
+        kv(
+            out,
+            "read revalidations",
+            &format!(
+                "{} retried after a stale entry, {} gave up (EIO)",
+                st.read_revalidated, st.read_revalidate_exhausted
+            ),
+        )?;
+    }
     figures(out, &s.space)?;
     throttle(out, &s.throttle)
 }

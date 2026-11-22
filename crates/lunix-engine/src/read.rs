@@ -224,7 +224,8 @@ pub(crate) struct ReadCtx {
 /// change of the block's entry (a cut, a re-hint) during the read, so the
 /// bound costs nothing in normal operation; a part still failing after these
 /// reports its error and counts `read_revalidate_exhausted`.
-const REVALIDATE_MAX: u32 = 16;
+#[doc(hidden)]
+pub const REVALIDATE_MAX: u32 = 16;
 
 impl ReadCtx {
     /// The decoded chunk `e` names, from the cache or the store. `Auth`

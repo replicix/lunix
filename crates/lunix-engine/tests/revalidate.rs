@@ -28,8 +28,7 @@ use proptest::prelude::*;
 
 const CS: u32 = 16 << 10;
 const CHUNKS: u64 = 3;
-/// `REVALIDATE_MAX` of the reader (crate-private).
-const RETRY_BOUND: u32 = 16;
+const RETRY_BOUND: u32 = lunix_engine::REVALIDATE_MAX;
 const WAIT: Duration = Duration::from_secs(5);
 
 fn tip_map(r: &Running, codec: PlainCodec, id_len: IdLen) -> FlatMap {
@@ -131,8 +130,8 @@ fn overwrite(r: &mut Running, ci: u64, seed: u64) -> Vec<u8> {
 
 /// Parks a read of the first block of chunk 1, overwrites the chunk and
 /// commits (`between` then runs with the old and the new hint), and lets the
-/// read go. Returns its result and the new chunk. One block: a read of
-/// several blocks is several parts, each its own lookup.
+/// read go. Returns its result and the new chunk. One block, so one part: a
+/// request is split into parts per chunk (and per run of overlay blocks).
 fn read_across_overwrite(
     v: &Vol,
     r: &mut Running,
@@ -336,26 +335,31 @@ fn a_block_discarded_under_the_read_reads_as_zeros() {
 }
 
 #[test]
-fn a_multi_part_read_retries_each_part_on_its_own() {
+fn a_read_across_two_chunks_retries_only_the_part_that_went_stale() {
     for (codec, id_len) in modes() {
         let (v, mut r) = setup(codec, id_len);
         let old = entry_hint(&entry(&r, codec, id_len, 1));
-        let (t, h) = park(&v, &mut r, old, u64::from(CS), CS);
+        let before = auth_failures(&r);
+        // Chunks 1 and 2 are two parts. Chunk 1 is overwritten and its old
+        // extent damaged under the parked part; chunk 2 is untouched.
+        let (t, h) = park(&v, &mut r, old, u64::from(CS), 2 * CS);
         let fresh = overwrite(&mut r, 1, 999);
-        SegmentStore::delete(&r.store, old.seg).unwrap();
+        lock(&v.read_faults.flip).insert(old);
         let (st, data) = finish(&mut r, t, h);
         assert!(st.is_ok(), "{id_len:?}: {st:?}");
-        // Four parts: each is the old or the new block (they need not be one
-        // snapshot), and at least the parked one went through the new entry.
+        let (c1, c2) = data.split_at(CS as usize);
+        // Each block is the old or the new one (parts need not agree).
         let was = pattern(101, CS as usize);
         for b in 0..4 {
-            let blk = &data[b * 4096..][..4096];
+            let blk = &c1[b * 4096..][..4096];
             assert!(
                 blk == &was[b * 4096..][..4096] || blk == &fresh[b * 4096..][..4096],
-                "{id_len:?}: block {b} is neither version"
+                "{id_len:?}: block {b} of chunk 1 is neither version"
             );
         }
+        assert_eq!(c2, pattern(102, CS as usize), "{id_len:?}");
         assert!(revalidated(&r) >= 1, "{id_len:?}");
+        assert_eq!(auth_failures(&r), before, "{id_len:?}");
     }
 }
 
@@ -438,7 +442,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
     /// Reads race overwrites and a collector that deletes every segment no
-    /// map entry names (grace 0): no read fails or returns bytes of a
+    /// map entry names (no grace): no read fails or returns bytes of a
     /// version it could not have seen, and every parked read whose segment
     /// was deleted under it is counted as revalidated.
     #[test]
@@ -533,11 +537,11 @@ proptest! {
 
 /// The invariant behind the destage base read not revalidating: a GC step
 /// runs only between cuts with the map at the tip. With the real collector
-/// at its smallest grace and compaction eager, partial-chunk overwrites (each
+/// at its floor grace (10 s on a manual clock) and compaction eager, partial-chunk overwrites (each
 /// a base read inside a cut) over many collected generations never see a
 /// missing extent, and the device stays what the model says.
 #[test]
-fn the_real_collector_at_grace_zero_never_breaks_a_partial_overwrite() {
+fn the_real_collector_at_the_floor_grace_never_breaks_a_partial_overwrite() {
     use lunix_gc::{FloorSource, Gc, GcConfig};
     use lunix_iface::gc::GcParams;
 
