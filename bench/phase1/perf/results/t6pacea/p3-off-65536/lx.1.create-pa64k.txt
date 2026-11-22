@@ -1,0 +1,4 @@
+created volume pa64k (integrity, uuid cea6b79b-942d-4ea1-b298-a596e9624845)
+directory        /mnt/pacea-ram/spike/m16-parta-vols/cea6b79b-942d-4ea1-b298-a596e9624845
+key file         /mnt/pacea-ram/spike/m16-parta-vols/cea6b79b-942d-4ea1-b298-a596e9624845/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

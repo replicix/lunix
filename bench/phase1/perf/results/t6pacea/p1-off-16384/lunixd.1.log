@@ -1,0 +1,806 @@
+1795384887798 INFO  lunixd: memory locking: key arena locked; queue and journal buffers are locked at attach key_arena_locked_bytes=65536
+1795384887799 INFO  lunixd: lunixd started socket=/mnt/pacea-ram/spike/m16-parta-state/ctl.sock
+1795384887799 INFO  lunixd::server: control socket ready
+1795384887804 INFO  lunixd::audit: {"ts_ms":1795384887804,"uid":0,"gid":0,"pid":616311,"method":"volume_create","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795384888556 INFO  lunixd::daemon: volume opened volume="pa16k" tip=0 replayed=0 swept_segments=0
+device reload json failed
+1795384888600 INFO  lunixd::daemon: attached volume="pa16k" recovered=false ms=787
+1795384888600 INFO  lunixd::daemon: attached; queue and journal I/O memory locked volume=pa16k locked_bytes=582094848
+1795384888600 INFO  lunixd::audit: {"ts_ms":1795384888600,"uid":0,"gid":0,"pid":616343,"method":"attach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795384893996 INFO  lunix_journal::ring: the journal's file system does not do FALLOC_FL_ZERO_RANGE: freed ring files are rewritten with zeros error=Operation not supported (os error 95)
+1795384894000 INFO  lunix_engine::coord: store factor of the cut journal_bytes=66064320 store_bytes=34018674 a_pred_milli=2000 a_real_milli=514 a_hat_milli=1000
+1795384894240 INFO  lunix_engine::coord: store factor of the cut journal_bytes=264257280 store_bytes=135932566 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384894273 INFO  lunix_engine::coord: store factor of the cut journal_bytes=52432000 store_bytes=27012664 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384894588 INFO  lunix_engine::coord: store factor of the cut journal_bytes=211825280 store_bytes=108971146 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384894620 INFO  lunix_engine::coord: store factor of the cut journal_bytes=50334720 store_bytes=25938933 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384894936 INFO  lunix_engine::coord: store factor of the cut journal_bytes=213922560 store_bytes=110051922 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384894973 INFO  lunix_engine::coord: store factor of the cut journal_bytes=55577920 store_bytes=28630166 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384895287 INFO  lunix_engine::coord: store factor of the cut journal_bytes=208679360 store_bytes=107347747 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384895320 INFO  lunix_engine::coord: store factor of the cut journal_bytes=50334720 store_bytes=25939044 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384895636 INFO  lunix_engine::coord: store factor of the cut journal_bytes=213922560 store_bytes=110051774 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384895669 INFO  lunix_engine::coord: store factor of the cut journal_bytes=50334720 store_bytes=25934430 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384895984 INFO  lunix_engine::coord: store factor of the cut journal_bytes=213922560 store_bytes=110047008 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384896018 INFO  lunix_engine::coord: store factor of the cut journal_bytes=53480640 store_bytes=27556683 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795384896337 INFO  lunix_engine::coord: store factor of the cut journal_bytes=210776640 store_bytes=108428455 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384896381 INFO  lunix_engine::coord: store factor of the cut journal_bytes=67112960 store_bytes=34561396 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795384897513 INFO  lunix_engine::coord: store factor of the cut journal_bytes=313090240 store_bytes=322214540 a_pred_milli=1000 a_real_milli=1029 a_hat_milli=1029
+1795384897716 INFO  lunix_engine::coord: store factor of the cut journal_bytes=103138880 store_bytes=181529484 a_pred_milli=1029 a_real_milli=1760 a_hat_milli=1760
+1795384898714 INFO  lunix_engine::coord: store factor of the cut journal_bytes=400150400 store_bytes=587602307 a_pred_milli=1760 a_real_milli=1468 a_hat_milli=1468
+1795384898815 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35601280 store_bytes=72575035 a_pred_milli=1468 a_real_milli=2038 a_hat_milli=1033
+1795384900332 INFO  lunix_engine::coord: store factor of the cut journal_bytes=427036480 store_bytes=609550292 a_pred_milli=1033 a_real_milli=1427 a_hat_milli=1427
+1795384900440 INFO  lunix_engine::coord: store factor of the cut journal_bytes=40089920 store_bytes=80823810 a_pred_milli=1427 a_real_milli=2016 a_hat_milli=1250
+1795384902138 INFO  lunix_engine::coord: store factor of the cut journal_bytes=436912320 store_bytes=596215220 a_pred_milli=1250 a_real_milli=1364 a_hat_milli=1364
+1795384902238 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35401600 store_bytes=69759672 a_pred_milli=1364 a_real_milli=1970 a_hat_milli=1406
+1795384903996 INFO  lunix_engine::coord: store factor of the cut journal_bytes=449608640 store_bytes=541235336 a_pred_milli=1406 a_real_milli=1203 a_hat_milli=1420
+1795384904083 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33962240 store_bytes=61471103 a_pred_milli=1420 a_real_milli=1809 a_hat_milli=1409
+1795384905808 INFO  lunix_engine::coord: store factor of the cut journal_bytes=455141440 store_bytes=604354764 a_pred_milli=1409 a_real_milli=1327 a_hat_milli=1377
+1795384905897 INFO  lunix_engine::coord: store factor of the cut journal_bytes=30230720 store_bytes=62549052 a_pred_milli=1377 a_real_milli=2069 a_hat_milli=1376
+1795384907642 INFO  lunix_engine::coord: store factor of the cut journal_bytes=457358720 store_bytes=644504915 a_pred_milli=1376 a_real_milli=1409 a_hat_milli=1409
+1795384907741 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35617920 store_bytes=72439340 a_pred_milli=1409 a_real_milli=2033 a_hat_milli=1371
+1795384909570 INFO  lunix_engine::coord: store factor of the cut journal_bytes=453714560 store_bytes=629688761 a_pred_milli=1371 a_real_milli=1387 a_hat_milli=1387
+1795384909666 INFO  lunix_engine::coord: store factor of the cut journal_bytes=34012160 store_bytes=68666400 a_pred_milli=1387 a_real_milli=2018 a_hat_milli=1377
+1795384911454 INFO  lunix_engine::coord: store factor of the cut journal_bytes=454975040 store_bytes=585768746 a_pred_milli=1377 a_real_milli=1287 a_hat_milli=1396
+1795384911545 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35534720 store_bytes=63533155 a_pred_milli=1396 a_real_milli=1787 a_hat_milli=1396
+1795384913208 INFO  lunix_engine::coord: store factor of the cut journal_bytes=443605760 store_bytes=537910724 a_pred_milli=1396 a_real_milli=1212 a_hat_milli=1370
+1795384914687 INFO  lunix_engine::coord: store factor of the cut journal_bytes=377594880 store_bytes=563680206 a_pred_milli=1370 a_real_milli=1492 a_hat_milli=1492
+1795384914846 INFO  lunix_engine::coord: store factor of the cut journal_bytes=74613760 store_bytes=137190113 a_pred_milli=1492 a_real_milli=1838 a_hat_milli=1838
+1795384916587 INFO  lunix_engine::coord: store factor of the cut journal_bytes=460029440 store_bytes=643865238 a_pred_milli=1838 a_real_milli=1399 a_hat_milli=1399
+1795384916686 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35297600 store_bytes=71722190 a_pred_milli=1399 a_real_milli=2031 a_hat_milli=1394
+1795384918506 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456031680 store_bytes=619658426 a_pred_milli=1394 a_real_milli=1358 a_hat_milli=1378
+1795384918602 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33983040 store_bytes=67765200 a_pred_milli=1378 a_real_milli=1994 a_hat_milli=1411
+1795384920099 INFO  lunix_engine::coord: store factor of the cut journal_bytes=387304320 store_bytes=494702896 a_pred_milli=1411 a_real_milli=1277 a_hat_milli=1382
+1795384920436 INFO  lunix_engine::coord: store factor of the cut journal_bytes=136693440 store_bytes=205955917 a_pred_milli=1382 a_real_milli=1506 a_hat_milli=1506
+1795384920812 INFO  lunix_engine::coord: store factor of the cut journal_bytes=138627840 store_bytes=209085208 a_pred_milli=1506 a_real_milli=1508 a_hat_milli=1508
+1795384921252 INFO  lunix_engine::coord: store factor of the cut journal_bytes=148283200 store_bytes=258152222 a_pred_milli=1508 a_real_milli=1740 a_hat_milli=1740
+1795384921745 INFO  lunix_engine::coord: store factor of the cut journal_bytes=168600640 store_bytes=298978694 a_pred_milli=1740 a_real_milli=1773 a_hat_milli=1773
+1795384922258 INFO  lunix_engine::coord: store factor of the cut journal_bytes=185032640 store_bytes=323448796 a_pred_milli=1773 a_real_milli=1748 a_hat_milli=1748
+1795384922788 INFO  lunix_engine::coord: store factor of the cut journal_bytes=185527680 store_bytes=323828183 a_pred_milli=1748 a_real_milli=1745 a_hat_milli=1745
+1795384922801 INFO  lunix_gc::collector: gc pass done how="step" pass=1 wall_ms=4097 steps=29 phases=mark=500ms/34u@0ms condemn=3ms/346u@581ms compact=569ms/32914u@584ms finish=0ms/1u@4097ms condemned=269 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=203 bytes_freed=0 bytes_moved=273012139 pending=344
+1795384923214 INFO  lunix_engine::coord: store factor of the cut journal_bytes=162564480 store_bytes=288539094 a_pred_milli=1745 a_real_milli=1774 a_hat_milli=1774
+1795384923772 INFO  lunix_engine::coord: store factor of the cut journal_bytes=278487040 store_bytes=442277891 a_pred_milli=1774 a_real_milli=1588 a_hat_milli=1674
+1795384923867 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33587840 store_bytes=68507850 a_pred_milli=1674 a_real_milli=2039 a_hat_milli=1701
+1795384925578 INFO  lunix_engine::coord: store factor of the cut journal_bytes=458735680 store_bytes=608053765 a_pred_milli=1701 a_real_milli=1325 a_hat_milli=1611
+1795384925678 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35243520 store_bytes=68506657 a_pred_milli=1611 a_real_milli=1943 a_hat_milli=1606
+1795384927230 INFO  lunix_engine::coord: store factor of the cut journal_bytes=449126080 store_bytes=538629903 a_pred_milli=1606 a_real_milli=1199 a_hat_milli=1488
+1795384927315 INFO  lunix_engine::coord: store factor of the cut journal_bytes=30659200 store_bytes=54591528 a_pred_milli=1488 a_real_milli=1780 a_hat_milli=1464
+1795384929040 INFO  lunix_engine::coord: store factor of the cut journal_bytes=452687040 store_bytes=619532821 a_pred_milli=1464 a_real_milli=1368 a_hat_milli=1414
+1795384929224 INFO  lunix_engine::coord: store factor of the cut journal_bytes=56105920 store_bytes=110926798 a_pred_milli=1414 a_real_milli=1977 a_hat_milli=1977
+1795384930012 INFO  lunix_engine::coord: store factor of the cut journal_bytes=202999680 store_bytes=348396662 a_pred_milli=1977 a_real_milli=1716 a_hat_milli=1716
+1795384930252 INFO  lunix_engine::pressure: write throttle on headroom=2585196980 soft=2713914028 limit=18092760191 rate=1347837254 ingest_rate=315098688 reclaim_rate=0
+1795384930645 INFO  lunix_engine::coord: store factor of the cut journal_bytes=224477760 store_bytes=378506442 a_pred_milli=1716 a_real_milli=1686 a_hat_milli=1686
+1795384931106 INFO  lunix_gc::collector: gc pass done how="step" pass=2 wall_ms=3289 steps=22 phases=mark=514ms/34u@1ms condemn=3ms/249u@1238ms delete=0ms/345u@1242ms compact=899ms/32407u@1242ms finish=0ms/1u@3289ms condemned=218 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=261 bytes_freed=0 bytes_moved=268869062 pending=591
+1795384931591 INFO  lunix_engine::coord: store factor of the cut journal_bytes=221332800 store_bytes=369985253 a_pred_milli=1686 a_real_milli=1671 a_hat_milli=1671
+1795384935150 INFO  lunix_engine::coord: store factor of the cut journal_bytes=388165440 store_bytes=550655925 a_pred_milli=1671 a_real_milli=1418 a_hat_milli=1466
+1795384937200 INFO  lunix_engine::coord: store factor of the cut journal_bytes=247328640 store_bytes=363287225 a_pred_milli=1466 a_real_milli=1468 a_hat_milli=1533
+1795384937550 INFO  lunix_gc::collector: gc pass done how="step" pass=3 wall_ms=1391 steps=5 phases=mark=470ms/34u@1ms condemn=5ms/274u@491ms delete=0ms/592u@497ms compact=488ms/32409u@497ms finish=0ms/1u@1390ms condemned=261 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=126 bytes_freed=0 bytes_moved=268911088 pending=863
+1795384937782 INFO  lunix_engine::coord: store factor of the cut journal_bytes=56592640 store_bytes=99070809 a_pred_milli=1533 a_real_milli=1750 a_hat_milli=1535
+1795384943186 INFO  lunix_engine::coord: store factor of the cut journal_bytes=86386560 store_bytes=139364989 a_pred_milli=1535 a_real_milli=1613 a_hat_milli=1613
+1795384943714 INFO  lunix_gc::collector: gc pass done how="step" pass=4 wall_ms=1128 steps=5 phases=mark=476ms/34u@1ms condemn=2ms/133u@651ms delete=0ms/864u@654ms compact=461ms/32952u@654ms finish=0ms/1u@1128ms condemned=126 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=79 bytes_freed=0 bytes_moved=273418955 pending=994
+1795384943865 INFO  lunix_engine::coord: store factor of the cut journal_bytes=5532800 store_bytes=13592000 a_pred_milli=1613 a_real_milli=2456 a_hat_milli=1579
+1795384949048 INFO  lunix_engine::coord: store factor of the cut journal_bytes=21677760 store_bytes=42303411 a_pred_milli=1579 a_real_milli=1951 a_hat_milli=1563
+1795384949559 WARN  lunix_engine::pressure: writes wait for space waiters=2 limit=17944569237 used=18059698925 full_timeout_ms=60000
+1795384949639 INFO  lunix_gc::collector: gc pass done how="step" pass=5 wall_ms=869 steps=4 phases=mark=401ms/34u@1ms condemn=2ms/85u@476ms delete=0ms/995u@478ms compact=279ms/20355u@478ms finish=0ms/1u@869ms condemned=79 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=43 bytes_freed=0 bytes_moved=168885065 pending=1077
+1795384949779 INFO  lunix_engine::coord: store factor of the cut journal_bytes=1568320 store_bytes=6113791 a_pred_milli=1563 a_real_milli=3898 a_hat_milli=1540
+1795384950746 INFO  lunix_gc::collector: gc pass done how="urgent" pass=6 wall_ms=386 steps=1 phases= condemned=42 segments_deleted=13 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=186331758 bytes_moved=0 pending=1109
+1795384950746 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179430864 freed=186331758 urgency=Urgent
+1795384955807 INFO  lunix_engine::coord: store factor of the cut journal_bytes=22031360 store_bytes=44037421 a_pred_milli=1540 a_real_milli=1998 a_hat_milli=1517
+1795384956605 INFO  lunix_gc::collector: gc pass done how="urgent" pass=8 wall_ms=385 steps=1 phases= condemned=0 segments_deleted=12 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=187760681 bytes_moved=0 pending=1059
+1795384956605 INFO  lunixd::stack::ladder: space ladder: gc urgent pass want_bytes=179430334 freed=187760681 urgency=Urgent
+1795384961849 INFO  lunix_engine::coord: store factor of the cut journal_bytes=139780160 store_bytes=215376857 a_pred_milli=1517 a_real_milli=1540 a_hat_milli=1589
+1795384962478 INFO  lunix_engine::pressure: write throttle off throttled_ms=33221 delayed_writes=330108 delayed_ms=8092699 delay_max_ms=1636
+1795384963040 INFO  lunix_gc::collector: gc pass done how="step" pass=9 wall_ms=1189 steps=6 phases=mark=380ms/34u@1ms condemn=0ms/5u@382ms delete=618ms/1060u@382ms compact=147ms/10978u@1031ms finish=0ms/1u@1189ms condemned=0 segments_deleted=422 packs_deleted=51 runs_deleted=0 commits_deleted=53 compacted=12 bytes_freed=7006220023 bytes_moved=91076076 pending=536
+1795384963199 INFO  lunix_engine::coord: store factor of the cut journal_bytes=13607360 store_bytes=28228664 a_pred_milli=1589 a_real_milli=2074 a_hat_milli=2074
+1795384968554 INFO  lunix_gc::collector: gc pass done how="step" pass=10 wall_ms=451 steps=7 phases=mark=389ms/34u@0ms condemn=0ms/16u@450ms delete=0ms/537u@451ms compact=0ms/1u@451ms finish=0ms/1u@451ms condemned=12 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=0 bytes_freed=0 bytes_moved=0 pending=550
+1795384973546 INFO  lunix_engine::coord: store factor of the cut journal_bytes=295418240 store_bytes=470888803 a_pred_milli=2074 a_real_milli=1593 a_hat_milli=1638
+1795384973621 INFO  lunix_engine::coord: store factor of the cut journal_bytes=21523840 store_bytes=45505781 a_pred_milli=1638 a_real_milli=2114 a_hat_milli=2114
+1795384974801 INFO  lunix_engine::coord: store factor of the cut journal_bytes=234757120 store_bytes=393549746 a_pred_milli=2114 a_real_milli=1676 a_hat_milli=1676
+1795384975307 INFO  lunix_engine::coord: store factor of the cut journal_bytes=171333760 store_bytes=302769000 a_pred_milli=1676 a_real_milli=1767 a_hat_milli=1767
+1795384975752 INFO  lunix_engine::coord: store factor of the cut journal_bytes=140329280 store_bytes=254354682 a_pred_milli=1767 a_real_milli=1812 a_hat_milli=1812
+1795384976176 INFO  lunix_engine::coord: store factor of the cut journal_bytes=134721600 store_bytes=244553620 a_pred_milli=1812 a_real_milli=1815 a_hat_milli=1815
+1795384976589 INFO  lunix_engine::coord: store factor of the cut journal_bytes=129296960 store_bytes=235569309 a_pred_milli=1815 a_real_milli=1821 a_hat_milli=1821
+1795384976999 INFO  lunix_engine::coord: store factor of the cut journal_bytes=128423360 store_bytes=232189738 a_pred_milli=1821 a_real_milli=1808 a_hat_milli=1808
+1795384977406 INFO  lunix_engine::coord: store factor of the cut journal_bytes=130648960 store_bytes=233437408 a_pred_milli=1808 a_real_milli=1786 a_hat_milli=1786
+1795384977425 INFO  lunix_gc::collector: gc pass done how="step" pass=11 wall_ms=3804 steps=26 phases=mark=425ms/34u@0ms condemn=0ms/6u@497ms delete=0ms/551u@497ms compact=470ms/32463u@497ms finish=0ms/1u@3803ms condemned=0 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=37 bytes_freed=0 bytes_moved=269267695 pending=554
+1795384977766 INFO  lunix_engine::coord: store factor of the cut journal_bytes=118805440 store_bytes=211853333 a_pred_milli=1786 a_real_milli=1783 a_hat_milli=1783
+1795384978743 INFO  lunix_engine::coord: store factor of the cut journal_bytes=328219840 store_bytes=457965490 a_pred_milli=1783 a_real_milli=1395 a_hat_milli=1695
+1795384978832 INFO  lunix_engine::coord: store factor of the cut journal_bytes=30006080 store_bytes=56956394 a_pred_milli=1695 a_real_milli=1898 a_hat_milli=1689
+1795384980707 INFO  lunix_engine::coord: store factor of the cut journal_bytes=463236800 store_bytes=549751992 a_pred_milli=1689 a_real_milli=1186 a_hat_milli=1518
+1795384980802 INFO  lunix_engine::coord: store factor of the cut journal_bytes=32119360 store_bytes=65951149 a_pred_milli=1518 a_real_milli=2053 a_hat_milli=1501
+1795384982646 INFO  lunix_engine::coord: store factor of the cut journal_bytes=460628480 store_bytes=645479276 a_pred_milli=1501 a_real_milli=1401 a_hat_milli=1450
+1795384983255 INFO  lunix_engine::coord: store factor of the cut journal_bytes=152788480 store_bytes=274347021 a_pred_milli=1450 a_real_milli=1795 a_hat_milli=1795
+1795384983445 INFO  lunix_engine::pressure: write throttle on headroom=2389642304 soft=2708807610 limit=18058717401 rate=502454926 ingest_rate=287061312 reclaim_rate=0
+1795384984942 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456339520 store_bytes=636158062 a_pred_milli=1795 a_real_milli=1394 a_hat_milli=1419
+1795384985476 INFO  lunix_gc::collector: gc pass done how="step" pass=12 wall_ms=2821 steps=15 phases=mark=487ms/34u@1ms condemn=4ms/160u@798ms delete=673ms/555u@802ms compact=639ms/32452u@1505ms finish=0ms/1u@2821ms condemned=131 segments_deleted=508 packs_deleted=12 runs_deleted=0 commits_deleted=11 compacted=152 bytes_freed=8378034166 bytes_moved=269267985 pending=181
+1795384985869 INFO  lunix_engine::coord: store factor of the cut journal_bytes=216935680 store_bytes=355999920 a_pred_milli=1419 a_real_milli=1641 a_hat_milli=1641
+1795384987212 INFO  lunix_engine::coord: store factor of the cut journal_bytes=396918080 store_bytes=526381866 a_pred_milli=1641 a_real_milli=1326 a_hat_milli=1408
+1795384987308 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33271680 store_bytes=61941207 a_pred_milli=1408 a_real_milli=1861 a_hat_milli=1408
+1795384988511 INFO  lunix_engine::pressure: write throttle off throttled_ms=33633 delayed_writes=348574 delayed_ms=8132936 delay_max_ms=1636
+1795384989194 INFO  lunix_engine::coord: store factor of the cut journal_bytes=461339840 store_bytes=554579309 a_pred_milli=1408 a_real_milli=1202 a_hat_milli=1411
+1795384989293 INFO  lunix_engine::coord: store factor of the cut journal_bytes=32576960 store_bytes=66699952 a_pred_milli=1411 a_real_milli=2047 a_hat_milli=1411
+1795384991034 INFO  lunix_engine::coord: store factor of the cut journal_bytes=454767040 store_bytes=638079289 a_pred_milli=1411 a_real_milli=1403 a_hat_milli=1412
+1795384991678 INFO  lunix_engine::coord: store factor of the cut journal_bytes=162922240 store_bytes=289872079 a_pred_milli=1412 a_real_milli=1779 a_hat_milli=1779
+1795384992516 INFO  lunix_engine::coord: store factor of the cut journal_bytes=255278400 store_bytes=417785948 a_pred_milli=1779 a_real_milli=1636 a_hat_milli=1636
+1795384993101 INFO  lunix_engine::coord: store factor of the cut journal_bytes=222851200 store_bytes=368359561 a_pred_milli=1636 a_real_milli=1652 a_hat_milli=1652
+1795384993613 INFO  lunix_engine::coord: store factor of the cut journal_bytes=187216640 store_bytes=312414457 a_pred_milli=1652 a_real_milli=1668 a_hat_milli=1668
+1795384994085 INFO  lunix_engine::coord: store factor of the cut journal_bytes=166566400 store_bytes=275586995 a_pred_milli=1668 a_real_milli=1654 a_hat_milli=1654
+1795384994517 INFO  lunix_engine::coord: store factor of the cut journal_bytes=154019840 store_bytes=246004713 a_pred_milli=1654 a_real_milli=1597 a_hat_milli=1598
+1795384994933 INFO  lunix_engine::coord: store factor of the cut journal_bytes=150180160 store_bytes=226556361 a_pred_milli=1598 a_real_milli=1508 a_hat_milli=1582
+1795384994975 INFO  lunix_gc::collector: gc pass done how="step" pass=13 wall_ms=3933 steps=25 phases=mark=442ms/34u@0ms condemn=7ms/248u@758ms delete=0ms/182u@765ms compact=500ms/32640u@765ms finish=0ms/1u@3932ms condemned=230 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=129 bytes_freed=0 bytes_moved=270762229 pending=427
+1795384995306 INFO  lunix_engine::coord: store factor of the cut journal_bytes=145924480 store_bytes=201487622 a_pred_milli=1582 a_real_milli=1380 a_hat_milli=1618
+1795384996091 INFO  lunix_engine::coord: store factor of the cut journal_bytes=319866560 store_bytes=461629414 a_pred_milli=1618 a_real_milli=1443 a_hat_milli=1566
+1795384997580 INFO  lunix_engine::coord: store factor of the cut journal_bytes=368501120 store_bytes=554468080 a_pred_milli=1566 a_real_milli=1504 a_hat_milli=1543
+1795384999137 INFO  lunix_engine::coord: store factor of the cut journal_bytes=469335360 store_bytes=651770462 a_pred_milli=1543 a_real_milli=1388 a_hat_milli=1493
+1795384999237 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33974720 store_bytes=69313023 a_pred_milli=1493 a_real_milli=2040 a_hat_milli=1485
+1795385001015 INFO  lunix_engine::coord: store factor of the cut journal_bytes=452882560 store_bytes=614624243 a_pred_milli=1485 a_real_milli=1357 a_hat_milli=1444
+1795385001490 INFO  lunix_engine::coord: store factor of the cut journal_bytes=124608640 store_bytes=212466279 a_pred_milli=1444 a_real_milli=1705 a_hat_milli=1705
+1795385001774 INFO  lunix_engine::pressure: write throttle on headroom=2759715511 soft=2772191589 limit=18481277266 rate=14844518678 ingest_rate=305648935 reclaim_rate=0
+1795385002208 INFO  lunix_gc::collector: gc pass done how="step" pass=14 wall_ms=2168 steps=17 phases=mark=511ms/34u@1ms condemn=7ms/230u@1185ms delete=0ms/428u@1192ms compact=697ms/32834u@1192ms finish=0ms/1u@2168ms condemned=204 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=186 bytes_freed=0 bytes_moved=272439130 pending=655
+1795385002805 INFO  lunix_engine::coord: store factor of the cut journal_bytes=367685760 store_bytes=460244579 a_pred_milli=1705 a_real_milli=1251 a_hat_milli=1413
+1795385005601 INFO  lunix_engine::coord: store factor of the cut journal_bytes=335046400 store_bytes=462117111 a_pred_milli=1413 a_real_milli=1379 a_hat_milli=1410
+1795385008393 INFO  lunix_engine::coord: store factor of the cut journal_bytes=331194240 store_bytes=508225475 a_pred_milli=1410 a_real_milli=1534 a_hat_milli=1534
+1795385008716 INFO  lunix_gc::collector: gc pass done how="step" pass=15 wall_ms=1505 steps=5 phases=mark=449ms/34u@1ms condemn=6ms/195u@470ms delete=14ms/656u@477ms compact=464ms/32408u@492ms finish=0ms/1u@1505ms condemned=186 segments_deleted=13 packs_deleted=5 runs_deleted=0 commits_deleted=5 compacted=97 bytes_freed=224410887 bytes_moved=268902630 pending=825
+1795385009046 INFO  lunix_engine::coord: store factor of the cut journal_bytes=107922880 store_bytes=202210137 a_pred_milli=1534 a_real_milli=1873 a_hat_milli=1873
+1795385014368 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91307840 store_bytes=173624335 a_pred_milli=1873 a_real_milli=1901 a_hat_milli=1901
+1795385015034 INFO  lunix_gc::collector: gc pass done how="step" pass=16 wall_ms=1282 steps=6 phases=mark=418ms/34u@1ms condemn=4ms/120u@624ms delete=158ms/826u@629ms compact=471ms/32844u@788ms finish=0ms/1u@1282ms condemned=113 segments_deleted=131 packs_deleted=13 runs_deleted=0 commits_deleted=14 compacted=62 bytes_freed=2115253463 bytes_moved=272522077 pending=785
+1795385015532 INFO  lunix_engine::coord: store factor of the cut journal_bytes=207475840 store_bytes=355259352 a_pred_milli=1901 a_real_milli=1712 a_hat_milli=1712
+1795385018151 INFO  lunix_engine::coord: store factor of the cut journal_bytes=432178240 store_bytes=606662182 a_pred_milli=1712 a_real_milli=1403 a_hat_milli=1492
+1795385021161 INFO  lunix_engine::coord: store factor of the cut journal_bytes=283404160 store_bytes=418959308 a_pred_milli=1492 a_real_milli=1478 a_hat_milli=1478
+1795385021447 INFO  lunix_gc::collector: gc pass done how="step" pass=17 wall_ms=1383 steps=5 phases=mark=416ms/34u@1ms condemn=2ms/69u@438ms delete=0ms/786u@440ms compact=468ms/33141u@440ms finish=0ms/1u@1383ms condemned=62 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=73 bytes_freed=0 bytes_moved=274987972 pending=852
+1795385021678 INFO  lunix_engine::coord: store factor of the cut journal_bytes=56243200 store_bytes=103715233 a_pred_milli=1478 a_real_milli=1844 a_hat_milli=1534
+1795385027069 INFO  lunix_engine::coord: store factor of the cut journal_bytes=74655360 store_bytes=130071880 a_pred_milli=1534 a_real_milli=1742 a_hat_milli=1742
+1795385027480 INFO  lunix_engine::pressure: write throttle off throttled_ms=60467 delayed_writes=869226 delayed_ms=14430265 delay_max_ms=1636
+1795385028097 INFO  lunix_engine::coord: store factor of the cut journal_bytes=258760320 store_bytes=358745905 a_pred_milli=1742 a_real_milli=1386 a_hat_milli=1553
+1795385028302 INFO  lunix_gc::collector: gc pass done how="step" pass=18 wall_ms=1818 steps=6 phases=mark=421ms/34u@1ms condemn=3ms/80u@589ms delete=321ms/853u@592ms compact=469ms/32468u@915ms finish=0ms/1u@1818ms condemned=73 segments_deleted=230 packs_deleted=8 runs_deleted=0 commits_deleted=8 compacted=76 bytes_freed=3794041477 bytes_moved=269400435 pending=684
+1795385028495 INFO  lunix_engine::coord: store factor of the cut journal_bytes=92676480 store_bytes=152304199 a_pred_milli=1553 a_real_milli=1643 a_hat_milli=1643
+1795385030263 INFO  lunix_engine::coord: store factor of the cut journal_bytes=393032640 store_bytes=543922470 a_pred_milli=1643 a_real_milli=1383 a_hat_milli=1484
+1795385030353 INFO  lunix_engine::coord: store factor of the cut journal_bytes=28974400 store_bytes=59989664 a_pred_milli=1484 a_real_milli=2070 a_hat_milli=1465
+1795385032414 INFO  lunix_engine::coord: store factor of the cut journal_bytes=469056640 store_bytes=652789110 a_pred_milli=1465 a_real_milli=1391 a_hat_milli=1460
+1795385032510 INFO  lunix_engine::coord: store factor of the cut journal_bytes=31308160 store_bytes=64351707 a_pred_milli=1460 a_real_milli=2055 a_hat_milli=1470
+1795385033212 INFO  lunix_engine::pressure: write throttle on headroom=1947139136 soft=2728379220 limit=18189194802 rate=167260101 ingest_rate=159410042 reclaim_rate=382540983
+1795385034805 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456056640 store_bytes=630039186 a_pred_milli=1470 a_real_milli=1381 a_hat_milli=1436
+1795385035275 INFO  lunix_gc::collector: gc pass done how="step" pass=19 wall_ms=1962 steps=7 phases=mark=443ms/34u@1ms condemn=3ms/96u@464ms delete=312ms/685u@468ms compact=497ms/32786u@790ms finish=0ms/1u@1962ms condemned=81 segments_deleted=204 packs_deleted=12 runs_deleted=0 commits_deleted=12 compacted=113 bytes_freed=3395122494 bytes_moved=272040785 pending=550
+1795385035642 INFO  lunix_engine::coord: store factor of the cut journal_bytes=197046720 store_bytes=321917382 a_pred_milli=1436 a_real_milli=1633 a_hat_milli=1633
+1795385037098 INFO  lunix_engine::coord: store factor of the cut journal_bytes=420343040 store_bytes=535153759 a_pred_milli=1633 a_real_milli=1273 a_hat_milli=1417
+1795385038309 INFO  lunix_engine::pressure: write throttle off throttled_ms=62925 delayed_writes=944043 delayed_ms=14888566 delay_max_ms=1636
+1795385041386 INFO  lunix_engine::coord: store factor of the cut journal_bytes=247865280 store_bytes=352701128 a_pred_milli=1417 a_real_milli=1422 a_hat_milli=1422
+1795385043955 INFO  lunix_gc::collector: gc pass done how="step" pass=20 wall_ms=3644 steps=42 phases=mark=438ms/34u@1ms condemn=5ms/121u@510ms delete=0ms/551u@515ms compact=483ms/33007u@515ms finish=0ms/1u@3644ms condemned=113 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=100 bytes_freed=0 bytes_moved=273626676 pending=669
+1795385048672 INFO  lunix_engine::pressure: write throttle on headroom=2668338688 soft=2691283240 limit=17941888272 rate=7804431227 ingest_rate=30030870 reclaim_rate=0
+1795385049131 INFO  lunix_engine::coord: store factor of the cut journal_bytes=277189120 store_bytes=444756885 a_pred_milli=1422 a_real_milli=1604 a_hat_milli=1604
+1795385050789 INFO  lunix_engine::coord: store factor of the cut journal_bytes=367107520 store_bytes=553862165 a_pred_milli=1604 a_real_milli=1508 a_hat_milli=1508
+1795385050986 INFO  lunix_gc::collector: gc pass done how="step" pass=21 wall_ms=1848 steps=6 phases=mark=302ms/27u@1ms condemn=5ms/133u@306ms delete=414ms/670u@311ms compact=481ms/32936u@735ms finish=0ms/1u@1848ms condemned=105 segments_deleted=299 packs_deleted=6 runs_deleted=0 commits_deleted=6 compacted=82 bytes_freed=4935472139 bytes_moved=273286532 pending=489
+1795385051361 INFO  lunix_engine::coord: store factor of the cut journal_bytes=200208320 store_bytes=344400486 a_pred_milli=1508 a_real_milli=1720 a_hat_milli=1720
+1795385052857 INFO  lunix_engine::coord: store factor of the cut journal_bytes=399875840 store_bytes=579391158 a_pred_milli=1720 a_real_milli=1448 a_hat_milli=1466
+1795385053768 INFO  lunix_engine::pressure: write throttle off throttled_ms=63813 delayed_writes=971813 delayed_ms=15074989 delay_max_ms=1636
+1795385054415 INFO  lunix_engine::coord: store factor of the cut journal_bytes=356561920 store_bytes=514334556 a_pred_milli=1466 a_real_milli=1442 a_hat_milli=1478
+1795385055635 INFO  lunix_engine::coord: store factor of the cut journal_bytes=391917760 store_bytes=497777116 a_pred_milli=1478 a_real_milli=1270 a_hat_milli=1436
+1795385057122 INFO  lunix_engine::coord: store factor of the cut journal_bytes=401764480 store_bytes=515079636 a_pred_milli=1436 a_real_milli=1282 a_hat_milli=1438
+1795385057566 INFO  lunix_engine::coord: store factor of the cut journal_bytes=147430400 store_bytes=253584503 a_pred_milli=1438 a_real_milli=1720 a_hat_milli=1720
+1795385058078 INFO  lunix_engine::coord: store factor of the cut journal_bytes=152759360 store_bytes=274056541 a_pred_milli=1720 a_real_milli=1794 a_hat_milli=1794
+1795385058625 INFO  lunix_engine::coord: store factor of the cut journal_bytes=195923520 store_bytes=338246842 a_pred_milli=1794 a_real_milli=1726 a_hat_milli=1726
+1795385059173 INFO  lunix_engine::coord: store factor of the cut journal_bytes=197824640 store_bytes=340737936 a_pred_milli=1726 a_real_milli=1722 a_hat_milli=1722
+1795385059701 INFO  lunix_engine::coord: store factor of the cut journal_bytes=191018880 store_bytes=328647751 a_pred_milli=1722 a_real_milli=1720 a_hat_milli=1720
+1795385059873 INFO  lunix_engine::pressure: write throttle on headroom=2489317313 soft=2738726469 limit=18258176462 rate=669804026 ingest_rate=290483460 reclaim_rate=0
+1795385060154 INFO  lunix_engine::coord: store factor of the cut journal_bytes=145728960 store_bytes=258570178 a_pred_milli=1720 a_real_milli=1774 a_hat_milli=1774
+1795385060217 INFO  lunix_gc::collector: gc pass done how="step" pass=22 wall_ms=4171 steps=26 phases=mark=458ms/34u@1ms condemn=4ms/106u@1090ms delete=0ms/490u@1094ms compact=514ms/32789u@1094ms finish=0ms/1u@4170ms condemned=82 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=142 bytes_freed=0 bytes_moved=271974344 pending=593
+1795385060519 INFO  lunix_engine::coord: store factor of the cut journal_bytes=93192320 store_bytes=173428599 a_pred_milli=1774 a_real_milli=1860 a_hat_milli=1860
+1795385063783 INFO  lunix_engine::coord: store factor of the cut journal_bytes=403719680 store_bytes=547045800 a_pred_milli=1860 a_real_milli=1355 a_hat_milli=1645
+1795385066167 INFO  lunix_engine::pressure: write throttle off throttled_ms=71067 delayed_writes=1242822 delayed_ms=16677267 delay_max_ms=1636
+1795385066663 INFO  lunix_engine::coord: store factor of the cut journal_bytes=362639680 store_bytes=464276839 a_pred_milli=1645 a_real_milli=1280 a_hat_milli=1563
+1795385067266 INFO  lunix_gc::collector: gc pass done how="step" pass=23 wall_ms=1972 steps=7 phases=mark=527ms/34u@1ms condemn=7ms/170u@549ms delete=311ms/594u@556ms compact=576ms/32402u@1391ms finish=0ms/1u@1972ms condemned=142 segments_deleted=216 packs_deleted=12 runs_deleted=0 commits_deleted=11 compacted=209 bytes_freed=3574993640 bytes_moved=268852946 pending=522
+1795385067727 INFO  lunix_engine::coord: store factor of the cut journal_bytes=286203840 store_bytes=404733025 a_pred_milli=1563 a_real_milli=1414 a_hat_milli=1522
+1795385069165 INFO  lunix_engine::coord: store factor of the cut journal_bytes=435069440 store_bytes=620455807 a_pred_milli=1522 a_real_milli=1426 a_hat_milli=1483
+1795385070755 INFO  lunix_engine::coord: store factor of the cut journal_bytes=374287680 store_bytes=556958942 a_pred_milli=1483 a_real_milli=1488 a_hat_milli=1488
+1795385070930 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82713280 store_bytes=147513823 a_pred_milli=1488 a_real_milli=1783 a_hat_milli=1783
+1795385071333 INFO  lunix_engine::pressure: write throttle on headroom=2367887488 soft=2715754293 limit=18105028623 rate=456801963 ingest_rate=200068559 reclaim_rate=370197125
+1795385072861 INFO  lunix_engine::coord: store factor of the cut journal_bytes=457525120 store_bytes=616423205 a_pred_milli=1783 a_real_milli=1347 a_hat_milli=1414
+1795385073763 INFO  lunix_engine::coord: store factor of the cut journal_bytes=155097280 store_bytes=252518718 a_pred_milli=1414 a_real_milli=1628 a_hat_milli=1628
+1795385074510 INFO  lunix_gc::collector: gc pass done how="step" pass=24 wall_ms=1641 steps=7 phases=mark=499ms/34u@1ms condemn=11ms/226u@503ms delete=171ms/523u@515ms compact=650ms/32903u@967ms finish=0ms/1u@1641ms condemned=212 segments_deleted=113 packs_deleted=3 runs_deleted=0 commits_deleted=3 compacted=194 bytes_freed=1894731589 bytes_moved=273012195 pending=627
+1795385075152 INFO  lunix_engine::coord: store factor of the cut journal_bytes=380261440 store_bytes=490142081 a_pred_milli=1628 a_real_milli=1288 a_hat_milli=1402
+1795385076663 INFO  lunix_engine::coord: store factor of the cut journal_bytes=438189440 store_bytes=575652100 a_pred_milli=1402 a_real_milli=1313 a_hat_milli=1404
+1795385076774 INFO  lunix_engine::pressure: write throttle off throttled_ms=76036 delayed_writes=1457737 delayed_ms=17490452 delay_max_ms=1636
+1795385078455 INFO  lunix_engine::coord: store factor of the cut journal_bytes=367681600 store_bytes=551962094 a_pred_milli=1404 a_real_milli=1501 a_hat_milli=1501
+1795385081052 INFO  lunix_engine::coord: store factor of the cut journal_bytes=423700160 store_bytes=598100493 a_pred_milli=1501 a_real_milli=1411 a_hat_milli=1414
+1795385081323 INFO  lunix_gc::collector: gc pass done how="step" pass=25 wall_ms=1757 steps=6 phases=mark=420ms/34u@1ms condemn=11ms/204u@442ms delete=167ms/628u@453ms compact=473ms/32383u@621ms finish=0ms/1u@1757ms condemned=194 segments_deleted=105 packs_deleted=3 runs_deleted=9 commits_deleted=14 compacted=102 bytes_freed=1703778929 bytes_moved=268695093 pending=698
+1795385081588 INFO  lunix_engine::coord: store factor of the cut journal_bytes=122366400 store_bytes=221945734 a_pred_milli=1414 a_real_milli=1813 a_hat_milli=1813
+1795385081992 INFO  lunix_engine::pressure: write throttle on headroom=2096818944 soft=2719999516 limit=18133330110 rate=225801547 ingest_rate=225916973 reclaim_rate=386770262
+1795385084035 INFO  lunix_engine::coord: store factor of the cut journal_bytes=486016960 store_bytes=625709364 a_pred_milli=1813 a_real_milli=1287 a_hat_milli=1389
+1795385084128 INFO  lunix_engine::coord: store factor of the cut journal_bytes=32061120 store_bytes=61195023 a_pred_milli=1389 a_real_milli=1908 a_hat_milli=1404
+1795385087459 INFO  lunix_engine::coord: store factor of the cut journal_bytes=326281280 store_bytes=424599441 a_pred_milli=1404 a_real_milli=1301 a_hat_milli=1377
+1795385087780 INFO  lunix_gc::collector: gc pass done how="step" pass=26 wall_ms=1448 steps=5 phases=mark=446ms/34u@1ms condemn=6ms/112u@468ms delete=0ms/699u@474ms compact=480ms/32938u@474ms finish=0ms/1u@1448ms condemned=102 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=131 bytes_freed=0 bytes_moved=273302837 pending=808
+1795385088054 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84735040 store_bytes=143683600 a_pred_milli=1377 a_real_milli=1695 a_hat_milli=1695
+1795385093504 INFO  lunix_engine::coord: store factor of the cut journal_bytes=106283840 store_bytes=179518189 a_pred_milli=1695 a_real_milli=1689 a_hat_milli=1689
+1795385094166 INFO  lunix_gc::collector: gc pass done how="step" pass=27 wall_ms=1305 steps=6 phases=mark=447ms/34u@1ms condemn=7ms/138u@674ms delete=139ms/809u@682ms compact=460ms/32429u@822ms finish=0ms/1u@1305ms condemned=131 segments_deleted=82 packs_deleted=16 runs_deleted=0 commits_deleted=6 compacted=58 bytes_freed=1370470007 bytes_moved=269076783 pending=840
+1795385094422 INFO  lunix_engine::coord: store factor of the cut journal_bytes=66139840 store_bytes=123482007 a_pred_milli=1689 a_real_milli=1866 a_hat_milli=1866
+1795385100207 INFO  lunix_engine::coord: store factor of the cut journal_bytes=350222080 store_bytes=526473423 a_pred_milli=1866 a_real_milli=1503 a_hat_milli=1503
+1795385100831 INFO  lunix_engine::pressure: write throttle off throttled_ms=97651 delayed_writes=1856420 delayed_ms=22597383 delay_max_ms=1636
+1795385101139 INFO  lunix_gc::collector: gc pass done how="step" pass=28 wall_ms=1912 steps=7 phases=mark=404ms/34u@1ms condemn=3ms/63u@415ms delete=587ms/841u@419ms compact=317ms/22153u@1573ms finish=0ms/1u@1911ms condemned=58 segments_deleted=142 packs_deleted=9 runs_deleted=9 commits_deleted=8 compacted=44 bytes_freed=2399988634 bytes_moved=183804198 pending=733
+1795385101762 INFO  lunix_engine::coord: store factor of the cut journal_bytes=304640960 store_bytes=479354247 a_pred_milli=1503 a_real_milli=1573 a_hat_milli=1573
+1795385103593 INFO  lunix_engine::coord: store factor of the cut journal_bytes=435801600 store_bytes=612444013 a_pred_milli=1573 a_real_milli=1405 a_hat_milli=1495
+1795385103662 INFO  lunix_engine::coord: store factor of the cut journal_bytes=16848000 store_bytes=36080990 a_pred_milli=1495 a_real_milli=2141 a_hat_milli=1493
+1795385105865 INFO  lunix_engine::pressure: write throttle on headroom=1893836032 soft=2738612539 limit=18257416927 rate=150445927 ingest_rate=140735315 reclaim_rate=261950298
+1795385107436 INFO  lunix_engine::coord: store factor of the cut journal_bytes=469360320 store_bytes=605169054 a_pred_milli=1493 a_real_milli=1289 a_hat_milli=1475
+1795385108404 INFO  lunix_engine::coord: store factor of the cut journal_bytes=221432640 store_bytes=315617942 a_pred_milli=1475 a_real_milli=1425 a_hat_milli=1460
+1795385109828 INFO  lunix_engine::coord: store factor of the cut journal_bytes=403511680 store_bytes=531967725 a_pred_milli=1460 a_real_milli=1318 a_hat_milli=1424
+1795385110181 INFO  lunix_gc::collector: gc pass done how="step" pass=29 wall_ms=4015 steps=12 phases=mark=423ms/34u@1ms condemn=3ms/54u@445ms delete=1466ms/734u@448ms compact=494ms/32629u@2924ms finish=0ms/1u@4015ms condemned=44 segments_deleted=212 packs_deleted=6 runs_deleted=0 commits_deleted=6 compacted=96 bytes_freed=3482510188 bytes_moved=270737202 pending=561
+1795385110496 INFO  lunix_engine::coord: store factor of the cut journal_bytes=157381120 store_bytes=272776716 a_pred_milli=1424 a_real_milli=1733 a_hat_milli=1733
+1795385110901 INFO  lunix_engine::pressure: write throttle off throttled_ms=104242 delayed_writes=2101767 delayed_ms=24040424 delay_max_ms=1636
+1795385112160 INFO  lunix_engine::coord: store factor of the cut journal_bytes=458885440 store_bytes=641985952 a_pred_milli=1733 a_real_milli=1399 a_hat_milli=1416
+1795385113749 INFO  lunix_engine::coord: store factor of the cut journal_bytes=366778880 store_bytes=544701747 a_pred_milli=1416 a_real_milli=1485 a_hat_milli=1485
+1795385116211 INFO  lunix_engine::coord: store factor of the cut journal_bytes=27855360 store_bytes=55047185 a_pred_milli=1485 a_real_milli=1976 a_hat_milli=1415
+1795385116607 INFO  lunix_gc::collector: gc pass done how="step" pass=30 wall_ms=1349 steps=6 phases=mark=451ms/34u@1ms condemn=7ms/122u@472ms delete=273ms/562u@479ms compact=488ms/32919u@763ms finish=0ms/1u@1349ms condemned=108 segments_deleted=194 packs_deleted=4 runs_deleted=0 commits_deleted=4 compacted=147 bytes_freed=3199218590 bytes_moved=273144664 pending=479
+1795385124360 INFO  lunix_gc::collector: gc pass done how="step" pass=31 wall_ms=2714 steps=34 phases=mark=436ms/33u@1ms condemn=9ms/156u@507ms delete=0ms/480u@517ms compact=371ms/25544u@517ms finish=0ms/1u@2714ms condemned=150 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=80 bytes_freed=0 bytes_moved=211757743 pending=633
+1795385124826 INFO  lunix_engine::coord: store factor of the cut journal_bytes=187982080 store_bytes=327936666 a_pred_milli=1415 a_real_milli=1744 a_hat_milli=1744
+1795385125089 INFO  lunix_engine::coord: store factor of the cut journal_bytes=124334080 store_bytes=228708751 a_pred_milli=1744 a_real_milli=1839 a_hat_milli=1839
+1795385125399 INFO  lunix_engine::coord: store factor of the cut journal_bytes=155138880 store_bytes=279067502 a_pred_milli=1839 a_real_milli=1798 a_hat_milli=1798
+1795385125714 INFO  lunix_engine::coord: store factor of the cut journal_bytes=158204800 store_bytes=283604144 a_pred_milli=1798 a_real_milli=1792 a_hat_milli=1792
+1795385126411 INFO  lunix_engine::coord: store factor of the cut journal_bytes=300784640 store_bytes=475687089 a_pred_milli=1792 a_real_milli=1581 a_hat_milli=1593
+1795385126519 INFO  lunix_engine::coord: store factor of the cut journal_bytes=36820160 store_bytes=74671948 a_pred_milli=1593 a_real_milli=2028 a_hat_milli=1671
+1795385128048 INFO  lunix_engine::coord: store factor of the cut journal_bytes=444184000 store_bytes=616607830 a_pred_milli=1671 a_real_milli=1388 a_hat_milli=1631
+1795385128156 INFO  lunix_engine::coord: store factor of the cut journal_bytes=36782720 store_bytes=73573839 a_pred_milli=1631 a_real_milli=2000 a_hat_milli=1633
+1795385128758 INFO  lunix_engine::pressure: write throttle on headroom=2449911488 soft=2729089569 limit=18193930464 rate=588910047 ingest_rate=190176159 reclaim_rate=0
+1795385129844 INFO  lunix_engine::coord: store factor of the cut journal_bytes=444720640 store_bytes=568355911 a_pred_milli=1633 a_real_milli=1278 a_hat_milli=1528
+1795385130842 INFO  lunix_engine::coord: store factor of the cut journal_bytes=264863040 store_bytes=331757124 a_pred_milli=1528 a_real_milli=1252 a_hat_milli=1468
+1795385132594 INFO  lunix_engine::coord: store factor of the cut journal_bytes=472193280 store_bytes=642848278 a_pred_milli=1468 a_real_milli=1361 a_hat_milli=1420
+1795385132626 INFO  lunix_gc::collector: gc pass done how="step" pass=32 wall_ms=2774 steps=9 phases=mark=500ms/34u@1ms condemn=5ms/118u@505ms delete=480ms/634u@511ms compact=649ms/32942u@1371ms finish=0ms/1u@2773ms condemned=80 segments_deleted=291 packs_deleted=8 runs_deleted=0 commits_deleted=8 compacted=171 bytes_freed=4854107933 bytes_moved=273336011 pending=442
+1795385132937 INFO  lunix_engine::coord: store factor of the cut journal_bytes=76831040 store_bytes=148760173 a_pred_milli=1420 a_real_milli=1936 a_hat_milli=1936
+1795385133840 INFO  lunix_engine::pressure: write throttle off throttled_ms=109364 delayed_writes=2216984 delayed_ms=24543554 delay_max_ms=1636
+1795385134552 INFO  lunix_engine::coord: store factor of the cut journal_bytes=412825920 store_bytes=599361257 a_pred_milli=1936 a_real_milli=1451 a_hat_milli=1451
+1795385134653 INFO  lunix_engine::coord: store factor of the cut journal_bytes=32955520 store_bytes=67472948 a_pred_milli=1451 a_real_milli=2047 a_hat_milli=1395
+1795385136603 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456530880 store_bytes=628701664 a_pred_milli=1395 a_real_milli=1377 a_hat_milli=1392
+1795385136700 INFO  lunix_engine::coord: store factor of the cut journal_bytes=31578560 store_bytes=64247625 a_pred_milli=1392 a_real_milli=2034 a_hat_milli=1391
+1795385138589 INFO  lunix_engine::coord: store factor of the cut journal_bytes=462317440 store_bytes=581072479 a_pred_milli=1391 a_real_milli=1256 a_hat_milli=1386
+1795385139475 INFO  lunix_engine::coord: store factor of the cut journal_bytes=227065280 store_bytes=289189814 a_pred_milli=1386 a_real_milli=1273 a_hat_milli=1390
+1795385139996 INFO  lunix_engine::coord: store factor of the cut journal_bytes=189758400 store_bytes=308660620 a_pred_milli=1390 a_real_milli=1626 a_hat_milli=1626
+1795385140538 INFO  lunix_engine::coord: store factor of the cut journal_bytes=189413120 store_bytes=329574446 a_pred_milli=1626 a_real_milli=1739 a_hat_milli=1739
+1795385140720 INFO  lunix_engine::pressure: write throttle on headroom=2269222656 soft=2721543387 limit=18143622586 rate=336674718 ingest_rate=255377521 reclaim_rate=0
+1795385141096 INFO  lunix_engine::coord: store factor of the cut journal_bytes=202987200 store_bytes=349304926 a_pred_milli=1739 a_real_milli=1720 a_hat_milli=1720
+1795385141275 INFO  lunix_gc::collector: gc pass done how="step" pass=33 wall_ms=3573 steps=20 phases=mark=499ms/34u@1ms condemn=11ms/188u@1149ms delete=0ms/443u@1161ms compact=529ms/32654u@1161ms finish=0ms/1u@3573ms condemned=171 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=160 bytes_freed=0 bytes_moved=270903640 pending=628
+1795385141581 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91087360 store_bytes=173461400 a_pred_milli=1720 a_real_milli=1904 a_hat_milli=1904
+1795385146090 INFO  lunix_engine::coord: store factor of the cut journal_bytes=405429440 store_bytes=590767412 a_pred_milli=1904 a_real_milli=1457 a_hat_milli=1492
+1795385147174 INFO  lunix_engine::pressure: write throttle off throttled_ms=116338 delayed_writes=2441640 delayed_ms=26133369 delay_max_ms=1636
+1795385147658 INFO  lunix_engine::coord: store factor of the cut journal_bytes=283653760 store_bytes=444024049 a_pred_milli=1492 a_real_milli=1565 a_hat_milli=1565
+1795385148075 INFO  lunix_gc::collector: gc pass done how="step" pass=34 wall_ms=1774 steps=7 phases=mark=498ms/34u@1ms condemn=11ms/175u@520ms delete=228ms/629u@531ms compact=499ms/32522u@770ms finish=0ms/1u@1774ms condemned=160 segments_deleted=152 packs_deleted=10 runs_deleted=0 commits_deleted=10 compacted=154 bytes_freed=2504920922 bytes_moved=269849047 pending=629
+1795385148531 INFO  lunix_engine::coord: store factor of the cut journal_bytes=267974720 store_bytes=411963059 a_pred_milli=1565 a_real_milli=1537 a_hat_milli=1559
+1795385150210 INFO  lunix_engine::coord: store factor of the cut journal_bytes=455270400 store_bytes=548187923 a_pred_milli=1559 a_real_milli=1204 a_hat_milli=1513
+1795385150277 INFO  lunix_engine::coord: store factor of the cut journal_bytes=16781440 store_bytes=32776633 a_pred_milli=1513 a_real_milli=1953 a_hat_milli=1505
+1795385152179 INFO  lunix_engine::pressure: write throttle on headroom=1757118720 soft=2722689533 limit=18151263555 rate=122122830 ingest_rate=168198942 reclaim_rate=264846788
+1795385154155 INFO  lunix_engine::coord: store factor of the cut journal_bytes=463473920 store_bytes=601427989 a_pred_milli=1505 a_real_milli=1297 a_hat_milli=1441
+1795385155239 INFO  lunix_engine::coord: store factor of the cut journal_bytes=248040000 store_bytes=412092085 a_pred_milli=1441 a_real_milli=1661 a_hat_milli=1661
+1795385155428 INFO  lunix_gc::collector: gc pass done how="step" pass=35 wall_ms=2348 steps=6 phases=mark=427ms/34u@1ms condemn=11ms/171u@1090ms delete=258ms/630u@1102ms compact=503ms/32854u@1364ms finish=0ms/1u@2347ms condemned=160 segments_deleted=150 packs_deleted=2 runs_deleted=0 commits_deleted=2 compacted=125 bytes_freed=2459922954 bytes_moved=272605265 pending=644
+1795385156004 INFO  lunix_engine::coord: store factor of the cut journal_bytes=275496000 store_bytes=438383895 a_pred_milli=1661 a_real_milli=1591 a_hat_milli=1591
+1795385157300 INFO  lunix_engine::coord: store factor of the cut journal_bytes=396385600 store_bytes=572386617 a_pred_milli=1591 a_real_milli=1444 a_hat_milli=1444
+1795385157372 INFO  lunix_engine::coord: store factor of the cut journal_bytes=18561920 store_bytes=39527864 a_pred_milli=1444 a_real_milli=2129 a_hat_milli=1427
+1795385160817 INFO  lunix_engine::coord: store factor of the cut journal_bytes=468407680 store_bytes=604084098 a_pred_milli=1427 a_real_milli=1289 a_hat_milli=1386
+1795385162431 INFO  lunix_engine::coord: store factor of the cut journal_bytes=367448640 store_bytes=478469467 a_pred_milli=1386 a_real_milli=1302 a_hat_milli=1410
+1795385162547 INFO  lunix_gc::collector: gc pass done how="step" pass=36 wall_ms=1721 steps=6 phases=mark=477ms/34u@1ms condemn=9ms/138u@481ms delete=125ms/645u@491ms compact=531ms/32801u@616ms finish=0ms/1u@1721ms condemned=125 segments_deleted=80 packs_deleted=18 runs_deleted=0 commits_deleted=18 compacted=177 bytes_freed=1343701363 bytes_moved=272164981 pending=664
+1795385162907 INFO  lunix_engine::coord: store factor of the cut journal_bytes=151889920 store_bytes=223645203 a_pred_milli=1410 a_real_milli=1472 a_hat_milli=1472
+1795385165707 INFO  lunix_engine::coord: store factor of the cut journal_bytes=387474880 store_bytes=556439208 a_pred_milli=1472 a_real_milli=1436 a_hat_milli=1437
+1795385165807 INFO  lunix_engine::coord: store factor of the cut journal_bytes=33246720 store_bytes=67508668 a_pred_milli=1437 a_real_milli=2030 a_hat_milli=1419
+1795385168677 INFO  lunix_engine::coord: store factor of the cut journal_bytes=232614720 store_bytes=389574231 a_pred_milli=1419 a_real_milli=1674 a_hat_milli=1674
+1795385168983 INFO  lunix_gc::collector: gc pass done how="step" pass=37 wall_ms=1373 steps=5 phases=mark=416ms/34u@1ms condemn=13ms/187u@438ms delete=0ms/665u@452ms compact=477ms/33150u@452ms finish=0ms/1u@1373ms condemned=177 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=96 bytes_freed=0 bytes_moved=275062632 pending=849
+1795385169204 INFO  lunix_engine::coord: store factor of the cut journal_bytes=43821440 store_bytes=88239707 a_pred_milli=1674 a_real_milli=2013 a_hat_milli=1436
+1795385174577 INFO  lunix_engine::coord: store factor of the cut journal_bytes=55352960 store_bytes=109579757 a_pred_milli=1436 a_real_milli=1979 a_hat_milli=1979
+1795385174989 INFO  lunix_engine::pressure: write throttle off throttled_ms=141364 delayed_writes=3121463 delayed_ms=31884902 delay_max_ms=1636
+1795385175705 INFO  lunix_engine::coord: store factor of the cut journal_bytes=288304640 store_bytes=455341169 a_pred_milli=1979 a_real_milli=1579 a_hat_milli=1579
+1795385175826 INFO  lunix_gc::collector: gc pass done how="step" pass=38 wall_ms=1817 steps=6 phases=mark=418ms/34u@1ms condemn=7ms/104u@571ms delete=235ms/850u@578ms compact=468ms/32577u@815ms finish=0ms/1u@1816ms condemned=97 segments_deleted=171 packs_deleted=7 runs_deleted=0 commits_deleted=8 compacted=52 bytes_freed=2817806381 bytes_moved=270305639 pending=765
+1795385176117 INFO  lunix_engine::coord: store factor of the cut journal_bytes=76806080 store_bytes=146154084 a_pred_milli=1579 a_real_milli=1902 a_hat_milli=1902
+1795385178410 INFO  lunix_engine::coord: store factor of the cut journal_bytes=415051520 store_bytes=568748930 a_pred_milli=1902 a_real_milli=1370 a_hat_milli=1553
+1795385178468 INFO  lunix_engine::coord: store factor of the cut journal_bytes=9505600 store_bytes=21759711 a_pred_milli=1553 a_real_milli=2289 a_hat_milli=1599
+1795385180070 INFO  lunix_engine::pressure: write throttle on headroom=1513330624 soft=2709052130 limit=18060347538 rate=84934408 ingest_rate=105237457 reclaim_rate=302599482
+1795385182279 INFO  lunix_engine::coord: store factor of the cut journal_bytes=375269440 store_bytes=489827486 a_pred_milli=1599 a_real_milli=1305 a_hat_milli=1516
+1795385182644 INFO  lunix_gc::collector: gc pass done how="step" pass=39 wall_ms=1773 steps=6 phases=mark=422ms/34u@1ms condemn=4ms/63u@444ms delete=266ms/766u@449ms compact=475ms/32431u@725ms finish=0ms/1u@1773ms condemned=52 segments_deleted=160 packs_deleted=7 runs_deleted=0 commits_deleted=6 compacted=80 bytes_freed=2639320596 bytes_moved=269093491 pending=653
+1795385183028 INFO  lunix_engine::coord: store factor of the cut journal_bytes=227077760 store_bytes=324679499 a_pred_milli=1516 a_real_milli=1429 a_hat_milli=1478
+1795385183872 INFO  lunix_engine::coord: store factor of the cut journal_bytes=346569600 store_bytes=508755911 a_pred_milli=1478 a_real_milli=1467 a_hat_milli=1467
+1795385185478 INFO  lunix_engine::coord: store factor of the cut journal_bytes=369016960 store_bytes=554719828 a_pred_milli=1467 a_real_milli=1503 a_hat_milli=1503
+1795385188572 INFO  lunix_engine::coord: store factor of the cut journal_bytes=477655360 store_bytes=653922441 a_pred_milli=1503 a_real_milli=1369 a_hat_milli=1423
+1795385189200 INFO  lunix_engine::pressure: write throttle off throttled_ms=152174 delayed_writes=3427602 delayed_ms=34242462 delay_max_ms=1636
+1795385190204 INFO  lunix_engine::coord: store factor of the cut journal_bytes=366566720 store_bytes=514813382 a_pred_milli=1423 a_real_milli=1404 a_hat_milli=1406
+1795385190272 INFO  lunix_gc::collector: gc pass done how="step" pass=40 wall_ms=2581 steps=7 phases=mark=450ms/34u@1ms condemn=7ms/94u@1143ms delete=265ms/654u@1151ms compact=544ms/32856u@1416ms finish=0ms/1u@2581ms condemned=83 segments_deleted=160 packs_deleted=4 runs_deleted=0 commits_deleted=5 compacted=108 bytes_freed=2644444957 bytes_moved=272621993 pending=576
+1795385190550 INFO  lunix_engine::coord: store factor of the cut journal_bytes=86174400 store_bytes=153878040 a_pred_milli=1406 a_real_milli=1785 a_hat_milli=1785
+1795385198996 INFO  lunix_gc::collector: gc pass done how="step" pass=41 wall_ms=3640 steps=46 phases=mark=450ms/34u@1ms condemn=9ms/115u@532ms delete=0ms/577u@541ms compact=475ms/32619u@541ms finish=0ms/1u@3640ms condemned=108 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=115 bytes_freed=0 bytes_moved=270363869 pending=689
+1795385200513 INFO  lunix_engine::pressure: write throttle on headroom=2690231104 soft=2691013459 limit=17940089728 rate=230762701442 ingest_rate=9517738 reclaim_rate=0
+1795385201154 INFO  lunix_engine::coord: store factor of the cut journal_bytes=251047680 store_bytes=414013201 a_pred_milli=1785 a_real_milli=1649 a_hat_milli=1649
+1795385202847 INFO  lunix_engine::coord: store factor of the cut journal_bytes=365015040 store_bytes=551020619 a_pred_milli=1649 a_real_milli=1509 a_hat_milli=1509
+1795385205831 INFO  lunix_engine::coord: store factor of the cut journal_bytes=453481600 store_bytes=636436067 a_pred_milli=1509 a_real_milli=1403 a_hat_milli=1468
+1795385206205 INFO  lunix_gc::collector: gc pass done how="step" pass=42 wall_ms=2147 steps=7 phases=mark=433ms/34u@1ms condemn=10ms/146u@454ms delete=472ms/690u@464ms compact=472ms/32742u@957ms finish=0ms/1u@2147ms condemned=116 segments_deleted=302 packs_deleted=10 runs_deleted=0 commits_deleted=9 compacted=62 bytes_freed=4996161984 bytes_moved=271675252 pending=512
+1795385206305 INFO  lunix_engine::pressure: write throttle off throttled_ms=155705 delayed_writes=3520469 delayed_ms=34876462 delay_max_ms=1636
+1795385206673 INFO  lunix_engine::coord: store factor of the cut journal_bytes=187175040 store_bytes=318906101 a_pred_milli=1468 a_real_milli=1703 a_hat_milli=1703
+1795385207943 INFO  lunix_engine::coord: store factor of the cut journal_bytes=390220480 store_bytes=545458657 a_pred_milli=1703 a_real_milli=1397 a_hat_milli=1469
+1795385208038 INFO  lunix_engine::coord: store factor of the cut journal_bytes=29273920 store_bytes=58909792 a_pred_milli=1469 a_real_milli=2012 a_hat_milli=1500
+1795385210007 INFO  lunix_engine::coord: store factor of the cut journal_bytes=460665920 store_bytes=536964799 a_pred_milli=1500 a_real_milli=1165 a_hat_milli=1446
+1795385210091 INFO  lunix_engine::coord: store factor of the cut journal_bytes=30609280 store_bytes=50894761 a_pred_milli=1446 a_real_milli=1662 a_hat_milli=1436
+1795385211968 INFO  lunix_engine::coord: store factor of the cut journal_bytes=466044800 store_bytes=639193761 a_pred_milli=1436 a_real_milli=1371 a_hat_milli=1400
+1795385212639 INFO  lunix_engine::coord: store factor of the cut journal_bytes=163230080 store_bytes=291026985 a_pred_milli=1400 a_real_milli=1782 a_hat_milli=1782
+1795385213513 INFO  lunix_engine::coord: store factor of the cut journal_bytes=264717440 store_bytes=431710468 a_pred_milli=1782 a_real_milli=1630 a_hat_milli=1630
+1795385214139 INFO  lunix_engine::coord: store factor of the cut journal_bytes=233492480 store_bytes=387705738 a_pred_milli=1630 a_real_milli=1660 a_hat_milli=1660
+1795385214653 INFO  lunix_engine::coord: store factor of the cut journal_bytes=172174080 store_bytes=297362340 a_pred_milli=1660 a_real_milli=1727 a_hat_milli=1727
+1795385214826 INFO  lunix_engine::pressure: write throttle on headroom=2714398088 soft=2805768885 limit=18705125905 rate=1993636677 ingest_rate=265319403 reclaim_rate=37838151
+1795385215142 INFO  lunix_engine::coord: store factor of the cut journal_bytes=163675200 store_bytes=280615100 a_pred_milli=1727 a_real_milli=1714 a_hat_milli=1714
+1795385215292 INFO  lunix_gc::collector: gc pass done how="step" pass=43 wall_ms=3316 steps=21 phases=mark=460ms/34u@1ms condemn=8ms/124u@794ms delete=0ms/513u@803ms compact=517ms/33028u@803ms finish=0ms/1u@3316ms condemned=94 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=173 bytes_freed=0 bytes_moved=274000239 pending=634
+1795385215682 INFO  lunix_engine::coord: store factor of the cut journal_bytes=135428800 store_bytes=234467233 a_pred_milli=1714 a_real_milli=1731 a_hat_milli=1731
+1795385220636 INFO  lunix_engine::coord: store factor of the cut journal_bytes=415267840 store_bytes=519789072 a_pred_milli=1731 a_real_milli=1251 a_hat_milli=1530
+1795385221478 INFO  lunix_engine::pressure: write throttle off throttled_ms=163515 delayed_writes=3787443 delayed_ms=36631919 delay_max_ms=1636
+1795385222212 INFO  lunix_engine::coord: store factor of the cut journal_bytes=311155520 store_bytes=411448408 a_pred_milli=1530 a_real_milli=1322 a_hat_milli=1535
+1795385222626 INFO  lunix_gc::collector: gc pass done how="step" pass=44 wall_ms=1983 steps=8 phases=mark=501ms/34u@1ms condemn=15ms/188u@506ms delete=390ms/635u@522ms compact=505ms/32629u@932ms finish=0ms/1u@1982ms condemned=173 segments_deleted=232 packs_deleted=11 runs_deleted=0 commits_deleted=12 compacted=146 bytes_freed=3838994612 bytes_moved=270737389 pending=565
+1795385223079 INFO  lunix_engine::coord: store factor of the cut journal_bytes=243900800 store_bytes=405517290 a_pred_milli=1535 a_real_milli=1662 a_hat_milli=1662
+1795385224743 INFO  lunix_engine::coord: store factor of the cut journal_bytes=449637760 store_bytes=635983999 a_pred_milli=1662 a_real_milli=1414 a_hat_milli=1493
+1795385226340 INFO  lunix_engine::coord: store factor of the cut journal_bytes=363101440 store_bytes=543430606 a_pred_milli=1493 a_real_milli=1496 a_hat_milli=1496
+1795385227151 INFO  lunix_engine::pressure: write throttle on headroom=2514222336 soft=2746023567 limit=18306823780 rate=727893480 ingest_rate=208728941 reclaim_rate=418601527
+1795385227852 INFO  lunix_engine::coord: store factor of the cut journal_bytes=410379840 store_bytes=571675527 a_pred_milli=1496 a_real_milli=1393 a_hat_milli=1445
+1795385229415 INFO  lunix_engine::coord: store factor of the cut journal_bytes=338424320 store_bytes=451249338 a_pred_milli=1445 a_real_milli=1333 a_hat_milli=1414
+1795385229615 INFO  lunix_gc::collector: gc pass done how="step" pass=45 wall_ms=1756 steps=6 phases=mark=478ms/34u@1ms condemn=14ms/172u@482ms delete=168ms/566u@496ms compact=547ms/32828u@676ms finish=0ms/1u@1756ms condemned=151 segments_deleted=108 packs_deleted=3 runs_deleted=0 commits_deleted=2 compacted=158 bytes_freed=1760403627 bytes_moved=272389991 pending=622
+1795385229880 INFO  lunix_engine::coord: store factor of the cut journal_bytes=156070720 store_bytes=216064428 a_pred_milli=1414 a_real_milli=1384 a_hat_milli=1397
+1795385231465 INFO  lunix_engine::coord: store factor of the cut journal_bytes=398236800 store_bytes=549064823 a_pred_milli=1397 a_real_milli=1378 a_hat_milli=1416
+1795385233160 INFO  lunix_engine::coord: store factor of the cut journal_bytes=365797120 store_bytes=550614400 a_pred_milli=1416 a_real_milli=1505 a_hat_milli=1505
+1795385235322 INFO  lunix_engine::pressure: write throttle off throttled_ms=169803 delayed_writes=4016875 delayed_ms=37916681 delay_max_ms=1636
+1795385236263 INFO  lunix_engine::coord: store factor of the cut journal_bytes=406739840 store_bytes=590497213 a_pred_milli=1505 a_real_milli=1451 a_hat_milli=1451
+1795385236578 INFO  lunix_gc::collector: gc pass done how="step" pass=46 wall_ms=1907 steps=6 phases=mark=425ms/34u@1ms condemn=15ms/171u@447ms delete=197ms/623u@462ms compact=483ms/33044u@670ms finish=0ms/1u@1907ms condemned=161 segments_deleted=116 packs_deleted=3 runs_deleted=9 commits_deleted=16 compacted=117 bytes_freed=1923644104 bytes_moved=274183006 pending=647
+1795385237131 INFO  lunix_engine::coord: store factor of the cut journal_bytes=244391680 store_bytes=393773205 a_pred_milli=1451 a_real_milli=1611 a_hat_milli=1611
+1795385238851 INFO  lunix_engine::coord: store factor of the cut journal_bytes=446630080 store_bytes=587842575 a_pred_milli=1611 a_real_milli=1316 a_hat_milli=1413
+1795385238913 INFO  lunix_engine::coord: store factor of the cut journal_bytes=11789440 store_bytes=25768105 a_pred_milli=1413 a_real_milli=2185 a_hat_milli=1420
+1795385240415 INFO  lunix_engine::pressure: write throttle on headroom=1634163264 soft=2713240187 limit=18088267917 rate=101630234 ingest_rate=176079387 reclaim_rate=204555944
+1795385242776 INFO  lunix_engine::coord: store factor of the cut journal_bytes=359461440 store_bytes=445028143 a_pred_milli=1420 a_real_milli=1238 a_hat_milli=1405
+1795385243156 INFO  lunix_gc::collector: gc pass done how="step" pass=47 wall_ms=1539 steps=5 phases=mark=484ms/34u@1ms condemn=12ms/137u@506ms delete=0ms/648u@518ms compact=489ms/32587u@518ms finish=0ms/1u@1539ms condemned=118 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=136 bytes_freed=0 bytes_moved=270388663 pending=782
+1795385243528 INFO  lunix_engine::coord: store factor of the cut journal_bytes=145005120 store_bytes=236250382 a_pred_milli=1405 a_real_milli=1629 a_hat_milli=1629
+1795385248954 INFO  lunix_engine::coord: store factor of the cut journal_bytes=149373120 store_bytes=260750088 a_pred_milli=1629 a_real_milli=1745 a_hat_milli=1745
+1795385249681 INFO  lunix_gc::collector: gc pass done how="step" pass=48 wall_ms=1446 steps=6 phases=mark=468ms/34u@1ms condemn=13ms/143u@776ms delete=154ms/783u@790ms compact=477ms/32538u@946ms finish=0ms/1u@1446ms condemned=136 segments_deleted=94 packs_deleted=20 runs_deleted=0 commits_deleted=8 compacted=57 bytes_freed=1548974313 bytes_moved=269982098 pending=801
+1795385250001 INFO  lunix_engine::coord: store factor of the cut journal_bytes=96312320 store_bytes=182320369 a_pred_milli=1745 a_real_milli=1893 a_hat_milli=1893
+1795385254668 INFO  lunix_engine::coord: store factor of the cut journal_bytes=350812800 store_bytes=534848447 a_pred_milli=1893 a_real_milli=1524 a_hat_milli=1524
+1795385255427 INFO  lunix_engine::pressure: write throttle off throttled_ms=189077 delayed_writes=4442245 delayed_ms=42406504 delay_max_ms=1636
+1795385256078 INFO  lunix_engine::coord: store factor of the cut journal_bytes=234594880 store_bytes=390815695 a_pred_milli=1524 a_real_milli=1665 a_hat_milli=1665
+1795385256465 INFO  lunix_gc::collector: gc pass done how="step" pass=49 wall_ms=1688 steps=6 phases=mark=424ms/34u@1ms condemn=6ms/64u@446ms delete=302ms/802u@452ms compact=465ms/32352u@765ms finish=0ms/1u@1688ms condemned=57 segments_deleted=173 packs_deleted=7 runs_deleted=0 commits_deleted=6 compacted=67 bytes_freed=2895300316 bytes_moved=268437368 pending=677
+1795385257046 INFO  lunix_engine::coord: store factor of the cut journal_bytes=259230400 store_bytes=419662443 a_pred_milli=1665 a_real_milli=1618 a_hat_milli=1618
+1795385257328 INFO  lunix_engine::coord: store factor of the cut journal_bytes=135690880 store_bytes=241426617 a_pred_milli=1618 a_real_milli=1779 a_hat_milli=1779
+1795385259376 INFO  lunix_engine::coord: store factor of the cut journal_bytes=494178880 store_bytes=622229336 a_pred_milli=1779 a_real_milli=1259 a_hat_milli=1548
+1795385260491 INFO  lunix_engine::pressure: write throttle on headroom=1876650304 soft=2731610692 limit=18210737950 rate=147304918 ingest_rate=179954710 reclaim_rate=305798512
+1795385261184 INFO  lunix_engine::coord: store factor of the cut journal_bytes=358080320 store_bytes=446652029 a_pred_milli=1548 a_real_milli=1247 a_hat_milli=1490
+1795385263206 INFO  lunix_engine::coord: store factor of the cut journal_bytes=421740800 store_bytes=590908632 a_pred_milli=1490 a_real_milli=1401 a_hat_milli=1458
+1795385263830 INFO  lunix_gc::collector: gc pass done how="step" pass=50 wall_ms=2337 steps=9 phases=mark=445ms/34u@1ms condemn=7ms/79u@466ms delete=667ms/678u@474ms compact=512ms/32595u@1808ms finish=0ms/1u@2336ms condemned=67 segments_deleted=151 packs_deleted=5 runs_deleted=9 commits_deleted=5 compacted=128 bytes_freed=2532000508 bytes_moved=270454813 pending=584
+1795385264487 INFO  lunix_engine::coord: store factor of the cut journal_bytes=319442240 store_bytes=497144016 a_pred_milli=1458 a_real_milli=1556 a_hat_milli=1556
+1795385264693 INFO  lunix_engine::coord: store factor of the cut journal_bytes=89993280 store_bytes=170575612 a_pred_milli=1556 a_real_milli=1895 a_hat_milli=1895
+1795385266446 INFO  lunix_engine::coord: store factor of the cut journal_bytes=450906560 store_bytes=629473948 a_pred_milli=1895 a_real_milli=1396 a_hat_milli=1430
+1795385266556 INFO  lunix_engine::pressure: write throttle off throttled_ms=194899 delayed_writes=4663603 delayed_ms=43444593 delay_max_ms=1636
+1795385270639 INFO  lunix_engine::coord: store factor of the cut journal_bytes=10786880 store_bytes=24334853 a_pred_milli=1430 a_real_milli=2255 a_hat_milli=1412
+1795385270990 INFO  lunix_gc::collector: gc pass done how="step" pass=51 wall_ms=2132 steps=10 phases=mark=447ms/34u@1ms condemn=14ms/139u@469ms delete=1037ms/585u@483ms compact=488ms/32608u@1571ms finish=0ms/1u@2131ms condemned=129 segments_deleted=161 packs_deleted=4 runs_deleted=0 commits_deleted=4 compacted=153 bytes_freed=2659270972 bytes_moved=270563003 pending=552
+1795385277252 INFO  lunix_engine::coord: store factor of the cut journal_bytes=287327360 store_bytes=147807937 a_pred_milli=1412 a_real_milli=514 a_hat_milli=1286
+1795385277490 INFO  lunix_engine::coord: store factor of the cut journal_bytes=133177280 store_bytes=68846921 a_pred_milli=1286 a_real_milli=516 a_hat_milli=1243
+1795385277844 INFO  lunix_engine::coord: store factor of the cut journal_bytes=153101440 store_bytes=78930796 a_pred_milli=1243 a_real_milli=515 a_hat_milli=1182
+1795385278066 INFO  lunix_engine::coord: store factor of the cut journal_bytes=127934080 store_bytes=66057776 a_pred_milli=1182 a_real_milli=516 a_hat_milli=1070
+1795385278306 INFO  lunix_engine::coord: store factor of the cut journal_bytes=159393280 store_bytes=82123833 a_pred_milli=1070 a_real_milli=515 a_hat_milli=1000
+1795385278551 INFO  lunix_engine::coord: store factor of the cut journal_bytes=177220160 store_bytes=91312593 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385278801 INFO  lunix_engine::coord: store factor of the cut journal_bytes=181414720 store_bytes=93477706 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385279057 INFO  lunix_engine::coord: store factor of the cut journal_bytes=188755200 store_bytes=97201551 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385279334 INFO  lunix_engine::coord: store factor of the cut journal_bytes=193998400 store_bytes=99970156 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385279601 INFO  lunix_engine::coord: store factor of the cut journal_bytes=212873920 store_bytes=109573121 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385279879 INFO  lunix_engine::coord: store factor of the cut journal_bytes=201338880 store_bytes=103688727 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385279882 INFO  lunix_gc::collector: gc pass done how="step" pass=52 wall_ms=3855 steps=36 phases=mark=415ms/33u@1ms condemn=16ms/159u@477ms delete=0ms/553u@504ms compact=494ms/32983u@504ms finish=0ms/1u@3855ms condemned=153 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=60 bytes_freed=0 bytes_moved=273460751 pending=709
+1795385280100 INFO  lunix_engine::coord: store factor of the cut journal_bytes=188755200 store_bytes=97193831 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385280301 INFO  lunix_engine::pressure: write throttle on headroom=2639470784 soft=2707552136 limit=18050347576 rate=2601768041 ingest_rate=282369945 reclaim_rate=0
+1795385280844 INFO  lunix_engine::coord: store factor of the cut journal_bytes=435185600 store_bytes=223879948 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385280882 INFO  lunix_engine::coord: store factor of the cut journal_bytes=36702400 store_bytes=18994733 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385281945 INFO  lunix_engine::coord: store factor of the cut journal_bytes=477131200 store_bytes=245447566 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385281982 INFO  lunix_engine::coord: store factor of the cut journal_bytes=36702400 store_bytes=19004101 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385284058 INFO  lunix_engine::coord: store factor of the cut journal_bytes=506493120 store_bytes=260577271 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385285855 INFO  lunix_engine::coord: store factor of the cut journal_bytes=418407360 store_bytes=215234424 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385286279 INFO  lunix_engine::pressure: write throttle off throttled_ms=203316 delayed_writes=4665526 delayed_ms=44915159 delay_max_ms=1681
+1795385286552 INFO  lunix_engine::coord: store factor of the cut journal_bytes=491812160 store_bytes=252979607 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385287213 INFO  lunix_engine::coord: store factor of the cut journal_bytes=411066880 store_bytes=211459411 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385287894 INFO  lunix_engine::coord: store factor of the cut journal_bytes=462450240 store_bytes=237924808 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385288567 INFO  lunix_engine::coord: store factor of the cut journal_bytes=462450240 store_bytes=237961832 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385288766 INFO  lunix_gc::collector: gc pass done how="step" pass=53 wall_ms=3805 steps=12 phases=mark=149ms/21u@1ms condemn=19ms/221u@150ms delete=2247ms/710u@170ms compact=30ms/1923u@3774ms finish=0ms/1u@3805ms condemned=178 segments_deleted=254 packs_deleted=6 runs_deleted=9 commits_deleted=7 compacted=6 bytes_freed=4265208336 bytes_moved=15940365 pending=652
+1795385288960 INFO  lunix_engine::coord: store factor of the cut journal_bytes=315640640 store_bytes=162462110 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385289506 INFO  lunix_engine::coord: store factor of the cut journal_bytes=427845120 store_bytes=220132830 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385289623 INFO  lunix_engine::coord: store factor of the cut journal_bytes=123739520 store_bytes=63808982 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385290281 INFO  lunix_engine::coord: store factor of the cut journal_bytes=454061120 store_bytes=233676604 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385290338 INFO  lunix_engine::coord: store factor of the cut journal_bytes=80745280 store_bytes=41675650 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385290976 INFO  lunix_engine::coord: store factor of the cut journal_bytes=413164160 store_bytes=212563111 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385291051 INFO  lunix_engine::coord: store factor of the cut journal_bytes=113253120 store_bytes=58344783 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385291705 INFO  lunix_engine::coord: store factor of the cut journal_bytes=445672000 store_bytes=229297788 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385291766 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43799573 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385292414 INFO  lunix_engine::coord: store factor of the cut journal_bytes=435185600 store_bytes=223889554 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385292478 INFO  lunix_engine::coord: store factor of the cut journal_bytes=94377600 store_bytes=48651041 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385293146 INFO  lunix_engine::coord: store factor of the cut journal_bytes=435185600 store_bytes=223880319 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385293211 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47055732 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385294000 INFO  lunix_engine::coord: store factor of the cut journal_bytes=513833600 store_bytes=264306094 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385294393 INFO  lunix_engine::coord: store factor of the cut journal_bytes=281035520 store_bytes=144632989 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385294406 INFO  lunix_gc::collector: gc pass done how="step" pass=54 wall_ms=406 steps=5 phases=mark=156ms/21u@1ms condemn=23ms/250u@159ms delete=0ms/653u@183ms compact=46ms/3140u@183ms finish=0ms/1u@406ms condemned=199 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=8 bytes_freed=0 bytes_moved=26036010 pending=900
+1795385294662 INFO  lunix_engine::coord: store factor of the cut journal_bytes=246430400 store_bytes=126925062 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385294763 INFO  lunix_engine::pressure: write throttle on headroom=2677084008 soft=2720590439 limit=18137269595 rate=4129414030 ingest_rate=762389915 reclaim_rate=442862458
+1795385295312 INFO  lunix_engine::coord: store factor of the cut journal_bytes=445672000 store_bytes=229325946 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385295378 INFO  lunix_engine::coord: store factor of the cut journal_bytes=97523520 store_bytes=50283800 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385296023 INFO  lunix_engine::coord: store factor of the cut journal_bytes=421553280 store_bytes=216885792 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385296090 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43799637 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385298057 INFO  lunix_engine::coord: store factor of the cut journal_bytes=438331520 store_bytes=225494272 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385300106 INFO  lunix_engine::pressure: write throttle off throttled_ms=208801 delayed_writes=4666938 delayed_ms=46087390 delay_max_ms=2038
+1795385300362 INFO  lunix_engine::coord: store factor of the cut journal_bytes=429942400 store_bytes=221190267 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385300669 INFO  lunix_gc::collector: gc pass done how="step" pass=55 wall_ms=1208 steps=5 phases=mark=136ms/20u@1ms condemn=8ms/93u@138ms delete=728ms/901u@147ms compact=43ms/2948u@1163ms finish=0ms/1u@1207ms condemned=69 segments_deleted=253 packs_deleted=12 runs_deleted=0 commits_deleted=11 compacted=8 bytes_freed=4151968652 bytes_moved=24441914 pending=715
+1795385300919 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214177305 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385301030 INFO  lunix_engine::coord: store factor of the cut journal_bytes=181414720 store_bytes=93418746 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385301689 INFO  lunix_engine::coord: store factor of the cut journal_bytes=454061120 store_bytes=233630134 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385301752 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42176329 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385302540 INFO  lunix_engine::coord: store factor of the cut journal_bytes=518028160 store_bytes=266476593 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385302609 INFO  lunix_engine::coord: store factor of the cut journal_bytes=89134400 store_bytes=45970294 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385303390 INFO  lunix_engine::coord: store factor of the cut journal_bytes=505444480 store_bytes=260020593 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385303480 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44903621 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385304259 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261125001 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385304328 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44922189 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385305106 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261124848 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385305173 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44885054 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385305959 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261106195 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385306152 INFO  lunix_gc::collector: gc pass done how="step" pass=56 wall_ms=192 steps=4 phases=mark=163ms/21u@1ms condemn=17ms/193u@166ms delete=0ms/716u@183ms compact=8ms/515u@183ms finish=0ms/1u@192ms condemned=144 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=3 bytes_freed=0 bytes_moved=4250769 pending=906
+1795385306339 INFO  lunix_engine::coord: store factor of the cut journal_bytes=273695040 store_bytes=140867086 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385306990 INFO  lunix_engine::coord: store factor of the cut journal_bytes=453012480 store_bytes=233082554 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385307059 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42742429 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385307862 INFO  lunix_engine::coord: store factor of the cut journal_bytes=501249920 store_bytes=257905880 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385307923 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44365616 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385308562 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214242591 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385308634 INFO  lunix_engine::coord: store factor of the cut journal_bytes=110107200 store_bytes=56721488 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385308834 INFO  lunix_engine::pressure: write throttle on headroom=2705422953 soft=2727948864 limit=18186325762 rate=8059956421 ingest_rate=697759736 reclaim_rate=428126278
+1795385309277 INFO  lunix_engine::coord: store factor of the cut journal_bytes=429942400 store_bytes=221208688 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385309358 INFO  lunix_engine::coord: store factor of the cut journal_bytes=104864000 store_bytes=54059337 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385310141 INFO  lunix_engine::coord: store factor of the cut journal_bytes=514882240 store_bytes=264871992 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385310186 INFO  lunix_engine::coord: store factor of the cut journal_bytes=48237440 store_bytes=24941089 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385311346 INFO  lunix_engine::coord: store factor of the cut journal_bytes=455109760 store_bytes=234130645 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385312000 INFO  lunix_engine::coord: store factor of the cut journal_bytes=419456000 store_bytes=215800380 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385312068 INFO  lunix_gc::collector: gc pass done how="step" pass=57 wall_ms=721 steps=3 phases=mark=158ms/20u@2ms condemn=13ms/151u@160ms delete=283ms/907u@173ms compact=11ms/707u@710ms finish=0ms/1u@721ms condemned=116 segments_deleted=153 packs_deleted=2 runs_deleted=0 commits_deleted=2 compacted=2 bytes_freed=2549982715 bytes_moved=5844819 pending=898
+1795385312199 INFO  lunix_engine::coord: store factor of the cut journal_bytes=206582080 store_bytes=106368599 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385313902 INFO  lunix_engine::pressure: write throttle off throttled_ms=211648 delayed_writes=4668206 delayed_ms=46711292 delay_max_ms=2038
+1795385317519 INFO  lunix_engine::coord: store factor of the cut journal_bytes=211825280 store_bytes=109086434 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385317534 INFO  lunix_gc::collector: gc pass done how="step" pass=58 wall_ms=429 steps=4 phases=mark=151ms/21u@1ms condemn=2ms/19u@173ms delete=0ms/899u@175ms compact=30ms/2047u@175ms finish=0ms/1u@429ms condemned=14 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=16961595 pending=915
+1795385322750 INFO  lunix_gc::collector: gc pass done how="step" pass=59 wall_ms=203 steps=4 phases=mark=125ms/19u@1ms condemn=2ms/26u@147ms delete=0ms/916u@149ms compact=35ms/2538u@150ms finish=0ms/1u@203ms condemned=20 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=21037986 pending=939
+1795385323321 INFO  lunix_engine::coord: store factor of the cut journal_bytes=442526080 store_bytes=227609011 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385323414 INFO  lunix_engine::coord: store factor of the cut journal_bytes=143663680 store_bytes=73984688 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385324199 INFO  lunix_engine::coord: store factor of the cut journal_bytes=516979520 store_bytes=265957188 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385324282 INFO  lunix_engine::coord: store factor of the cut journal_bytes=95426240 store_bytes=49170483 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385325063 INFO  lunix_engine::coord: store factor of the cut journal_bytes=499152640 store_bytes=256783741 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385325144 INFO  lunix_engine::coord: store factor of the cut journal_bytes=95426240 store_bytes=49170530 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385325645 INFO  lunix_engine::pressure: write throttle on headroom=2700926528 soft=2714222236 limit=18094814910 rate=13632678383 ingest_rate=302874242 reclaim_rate=0
+1795385325921 INFO  lunix_engine::coord: store factor of the cut journal_bytes=499152640 store_bytes=256773856 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385325974 INFO  lunix_engine::coord: store factor of the cut journal_bytes=60821120 store_bytes=31378577 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385326732 INFO  lunix_engine::coord: store factor of the cut journal_bytes=467693440 store_bytes=240605818 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385326775 INFO  lunix_engine::coord: store factor of the cut journal_bytes=40896960 store_bytes=21175135 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385327842 INFO  lunix_engine::coord: store factor of the cut journal_bytes=487617600 store_bytes=250837333 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385328474 INFO  lunix_engine::coord: store factor of the cut journal_bytes=349197120 store_bytes=179660398 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385329126 INFO  lunix_engine::coord: store factor of the cut journal_bytes=443574720 store_bytes=228193966 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385329457 INFO  lunix_gc::collector: gc pass done how="step" pass=60 wall_ms=1615 steps=6 phases=mark=154ms/21u@1ms condemn=12ms/126u@156ms delete=898ms/940u@168ms compact=64ms/4343u@1550ms finish=0ms/1u@1614ms condemned=100 segments_deleted=377 packs_deleted=32 runs_deleted=19 commits_deleted=39 compacted=10 bytes_freed=6103699962 bytes_moved=36015258 pending=596
+1795385329702 INFO  lunix_engine::coord: store factor of the cut journal_bytes=374364480 store_bytes=192582141 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385329842 INFO  lunix_engine::coord: store factor of the cut journal_bytes=210776640 store_bytes=108501979 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385330506 INFO  lunix_engine::coord: store factor of the cut journal_bytes=471888000 store_bytes=242767080 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385330577 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44319358 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385330678 INFO  lunix_engine::pressure: write throttle off throttled_ms=213847 delayed_writes=4669146 delayed_ms=47168598 delay_max_ms=2038
+1795385331358 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261663179 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385331454 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47009415 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385332236 INFO  lunix_engine::coord: store factor of the cut journal_bytes=503347200 store_bytes=258935919 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385332304 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45413720 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385333087 INFO  lunix_engine::coord: store factor of the cut journal_bytes=506493120 store_bytes=260549651 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385333166 INFO  lunix_engine::coord: store factor of the cut journal_bytes=90183040 store_bytes=46499251 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385333950 INFO  lunix_engine::coord: store factor of the cut journal_bytes=504395840 store_bytes=259473320 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385334023 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44894528 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385334803 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261078389 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385335205 INFO  lunix_engine::coord: store factor of the cut journal_bytes=287327360 store_bytes=147870518 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385335207 INFO  lunix_gc::collector: gc pass done how="step" pass=61 wall_ms=403 steps=5 phases=mark=163ms/21u@1ms condemn=20ms/196u@166ms delete=0ms/597u@186ms compact=32ms/2086u@186ms finish=0ms/1u@403ms condemned=155 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=8 bytes_freed=0 bytes_moved=17285435 pending=790
+1795385335517 INFO  lunix_engine::coord: store factor of the cut journal_bytes=256916800 store_bytes=132202646 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385335638 INFO  lunix_engine::coord: store factor of the cut journal_bytes=191901120 store_bytes=98761466 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385336421 INFO  lunix_engine::coord: store factor of the cut journal_bytes=519076800 store_bytes=267005691 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385336484 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43818488 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385337270 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262182410 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385337338 INFO  lunix_engine::coord: store factor of the cut journal_bytes=93328960 store_bytes=48113320 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385338117 INFO  lunix_engine::coord: store factor of the cut journal_bytes=501249920 store_bytes=257878401 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385338188 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44875889 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385338972 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261097091 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385339066 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44337902 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385339849 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261616151 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385339922 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45432552 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385340696 INFO  lunix_engine::coord: store factor of the cut journal_bytes=506493120 store_bytes=260549420 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385340733 INFO  lunix_gc::collector: gc pass done how="step" pass=62 wall_ms=510 steps=4 phases=mark=157ms/21u@1ms condemn=15ms/160u@179ms delete=0ms/791u@481ms compact=28ms/1918u@481ms finish=0ms/1u@510ms condemned=123 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=15898882 pending=948
+1795385340820 INFO  lunix_engine::coord: store factor of the cut journal_bytes=117447680 store_bytes=60534495 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385341588 INFO  lunix_engine::coord: store factor of the cut journal_bytes=477131200 store_bytes=245476108 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385341647 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43271291 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385342293 INFO  lunix_engine::coord: store factor of the cut journal_bytes=422601920 store_bytes=217442961 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385342359 INFO  lunix_engine::coord: store factor of the cut journal_bytes=101718080 store_bytes=52417688 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385343031 INFO  lunix_engine::coord: store factor of the cut journal_bytes=436234240 store_bytes=224418599 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385343093 INFO  lunix_engine::coord: store factor of the cut journal_bytes=94377600 store_bytes=48651207 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385343194 INFO  lunix_engine::pressure: write throttle on headroom=2614359552 soft=2705686254 limit=18037908360 rate=1921088748 ingest_rate=745220512 reclaim_rate=0
+1795385343824 INFO  lunix_engine::coord: store factor of the cut journal_bytes=412115520 store_bytes=212015968 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385343863 INFO  lunix_engine::coord: store factor of the cut journal_bytes=48237440 store_bytes=24931966 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385345544 INFO  lunix_engine::coord: store factor of the cut journal_bytes=514882240 store_bytes=264863096 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385345575 INFO  lunix_engine::coord: store factor of the cut journal_bytes=31459200 store_bytes=16295420 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385346683 INFO  lunix_engine::coord: store factor of the cut journal_bytes=497055360 store_bytes=255698314 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385347347 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214196274 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385347596 INFO  lunix_gc::collector: gc pass done how="step" pass=63 wall_ms=1819 steps=7 phases=mark=158ms/21u@1ms condemn=14ms/149u@160ms delete=1054ms/949u@174ms compact=21ms/1411u@1797ms finish=0ms/1u@1819ms condemned=106 segments_deleted=329 packs_deleted=34 runs_deleted=35 commits_deleted=33 compacted=6 bytes_freed=5318915501 bytes_moved=11689542 pending=664
+1795385347846 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214186762 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385347956 INFO  lunix_engine::coord: store factor of the cut journal_bytes=164636480 store_bytes=84782718 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385348257 INFO  lunix_engine::pressure: write throttle off throttled_ms=216839 delayed_writes=4670342 delayed_ms=47905196 delay_max_ms=2038
+1795385348751 INFO  lunix_engine::coord: store factor of the cut journal_bytes=522222720 store_bytes=268619647 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385348820 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44894606 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385349604 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261087585 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385349670 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44356658 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385350477 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261653673 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385350542 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43818443 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385351326 INFO  lunix_engine::coord: store factor of the cut journal_bytes=504395840 store_bytes=259483208 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385351386 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42185956 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385352036 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214196059 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385352117 INFO  lunix_engine::coord: store factor of the cut journal_bytes=114301760 store_bytes=58901732 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385352774 INFO  lunix_engine::coord: store factor of the cut journal_bytes=445672000 store_bytes=229288661 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385353100 INFO  lunix_engine::coord: store factor of the cut journal_bytes=242235840 store_bytes=124689299 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385353174 INFO  lunix_gc::collector: gc pass done how="step" pass=64 wall_ms=400 steps=5 phases=mark=166ms/20u@1ms condemn=20ms/195u@169ms delete=0ms/665u@344ms compact=53ms/3561u@344ms finish=0ms/1u@399ms condemned=155 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=29531191 pending=857
+1795385353460 INFO  lunix_engine::coord: store factor of the cut journal_bytes=296765120 store_bytes=152722262 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385354142 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456158400 store_bytes=234659279 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385354198 INFO  lunix_engine::coord: store factor of the cut journal_bytes=78648000 store_bytes=40553219 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385354953 INFO  lunix_engine::coord: store factor of the cut journal_bytes=449866560 store_bytes=231459514 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385355007 INFO  lunix_engine::coord: store factor of the cut journal_bytes=75502080 store_bytes=38967188 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385355764 INFO  lunix_engine::coord: store factor of the cut journal_bytes=453012480 store_bytes=233064411 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385355820 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42185910 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385356465 INFO  lunix_engine::coord: store factor of the cut journal_bytes=420504640 store_bytes=216348116 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385356549 INFO  lunix_engine::coord: store factor of the cut journal_bytes=110107200 store_bytes=56731142 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385357341 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262692567 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385357423 INFO  lunix_engine::coord: store factor of the cut journal_bytes=89134400 store_bytes=45980067 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385358204 INFO  lunix_engine::coord: store factor of the cut journal_bytes=505444480 store_bytes=260030553 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385358402 INFO  lunix_gc::collector: gc pass done how="step" pass=65 wall_ms=197 steps=4 phases=mark=149ms/21u@1ms condemn=17ms/163u@152ms delete=0ms/858u@170ms compact=27ms/1817u@170ms finish=0ms/1u@197ms condemned=123 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=15060325 pending=1018
+1795385358568 INFO  lunix_engine::coord: store factor of the cut journal_bytes=265305920 store_bytes=136535213 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385363772 INFO  lunix_engine::coord: store factor of the cut journal_bytes=3145920 store_bytes=1694593 a_pred_milli=1000 a_real_milli=538 a_hat_milli=1000
+1795385363778 INFO  lunix_gc::collector: gc pass done how="step" pass=66 wall_ms=304 steps=4 phases=mark=150ms/22u@1ms condemn=1ms/9u@172ms delete=0ms/1019u@173ms compact=21ms/1518u@173ms finish=0ms/1u@304ms condemned=6 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=2 bytes_freed=0 bytes_moved=12577936 pending=1025
+1795385368979 INFO  lunix_engine::pressure: write throttle on headroom=2476202727 soft=2690703293 limit=17938021959 rate=774707289 ingest_rate=40443122 reclaim_rate=0
+1795385369140 INFO  lunix_engine::coord: store factor of the cut journal_bytes=257965440 store_bytes=132768724 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385369161 INFO  lunix_gc::collector: gc pass done how="step" pass=67 wall_ms=370 steps=4 phases=mark=111ms/18u@1ms condemn=3ms/33u@132ms delete=0ms/1026u@136ms compact=62ms/3930u@136ms finish=0ms/1u@370ms condemned=19 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=9 bytes_freed=0 bytes_moved=32594844 pending=1056
+1795385369380 INFO  lunix_engine::coord: store factor of the cut journal_bytes=183512000 store_bytes=94550956 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385370644 INFO  lunix_engine::coord: store factor of the cut journal_bytes=479228480 store_bytes=246523907 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385370685 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35653760 store_bytes=18457183 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385372251 INFO  lunix_engine::coord: store factor of the cut journal_bytes=482374400 store_bytes=248137961 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385372298 INFO  lunix_engine::coord: store factor of the cut journal_bytes=41945600 store_bytes=21722543 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385373569 INFO  lunix_engine::coord: store factor of the cut journal_bytes=492860800 store_bytes=253518290 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385374594 INFO  lunix_engine::pressure: write throttle off throttled_ms=222374 delayed_writes=4672266 delayed_ms=49134633 delay_max_ms=2038
+1795385375054 INFO  lunix_engine::coord: store factor of the cut journal_bytes=406872320 store_bytes=209326151 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385375732 INFO  lunix_engine::coord: store factor of the cut journal_bytes=456158400 store_bytes=234678268 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385376000 INFO  lunix_gc::collector: gc pass done how="step" pass=68 wall_ms=1829 steps=7 phases=mark=159ms/20u@1ms condemn=6ms/52u@160ms delete=1033ms/1057u@167ms compact=74ms/4918u@1752ms finish=0ms/1u@1828ms condemned=42 segments_deleted=412 packs_deleted=41 runs_deleted=19 commits_deleted=45 compacted=13 bytes_freed=6580077668 bytes_moved=40789094 pending=589
+1795385376242 INFO  lunix_engine::coord: store factor of the cut journal_bytes=382753600 store_bytes=196951670 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385376379 INFO  lunix_engine::coord: store factor of the cut journal_bytes=207630720 store_bytes=106925529 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385377044 INFO  lunix_engine::coord: store factor of the cut journal_bytes=466644800 store_bytes=240096002 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385377105 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42724081 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385377756 INFO  lunix_engine::coord: store factor of the cut journal_bytes=426796480 store_bytes=219566950 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385377865 INFO  lunix_engine::coord: store factor of the cut journal_bytes=104864000 store_bytes=54031703 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385378647 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261635056 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385378707 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42723945 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385379351 INFO  lunix_engine::coord: store factor of the cut journal_bytes=412115520 store_bytes=212044037 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385379429 INFO  lunix_engine::coord: store factor of the cut journal_bytes=113253120 store_bytes=58363811 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385380079 INFO  lunix_engine::coord: store factor of the cut journal_bytes=442526080 store_bytes=227684286 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385380142 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44356753 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385380788 INFO  lunix_engine::coord: store factor of the cut journal_bytes=430991040 store_bytes=221737791 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385380855 INFO  lunix_engine::coord: store factor of the cut journal_bytes=97523520 store_bytes=50284100 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385381517 INFO  lunix_engine::coord: store factor of the cut journal_bytes=433088320 store_bytes=222804717 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385381554 INFO  lunix_gc::collector: gc pass done how="step" pass=69 wall_ms=498 steps=4 phases=mark=159ms/20u@1ms condemn=24ms/217u@181ms delete=0ms/590u@483ms compact=14ms/963u@483ms finish=0ms/1u@498ms condemned=169 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=2 bytes_freed=0 bytes_moved=7970189 pending=804
+1795385381656 INFO  lunix_engine::coord: store factor of the cut journal_bytes=131080000 store_bytes=67538013 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385382428 INFO  lunix_engine::coord: store factor of the cut journal_bytes=479228480 store_bytes=246533385 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385382486 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42176732 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385383240 INFO  lunix_engine::coord: store factor of the cut journal_bytes=446720640 store_bytes=229854752 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385383299 INFO  lunix_engine::coord: store factor of the cut journal_bytes=78648000 store_bytes=40562600 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385383949 INFO  lunix_engine::coord: store factor of the cut journal_bytes=422601920 store_bytes=217442868 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385384035 INFO  lunix_engine::coord: store factor of the cut journal_bytes=112204480 store_bytes=57807193 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385384821 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262154663 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385384905 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43799998 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385385689 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262182755 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385385753 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43318087 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385386540 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262757997 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385386602 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43837324 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385386865 INFO  lunix_gc::collector: gc pass done how="step" pass=70 wall_ms=262 steps=5 phases=mark=164ms/21u@1ms condemn=17ms/171u@176ms delete=0ms/805u@204ms compact=47ms/3211u@204ms finish=0ms/1u@262ms condemned=123 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=26625449 pending=973
+1795385387202 INFO  lunix_engine::coord: store factor of the cut journal_bytes=389045440 store_bytes=200188868 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385387281 INFO  lunix_engine::coord: store factor of the cut journal_bytes=130031360 store_bytes=66972054 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385387940 INFO  lunix_engine::coord: store factor of the cut journal_bytes=450915200 store_bytes=231978782 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385388008 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42204644 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385388817 INFO  lunix_engine::coord: store factor of the cut journal_bytes=514882240 store_bytes=264872379 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385388884 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42213942 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385389285 INFO  lunix_engine::pressure: write throttle on headroom=2715174144 soft=2735503600 limit=18236690670 rate=8962967448 ingest_rate=748798808 reclaim_rate=0
+1795385389659 INFO  lunix_engine::coord: store factor of the cut journal_bytes=501249920 store_bytes=257850357 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385389701 INFO  lunix_engine::coord: store factor of the cut journal_bytes=50334720 store_bytes=26017472 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385390572 INFO  lunix_engine::coord: store factor of the cut journal_bytes=489714880 store_bytes=251932428 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385390606 INFO  lunix_engine::coord: store factor of the cut journal_bytes=34605120 store_bytes=17928559 a_pred_milli=1000 a_real_milli=518 a_hat_milli=1000
+1795385391869 INFO  lunix_engine::coord: store factor of the cut journal_bytes=479228480 store_bytes=246524130 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385392465 INFO  lunix_engine::coord: store factor of the cut journal_bytes=294667840 store_bytes=151646029 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385393157 INFO  lunix_engine::coord: store factor of the cut journal_bytes=512784960 store_bytes=263787273 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385393818 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214196569 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385393994 INFO  lunix_gc::collector: gc pass done how="step" pass=71 wall_ms=2124 steps=7 phases=mark=154ms/20u@1ms condemn=15ms/143u@155ms delete=1189ms/974u@171ms compact=26ms/1731u@2097ms finish=0ms/1u@2124ms condemned=109 segments_deleted=384 packs_deleted=41 runs_deleted=36 commits_deleted=40 compacted=3 bytes_freed=6207072964 bytes_moved=14346342 pending=613
+1795385394205 INFO  lunix_engine::coord: store factor of the cut journal_bytes=339759360 store_bytes=174846536 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385394321 INFO  lunix_engine::coord: store factor of the cut journal_bytes=185609280 store_bytes=95589863 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385394422 INFO  lunix_engine::pressure: write throttle off throttled_ms=225393 delayed_writes=4673490 delayed_ms=49785714 delay_max_ms=2038
+1795385395109 INFO  lunix_engine::coord: store factor of the cut journal_bytes=511736320 store_bytes=263258436 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385395173 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43280792 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385395981 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262711364 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385396055 INFO  lunix_engine::coord: store factor of the cut journal_bytes=90183040 store_bytes=46518371 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385396841 INFO  lunix_engine::coord: store factor of the cut journal_bytes=504395840 store_bytes=259520552 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385396905 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43828116 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385397553 INFO  lunix_engine::coord: store factor of the cut journal_bytes=408969600 store_bytes=210420684 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385397635 INFO  lunix_engine::coord: store factor of the cut journal_bytes=119544960 store_bytes=61591897 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385398417 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262191911 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385398484 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43818882 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385399266 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262192094 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385399695 INFO  lunix_engine::coord: store factor of the cut journal_bytes=294667840 store_bytes=151627648 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385399720 INFO  lunix_gc::collector: gc pass done how="step" pass=72 wall_ms=453 steps=5 phases=mark=167ms/21u@1ms condemn=24ms/203u@169ms delete=0ms/614u@194ms compact=48ms/3211u@194ms finish=0ms/1u@453ms condemned=160 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=26625433 pending=814
+1795385399864 INFO  lunix_engine::coord: store factor of the cut journal_bytes=219165760 store_bytes=112834289 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385400532 INFO  lunix_engine::coord: store factor of the cut journal_bytes=477131200 store_bytes=245447739 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385400599 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43809443 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385401384 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262201288 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385401446 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42742781 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385402233 INFO  lunix_engine::coord: store factor of the cut journal_bytes=511736320 store_bytes=263249525 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385402300 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44347456 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385403086 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261654174 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385403177 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47046908 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385403963 INFO  lunix_engine::coord: store factor of the cut journal_bytes=503347200 store_bytes=258945185 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385404027 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45460770 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385405035 INFO  lunix_gc::collector: gc pass done how="step" pass=73 wall_ms=306 steps=4 phases=mark=144ms/21u@1ms condemn=17ms/150u@166ms delete=0ms/815u@183ms compact=22ms/1603u@183ms finish=0ms/1u@305ms condemned=115 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=3 bytes_freed=0 bytes_moved=13283679 pending=962
+1795385405256 INFO  lunix_engine::coord: store factor of the cut journal_bytes=201338880 store_bytes=103660338 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385410350 INFO  lunix_gc::collector: gc pass done how="step" pass=74 wall_ms=289 steps=4 phases=mark=131ms/20u@1ms condemn=2ms/25u@152ms delete=0ms/963u@154ms compact=34ms/2456u@155ms finish=0ms/1u@289ms condemned=12 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=8 bytes_freed=0 bytes_moved=20357166 pending=985
+1795385415203 INFO  lunix_engine::coord: store factor of the cut journal_bytes=383802240 store_bytes=197433678 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385415378 INFO  lunix_engine::coord: store factor of the cut journal_bytes=255868160 store_bytes=131702069 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385415640 INFO  lunix_gc::collector: gc pass done how="step" pass=75 wall_ms=261 steps=5 phases=mark=174ms/21u@1ms condemn=2ms/18u@197ms delete=0ms/986u@200ms compact=51ms/3542u@200ms finish=0ms/1u@261ms condemned=13 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=29373447 pending=1001
+1795385416005 INFO  lunix_engine::coord: store factor of the cut journal_bytes=458255680 store_bytes=235791594 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385416073 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44857464 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385416474 INFO  lunix_engine::pressure: write throttle on headroom=2624461376 soft=2711869262 limit=18079128417 rate=2014974044 ingest_rate=243233107 reclaim_rate=0
+1795385416855 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261059962 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385416896 INFO  lunix_engine::coord: store factor of the cut journal_bytes=39848320 store_bytes=20600084 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385417763 INFO  lunix_engine::coord: store factor of the cut journal_bytes=488666240 store_bytes=251347529 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385417799 INFO  lunix_engine::coord: store factor of the cut journal_bytes=34605120 store_bytes=17938002 a_pred_milli=1000 a_real_milli=518 a_hat_milli=1000
+1795385419166 INFO  lunix_engine::coord: store factor of the cut journal_bytes=493909440 store_bytes=254056370 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385421353 INFO  lunix_engine::coord: store factor of the cut journal_bytes=417358720 store_bytes=214743569 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385421758 INFO  lunix_engine::pressure: write throttle off throttled_ms=230108 delayed_writes=4674988 delayed_ms=50821471 delay_max_ms=2038
+1795385422044 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261088168 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385422715 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214196359 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385422722 INFO  lunix_gc::collector: gc pass done how="step" pass=76 wall_ms=2052 steps=7 phases=mark=146ms/20u@1ms condemn=11ms/88u@147ms delete=990ms/1002u@159ms compact=62ms/4231u@1720ms finish=0ms/1u@2052ms condemned=72 segments_deleted=359 packs_deleted=38 runs_deleted=35 commits_deleted=40 compacted=10 bytes_freed=5741608839 bytes_moved=35085474 pending=615
+1795385422849 INFO  lunix_engine::coord: store factor of the cut journal_bytes=191901120 store_bytes=98799455 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385423640 INFO  lunix_engine::coord: store factor of the cut journal_bytes=514882240 store_bytes=264863213 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385423707 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43271692 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385424496 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262730039 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385424589 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44338253 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385425375 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261654069 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385425440 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42724149 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385426233 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261626142 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385426313 INFO  lunix_engine::coord: store factor of the cut journal_bytes=92280320 store_bytes=47603523 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385427097 INFO  lunix_engine::coord: store factor of the cut journal_bytes=505444480 store_bytes=260030679 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385427166 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44894939 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385427951 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261078784 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385428366 INFO  lunix_engine::coord: store factor of the cut journal_bytes=293619200 store_bytes=151099028 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385428394 INFO  lunix_gc::collector: gc pass done how="step" pass=77 wall_ms=443 steps=5 phases=mark=165ms/21u@1ms condemn=24ms/201u@168ms delete=0ms/616u@193ms compact=51ms/3348u@193ms finish=0ms/1u@443ms condemned=158 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=11 bytes_freed=0 bytes_moved=27762760 pending=814
+1795385428714 INFO  lunix_engine::coord: store factor of the cut journal_bytes=289424640 store_bytes=148947048 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385428846 INFO  lunix_engine::coord: store factor of the cut journal_bytes=198192960 store_bytes=102018274 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385429512 INFO  lunix_engine::coord: store factor of the cut journal_bytes=473985280 store_bytes=243843224 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385429580 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43800070 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385430363 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262182809 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385430437 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47037626 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385431225 INFO  lunix_engine::coord: store factor of the cut journal_bytes=503347200 store_bytes=258945522 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385431297 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47046980 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385432081 INFO  lunix_engine::coord: store factor of the cut journal_bytes=503347200 store_bytes=258954776 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385432170 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44876337 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385432960 INFO  lunix_engine::coord: store factor of the cut journal_bytes=507541760 store_bytes=261116313 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385433030 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45432963 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385433841 INFO  lunix_engine::coord: store factor of the cut journal_bytes=506493120 store_bytes=260578244 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385433952 INFO  lunix_gc::collector: gc pass done how="step" pass=78 wall_ms=520 steps=5 phases=mark=160ms/21u@1ms condemn=19ms/170u@459ms delete=0ms/815u@480ms compact=39ms/2712u@480ms finish=0ms/1u@519ms condemned=124 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=8 bytes_freed=0 bytes_moved=22482553 pending=982
+1795385434090 INFO  lunix_engine::coord: store factor of the cut journal_bytes=184560640 store_bytes=95079866 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385434391 INFO  lunix_engine::pressure: write throttle on headroom=2660397568 soft=2719556831 limit=18130378878 rate=3017891865 ingest_rate=748492390 reclaim_rate=0
+1795385434727 INFO  lunix_engine::coord: store factor of the cut journal_bytes=410018240 store_bytes=210987099 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385434775 INFO  lunix_engine::coord: store factor of the cut journal_bytes=53480640 store_bytes=27622460 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385435526 INFO  lunix_engine::coord: store factor of the cut journal_bytes=449866560 store_bytes=231450320 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385435577 INFO  lunix_engine::coord: store factor of the cut journal_bytes=55577920 store_bytes=28707651 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385436757 INFO  lunix_engine::coord: store factor of the cut journal_bytes=498104000 store_bytes=256227553 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385436788 INFO  lunix_engine::coord: store factor of the cut journal_bytes=24118720 store_bytes=12511121 a_pred_milli=1000 a_real_milli=518 a_hat_milli=1000
+1795385439160 INFO  lunix_engine::coord: store factor of the cut journal_bytes=493909440 store_bytes=254075132 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385439576 INFO  lunix_engine::pressure: write throttle off throttled_ms=235706 delayed_writes=4676743 delayed_ms=52041496 delay_max_ms=2038
+1795385440027 INFO  lunix_engine::coord: store factor of the cut journal_bytes=406872320 store_bytes=209326648 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385440688 INFO  lunix_engine::coord: store factor of the cut journal_bytes=462450240 store_bytes=237897393 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385441041 INFO  lunix_gc::collector: gc pass done how="step" pass=79 wall_ms=1881 steps=7 phases=mark=143ms/21u@1ms condemn=14ms/114u@145ms delete=1194ms/983u@159ms compact=5ms/344u@1875ms finish=0ms/1u@1880ms condemned=94 segments_deleted=384 packs_deleted=39 runs_deleted=28 commits_deleted=39 compacted=2 bytes_freed=6232181885 bytes_moved=2831073 pending=604
+1795385441306 INFO  lunix_engine::coord: store factor of the cut journal_bytes=397434560 store_bytes=204503011 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385441444 INFO  lunix_engine::coord: store factor of the cut journal_bytes=198192960 store_bytes=102055679 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385442108 INFO  lunix_engine::coord: store factor of the cut journal_bytes=461401600 store_bytes=237396900 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385442172 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42195700 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385442962 INFO  lunix_engine::coord: store factor of the cut journal_bytes=511736320 store_bytes=263249578 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385443046 INFO  lunix_engine::coord: store factor of the cut journal_bytes=80745280 store_bytes=41657685 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385443697 INFO  lunix_engine::coord: store factor of the cut journal_bytes=440428800 store_bytes=226627168 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385443761 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43800320 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385444411 INFO  lunix_engine::coord: store factor of the cut journal_bytes=422601920 store_bytes=217415398 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385444493 INFO  lunix_engine::coord: store factor of the cut journal_bytes=108009920 store_bytes=55627625 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385445285 INFO  lunix_engine::coord: store factor of the cut journal_bytes=515930880 store_bytes=265401539 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385445358 INFO  lunix_engine::coord: store factor of the cut journal_bytes=90183040 store_bytes=46499717 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385446140 INFO  lunix_engine::coord: store factor of the cut journal_bytes=504395840 store_bytes=259474195 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385446353 INFO  lunix_gc::collector: gc pass done how="step" pass=80 wall_ms=212 steps=4 phases=mark=163ms/21u@1ms condemn=24ms/192u@166ms delete=0ms/605u@191ms compact=20ms/1347u@191ms finish=0ms/1u@212ms condemned=151 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=11158225 pending=794
+1795385446558 INFO  lunix_engine::coord: store factor of the cut journal_bytes=286278720 store_bytes=147351777 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385447134 INFO  lunix_engine::coord: store factor of the cut journal_bytes=440428800 store_bytes=226580419 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385447200 INFO  lunix_engine::coord: store factor of the cut journal_bytes=80745280 store_bytes=41666979 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385448083 INFO  lunix_engine::coord: store factor of the cut journal_bytes=513833600 store_bytes=264353747 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385448146 INFO  lunix_engine::coord: store factor of the cut journal_bytes=77599360 store_bytes=40043599 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385449035 INFO  lunix_engine::coord: store factor of the cut journal_bytes=516979520 store_bytes=265977087 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385449103 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43299867 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385449887 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262730347 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385449958 INFO  lunix_engine::coord: store factor of the cut journal_bytes=87037120 store_bytes=44904438 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385451765 INFO  lunix_engine::coord: store factor of the cut journal_bytes=270549120 store_bytes=139234803 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385451785 INFO  lunix_gc::collector: gc pass done how="step" pass=81 wall_ms=425 steps=5 phases=mark=154ms/21u@1ms condemn=13ms/112u@175ms delete=0ms/795u@199ms compact=57ms/4037u@199ms finish=0ms/1u@424ms condemned=84 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=33474820 pending=904
+1795385457099 INFO  lunix_gc::collector: gc pass done how="step" pass=82 wall_ms=300 steps=4 phases=mark=130ms/19u@1ms condemn=3ms/24u@151ms delete=0ms/905u@155ms compact=45ms/3184u@155ms finish=0ms/1u@300ms condemned=18 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=7 bytes_freed=0 bytes_moved=26401171 pending=926
+1795385461100 INFO  lunix_engine::coord: store factor of the cut journal_bytes=266354560 store_bytes=137008140 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385461298 INFO  lunix_engine::coord: store factor of the cut journal_bytes=293619200 store_bytes=151089953 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385461503 INFO  lunix_engine::coord: store factor of the cut journal_bytes=304105600 store_bytes=156488875 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385461650 INFO  lunix_engine::coord: store factor of the cut journal_bytes=241187200 store_bytes=124123751 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385462087 INFO  lunix_engine::coord: store factor of the cut journal_bytes=393240000 store_bytes=202331914 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385462204 INFO  lunix_engine::coord: store factor of the cut journal_bytes=162539200 store_bytes=83697459 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385462796 INFO  lunix_engine::coord: store factor of the cut journal_bytes=491812160 store_bytes=252980706 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385462947 INFO  lunix_engine::coord: store factor of the cut journal_bytes=148906880 store_bytes=76694084 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385463254 INFO  lunix_engine::pressure: write throttle on headroom=2680082368 soft=2740257803 limit=18268385354 rate=2988882143 ingest_rate=411297086 reclaim_rate=0
+1795385463260 INFO  lunix_gc::collector: gc pass done how="step" pass=83 wall_ms=1056 steps=11 phases=mark=170ms/20u@1ms condemn=7ms/48u@192ms delete=0ms/927u@199ms compact=136ms/9013u@199ms finish=0ms/1u@1055ms condemned=39 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=16 bytes_freed=0 bytes_moved=74728908 pending=972
+1795385463616 INFO  lunix_engine::coord: store factor of the cut journal_bytes=445672000 store_bytes=229270190 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385463661 INFO  lunix_engine::coord: store factor of the cut journal_bytes=50334720 store_bytes=26027262 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385464531 INFO  lunix_engine::coord: store factor of the cut journal_bytes=471888000 store_bytes=242749002 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385464570 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35653760 store_bytes=18457602 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385466046 INFO  lunix_engine::coord: store factor of the cut journal_bytes=499152640 store_bytes=256765381 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385466070 INFO  lunix_engine::coord: store factor of the cut journal_bytes=15729600 store_bytes=8188578 a_pred_milli=1000 a_real_milli=520 a_hat_milli=1000
+1795385468695 INFO  lunix_engine::pressure: write throttle off throttled_ms=241314 delayed_writes=4678344 delayed_ms=53324376 delay_max_ms=2038
+1795385468978 INFO  lunix_engine::coord: store factor of the cut journal_bytes=512784960 store_bytes=263778380 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385469645 INFO  lunix_engine::coord: store factor of the cut journal_bytes=416310080 store_bytes=214187448 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385470339 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261673186 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385470450 INFO  lunix_gc::collector: gc pass done how="step" pass=84 wall_ms=2176 steps=7 phases=mark=145ms/21u@1ms condemn=14ms/111u@146ms delete=1106ms/973u@161ms compact=45ms/3140u@2130ms finish=0ms/1u@2176ms condemned=87 segments_deleted=379 packs_deleted=38 runs_deleted=35 commits_deleted=40 compacted=6 bytes_freed=6112647393 bytes_moved=26035881 pending=589
+1795385470582 INFO  lunix_engine::coord: store factor of the cut journal_bytes=179317440 store_bytes=92343621 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385471220 INFO  lunix_engine::coord: store factor of the cut journal_bytes=415261440 store_bytes=213630996 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385471288 INFO  lunix_engine::coord: store factor of the cut journal_bytes=79696640 store_bytes=41119833 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385472176 INFO  lunix_engine::coord: store factor of the cut journal_bytes=514882240 store_bytes=264872950 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385472244 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42743335 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385473054 INFO  lunix_engine::coord: store factor of the cut journal_bytes=511736320 store_bytes=263249633 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385473124 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44347880 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385473907 INFO  lunix_engine::coord: store factor of the cut journal_bytes=503347200 store_bytes=258936425 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385473969 INFO  lunix_engine::coord: store factor of the cut journal_bytes=81793920 store_bytes=42205169 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385474618 INFO  lunix_engine::coord: store factor of the cut journal_bytes=413164160 store_bytes=212592025 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385474700 INFO  lunix_engine::coord: store factor of the cut journal_bytes=116399040 store_bytes=59969074 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385475354 INFO  lunix_engine::coord: store factor of the cut journal_bytes=442526080 store_bytes=227665962 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385475426 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45414703 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385475764 INFO  lunix_gc::collector: gc pass done how="step" pass=85 wall_ms=236 steps=4 phases=mark=166ms/20u@1ms condemn=27ms/203u@188ms delete=0ms/590u@225ms compact=10ms/648u@225ms finish=0ms/1u@236ms condemned=160 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=4 bytes_freed=0 bytes_moved=5354980 pending=790
+1795385476140 INFO  lunix_engine::coord: store factor of the cut journal_bytes=465596160 store_bytes=239511563 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385476243 INFO  lunix_engine::coord: store factor of the cut journal_bytes=122690880 store_bytes=63215886 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385476905 INFO  lunix_engine::coord: store factor of the cut journal_bytes=455109760 store_bytes=234196733 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385476973 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42733777 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385477754 INFO  lunix_engine::coord: store factor of the cut journal_bytes=506493120 store_bytes=260559682 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385477829 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42733873 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385478618 INFO  lunix_engine::coord: store factor of the cut journal_bytes=516979520 store_bytes=265958692 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385478687 INFO  lunix_engine::coord: store factor of the cut journal_bytes=83891200 store_bytes=43271866 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385479476 INFO  lunix_engine::coord: store factor of the cut journal_bytes=510687680 store_bytes=262693170 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385479544 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43809937 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385480349 INFO  lunix_engine::coord: store factor of the cut journal_bytes=509639040 store_bytes=262201504 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385480411 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43819189 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385481054 INFO  lunix_engine::coord: store factor of the cut journal_bytes=410018240 store_bytes=210996648 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385481401 INFO  lunix_engine::coord: store factor of the cut journal_bytes=259014080 store_bytes=133325913 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385481493 INFO  lunix_gc::collector: gc pass done how="step" pass=86 wall_ms=438 steps=5 phases=mark=154ms/20u@1ms condemn=23ms/163u@157ms delete=0ms/791u@362ms compact=73ms/4446u@363ms finish=0ms/1u@438ms condemned=124 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=10 bytes_freed=0 bytes_moved=36870399 pending=951
+1795385481807 INFO  lunix_engine::coord: store factor of the cut journal_bytes=324029760 store_bytes=166720328 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385482456 INFO  lunix_engine::coord: store factor of the cut journal_bytes=441477440 store_bytes=227137149 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385482525 INFO  lunix_engine::coord: store factor of the cut journal_bytes=77599360 store_bytes=40062509 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385483126 INFO  lunix_engine::pressure: write throttle on headroom=2740439470 soft=2756762473 limit=18378416493 rate=11266785878 ingest_rate=743709579 reclaim_rate=0
+1795385483419 INFO  lunix_engine::coord: store factor of the cut journal_bytes=516979520 store_bytes=265977243 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385483485 INFO  lunix_engine::coord: store factor of the cut journal_bytes=78648000 store_bytes=40572591 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385484293 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261617278 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385484345 INFO  lunix_engine::coord: store factor of the cut journal_bytes=58723840 store_bytes=30321941 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385485114 INFO  lunix_engine::coord: store factor of the cut journal_bytes=472936640 store_bytes=243296465 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385485150 INFO  lunix_engine::coord: store factor of the cut journal_bytes=35653760 store_bytes=18457752 a_pred_milli=1000 a_real_milli=517 a_hat_milli=1000
+1795385487465 INFO  lunix_engine::coord: store factor of the cut journal_bytes=497055360 store_bytes=255698897 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385488146 INFO  lunix_engine::coord: store factor of the cut journal_bytes=429942400 store_bytes=221191088 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385488275 INFO  lunix_gc::collector: gc pass done how="step" pass=87 wall_ms=1722 steps=6 phases=mark=143ms/20u@1ms condemn=16ms/130u@144ms delete=933ms/952u@160ms compact=38ms/2608u@1682ms finish=0ms/1u@1721ms condemned=93 segments_deleted=329 packs_deleted=33 runs_deleted=18 commits_deleted=32 compacted=7 bytes_freed=5246022527 bytes_moved=21619140 pending=667
+1795385488276 INFO  lunix_engine::pressure: write throttle off throttled_ms=244524 delayed_writes=4679109 delayed_ms=53884057 delay_max_ms=2038
+1795385488486 INFO  lunix_engine::coord: store factor of the cut journal_bytes=287327360 store_bytes=147861990 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385489048 INFO  lunix_engine::coord: store factor of the cut journal_bytes=444623360 store_bytes=228770036 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385489118 INFO  lunix_engine::coord: store factor of the cut journal_bytes=99620800 store_bytes=51370264 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385489761 INFO  lunix_engine::coord: store factor of the cut journal_bytes=404775040 store_bytes=208250536 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385489845 INFO  lunix_engine::coord: store factor of the cut journal_bytes=124788160 store_bytes=64301094 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385490503 INFO  lunix_engine::coord: store factor of the cut journal_bytes=442526080 store_bytes=227656694 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385490598 INFO  lunix_engine::coord: store factor of the cut journal_bytes=91231680 store_bytes=47075279 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385491397 INFO  lunix_engine::coord: store factor of the cut journal_bytes=515930880 store_bytes=265401761 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385491471 INFO  lunix_engine::coord: store factor of the cut journal_bytes=88085760 store_bytes=45433245 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385492258 INFO  lunix_engine::coord: store factor of the cut journal_bytes=505444480 store_bytes=260012323 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385492324 INFO  lunix_engine::coord: store factor of the cut journal_bytes=78648000 store_bytes=40591095 a_pred_milli=1000 a_real_milli=516 a_hat_milli=1000
+1795385493113 INFO  lunix_engine::coord: store factor of the cut journal_bytes=511736320 store_bytes=263240448 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385493181 INFO  lunix_engine::coord: store factor of the cut journal_bytes=82842560 store_bytes=42724528 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385493649 INFO  lunix_gc::collector: gc pass done how="step" pass=88 wall_ms=367 steps=5 phases=mark=164ms/21u@1ms condemn=26ms/191u@186ms delete=0ms/668u@222ms compact=44ms/2923u@223ms finish=0ms/1u@367ms condemned=149 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=24234336 pending=856
+1795385494042 INFO  lunix_engine::coord: store factor of the cut journal_bytes=516979520 store_bytes=265949205 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385494109 INFO  lunix_engine::coord: store factor of the cut journal_bytes=85988480 store_bytes=44357303 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385494897 INFO  lunix_engine::coord: store factor of the cut journal_bytes=508590400 store_bytes=261635969 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385494961 INFO  lunix_engine::coord: store factor of the cut journal_bytes=84939840 store_bytes=43781880 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385495611 INFO  lunix_engine::coord: store factor of the cut journal_bytes=422601920 store_bytes=217406408 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385495682 INFO  lunix_engine::coord: store factor of the cut journal_bytes=100669440 store_bytes=51908378 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385496328 INFO  lunix_engine::coord: store factor of the cut journal_bytes=433088320 store_bytes=222814523 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385496401 INFO  lunix_engine::coord: store factor of the cut journal_bytes=92280320 store_bytes=47603941 a_pred_milli=1000 a_real_milli=515 a_hat_milli=1000
+1795385498931 INFO  lunix_gc::collector: gc pass done how="step" pass=89 wall_ms=226 steps=4 phases=mark=147ms/20u@1ms condemn=13ms/93u@169ms delete=0ms/857u@192ms compact=33ms/2407u@192ms finish=0ms/1u@226ms condemned=75 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=6 bytes_freed=0 bytes_moved=19950315 pending=947
+1795385499122 INFO  lunix_engine::coord: store factor of the cut journal_bytes=149955520 store_bytes=77213761 a_pred_milli=1000 a_real_milli=514 a_hat_milli=1000
+1795385504202 INFO  lunix_gc::collector: gc pass done how="step" pass=90 wall_ms=175 steps=3 phases=mark=131ms/19u@1ms condemn=2ms/18u@152ms delete=0ms/948u@155ms compact=19ms/1411u@155ms finish=0ms/1u@175ms condemned=14 segments_deleted=0 packs_deleted=0 runs_deleted=0 commits_deleted=0 compacted=5 bytes_freed=0 bytes_moved=11689568 pending=963
+1795385506742 INFO  lunixd::audit: {"ts_ms":1795385506742,"uid":0,"gid":0,"pid":657509,"method":"detach","volume":"pa16k","outcome":"ok","code":null,"message":null}
+1795385523925 INFO  lunixd::server: signal: quiescing every device
+1795385523925 INFO  lunixd::daemon: quiesced; exiting without a stop command devices=0 code=0

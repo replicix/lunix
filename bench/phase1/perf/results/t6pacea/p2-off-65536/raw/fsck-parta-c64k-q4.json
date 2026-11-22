@@ -1,0 +1,214 @@
+{
+  "counts": {
+    "gc_dry_run": 1,
+    "gc_pending": 836
+  },
+  "deep": true,
+  "exit": 0,
+  "findings": [
+    {
+      "code": "gc_dry_run",
+      "message": "a pass would condemn 19 segments and delete 688 segments, 85 packs, 0 index runs and 84 commits (10952210091 bytes), and compact 0 segments (0 live bytes)",
+      "object": "gc",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828471 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb0.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828600 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb1.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828633 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb2.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828529 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb3.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828580 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb4.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828560 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb5.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (4190679 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb6.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828506 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eb9.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828649 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eba.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828583 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ebb.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828472 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ebc.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (5587526 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ebd.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828528 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec0.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828653 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec1.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828554 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec2.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828573 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec3.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828604 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec4.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828521 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec5.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828574 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec6.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828563 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec7.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828495 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec8.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828655 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ec9.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828545 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002eca.seg",
+      "severity": "note"
+    },
+    {
+      "code": "gc_pending",
+      "message": "condemned (16828591 bytes): a pass deletes it after its grace and a recheck",
+      "object": "segments/0000000000002ecb.seg",
+      "severity": "note"
+    }
+  ],
+  "gc_dry_run": {
+    "bytes_freed": 10952210091,
+    "bytes_moved": 0,
+    "commits_deleted": 84,
+    "dry_run": true,
+    "packs_deleted": 85,
+    "pass": 0,
+    "runs_deleted": 0,
+    "segments_compacted": 0,
+    "segments_condemned": 19,
+    "segments_deleted": 688
+  },
+  "mode": "integrity",
+  "peak_rss_kib": 107876,
+  "ratios": {
+    "bytes": {
+      "commits": 384292,
+      "index": 273400104,
+      "journal": 1077936128,
+      "map_packs": 17616700,
+      "other": 7390251,
+      "segments": 12177502688
+    },
+    "chunk_count": 262144,
+    "chunk_size": 65536,
+    "compression_ratio": 1.9767727534105524,
+    "dedup_ratio": 1.0,
+    "hole_chunks": 229376,
+    "hole_share": 0.875,
+    "mapped_chunks": 32768,
+    "unique_chunks": 32768,
+    "unique_clen": 1086358381,
+    "unique_ulen": 2147483648,
+    "unresolved_entries": 0
+  },
+  "repairs": [],
+  "stats": {
+    "commits": 87,
+    "extents": 367862,
+    "journal_flushed": 2048,
+    "journal_marks": 0,
+    "journal_records": 0,
+    "map_nodes": 79,
+    "packs": 92,
+    "segments": 767
+  },
+  "tip": 679,
+  "uncovered": [
+    "journal: bytes after the last record of a lane and the zero padding of a batch (a torn tail is legal)",
+    "volume.json and state/device: content that still parses (no checksum)",
+    "state/checkpoint: a hint; damage is a warning, never an error",
+    "cache/: not looked at"
+  ],
+  "volume": "adbc88d7-8932-4b39-ad7a-a3060fa2bff8"
+}
