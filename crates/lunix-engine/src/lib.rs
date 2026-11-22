@@ -63,6 +63,8 @@ pub use engine::CoordHold;
 pub use engine::{CommitOutcome, Engine, GcStatusHandle, TipView};
 pub use error::OpenError;
 pub use pressure::{Pressure, PressureTracker};
+#[doc(hidden)]
+pub use read::REVALIDATE_MAX;
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;
 

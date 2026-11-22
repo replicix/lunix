@@ -1,12 +1,24 @@
-//! Store reads: the R1 check, the stale-hint fallback and the read helper pool.
+//! Store reads: the R1 check, the stale-hint fallback, the revalidating read
+//! (C7) and the read helper pool.
 //!
 //! **R1** (cross-cutting rule 13): every data read passes the map entry's
 //! `id_prefix` (or the full id) and the volume's chunk size to
-//! `ExtentCodec::open`; a mismatch is an `extent_auth_failures` event and an
-//! error, never data. [`ExtentReader::open_at`] is the engine's only caller
-//! of `SegmentStore::read_extent`, and it takes an [`Expectation`], which has
-//! no "none" case: a lean volume (`id_len = 0`) reads as a scan
+//! `ExtentCodec::open`; a mismatch is an error, never data, and an
+//! `extent_auth_failures` event once it is known to concern the block's
+//! current entry (see below). [`ExtentReader::open_at`] is the engine's only
+//! caller of `SegmentStore::read_extent`, and it takes an [`Expectation`],
+//! which has no "none" case: a lean volume (`id_len = 0`) reads as a scan
 //! (`verify_id`), as R1 says.
+//!
+//! **C7** (revalidating read): a guest read part whose entry went stale (its
+//! segment collected, its hint failing authentication) looks the block up in
+//! the map again and reads the new entry; see [`ReadCtx`]. An `Auth` event is
+//! counted only when the map still names the entry that failed, so a read
+//! that raced a collection never raises a false integrity alarm. The
+//! destage base read (`ChunkReader::read_entry`) does not revalidate and
+//! counts at once: it runs inside a cut, and a GC step runs only between
+//! cuts with the map at the tip. Out-of-process readers of a live volume
+//! cannot revalidate and must accept `NotFound`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -46,7 +58,9 @@ pub enum Expectation<'a> {
 pub trait ChunkReader: Send + Sync {
     /// Reads, verifies and decompresses the chunk `entry` names, falling
     /// back to the index on a stale hint. `out` is replaced by `chunk_size`
-    /// bytes.
+    /// bytes. Every `Auth` failure is counted in `extent_auth_failures` at
+    /// once: this reader does not re-resolve the block (guest reads do, in
+    /// `ReadCtx`).
     ///
     /// # Errors
     /// `Auth` when no copy verifies, `NotFound` when none exists, `Io`.
@@ -72,6 +86,12 @@ pub(crate) struct ExtentReader {
 
 fn stale(e: &Error) -> bool {
     matches!(e.kind(), ErrorKind::NotFound | ErrorKind::Corrupt)
+}
+
+/// Failures after which a guest read looks the block up again (C7): the
+/// extent is gone, damaged or not the block's any more.
+fn revalidates(e: &Error) -> bool {
+    stale(e) || e.kind() == ErrorKind::Auth
 }
 
 impl ExtentReader {
@@ -106,20 +126,29 @@ impl ExtentReader {
         Ok(())
     }
 
-    fn auth_failed(&self) {
-        add(&self.stats.extent_auth_failures, 1);
+    fn count_auth(&self, n: u64) {
+        if n > 0 {
+            add(&self.stats.extent_auth_failures, n);
+        }
     }
-}
 
-impl ChunkReader for ExtentReader {
-    fn read_entry(&self, entry: &DataEntry, out: &mut Vec<u8>) -> Result<()> {
+    /// [`ChunkReader::read_entry`] with the `Auth` events of this attempt
+    /// added to `auth` instead of the counter, so a caller that can
+    /// re-resolve the block decides whether they count (C7: not while the
+    /// hint was stale).
+    fn read_entry_deferred(
+        &self,
+        entry: &DataEntry,
+        out: &mut Vec<u8>,
+        auth: &mut u64,
+    ) -> Result<()> {
         let hint = entry_hint(entry);
         let first = match self.open_at(&hint, Expectation::Prefix(&entry.prefix), out) {
             Ok(()) => return Ok(()),
             Err(e) => e,
         };
         if first.kind() == ErrorKind::Auth {
-            self.auth_failed();
+            *auth += 1;
         } else if !stale(&first) {
             return Err(first);
         }
@@ -134,7 +163,7 @@ impl ChunkReader for ExtentReader {
             }
             match self.open_at(&cand.hint, Expectation::Full(&cand.id), out) {
                 Ok(()) => return Ok(()),
-                Err(e) if e.kind() == ErrorKind::Auth => self.auth_failed(),
+                Err(e) if e.kind() == ErrorKind::Auth => *auth += 1,
                 Err(e) if stale(&e) => {}
                 Err(e) => return Err(e),
             }
@@ -142,13 +171,22 @@ impl ChunkReader for ExtentReader {
         out.clear();
         Err(first)
     }
+}
+
+impl ChunkReader for ExtentReader {
+    fn read_entry(&self, entry: &DataEntry, out: &mut Vec<u8>) -> Result<()> {
+        let mut auth = 0;
+        let r = self.read_entry_deferred(entry, out, &mut auth);
+        self.count_auth(auth);
+        r
+    }
 
     fn confirm(&self, hint: &Hint, id: &ChunkId) -> Result<bool> {
         let mut out = Vec::new();
         match self.open_at(hint, Expectation::Full(id), &mut out) {
             Ok(()) => Ok(true),
             Err(e) if e.kind() == ErrorKind::Auth => {
-                self.auth_failed();
+                self.count_auth(1);
                 Ok(false)
             }
             Err(e) if stale(&e) => Ok(false),
@@ -182,32 +220,130 @@ pub(crate) struct ReadCtx {
     pub(crate) cache: Arc<ChunkCache>,
 }
 
+/// Retries of one read part after a failed read (C7). Each needs an observed
+/// change of the block's entry (a cut, a re-hint) during the read, so the
+/// bound costs nothing in normal operation; a part still failing after these
+/// reports its error and counts `read_revalidate_exhausted`.
+#[doc(hidden)]
+pub const REVALIDATE_MAX: u32 = 16;
+
 impl ReadCtx {
+    /// The decoded chunk `e` names, from the cache or the store. `Auth`
+    /// events are added to `auth`, not counted.
+    fn chunk(&self, e: &DataEntry, auth: &mut u64) -> Result<Arc<[u8]>> {
+        let key = (entry_hint(e), e.prefix);
+        if let Some(d) = self.cache.get(&key) {
+            return Ok(d);
+        }
+        let mut out = Vec::new();
+        self.reader.read_entry_deferred(e, &mut out, auth)?;
+        let d: Arc<[u8]> = Arc::from(out);
+        self.cache.insert(key, Arc::clone(&d));
+        Ok(d)
+    }
+
+    /// One read part. The entry the job carries (or the map gave) can be
+    /// stale by the time the store is read: a cut re-hinted the block, or
+    /// the overwritten chunk's segment was collected. When the read then
+    /// fails with `NotFound`, `Corrupt` or `Auth`, the block is looked up
+    /// again and a changed entry is read instead (C7). `Auth` events are
+    /// counted only if the map still names the entry that failed, also when
+    /// the failed hint was bridged by the index fallback and the read
+    /// succeeded. Nothing is added to the success path but a local counter.
+    ///
+    /// A retried part reads the map as it is now, so the parts of one request
+    /// may come from different snapshots (a part retried after a concurrent
+    /// write is newer than its siblings). That is allowed for a read that
+    /// overlaps a write; it is never older than the request's start.
     fn run(&self, job: &ReadJob) -> Result<Vec<u8>> {
-        let entry = match job.entry {
+        let mut entry = match job.entry {
             Some(e) => Some(e),
             None => self.map.get(ChunkNo(job.ci))?,
         };
-        let Some(e) = entry else {
-            return Ok(vec![0; job.len]);
-        };
-        let key = (entry_hint(&e), e.prefix);
-        let data = match self.cache.get(&key) {
-            Some(d) => d,
-            None => {
-                let mut out = Vec::new();
-                self.reader.read_entry(&e, &mut out)?;
-                let d: Arc<[u8]> = Arc::from(out);
-                self.cache.insert(key, Arc::clone(&d));
-                d
+        let mut retries = 0;
+        loop {
+            let Some(e) = entry else {
+                return Ok(vec![0; job.len]);
+            };
+            let mut auth = 0;
+            let err = match self.chunk(&e, &mut auth) {
+                Ok(data) => {
+                    if auth > 0 {
+                        self.settle_auth(job.ci, &e, auth);
+                    }
+                    return data
+                        .get(job.chunk_off..job.chunk_off + job.len)
+                        .map(<[u8]>::to_vec)
+                        .ok_or(Error::Corrupt {
+                            what: "chunk",
+                            detail: "read past the chunk",
+                        });
+                }
+                Err(err) => err,
+            };
+            match self.after_failure(job.ci, &e, &err, auth, retries) {
+                Some(next) => {
+                    entry = next;
+                    retries += 1;
+                }
+                None => return Err(err),
+            }
+        }
+    }
+
+    /// A read of `e` succeeded after `auth` failed authentications (the hint
+    /// was bridged by the index): they are real only if the block still
+    /// names `e`.
+    #[cold]
+    fn settle_auth(&self, ci: u64, e: &DataEntry, auth: u64) {
+        match self.map.get(ChunkNo(ci)) {
+            Ok(now) if now != Some(*e) => {}
+            Ok(_) => self.reader.count_auth(auth),
+            Err(err) => {
+                tracing::debug!(chunk = ci, error = %err, "re-lookup failed; counting the authentication failure");
+                self.reader.count_auth(auth);
+            }
+        }
+    }
+
+    /// The read of `e` failed with `err` after `auth` failed authentications.
+    /// `Some(next)` retries with the block's new entry; `None` reports `err`
+    /// (the events counted if they concern the current entry).
+    #[cold]
+    fn after_failure(
+        &self,
+        ci: u64,
+        e: &DataEntry,
+        err: &Error,
+        auth: u64,
+        retries: u32,
+    ) -> Option<Option<DataEntry>> {
+        if !revalidates(err) {
+            self.reader.count_auth(auth);
+            return None;
+        }
+        let now = match self.map.get(ChunkNo(ci)) {
+            Ok(now) => now,
+            Err(me) => {
+                tracing::debug!(chunk = ci, error = %me, "re-lookup failed; reporting the read error");
+                self.reader.count_auth(auth);
+                return None;
             }
         };
-        data.get(job.chunk_off..job.chunk_off + job.len)
-            .map(<[u8]>::to_vec)
-            .ok_or(Error::Corrupt {
-                what: "chunk",
-                detail: "read past the chunk",
-            })
+        if now == Some(*e) {
+            // Nothing changed: the error is real.
+            self.reader.count_auth(auth);
+            return None;
+        }
+        // The attempt's events concern an entry the block no longer names.
+        if retries >= REVALIDATE_MAX {
+            add(&self.reader.stats.read_revalidate_exhausted, 1);
+            tracing::warn!(chunk = ci, retries, error = %err, "read part still failing after its entry changed; giving up");
+            return None;
+        }
+        add(&self.reader.stats.read_revalidated, 1);
+        tracing::debug!(chunk = ci, error = %err, "read part retried with the block's new entry");
+        Some(now)
     }
 }
 

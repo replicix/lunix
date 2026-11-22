@@ -59,6 +59,8 @@ counters!(
     dirty_leaves,
     commits,
     extent_auth_failures,
+    read_revalidated,
+    read_revalidate_exhausted,
 );
 
 /// Adds to a counter.

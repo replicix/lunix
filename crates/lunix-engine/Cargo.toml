@@ -26,3 +26,4 @@ tracing.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 lunix-testkit.workspace = true
+lunix-gc.workspace = true
