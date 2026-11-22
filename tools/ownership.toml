@@ -533,3 +533,13 @@ paths = [
   "docs/plans/v1/reports/p1-gate.md",
   "tools/ownership.toml",
 ]
+
+# revalidate: C7, the revalidating read: a read part whose segment is gone
+# or whose hint fails authentication looks the block up again.
+[revalidate]
+paths = [
+  "crates/lunix-engine/src/read.rs",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/revalidate.rs",
+  "tools/ownership.toml",
+]
