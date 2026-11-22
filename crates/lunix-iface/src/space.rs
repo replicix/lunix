@@ -226,6 +226,19 @@ pub enum ReserveOutcome {
     NoSpace,
 }
 
+/// One store byte per journal byte, in the thousandths of the store factor:
+/// its lower clamp.
+pub const FACTOR_ONE: u64 = 1000;
+
+/// Sixteen store bytes per journal byte (a 64 KiB chunk written 4 KiB at a
+/// time, incompressible): the upper clamp of the engine's `A_hat`.
+pub const FACTOR_MAX: u64 = 16_000;
+
+/// The factor before the engine has measured a cut: 2.0 (the measured write
+/// amplification of the first cuts is 2.4 to 2.8), so a volume that starts
+/// full of journal does not start at one.
+pub const FACTOR_INITIAL: u64 = 2000;
+
 /// The gate's write-throttle state (ADR-32).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -317,6 +330,31 @@ pub struct ThrottleFigures {
     /// The ring pace the gate applies now, bytes per second (0: none,
     /// also with the band off or closing).
     pub ring_pace_rate: u64,
+    /// The store factor the gate holds now, thousandths of a store byte per
+    /// journal byte (the engine's `A_hat`; [`FACTOR_INITIAL`] before its
+    /// first measured cut). Held whether or not the gate paces by it.
+    pub store_factor_milli: u64,
+    /// The factor the curve reads: `store_factor_milli` times the margin
+    /// (`throttle_pace_store_margin_percent`).
+    pub store_factor_biased_milli: u64,
+    /// The journal bytes reserved and not yet in a cut (`J`), the cut in
+    /// flight left out.
+    pub journal_uncut: u64,
+    /// The projected headroom `headroom - (A_biased - 1) * J`, bytes. What
+    /// the band's curve reads when it paces by store bytes; computed from the
+    /// held figures whether or not it does.
+    pub store_h_proj: u64,
+    /// With the store pace on: the pace applies now although the raw
+    /// headroom is at or above the soft mark (the state is `open`).
+    pub store_paced_above_soft: bool,
+    /// Time the store pace applied above the soft mark, milliseconds.
+    pub store_above_soft_ms: u64,
+    /// Requests admitted after a wait while the raw headroom was at or above
+    /// the soft mark (only the store pace could delay them); also counted in
+    /// `delayed_writes`.
+    pub store_delayed_writes: u64,
+    /// Their summed wait, milliseconds.
+    pub store_delayed_ms: u64,
 }
 
 /// A point-in-time view of the ledger.
@@ -501,4 +539,22 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// The rate is raised to the band's minimum rate. A gate without a band
     /// ignores it.
     fn set_ring_pace(&self, _rate: Option<u64>) {}
+
+    /// Tells the gate the store factor and the cut in flight (P1': the band
+    /// paces in store bytes). `factor_milli` is the engine's estimate of the
+    /// store bytes one journal byte becomes at the cut, in thousandths (at
+    /// least 1000); `in_flight` the journal bytes of the cut being committed
+    /// (0 between cuts), which already hold their segment bound and are not
+    /// counted again. The gate derives the journal bytes not yet cut from its
+    /// own `JournalReserved` charge less `in_flight`, so the figure is as
+    /// fresh as the ledger. A gate without a band, or with store-byte pacing
+    /// off, only records it for the status.
+    fn set_store_pace(&self, _factor_milli: u64, _in_flight: u64) {}
+
+    /// True when the gate paces by store bytes (`throttle_pace_store_bytes`):
+    /// the engine then pushes the factor and the cut in flight, and does
+    /// nothing for it otherwise.
+    fn store_pace_enabled(&self) -> bool {
+        false
+    }
 }

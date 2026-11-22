@@ -875,6 +875,29 @@ pub struct WritePathStatus {
     pub ring_pace_max_ms: u64,
     pub ring_pace_capped: u64,
     pub ring_pace_bypassed_fua: u64,
+    /// The store factor `A_hat` the gate holds, thousandths of a store byte
+    /// per journal byte (P1').
+    pub store_factor_milli: u64,
+    /// `A_hat` with the margin, the factor the curve reads, thousandths.
+    pub store_factor_biased_milli: u64,
+    /// The journal bytes reserved and not yet in a cut (`J`).
+    pub store_journal_uncut: u64,
+    /// The projected headroom `headroom - (A_biased - 1) * J`, bytes.
+    pub store_h_proj: u64,
+    /// The store pace applies although the raw headroom is at or above the
+    /// soft mark.
+    pub store_paced_above_soft: bool,
+    /// Time it applied above the soft mark, milliseconds.
+    pub store_above_soft_ms: u64,
+    /// Writes admitted after a wait while the raw headroom was at or above
+    /// the soft mark, and their summed wait, milliseconds.
+    pub store_delayed_writes: u64,
+    pub store_delayed_ms: u64,
+    /// `A_hat` as it stood when the last cut began, thousandths (0: no cut
+    /// yet). Against `store_real_milli` it is the estimator's error.
+    pub store_pred_milli: u64,
+    /// The last cut's measured store bytes per journal byte, thousandths.
+    pub store_real_milli: u64,
     /// Bytes of the resident journal window now (what the journal keeps in
     /// memory of what it wrote until the ring file is reclaimed).
     pub window_resident_bytes: u64,

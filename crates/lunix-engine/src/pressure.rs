@@ -196,6 +196,18 @@ pub enum LogLine {
     Stop { waiters: u64, limit: u64, used: u64 },
     /// ERROR `volume full`.
     Full { used: u64, limit: u64 },
+    /// INFO `store pace above the soft mark` / `ended`: the store pace
+    /// (P1') applies or stops applying while the state is `open`.
+    StorePace {
+        on: bool,
+        rate: u64,
+        headroom: u64,
+        soft: u64,
+        store_h_proj: u64,
+        journal_uncut: u64,
+        factor_biased_milli: u64,
+        above_soft_ms: u64,
+    },
     /// INFO `volume no longer full`.
     NotFull {
         headroom: u64,
@@ -224,6 +236,9 @@ pub struct ThrottleWatch {
     full_since: Option<Duration>,
     /// Latches already written a line for (the gate's `fulls`).
     fulls_logged: u64,
+    /// The store pace above the soft mark, as last logged, and when.
+    above_logged: bool,
+    above_last: Option<Duration>,
 }
 
 impl ThrottleWatch {
@@ -321,6 +336,28 @@ impl ThrottleWatch {
         }
         if to != ThrottleState::Full && self.logged != ThrottleState::Full {
             self.full_since = None;
+        }
+        // The store pace above the soft mark (P1') changes no state: its own
+        // transitions, merged like the state's when closer than the coalesce
+        // period (the next due one is written).
+        let above = t.store_paced_above_soft;
+        if above != self.above_logged
+            && self
+                .above_last
+                .is_none_or(|l| now.saturating_sub(l) >= LOG_COALESCE)
+        {
+            self.above_logged = above;
+            self.above_last = Some(now);
+            out.push(LogLine::StorePace {
+                on: above,
+                rate: t.rate.unwrap_or(0),
+                headroom: t.headroom,
+                soft: t.soft,
+                store_h_proj: t.store_h_proj,
+                journal_uncut: t.journal_uncut,
+                factor_biased_milli: t.store_factor_biased_milli,
+                above_soft_ms: t.store_above_soft_ms,
+            });
         }
         out
     }
@@ -479,6 +516,30 @@ impl Inner {
                     "volume full: writes fail with ENOSPC until space is freed"
                 );
             }
+            LogLine::StorePace {
+                on,
+                rate,
+                headroom,
+                soft,
+                store_h_proj,
+                journal_uncut,
+                factor_biased_milli,
+                above_soft_ms,
+            } => tracing::info!(
+                rate,
+                headroom,
+                soft,
+                store_h_proj,
+                journal_uncut,
+                factor_biased_milli,
+                above_soft_ms,
+                "{}",
+                if on {
+                    "store pace above the soft mark"
+                } else {
+                    "store pace above the soft mark ended"
+                }
+            ),
             LogLine::NotFull {
                 headroom,
                 full_ms,
@@ -509,6 +570,30 @@ mod tests {
             },
             ..SpaceSnapshot::default()
         }
+    }
+
+    #[test]
+    fn the_store_pace_above_the_soft_mark_logs_its_transitions_only_and_not_in_a_hurry() {
+        let mut w = ThrottleWatch::default();
+        let mut s = snap(ThrottleState::Open);
+        let mut at = |s: &SpaceSnapshot, t: u64| w.observe(s, Pressure::Normal, secs(t));
+        assert!(at(&s, 0).is_empty());
+        s.throttle.store_paced_above_soft = true;
+        let on = at(&s, 10);
+        assert!(
+            matches!(on.as_slice(), [LogLine::StorePace { on: true, .. }]),
+            "{on:?}"
+        );
+        assert!(at(&s, 11).is_empty(), "no repeat while it holds");
+        // It ends within the coalesce period: not written yet, written when due.
+        s.throttle.store_paced_above_soft = false;
+        assert!(at(&s, 12).is_empty());
+        let off = at(&s, 10 + LOG_COALESCE.as_secs() + 1);
+        assert!(
+            matches!(off.as_slice(), [LogLine::StorePace { on: false, .. }]),
+            "{off:?}"
+        );
+        assert!(at(&s, 1000).is_empty());
     }
 
     fn params() -> GcParams {

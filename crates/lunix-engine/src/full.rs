@@ -404,6 +404,25 @@ impl JournalCharges {
         }
     }
 
+    /// The sum of the charges of every record at or below `cut`: what a
+    /// cut at `cut` would release. Reads only, and like `take_upto` holds a
+    /// lane's mutex only to copy its prefix; the sum is outside. For the
+    /// store pace (once per cut, only when the gate paces by store bytes).
+    pub(crate) fn sum_upto(&self, cut: u64) -> u64 {
+        self.lanes
+            .iter()
+            .chain(std::iter::once(&self.recovered))
+            .map(|q| {
+                let prefix: Vec<u64> = {
+                    let q = lock(q);
+                    let n = q.partition_point(|(s, _)| *s <= cut);
+                    q.range(..n).map(|e| e.1).collect()
+                };
+                prefix.iter().fold(0u64, |a, b| a.saturating_add(*b))
+            })
+            .fold(0u64, u64::saturating_add)
+    }
+
     /// Takes the charges of every record at or below `cut`; returns their
     /// sum and, per lane, whether the lane still holds charges above the cut
     /// (the replayed records, while any are left, count for every lane): the

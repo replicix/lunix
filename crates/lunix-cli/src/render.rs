@@ -250,6 +250,22 @@ fn human_ms(ms: u64) -> String {
 /// since the attach says how much.
 fn throttle(out: &mut dyn Write, t: &ThrottleStatus) -> io::Result<()> {
     if t.state == ThrottleState::Open {
+        // The store pace (P1') can pace while the raw headroom is above the
+        // soft mark: the state is open, the rate is not empty.
+        if let Some(r) = t.rate {
+            kv(
+                out,
+                "throttle",
+                &format!(
+                    "open, paced above soft, {}/s, headroom {} of {}, longest wait {}",
+                    format_bytes(r),
+                    format_bytes(t.headroom),
+                    format_bytes(t.limit),
+                    human_ms(t.delay_max_ms)
+                ),
+            )?;
+            return Ok(());
+        }
         if t.throttled_ms > 0 || t.delayed_writes > 0 || t.enospc > 0 {
             kv(
                 out,
