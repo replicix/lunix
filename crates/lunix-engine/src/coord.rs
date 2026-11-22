@@ -132,6 +132,13 @@ pub(crate) struct Coord {
     /// The ring pace: writes are admitted at the drain rate while the ring is
     /// nearly full (milestone jstall).
     pub(crate) ring_pacer: crate::cut::RingPacer,
+    /// The store bytes the cut in flight settled (segments, map packs and the
+    /// commit), noted at C9 with `cut_bytes` (P1').
+    pub(crate) cut_store_bytes: u64,
+    /// The store factor the space gate paces by (P1').
+    pub(crate) store_factor: crate::cut::StoreFactor,
+    /// `A_hat` when the cut in flight began.
+    pub(crate) cut_pred_milli: u64,
 }
 
 impl Coord {
@@ -171,6 +178,9 @@ impl Coord {
             cut_end: Duration::ZERO,
             reclaim_error: None,
             ring_pacer: crate::cut::RingPacer::default(),
+            cut_store_bytes: 0,
+            store_factor: crate::cut::StoreFactor::default(),
+            cut_pred_milli: 0,
         }
     }
 }
@@ -393,6 +403,7 @@ impl Inner {
         self.update_pressure();
         let mut co = crate::engine::lock(&self.coord);
         self.update_ring_pace(&mut co);
+        self.update_store_pace(&co, 0);
         let wanted = self.wanted(&mut co);
         self.reclaim_covered(&mut co);
         // ADR-32 T2: a full volume cuts its discards and turns the window.
@@ -546,6 +557,9 @@ impl Inner {
         bounded: bool,
     ) -> Result<CommitOutcome> {
         let res = self.commit_once(co, force, new_size, bounded);
+        // The cut is over, committed or not: nothing is in flight, and the
+        // factor may have moved.
+        self.update_store_pace(co, 0);
         self.full.note_commit(&res, self.clock.monotonic());
         match &res {
             Err(e) if e.kind() == ErrorKind::NoSpace => self.space_short(co),
@@ -594,6 +608,11 @@ impl Inner {
         c = self.bound_cut(prev, c);
         point!(self.points, "engine.c1.waited");
         let cut_started = self.clock.monotonic();
+        // P1': the gate learns which journal bytes this cut holds (their
+        // segment bound is reserved), and `A_hat` is kept to be compared with
+        // what the cut settles.
+        co.cut_pred_milli = co.store_factor.a_hat();
+        self.update_store_pace(co, self.jcharges.sum_upto(c));
         // A cut too big for the map's dirty-leaf cap is retried smaller:
         // any c' in (prev, c] is a cut too.
         let _running = CutRunning::begin(self);
@@ -691,6 +710,19 @@ impl Inner {
         }
         co.prev_cut_end = Some(co.cut_end);
         let c = &self.cuts;
+        if let Some(real) = co.store_factor.push(co.cut_bytes, co.cut_store_bytes) {
+            c.store_pred_milli
+                .store(co.cut_pred_milli, Ordering::Relaxed);
+            c.store_real_milli.store(real, Ordering::Relaxed);
+            tracing::info!(
+                journal_bytes = co.cut_bytes,
+                store_bytes = co.cut_store_bytes,
+                a_pred_milli = co.cut_pred_milli,
+                a_real_milli = real,
+                a_hat_milli = co.store_factor.a_hat(),
+                "store factor of the cut"
+            );
+        }
         c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
         c.last_cut_ms.store(
             u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
@@ -721,6 +753,14 @@ impl Inner {
         if self.cuts.ring_pace_rate.swap(w, Ordering::Relaxed) != w {
             self.space.set_ring_pace(want);
         }
+    }
+
+    /// Tells the space gate the store factor and the journal bytes of the cut
+    /// in flight (P1'; `0` between cuts). The gate holds what it is told and
+    /// ignores a repeat; it paces by it only with `throttle_pace_store_bytes`.
+    fn update_store_pace(&self, co: &Coord, in_flight: u64) {
+        self.space
+            .set_store_pace(co.store_factor.a_hat(), in_flight);
     }
 
     /// Lowers `c` so that the cut dirties at most `max_leaves_per_cut` map
@@ -907,7 +947,7 @@ impl Inner {
                 return Err(e.into());
             }
         };
-        let map_actual = map_packs.iter().map(|(_, b)| *b).sum();
+        let map_actual: u64 = map_packs.iter().map(|(_, b)| *b).sum();
         self.settle(&mut acct, SpaceKind::Map, map_bound, map_actual);
         let map_packs: Vec<_> = map_packs.into_iter().map(|(p, _)| p).collect();
         self.full.cut_alive(self.clock.monotonic());
@@ -1064,9 +1104,15 @@ impl Inner {
             self.note_lane_backlog(&left);
         }
         co.cut_bytes = released;
+        co.cut_store_bytes = seg_actual
+            .saturating_add(map_actual)
+            .saturating_add(sealed.bytes.len() as u64);
         let give = released.min(held);
         self.journal_charged.fetch_sub(give, Ordering::AcqRel);
         self.space.release(SpaceKind::JournalReserved, give);
+        // The cut's journal bytes are released: none is in flight now (the
+        // factor follows in `note_cut`).
+        self.update_store_pace(co, 0);
         self.overlay.release(&cut);
         self.abandon(acct);
         co.cut_end = self.clock.monotonic();

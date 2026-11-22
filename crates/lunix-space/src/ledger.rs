@@ -14,7 +14,7 @@ use lunix_iface::{Error, Result};
 
 use crate::policy::Policy;
 use crate::probe::FsStat;
-use crate::throttle::{Bucket, Counters, Meter, StateClock, ThrottleConfig};
+use crate::throttle::{Bucket, Counters, Meter, StateClock, ThrottleConfig, FACTOR_ONE};
 
 const HEADROOM: usize = SpaceKind::Headroom as usize;
 
@@ -64,6 +64,11 @@ pub(crate) struct Ledger {
     /// nearly full (`SpaceGate::set_ring_pace`), bytes per second. A second
     /// input of the band: the space state does not follow it.
     pub ring_pace: Option<u64>,
+    /// The engine's store factor `A_hat` (`SpaceGate::set_store_pace`),
+    /// thousandths; 1000 before its first cut.
+    pub store_factor: u64,
+    /// The journal bytes of the cut in flight (0 between cuts).
+    pub store_in_flight: u64,
     pub bucket: Bucket,
     pub counters: Counters,
     pub state: StateClock,
@@ -84,6 +89,8 @@ impl Ledger {
             fulls: 0,
             throttle,
             ring_pace: None,
+            store_factor: FACTOR_ONE,
+            store_in_flight: 0,
             bucket: Bucket::new(),
             counters: Counters::default(),
             state: StateClock::new(now),
@@ -213,7 +220,44 @@ impl Ledger {
         if self.closing {
             return None;
         }
-        self.throttle.rate(self.headroom(), self.soft())
+        self.throttle.paced_rate(
+            self.headroom(),
+            self.soft(),
+            self.biased_factor(),
+            self.pending_journal(),
+        )
+    }
+
+    /// The factor the curve reads: the engine's `A_hat` with the margin.
+    pub fn biased_factor(&self) -> u64 {
+        self.throttle.biased_factor(self.store_factor)
+    }
+
+    /// `J`: the journal bytes reserved and not yet in a cut. The cut in
+    /// flight is left out: its segment bound is held already.
+    pub fn pending_journal(&self) -> u64 {
+        self.held[SpaceKind::JournalReserved.index()].saturating_sub(self.store_in_flight)
+    }
+
+    /// The projected headroom `headroom - (A_hat - 1) * J`.
+    pub fn projected_headroom(&self) -> u64 {
+        ThrottleConfig::projected_headroom(
+            self.headroom(),
+            self.biased_factor(),
+            self.pending_journal(),
+        )
+    }
+
+    /// Records the store factor and the cut in flight; true when either
+    /// changed and the pace may be different now.
+    pub fn set_store_pace(&mut self, factor_milli: u64, in_flight: u64) -> bool {
+        let factor = factor_milli.max(FACTOR_ONE);
+        if self.store_factor == factor && self.store_in_flight == in_flight {
+            return false;
+        }
+        self.store_factor = factor;
+        self.store_in_flight = in_flight;
+        self.throttle.pace_store_bytes
     }
 
     /// The rate admissions are paced at now: the space curve's and the ring
@@ -774,6 +818,10 @@ impl Ledger {
         t.resume = self.resume_mark();
         t.rate = self.band_rate();
         t.ring_pace_rate = self.pace_rate().and(self.ring_pace).unwrap_or(0);
+        t.store_factor_milli = self.store_factor;
+        t.store_factor_biased_milli = self.biased_factor();
+        t.store_pending = self.pending_journal();
+        t.h_proj = self.projected_headroom();
         t.paced_waiters = paced;
         t.space_waiters = space;
         SpaceSnapshot {

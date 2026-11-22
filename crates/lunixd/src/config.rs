@@ -39,6 +39,8 @@
 //! | `throttle_soft_max_bytes` | 68719476736 | upper clamp of the soft mark; at least `throttle_soft_min_bytes` |
 //! | `throttle_min_rate` | 4194304 | `r_min`: the slowest admission rate inside the band, bytes per second per volume; at least 65536 |
 //! | `throttle_max_delay_ms` | 10000 | the longest one request is delayed by pacing; 10 ..= `full_timeout_ms` |
+//! | `throttle_pace_store_bytes` | `false` | P1': pace the band in store bytes. The engine measures, per cut, the store bytes (segments, map packs, commit) each journal byte became; the curve then reads the projected headroom `headroom - (A_hat - 1) * J` (`J`: journal bytes not yet cut, the cut in flight left out) and its rate is divided by `A_hat`, never below `throttle_min_rate`. The throttle state, the pressure level and the soft mark stay on the raw headroom. The factor is biased high by `throttle_pace_store_margin_percent`. `false`: the plain curve, unchanged; the figures are still reported (`write_path.store_*` in the volume status) |
+//! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent, clamped to 1 ..= 8 (too low an `A_hat` costs far more than too high a one); 100 ..= 300 |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -421,6 +423,14 @@ impl DaemonConfig {
                 }
                 self.throttle.min_rate = r;
             }
+            "throttle_pace_store_bytes" => self.throttle.pace_store_bytes = b(v)?,
+            "throttle_pace_store_margin_percent" => {
+                let p = n(v)?;
+                if !(100..=300).contains(&p) {
+                    return Err("throttle_pace_store_margin_percent must be 100 to 300".into());
+                }
+                self.throttle.store_margin_percent = p;
+            }
             "throttle_max_delay_ms" => {
                 let t = n(v)?;
                 if t < 10 {
@@ -565,6 +575,28 @@ volume_roots = "/a, /b"
         assert_eq!(d.throttle.min_rate, 4 << 20);
         assert_eq!(d.throttle.max_delay, Duration::from_secs(10));
         assert_eq!(d.gc_pressure_rate_factor, 4);
+        assert!(!d.throttle.pace_store_bytes, "off by default");
+        assert!(
+            DaemonConfig::parse("throttle_pace_store_bytes = true\n")
+                .unwrap()
+                .throttle
+                .pace_store_bytes
+        );
+        assert!(DaemonConfig::parse("throttle_pace_store_bytes = 1\n").is_err());
+        assert_eq!(d.throttle.store_margin_percent, 115);
+        assert_eq!(
+            DaemonConfig::parse("throttle_pace_store_margin_percent = 100\n")
+                .unwrap()
+                .throttle
+                .store_margin_percent,
+            100
+        );
+        for bad in [
+            "throttle_pace_store_margin_percent = 99",
+            "throttle_pace_store_margin_percent = 301",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
         let c = DaemonConfig::parse(
             "throttle = false\nthrottle_soft_percent = 30\nthrottle_soft_min_bytes = 134217728\n\
              throttle_soft_max_bytes = 1073741824\nthrottle_min_rate = 1_000_000\n\

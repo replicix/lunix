@@ -404,6 +404,21 @@ impl JournalCharges {
         }
     }
 
+    /// The sum of the charges of every record at or below `cut`: what a
+    /// cut at `cut` would release. Reads only.
+    pub(crate) fn sum_upto(&self, cut: u64) -> u64 {
+        self.lanes
+            .iter()
+            .chain(std::iter::once(&self.recovered))
+            .map(|q| {
+                lock(q)
+                    .iter()
+                    .take_while(|(s, _)| *s <= cut)
+                    .fold(0u64, |a, (_, b)| a.saturating_add(*b))
+            })
+            .fold(0u64, u64::saturating_add)
+    }
+
     /// Takes the charges of every record at or below `cut`; returns their
     /// sum and, per lane, whether the lane still holds charges above the cut
     /// (the replayed records, while any are left, count for every lane): the

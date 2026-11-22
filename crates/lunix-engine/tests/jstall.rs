@@ -630,6 +630,31 @@ fn a_write_that_waited_for_the_ring_keeps_the_pace_on_for_a_few_seconds() {
     assert_eq!(r.space.ring_pace(), None, "7 s after the last wait");
 }
 
+// ----------------------------------------------------------------- store pace
+
+#[test]
+fn the_engine_tells_the_gate_the_store_factor_and_the_cut_in_flight() {
+    let v = ring(1, 64);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    assert_eq!(r.space.store_pace(), (1000, 0), "one before any cut");
+    writes(&mut r, 0, 20);
+    r.engine.commit_now(false).expect("first cut");
+    let st = r.engine.cut_stats();
+    assert!(st.last_cut_bytes > 0);
+    // The first cut had no history: it predicted one.
+    assert_eq!(st.store_pred_milli, 1000);
+    assert!(st.store_real_milli > 0, "{st:?}");
+    // The cut said its journal bytes while it ran, and none after it.
+    assert_eq!(r.space.store_in_flight_max(), st.last_cut_bytes);
+    let (a, in_flight) = r.space.store_pace();
+    assert_eq!(in_flight, 0);
+    assert_eq!(a, st.store_real_milli.clamp(1000, 8000), "{st:?}");
+    // The next cut predicts what the first measured.
+    writes(&mut r, 20, 20);
+    r.engine.commit_now(false).expect("second cut");
+    assert_eq!(r.engine.cut_stats().store_pred_milli, a);
+}
+
 // ------------------------------------------------------------------- GC yield
 
 /// What the scripted collector saw and does.

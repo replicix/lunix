@@ -66,6 +66,70 @@ impl DrainHistory {
     }
 }
 
+/// Cuts the store factor is averaged over (P1').
+pub(crate) const FACTOR_HISTORY: usize = 8;
+
+/// One store byte per journal byte, in thousandths: the factor before any
+/// cut and its lower clamp.
+pub(crate) const FACTOR_ONE: u64 = 1000;
+
+/// The upper clamp of the factor, thousandths: eight store bytes per journal
+/// byte.
+pub(crate) const FACTOR_MAX: u64 = 8000;
+
+/// The store factor `A_hat` (P1'): how many store bytes (segments, map packs
+/// and the commit) one journal byte becomes at the cut. The space gate
+/// paces journal bytes against headroom, and the headroom falls by this
+/// factor times what was admitted, a cut at a time.
+///
+/// `A_hat = max(byte-weighted mean of the last [`FACTOR_HISTORY`] cuts, the
+/// last cut's own factor)`, clamped to `[1, 8]`, in thousandths (fixed point:
+/// the gate compares and divides it, and no float crosses the trait). It is
+/// 1 before the first cut. A cut without journal bytes (a forced FULL, GC
+/// moves) says nothing and is not noted.
+#[derive(Debug, Default)]
+pub(crate) struct StoreFactor {
+    /// Journal bytes and settled store bytes of the last cuts.
+    cuts: VecDeque<(u64, u64)>,
+}
+
+impl StoreFactor {
+    /// Notes a committed cut of `journal` bytes that settled `store` bytes.
+    /// Returns the cut's own factor (unclamped), `None` for a cut without
+    /// journal bytes.
+    pub(crate) fn push(&mut self, journal: u64, store: u64) -> Option<u64> {
+        if journal == 0 {
+            return None;
+        }
+        if self.cuts.len() == FACTOR_HISTORY {
+            self.cuts.pop_front();
+        }
+        self.cuts.push_back((journal, store));
+        Some(Self::ratio(journal, store))
+    }
+
+    /// `store / journal` in thousandths.
+    fn ratio(journal: u64, store: u64) -> u64 {
+        let r = u128::from(store) * u128::from(FACTOR_ONE) / u128::from(journal.max(1));
+        u64::try_from(r).unwrap_or(u64::MAX)
+    }
+
+    /// `A_hat` in thousandths.
+    pub(crate) fn a_hat(&self) -> u64 {
+        let Some(&(last_j, last_s)) = self.cuts.back() else {
+            return FACTOR_ONE;
+        };
+        let journal: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
+        let store: u128 = self.cuts.iter().map(|c| u128::from(c.1)).sum();
+        let mean = Self::ratio(
+            u64::try_from(journal).unwrap_or(u64::MAX),
+            u64::try_from(store).unwrap_or(u64::MAX),
+        );
+        mean.max(Self::ratio(last_j, last_s))
+            .clamp(FACTOR_ONE, FACTOR_MAX)
+    }
+}
+
 /// Buckets of the write latency histogram (`2^(b-1) <= us < 2^b`).
 pub const LATENCY_BUCKETS: usize = 32;
 
@@ -247,6 +311,10 @@ pub(crate) struct CutCounters {
     pub(crate) yield_until_ms: AtomicU64,
     pub(crate) last_cut_bytes: AtomicU64,
     pub(crate) last_cut_ms: AtomicU64,
+    /// `A_hat` when the last cut began and the cut's measured factor,
+    /// thousandths (0: no cut yet).
+    pub(crate) store_pred_milli: AtomicU64,
+    pub(crate) store_real_milli: AtomicU64,
     /// Segment seals, all cuts (ADR-33 T8).
     pub(crate) seals: AtomicU64,
     /// The most seals in flight at once in any cut since the attach.
@@ -267,6 +335,8 @@ impl CutCounters {
             ring_pace_rate: self.ring_pace_rate.load(Ordering::Relaxed),
             last_cut_bytes: self.last_cut_bytes.load(Ordering::Relaxed),
             last_cut_ms: self.last_cut_ms.load(Ordering::Relaxed),
+            store_pred_milli: self.store_pred_milli.load(Ordering::Relaxed),
+            store_real_milli: self.store_real_milli.load(Ordering::Relaxed),
             seals: self.seals.load(Ordering::Relaxed),
             seal_in_flight_max: self.seal_in_flight_max.load(Ordering::Relaxed),
             seal_busy_ms: self.seal_busy_ns.load(Ordering::Relaxed) / 1_000_000,
@@ -300,6 +370,11 @@ pub struct CutStats {
     pub last_cut_bytes: u64,
     /// Its duration, C1 to C9, milliseconds.
     pub last_cut_ms: u64,
+    /// `A_hat` as it stood when the last cut began, thousandths (0: no cut
+    /// yet).
+    pub store_pred_milli: u64,
+    /// The last cut's measured store bytes per journal byte, thousandths.
+    pub store_real_milli: u64,
     /// Segment seals run since the attach.
     pub seals: u64,
     /// The most seals in flight at once in one cut since the attach.
@@ -329,6 +404,45 @@ mod tests {
 
     fn secs(s: u64) -> Duration {
         Duration::from_secs(s)
+    }
+
+    #[test]
+    fn the_store_factor_is_one_before_a_cut_and_a_cut_without_journal_bytes_says_nothing() {
+        let mut f = StoreFactor::default();
+        assert_eq!(f.a_hat(), 1000);
+        assert_eq!(f.push(0, 5 << 20), None);
+        assert_eq!(f.a_hat(), 1000);
+    }
+
+    #[test]
+    fn the_store_factor_is_the_larger_of_the_weighted_mean_and_the_last_cut() {
+        let mut f = StoreFactor::default();
+        // 100 MiB of journal became 250 MiB, then 10 MiB became 20.
+        assert_eq!(f.push(100 << 20, 250 << 20), Some(2500));
+        assert_eq!(f.a_hat(), 2500);
+        assert_eq!(f.push(10 << 20, 20 << 20), Some(2000));
+        // The mean is 270 / 110 = 2.454; the last cut's 2.0 is below it.
+        assert_eq!(f.a_hat(), 2454);
+        // A last cut above the mean wins: the factor rises at once.
+        assert_eq!(f.push(1 << 20, 4 << 20), Some(4000));
+        assert_eq!(f.a_hat(), 4000);
+    }
+
+    #[test]
+    fn the_store_factor_forgets_cuts_older_than_eight_and_stays_within_one_and_eight() {
+        let mut f = StoreFactor::default();
+        f.push(1 << 20, 7 << 20);
+        for _ in 0..FACTOR_HISTORY {
+            f.push(1 << 20, 2 << 20);
+        }
+        assert_eq!(f.a_hat(), 2000, "the first cut left the window");
+        // Below one (a cut that deduplicated or compressed): one.
+        let mut f = StoreFactor::default();
+        f.push(10 << 20, 3 << 20);
+        assert_eq!(f.a_hat(), 1000);
+        // Above eight: eight.
+        f.push(1 << 20, 50 << 20);
+        assert_eq!(f.a_hat(), 8000);
     }
 
     #[test]

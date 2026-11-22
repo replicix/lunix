@@ -48,6 +48,16 @@ pub struct ThrottleConfig {
     pub max_delay: Duration,
     /// `r_mid`, the rate in the middle of the band: `max(gc_rate, 16 MiB/s)`.
     pub mid_rate: u64,
+    /// P1': the curve reads the projected headroom
+    /// `headroom - (A_hat - 1) * J` and its rate is divided by `A_hat`, so
+    /// the pace is in journal bytes that each become `A_hat` store bytes at
+    /// the cut. Off: the curve is the plain one, bit for bit.
+    pub pace_store_bytes: bool,
+    /// P1': the bias on the engine's `A_hat`, percent (115: 15 % high). The
+    /// pace is far more costly when `A_hat` is too low than when it is too
+    /// high, so the factor the curve reads is `A_hat * margin / 100`, clamped
+    /// to 1 ..= 8. Read only with `pace_store_bytes`.
+    pub store_margin_percent: u64,
 }
 
 impl Default for ThrottleConfig {
@@ -61,6 +71,8 @@ impl Default for ThrottleConfig {
             min_rate: 4 << 20,
             max_delay: Duration::from_secs(10),
             mid_rate: 64 << 20,
+            pace_store_bytes: false,
+            store_margin_percent: DEFAULT_STORE_MARGIN_PERCENT,
         }
     }
 }
@@ -97,7 +109,61 @@ impl ThrottleConfig {
         let r = u128::from(self.mid_rate) * h / (u128::from(soft) - h);
         Some(u64::try_from(r).unwrap_or(u64::MAX).max(self.min_rate))
     }
+
+    /// The factor the curve reads: the engine's `A_hat` (`raw_milli`, at
+    /// least 1000) times the margin, clamped to 1 ..= 8, thousandths.
+    pub fn biased_factor(&self, raw_milli: u64) -> u64 {
+        let r = u128::from(raw_milli.max(FACTOR_ONE)) * u128::from(self.store_margin_percent) / 100;
+        u64::try_from(r)
+            .unwrap_or(u64::MAX)
+            .clamp(FACTOR_ONE, FACTOR_MAX)
+    }
+
+    /// The projected headroom `headroom - (A_hat - 1) * pending` (P1'),
+    /// `factor_milli` being `A_hat` in thousandths. A factor below 1000
+    /// counts as 1000. Saturates at 0.
+    pub fn projected_headroom(headroom: u64, factor_milli: u64, pending: u64) -> u64 {
+        let extra = u128::from(factor_milli.max(FACTOR_ONE) - FACTOR_ONE) * u128::from(pending)
+            / u128::from(FACTOR_ONE);
+        headroom.saturating_sub(u64::try_from(extra).unwrap_or(u64::MAX))
+    }
+
+    /// The admission rate in journal bytes per second with the store factor
+    /// `factor_milli` (already biased: [`biased_factor`](Self::biased_factor)) and `pending` journal bytes not yet cut. With
+    /// `pace_store_bytes` off it is [`rate`](Self::rate) and nothing else.
+    /// On, the curve reads [`projected_headroom`](Self::projected_headroom)
+    /// and the rate is divided by `A_hat`, never below `min_rate`. Whether
+    /// the band applies at all follows the raw `headroom` (`None` at or above
+    /// the soft mark), so the throttle state does not change with the key.
+    pub fn paced_rate(
+        &self,
+        headroom: u64,
+        soft: u64,
+        factor_milli: u64,
+        pending: u64,
+    ) -> Option<u64> {
+        if !self.pace_store_bytes {
+            return self.rate(headroom, soft);
+        }
+        if !self.enabled || soft == 0 || headroom >= soft {
+            return None;
+        }
+        let a = u128::from(factor_milli.max(FACTOR_ONE));
+        let h = u128::from(Self::projected_headroom(headroom, factor_milli, pending));
+        // `h <= headroom < soft`: the divisor is positive.
+        let r = u128::from(self.mid_rate) * h / (u128::from(soft) - h) * u128::from(FACTOR_ONE) / a;
+        Some(u64::try_from(r).unwrap_or(u64::MAX).max(self.min_rate))
+    }
 }
+
+/// One store byte per journal byte, in the thousandths of the store factor.
+pub const FACTOR_ONE: u64 = 1000;
+
+/// Eight store bytes per journal byte: the upper clamp of the factor.
+pub const FACTOR_MAX: u64 = 8000;
+
+/// The default margin on `A_hat`: 15 % high.
+pub const DEFAULT_STORE_MARGIN_PERCENT: u64 = 115;
 
 /// A token bucket in bytes of journal record. It has no clock: every call is
 /// told the time. Inactive while the gate is open; entering the band fills
@@ -379,6 +445,90 @@ mod tests {
         let c = ThrottleConfig::default().with_gc_rate(200 * MIB);
         assert_eq!(c.mid_rate, 200 * MIB);
         assert_eq!(c.rate(50, 100), Some(200 * MIB));
+    }
+
+    #[test]
+    fn with_the_key_off_the_paced_rate_is_the_plain_curve_whatever_the_factor() {
+        let c = ThrottleConfig::default();
+        let soft = 1000 * MIB;
+        for h in [0, 1, 10 * MIB, 500 * MIB, 999 * MIB, soft, soft + 1] {
+            for (a, j) in [(1000, 0), (2500, 300 * MIB), (8000, u64::MAX)] {
+                assert_eq!(c.paced_rate(h, soft, a, j), c.rate(h, soft), "h {h} a {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn with_the_key_on_a_factor_of_one_is_the_plain_curve() {
+        let c = ThrottleConfig {
+            pace_store_bytes: true,
+            ..ThrottleConfig::default()
+        };
+        let soft = 1000 * MIB;
+        for h in [0, 1, 10 * MIB, 500 * MIB, 999 * MIB, soft, soft + 1] {
+            for j in [0, 300 * MIB, u64::MAX] {
+                assert_eq!(c.paced_rate(h, soft, 1000, j), c.rate(h, soft), "h {h}");
+                // A factor below one counts as one.
+                assert_eq!(c.paced_rate(h, soft, 500, j), c.rate(h, soft), "h {h}");
+            }
+        }
+    }
+
+    #[test]
+    fn with_the_key_on_the_curve_reads_the_projected_headroom_and_divides_by_the_factor() {
+        let c = ThrottleConfig {
+            pace_store_bytes: true,
+            ..ThrottleConfig::default()
+        };
+        let soft = 1000 * MIB;
+        // A = 2.5, J = 200 MiB: h_proj = 800 - 1.5 * 200 = 500 MiB, the
+        // middle of the band: r_mid / 2.5.
+        assert_eq!(
+            ThrottleConfig::projected_headroom(800 * MIB, 2500, 200 * MIB),
+            500 * MIB
+        );
+        assert_eq!(
+            c.paced_rate(800 * MIB, soft, 2500, 200 * MIB),
+            Some(c.mid_rate * 1000 / 2500)
+        );
+        // Slower than the plain curve at the same headroom.
+        assert!(c.paced_rate(800 * MIB, soft, 2500, 200 * MIB) < c.rate(800 * MIB, soft));
+        // More journal pending paces harder; it never goes under r_min.
+        assert_eq!(
+            c.paced_rate(800 * MIB, soft, 2500, u64::MAX),
+            Some(c.min_rate)
+        );
+        assert_eq!(c.paced_rate(0, soft, 8000, 0), Some(c.min_rate));
+        // Not paced at or above the soft mark, whatever is pending: the
+        // state follows the raw headroom.
+        assert_eq!(c.paced_rate(soft, soft, 2500, u64::MAX), None);
+        // The band off: no pace.
+        let off = ThrottleConfig {
+            enabled: false,
+            ..c
+        };
+        assert_eq!(off.paced_rate(MIB, soft, 2500, MIB), None);
+    }
+
+    #[test]
+    fn the_margin_biases_the_factor_up_and_the_clamp_holds() {
+        let c = ThrottleConfig::default();
+        assert_eq!(c.store_margin_percent, 115);
+        assert_eq!(c.biased_factor(1000), 1150);
+        assert_eq!(c.biased_factor(2500), 2875);
+        assert_eq!(
+            c.biased_factor(500),
+            1150,
+            "a raw factor below one counts as one"
+        );
+        assert_eq!(c.biased_factor(7500), 8000, "clamped to eight");
+        assert_eq!(c.biased_factor(u64::MAX), 8000);
+        let none = ThrottleConfig {
+            store_margin_percent: 100,
+            ..c
+        };
+        assert_eq!(none.biased_factor(2500), 2500);
+        assert_eq!(none.biased_factor(9000), 8000);
     }
 
     #[test]

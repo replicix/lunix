@@ -317,6 +317,20 @@ pub struct ThrottleFigures {
     /// The ring pace the gate applies now, bytes per second (0: none,
     /// also with the band off or closing).
     pub ring_pace_rate: u64,
+    /// The store factor the gate holds now, thousandths of a store byte per
+    /// journal byte (the engine's `A_hat`; 1000 before its first cut). Held
+    /// whether or not the gate paces by it.
+    pub store_factor_milli: u64,
+    /// The factor the curve reads: `store_factor_milli` times the margin
+    /// (`throttle_pace_store_margin_percent`), clamped to 1 ..= 8.
+    pub store_factor_biased_milli: u64,
+    /// The journal bytes reserved and not yet in a cut (`J`), the cut in
+    /// flight left out.
+    pub store_pending: u64,
+    /// The projected headroom `headroom - (A_biased - 1) * J`, bytes. What
+    /// the band's curve reads when it paces by store bytes; computed from the
+    /// held figures whether or not it does.
+    pub h_proj: u64,
 }
 
 /// A point-in-time view of the ledger.
@@ -501,4 +515,15 @@ pub trait SpaceGate: Ladder + SpaceEvents + Send + Sync {
     /// The rate is raised to the band's minimum rate. A gate without a band
     /// ignores it.
     fn set_ring_pace(&self, _rate: Option<u64>) {}
+
+    /// Tells the gate the store factor and the cut in flight (P1': the band
+    /// paces in store bytes). `factor_milli` is the engine's estimate of the
+    /// store bytes one journal byte becomes at the cut, in thousandths (at
+    /// least 1000); `in_flight` the journal bytes of the cut being committed
+    /// (0 between cuts), which already hold their segment bound and are not
+    /// counted again. The gate derives the journal bytes not yet cut from its
+    /// own `JournalReserved` charge less `in_flight`, so the figure is as
+    /// fresh as the ledger. A gate without a band, or with store-byte pacing
+    /// off, only records it for the status.
+    fn set_store_pace(&self, _factor_milli: u64, _in_flight: u64) {}
 }

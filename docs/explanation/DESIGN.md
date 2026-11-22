@@ -442,6 +442,20 @@ journal):
     `x = H / soft`, `r_mid = max(gc_rate, 16 MiB/s)` and `r_min` 4 MiB/s
     (`throttle_min_rate`): unbounded at the soft mark, `r_mid` in the
     middle of the band, `r_min` near the limit;
+  - with `throttle_pace_store_bytes` (off by default; P1') the curve is in
+    store bytes: each journal byte becomes `A_hat` store bytes at the cut
+    (the engine measures `A_hat` per cut: the larger of the byte-weighted
+    mean of the last 8 cuts and the last cut's own, clamped to 1 ..= 8; the
+    gate biases it high by `throttle_pace_store_margin_percent`, default 115,
+    because a low `A_hat` costs far more than a high one, and clamps again),
+    so the curve reads the projected headroom `H - (A_hat - 1) * J` (`J`: the
+    journal bytes not yet in a cut; the cut in flight holds its segment
+    bound already) and the rate is divided by `A_hat`, at least
+    `throttle_min_rate`. The state (open, slowdown, stop), the soft mark and
+    the collector's pressure stay on the raw `H`; the bucket and the delay
+    cap below are the same. The volume status reports `A_hat`, `J`, the
+    biased `A_hat`, the projected headroom and, per cut, the raw `A_hat` at its start against the factor
+    it measured (`write_path.store_*`);
   - one request is delayed at most `throttle_max_delay_ms` (10 s) from its
     arrival at its queue, the time it stood behind other requests of the
     queue included; past that it is admitted if it fits, together with what

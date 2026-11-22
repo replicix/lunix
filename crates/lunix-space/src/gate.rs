@@ -573,6 +573,18 @@ impl SpaceGate for LunixSpace {
         self.sh.cv.notify_all();
     }
 
+    /// P1': the engine's store factor and the cut in flight. With the key on
+    /// a change re-judges the parked requests (the pace moved); off, it is
+    /// only recorded for the status.
+    fn set_store_pace(&self, factor_milli: u64, in_flight: u64) {
+        let now = self.sh.clock.monotonic();
+        let mut st = lock(&self.sh.st);
+        if st.ledger.set_store_pace(factor_milli, in_flight) {
+            st.ledger.grant_waiters(now);
+            self.sh.cv.notify_all();
+        }
+    }
+
     /// Re-judges every parked request under the new policy (ADR-32):
     /// `on_full = error` fails them now, a new `full_timeout` counts from
     /// each request's arrival (the overdue ones fail now and latch the

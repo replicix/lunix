@@ -1636,3 +1636,124 @@ fn a_write_that_stood_in_its_queue_at_an_open_gate_is_no_delay_of_the_gate() {
         "{t:?}"
     );
 }
+
+/// P1': a gate in the band with 100 MiB of journal charged, headroom 500 MiB.
+fn store_gate(on: bool, ck: &Arc<ManualClock>) -> Arc<LunixSpace> {
+    let g = at_headroom(
+        600 * MIB,
+        cfg(None, |c| {
+            c.throttle.pace_store_bytes = on;
+            c.throttle.store_margin_percent = 100;
+        }),
+        ck,
+    );
+    g.charge(K, 100 * MIB).expect("charge");
+    assert_eq!(g.snapshot().throttle.headroom, 500 * MIB);
+    g
+}
+
+#[test]
+fn with_the_store_pace_off_the_factor_is_only_reported() {
+    let ck = clock();
+    let g = store_gate(false, &ck);
+    let plain = g.snapshot().throttle.rate.expect("in the band");
+    g.set_store_pace(2500, 0);
+    let t = g.snapshot().throttle;
+    assert_eq!(t.rate, Some(plain), "the pace does not move");
+    assert_eq!(t.state, ThrottleState::Slowdown);
+    assert_eq!(t.store_factor_milli, 2500);
+    assert_eq!(t.store_pending, 100 * MIB);
+    assert_eq!(t.h_proj, 350 * MIB, "computed whether or not it paces");
+}
+
+#[test]
+fn with_the_store_pace_on_the_rate_reads_the_projected_headroom() {
+    let ck = clock();
+    let g = store_gate(true, &ck);
+    let plain = g.snapshot().throttle.rate.expect("in the band");
+    // Before the engine says anything the factor is one.
+    assert_eq!(g.snapshot().throttle.store_factor_milli, 1000);
+    g.set_store_pace(2500, 0);
+    let t = g.snapshot().throttle;
+    let h = 350 * MIB;
+    let want = 64 * MIB * h / (SOFT - h) * 1000 / 2500;
+    assert_eq!(t.rate, Some(want));
+    assert!(want < plain);
+    // The state and the soft mark stay on the raw headroom.
+    assert_eq!(
+        (t.state, t.headroom, t.soft),
+        (ThrottleState::Slowdown, 500 * MIB, SOFT)
+    );
+    // The cut in flight is not counted twice: its journal bytes leave J.
+    g.set_store_pace(2500, 100 * MIB);
+    let t = g.snapshot().throttle;
+    assert_eq!((t.store_pending, t.h_proj), (0, 500 * MIB));
+    assert_eq!(
+        t.rate,
+        Some(64 * MIB * 500 * MIB / (SOFT - 500 * MIB) * 1000 / 2500)
+    );
+    // Back to a factor of one: the plain curve.
+    g.set_store_pace(1000, 0);
+    assert_eq!(g.snapshot().throttle.rate, Some(plain));
+}
+
+#[test]
+fn the_store_pace_never_paces_above_the_soft_mark_and_keeps_the_floor() {
+    let ck = clock();
+    let g = at_headroom(
+        SOFT + 10 * MIB,
+        cfg(None, |c| {
+            c.throttle.pace_store_bytes = true;
+            c.throttle.store_margin_percent = 100;
+        }),
+        &ck,
+    );
+    g.charge(K, 5 * MIB).expect("charge");
+    g.set_store_pace(8000, 0);
+    let t = g.snapshot().throttle;
+    assert_eq!((t.state, t.rate), (ThrottleState::Open, None));
+    // Inside the band with everything pending: the floor.
+    let g = at_headroom(
+        SOFT / 2,
+        cfg(None, |c| {
+            c.throttle.pace_store_bytes = true;
+            c.throttle.store_margin_percent = 100;
+        }),
+        &ck,
+    );
+    g.charge(K, 100 * MIB).expect("charge");
+    g.set_store_pace(8000, 0);
+    assert_eq!(
+        g.snapshot().throttle.rate,
+        Some(ThrottleConfig::default().min_rate)
+    );
+}
+
+#[test]
+fn the_default_margin_biases_the_factor_the_curve_reads_and_the_status_has_both() {
+    let ck = clock();
+    let g = at_headroom(
+        600 * MIB,
+        cfg(None, |c| c.throttle.pace_store_bytes = true),
+        &ck,
+    );
+    g.charge(K, 100 * MIB).expect("charge");
+    // The engine says 2.0: the curve reads 2.3 (15 % high).
+    g.set_store_pace(2000, 0);
+    let t = g.snapshot().throttle;
+    assert_eq!(
+        (t.store_factor_milli, t.store_factor_biased_milli),
+        (2000, 2300)
+    );
+    // h_proj = 500 - 1.3 * 100 = 370 MiB.
+    assert_eq!(t.h_proj, 370 * MIB);
+    let h = 370 * MIB;
+    assert_eq!(t.rate, Some(64 * MIB * h / (SOFT - h) * 1000 / 2300));
+    // Before the engine says anything: one, biased to 1.15.
+    let g2 = at_headroom(
+        600 * MIB,
+        cfg(None, |c| c.throttle.pace_store_bytes = true),
+        &ck,
+    );
+    assert_eq!(g2.snapshot().throttle.store_factor_biased_milli, 1150);
+}
