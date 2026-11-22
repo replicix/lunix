@@ -647,17 +647,17 @@ fn the_engine_tells_the_gate_the_store_factor_and_the_cut_in_flight() {
     // The cut said its journal bytes while it ran, and none after it; the
     // new factor came with the end of the cut, one push, not two.
     assert_eq!(r.space.store_in_flight_max(), st.last_cut_bytes);
-    let (a, in_flight) = r.space.store_pace();
-    assert_eq!(in_flight, 0);
-    assert_eq!(a, st.store_real_milli.clamp(1000, 16_000), "{st:?}");
+    // A cut under 1 MiB of journal is measured for the status but is not in
+    // the window: the factor stays the initial one.
+    assert_eq!(r.space.store_pace(), (2000, 0));
     assert_eq!(
         r.space.store_pace_log(),
-        vec![(2000, st.last_cut_bytes), (a, 0)]
+        vec![(2000, st.last_cut_bytes), (2000, 0)]
     );
-    // The next cut predicts what the first measured.
+    // The next cut predicts the same.
     writes(&mut r, 20, 20);
     r.engine.commit_now(false).expect("second cut");
-    assert_eq!(r.engine.cut_stats().store_pred_milli, a);
+    assert_eq!(r.engine.cut_stats().store_pred_milli, 2000);
 }
 
 #[test]

@@ -446,8 +446,9 @@ journal):
     store bytes: each journal byte becomes `A_hat` store bytes at the cut.
     The engine measures `A_hat` per cut (the larger of the byte-weighted
     mean of the last 8 cuts and the last cut's own, the last one only for a
-    cut that is not tiny; clamped to 1 ..= 16; 2.0 before the first
-    measured cut). The gate biases it high by
+    cut that is not small against the window; cuts under 1 MiB of journal
+    are not measured; clamped to 1 ..= 16; 2.0 until the window holds
+    16 MiB of journal). The gate biases it high by
     `throttle_pace_store_margin_percent` (default 115), because a low
     `A_hat` costs far more than a high one, and the curve reads the
     projected headroom `H - (A - 1) * J` (`J`: the journal bytes not yet in

@@ -623,6 +623,8 @@ impl Inner {
                     if c <= prev + 1 || self.is_failed() {
                         return Err(e);
                     }
+                    // The cut that failed holds nothing now.
+                    self.update_store_pace(co, 0);
                     c = prev + (c - prev) / 2;
                     tracing::info!(cut = c, "map dirty-leaf cap reached: cutting smaller");
                 }
@@ -833,9 +835,16 @@ impl Inner {
         let mut acct = self.reserve_bounds(&cut);
         // P1': this cut's journal bytes now hold their segment bound (a bound
         // that could not be reserved holds nothing, and the bytes stay in
-        // `J`). Announced again at each smaller retry, which comes here too.
-        if acct.seg_bound != 0 && self.space.store_pace_enabled() {
-            self.update_store_pace(co, self.jcharges.sum_upto(c));
+        // `J`). Every attempt says so, 0 when no bound is held, so a retried
+        // cut whose bound fails does not leave the figure of the attempt
+        // before it. Announced again at each smaller retry, which comes here too.
+        if self.space.store_pace_enabled() {
+            let held = if acct.seg_bound != 0 {
+                self.jcharges.sum_upto(c)
+            } else {
+                0
+            };
+            self.update_store_pace(co, held);
         }
         if let Err(e) = self.points.hit("engine.c2.cut") {
             self.abandon(acct);

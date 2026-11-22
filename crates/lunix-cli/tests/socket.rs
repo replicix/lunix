@@ -570,6 +570,29 @@ fn status_prints_one_throttle_line_when_the_state_is_not_open() {
 }
 
 #[test]
+fn status_says_when_the_store_pace_paces_an_open_volume_above_the_soft_mark() {
+    let env = Env::new();
+    let mut s = status_body("vol1", VolumeMode::Plain);
+    s.throttle.rate = Some(12 << 20);
+    s.throttle.headroom = 5 << 30;
+    s.throttle.limit = 48 << 30;
+    env.ok("VolumeStatus", Response::VolumeStatus(Box::new(s)));
+    let o = env.run(&["status", "vol1"]);
+    let line = o
+        .stdout
+        .lines()
+        .find(|l| l.starts_with("throttle"))
+        .unwrap_or_else(|| panic!("no throttle line in {}", o.stdout));
+    for part in [
+        "open, paced above soft",
+        "12 MiB/s",
+        "headroom 5 GiB of 48 GiB",
+    ] {
+        assert!(line.contains(part), "{part:?} missing from {line:?}");
+    }
+}
+
+#[test]
 fn status_without_a_rollback_floor_says_so() {
     let env = Env::new();
     let mut s = status_body("vol1", VolumeMode::Plain);
