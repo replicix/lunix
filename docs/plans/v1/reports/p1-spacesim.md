@@ -871,6 +871,298 @@ note (C8, C9), 16 GiB working sets, the P7 row (C4: not expressible, see round-2
 | combo D: P2 + G9 + P0a | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.107 | 7.5 | 0.0 / 2.8 | 22 % |
 | combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.7K | 11.3K | 0.090 | 7.5 | 0.0 / 0.0 | 1 % |
 
+## Round 3: the missing rows, the gap split, a costed C5, a lagging estimator, the dead-time split and a band-reaching network cell
+
+Same seeds and regimes as round 2 (32 seeds RAM 64K, 24 M15, 8 network volume); `spacesim experiments --round3`. **The RAM 16K rows are not evidence**: the measured cell stopped in 0 of 6 repetitions and the simulation's
+16K rows stop in neither regime in the way the cell does (tables at the end, for completeness only). The network-volume cell is now `netvol-band` (cap 6 GiB): it reaches the band at about 92 s and stops in the third cell, so
+"unchanged" there is a real no-regression result. New model pieces: `fast_recheck` (a recheck-only pass, no compaction, 1 s after a grace ends), `cut_cadence_s` (a forced FULL every X s while the gate is not open and journal bytes wait),
+`c5_cost` (a proposal at each cut costs a list sync plus `condemn_ms` per flag of coordinator time, is skipped while a pass is running, and can fail with `c5_error`), `a_lag` / `a_bias` (A from the last 8 cuts, byte-weighted, maximum
+with the last, times 1 + bias; the zero-mean wobble is off), and the delete term of the dead time.
+
+#### 1. The missing rows and the gap split
+
+cells: `stops first-fill/steady; longest median / p90 s; dwell s (throttle on to first stop)`
+
+| row | RAM 64K faithful | RAM 64K stall regime | M15 faithful | M15 stall regime | network volume (band) |
+|---|---|---|---|---|---|
+| base (main) | 1 / 2; 35.1 / 68.3; 4.6 | 4 / 5; 31.0 / 35.9; 4.7 | 1 / 1; 36.8 / 37.5; 44.5 | 2 / 3; 35.3 / 36.1; 11.5 | 0 / 3; 11.0 / 12.1; 40.6 |
+| P1' alone | 0 / 0; 4.3 / 50.9; 20.1 | 2 / 0; 19.5 / 23.6; 22.4 | 0 / 2; 35.4 / 57.6; 52.0 | 2 / 3; 32.2 / 36.8; 15.8 | 0 / 3; 8.5 / 8.6; 36.0 |
+| P1' + C5 free (no gap) | 0 / 0; 2.4 / 3.5; 16.0 | 2 / 0; 5.9 / 11.5; 21.5 | 0 / 3; 32.7 / 36.2; 90.8 | 2 / 3; 27.5 / 32.1; 14.4 | 0 / 3; 8.5 / 8.6; 35.6 |
+| P1' + gap 1 s (no C5) | 0 / 0; 6.9 / 16.6; 62.6 | 2 / 0; 23.5 / 27.4; 17.0 | 0 / 5; 33.2 / 37.1; 92.3 | 2 / 3; 31.9 / 36.9; 13.2 | 0 / 3; 8.5 / 8.6; 36.0 |
+| P1' + C5 free + gap 1 s | 0 / 0; 1.0 / 4.8; 82.7 | 1 / 0; 5.4 / 12.4; 21.1 | 1 / 6; 29.6 / 35.3; 51.7 | 3 / 4; 29.0 / 32.4; 10.7 | 0 / 3; 8.5 / 8.6; 35.6 |
+| P1' + C5 free + (a) fast recheck | 0 / 0; 0.8 / 1.1; 16.0 | 2 / 0; 7.0 / 12.4; 22.3 | 0 / 1; 34.9 / 36.6; 89.3 | 2 / 3; 32.2 / 34.1; 14.4 | 0 / 1; 8.5 / 8.6; 35.4 |
+| P1' + C5 free + (b) cadence 2 s | 1 / 0; 5.3 / 11.2; 17.2 | 2 / 0; 11.1 / 11.7; 17.8 | 4 / 10; 24.7 / 29.3; 3.8 | 3 / 3; 27.2 / 31.8; 13.7 | 0 / 3; 8.5 / 15.2; 50.5 |
+| P1' + (b) cadence 2 s (no C5) | 1 / 2; 12.5 / 30.5; 15.6 | 2 / 2; 20.4 / 30.2; 19.9 | 3 / 6; 27.5 / 32.5; 3.8 | 2 / 2; 32.5 / 36.9; 15.9 | 0 / 3; 8.5 / 15.0; 51.3 |
+| gap 1 s (collector pass gap) | 1 / 4; 13.8 / 68.3; 4.0 | 4 / 5; 31.0 / 32.9; 4.7 | 0 / 3; 36.5 / 66.3; 47.9 | 2 / 5; 32.3 / 35.9; 10.4 | 0 / 3; 10.8 / 12.1; 40.6 |
+| gap (a) fast recheck-only pass | 1 / 2; 15.5 / 58.8; 4.6 | 4 / 7; 30.4 / 32.0; 4.7 | 1 / 1; 36.8 / 37.6; 44.5 | 3 / 4; 38.5 / 45.0; 11.5 | 0 / 3; 10.8 / 14.7; 39.9 |
+| gap (b) cut cadence 1 s | 1 / 2; 33.2 / 39.9; 31.0 | 4 / 4; 31.4 / 35.5; 9.0 | 5 / 9; 33.0 / 35.3; 2.7 | 2 / 3; 35.5 / 36.6; 11.6 | 0 / 5; 8.2 / 14.7; 34.0 |
+| gap (b) cut cadence 2 s | 2 / 4; 16.7 / 40.3; 4.2 | 5 / 4; 32.4 / 35.6; 7.3 | 2 / 6; 35.0 / 37.3; 44.2 | 3 / 3; 35.5 / 36.6; 11.6 | 0 / 2; 8.4 / 9.6; 35.1 |
+| gap (b) cut cadence 5 s | 1 / 2; 37.7 / 62.7; 4.6 | 4 / 4; 31.5 / 35.4; 4.7 | 1 / 1; 36.8 / 57.6; 44.5 | 3 / 3; 35.5 / 36.0; 11.0 | 0 / 3; 10.6 / 12.3; 40.6 |
+
+Reading: the work is done by C5. `P1' + C5` (no gap) is 2.4 / 3.5 s faithful and 5.9 / 11.5 s in the stall regime; adding the 1 s gap changes it little (1.0 / 4.8 and 5.4 / 12.4), `P1' + gap` without C5 is weak (6.9 / 16.6, 23.5 / 27.4).
+The gap split settles the mechanism: the recheck-only pass (a) takes the recheck term from 4.8 s to 1.1 s and gives the best faithful row (`P1' + C5 + (a)`: 0.8 / 1.1 s, 43.5 K IOPS) at a lower collector cost than the 1 s gap, while an
+explicit cut cadence (b) does not reproduce the gap's effect (faithful 5.3 / 11.2 s with P1' + C5, 16.7-37.7 s alone): **the gap works through the recheck, not through the cut cadence**, and a fast recheck-only pass is the right
+form of it. No row helps M15 (cap-bound): its best is `P1' + C5 + (b) 2 s` at 24.7-27.2 s.
+
+#### 2. C5 with its costs
+
+cells: `stops first-fill/steady; longest median / p90 s; dwell s (throttle on to first stop)`
+
+| row | RAM 64K faithful | RAM 64K stall regime | M15 faithful | M15 stall regime | network volume (band) |
+|---|---|---|---|---|---|
+| C5 free | 2 / 4; 8.3 / 11.4; 4.3 | 6 / 10; 19.7 / 28.8; 4.7 | 1 / 2; 35.4 / 36.1; 43.5 | 2 / 4; 31.7 / 32.1; 11.7 | 0 / 3; 7.9 / 12.2; 40.4 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 2 / 4; 10.7 / 11.6; 4.2 | 5 / 8; 20.4 / 36.6; 8.2 | 1 / 1; 35.3 / 36.3; 46.0 | 3 / 4; 32.2 / 33.2; 9.7 | 0 / 3; 7.9 / 11.4; 41.9 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 2 / 4; 10.7 / 11.6; 4.2 | 6 / 9; 20.2 / 32.3; 8.7 | 1 / 1; 35.3 / 36.3; 46.0 | 3 / 5; 32.2 / 33.2; 9.7 | 0 / 3; 7.9 / 11.4; 41.9 |
+| C5 costed, 20 % proposals fail | 2 / 4; 11.0 / 17.6; 4.2 | 5 / 8; 20.8 / 34.6; 19.0 | 1 / 0; 35.5 / 37.2; 46.0 | 2 / 4; 32.2 / 33.3; 9.7 | 0 / 3; 8.6 / 11.4; 41.9 |
+| P1' + C5 free + gap 1 s | 0 / 0; 1.0 / 4.8; 82.7 | 1 / 0; 5.4 / 12.4; 21.1 | 1 / 6; 29.6 / 35.3; 51.7 | 3 / 4; 29.0 / 32.4; 10.7 | 0 / 3; 8.5 / 8.6; 35.6 |
+| P1' + C5 costed + gap 1 s | 0 / 0; 1.3 / 8.2; 81.5 | 1 / 0; 4.1 / 12.3; 24.8 | 1 / 6; 29.9 / 35.2; 51.5 | 3 / 4; 30.8 / 35.1; 10.9 | 0 / 3; 8.6 / 8.6; 35.6 |
+
+Costing C5 (a list sync of 0.1 ms on tmpfs or 3 ms on disk, 0.015 / 5.5 ms per flag, a proposal skipped while a pass is running, 20 % failures) moves it little: RAM 64K faithful 8.3 / 11.4 s -> 10.7 / 11.6 s (11.0 / 17.6 s with
+20 % failures), stall regime 19.7 / 28.8 -> 20.4 / 36.6 s; the combination with P1' and the gap 1.0 / 4.8 -> 1.3 / 8.2 s and 5.4 / 12.4 -> 4.1 / 12.3 s. **C5 still raises the stop count** (stops 1/2 -> 2/4 faithful, 4/5 -> 5/8 and 6/10 in the stall
+regime; M15 1/1 -> 1/1 costed): the dead time falls (detection+retention 15.6 s -> 4.7-6.5 s) and the volume restarts more often, each stop shorter. With P1' in front the stop count is 0 / 0 in the faithful regime and 1-2 / 0 in the stall regime.
+
+#### 3. The estimator of A: lag and bias
+
+cells: `stops first-fill/steady; longest median / p90 s; dwell s (throttle on to first stop)`
+
+| row | RAM 64K faithful | RAM 64K stall regime | M15 faithful | M15 stall regime | network volume (band) |
+|---|---|---|---|---|---|
+| P1' alone | 0 / 0; 4.3 / 50.9; 20.1 | 2 / 0; 19.5 / 23.6; 22.4 | 0 / 2; 35.4 / 57.6; 52.0 | 2 / 3; 32.2 / 36.8; 15.8 | 0 / 3; 8.5 / 8.6; 36.0 |
+| P1' alone, lagged A, bias +15 % | 0 / 0; 1.0 / 13.9; 26.2 | 2 / 0; 12.1 / 20.1; 27.3 | 0 / 5; 31.2 / 37.6; 56.9 | 2 / 3; 30.3 / 36.7; 16.0 | 0 / 3; 8.6 / 12.7; 37.2 |
+| P1' alone, lagged A, bias -15 % | 0 / 0; 5.7 / 61.6; - | 2 / 2; 19.8 / 23.7; 23.8 | 1 / 2; 36.5 / 70.3; 49.2 | 2 / 2; 32.2 / 36.8; 15.6 | 0 / 3; 8.5 / 8.6; 35.8 |
+
+P1' alone is sensitive to the estimate: with A over-estimated by 15 % the faithful row improves (1.0 / 13.9 s: the pace is a little slower and the stalls disappear); with A under-estimated by 15 % the median is still 5.7 s but the p90 is 61.6 s
+(the heavy tail: seeds in which the first fill reaches the band with a journal debt the estimate did not cover). The exact-estimator row of round 2 (4.3 / 50.9 s) sits between. In the stall regime the three rows are 19.5 / 23.6, 12.1 / 20.1 and 19.8 / 23.7 s.
+
+#### 4. Dead time split and the band dwell
+
+Dead time of a wholly dead segment, seconds, `retention+detection / grace / recheck / delete` (delete = the pass's index work between the recheck and the release of the bytes); dwell = throttle on to the first stop (**measured at RAM 64K: 6.5 s**, rep 1: on at 955.3 s, stop at 961.8 s).
+
+| row | RAM 64K faithful: dead time; dwell | RAM 64K stall regime: dead time; dwell | network volume (band): dead time; dwell |
+|---|---|---|---|
+| base (main) | 15.6 / 30.0 / 4.8 / 3.8; 4.6 | 12.6 / 30.0 / 3.5 / 8.2; 4.7 | 7.4 / 30.0 / 3.2 / 0.8; 40.6 |
+| P1' alone | 11.7 / 30.0 / 3.8 / 4.0; 20.1 | 10.3 / 30.0 / 3.8 / 5.9; 22.4 | 7.4 / 30.0 / 15.8 / 0.8; 36.0 |
+| C5 free | 4.7 / 30.0 / 3.6 / 2.7; 4.3 | 2.1 / 30.0 / 4.0 / 4.5; 4.7 | 6.7 / 30.0 / 1.6 / 0.5; 40.4 |
+| gap 1 s (collector pass gap) | 7.1 / 30.0 / 1.5 / 3.2; 4.0 | 9.2 / 30.0 / 4.0 / 6.3; 4.7 | 7.4 / 30.0 / 1.7 / 0.8; 40.6 |
+| gap (a) fast recheck-only pass | 12.9 / 30.0 / 1.1 / 3.5; 4.6 | 9.6 / 30.0 / 1.1 / 6.6; 4.7 | 7.4 / 30.0 / 1.6 / 0.7; 39.9 |
+| gap (b) cut cadence 2 s | 13.2 / 30.0 / 4.2 / 4.1; 4.2 | 9.4 / 30.0 / 5.7 / 6.7; 7.3 | 7.4 / 30.0 / 3.1 / 0.0; 35.1 |
+| P1' + C5 free + gap 1 s | 2.4 / 30.0 / 1.6 / 1.7; 82.7 | 0.8 / 30.0 / 2.2 / 3.3; 21.1 | 6.7 / 30.0 / 16.2 / 0.5; 35.6 |
+| P1' + C5 free + (a) fast recheck | 4.7 / 30.0 / 1.0 / 1.2; 16.0 | 1.2 / 30.0 / 1.4 / 2.8; 22.3 | 6.6 / 30.0 / 9.9 / 0.5; 35.4 |
+
+The measured dead time of the first condemn in rep 1 was 33 s (30 s grace plus about 3 s of recheck and delete); the model's base is 15.6 + 30 + 4.8 + 3.8 s for the segments deleted over the whole run (the first batch is shorter; the mean includes
+segments that die long before the pass that finds them). The simulated band dwell of the base is 4.6 s (faithful) and 4.7 s (stall regime) against 6.5 s measured: about 30 % short, in the right range. P1' lengthens it to 20-26 s, which is its purpose.
+
+#### 5. The network volume reaching the band (`netvol-band`, all rows)
+
+cells: `stops first-fill/steady; longest median / p90 s; dwell s (throttle on to first stop)`
+
+| row | network volume (band) |
+|---|---|
+| base (main) | 0 / 3; 11.0 / 12.1; 40.6 |
+| P1' alone | 0 / 3; 8.5 / 8.6; 36.0 |
+| C5 free | 0 / 3; 7.9 / 12.2; 40.4 |
+| gap (a) fast recheck-only pass | 0 / 3; 10.8 / 14.7; 39.9 |
+| P1' + C5 free + gap 1 s | 0 / 3; 8.5 / 8.6; 35.6 |
+| P1' + C5 free + (a) fast recheck | 0 / 1; 8.5 / 8.6; 35.4 |
+
+The cell enters the band at about 92 s and stops in the third cell (longest completion 11.0 / 12.1 s, throughput 2.0 K / 0.7 K IOPS); no candidate changes the throughput, none makes the stops or the longest wait worse
+(P1' alone 8.5 / 8.6 s, C5 7.9 / 12.2 s): the no-regression check holds with a cell that is actually in the band. Its dead-time split shows the long recheck of P1' there (15.8 s: its slow pass cadence at 22 % collector).
+
+### Revised verdict
+
+* **P1' alone** (the real test's first step): it removes the stops on RAM 64K at the median (faithful: stops 0/0, 1 of 32 seeds stops in the first cell; longest 4.3 s against 35.1 s) and halves the stall in the stall regime (19.5 against 31.0 s), at no throughput cost, **but its p90 is
+  50.9 s (61.6 s with A under-estimated by 15 %, 13.9 s with A over-estimated): a heavy tail the median hides**. Bias the estimate high, and judge the real test on p90 and the worst run, not the median. It does nothing for a cap-bound volume (M15: 35.4 / 57.6 s) and a
+  little on the network-volume band (8.5 against 11.0 s). Confidence in its direction: medium; in its size: low.
+* **Next, C5 (condemn-on-cut), in its recheck-only form**: it is the part of the earlier combination that does the work (`P1' + C5` 2.4 / 3.5 s faithful and 5.9 / 11.5 s in the stall regime without any gap; `P1' + C5 + (a) fast recheck` 0.8 / 1.1 s faithful), costed it still
+  holds (within 20 %), it raises the stop count (shorter, more frequent) unless P1' is in front, and the 1 s collector gap is not needed once the fast recheck-only pass exists.
+* **Short grace behind reader safety** stays the only lever on a cap-bound volume (round 2) and was not re-run here.
+* Not done in this round: skew workloads, G6, P7.
+
+#### Tables, RAM 64K, faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 2 | 25 (32/32) | 35.1 / 68.3 | 0.66 | 35.8K / 28.9K | 64.7K | 1.011 | 2.4 | 30.7 / 16.8 | 18 % | 4.6 | 15.6 / 30.0 / 4.8 / 3.8 |
+| P1' alone | 0 / 0 | 40 (1/32) | 4.3 / 50.9 | 0.78 | 36.1K / 29.9K | 64.7K | 1.008 | 2.4 | 30.1 / 23.0 | 25 % | 20.1 | 11.7 / 30.0 / 3.8 / 4.0 |
+| P1' alone, lagged A, bias +15 % | 0 / 0 | 45 (3/32) | 1.0 / 13.9 | 1.02 | 35.6K / 28.2K | 64.7K | 1.009 | 2.4 | 29.5 / 22.9 | 24 % | 26.2 | 11.4 / 30.0 / 4.3 / 4.3 |
+| P1' alone, lagged A, bias -15 % | 0 / 0 | none | 5.7 / 61.6 | 0.67 | 36.6K / 30.0K | 64.7K | 1.008 | 2.4 | 30.8 / 22.7 | 23 % | - | 12.5 / 30.0 / 4.2 / 3.7 |
+| C5 free | 2 / 4 | 25 (32/32) | 8.3 / 11.4 | 0.66 | 40.3K / 38.3K | 64.7K | 1.014 | 2.4 | 41.6 / 23.3 | 15 % | 4.3 | 4.7 / 30.0 / 3.6 / 2.7 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 2 / 4 | 25 (30/32) | 10.7 / 11.6 | 0.71 | 39.7K / 35.5K | 64.6K | 1.014 | 2.4 | 38.9 / 23.0 | 14 % | 4.2 | 6.5 / 30.0 / 3.6 / 2.7 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 2 / 4 | 25 (30/32) | 10.7 / 11.6 | 0.71 | 39.7K / 35.8K | 64.6K | 1.013 | 2.4 | 38.3 / 23.7 | 15 % | 4.2 | 6.6 / 30.0 / 3.6 / 2.7 |
+| C5 costed, 20 % proposals fail | 2 / 4 | 25 (30/32) | 11.0 / 17.6 | 0.70 | 38.9K / 34.8K | 64.6K | 1.012 | 2.4 | 37.8 / 21.3 | 15 % | 4.2 | 7.3 / 30.0 / 3.6 / 3.0 |
+| gap 1 s (collector pass gap) | 1 / 4 | 25 (29/32) | 13.8 / 68.3 | 0.65 | 39.0K / 36.3K | 64.7K | 1.014 | 2.4 | 28.3 / 36.0 | 31 % | 4.0 | 7.1 / 30.0 / 1.5 / 3.2 |
+| gap (a) fast recheck-only pass | 1 / 2 | 25 (32/32) | 15.5 / 58.8 | 0.67 | 36.3K / 34.0K | 64.7K | 1.011 | 2.4 | 41.9 / 14.4 | 24 % | 4.6 | 12.9 / 30.0 / 1.1 / 3.5 |
+| gap (b) cut cadence 1 s | 1 / 2 | 24 (16/32) | 33.2 / 39.9 | 0.67 | 35.0K / 26.8K | 64.7K | 1.016 | 2.4 | 34.3 / 17.2 | 15 % | 31.0 | 11.3 / 30.0 / 4.0 / 4.2 |
+| gap (b) cut cadence 2 s | 2 / 4 | 25 (31/32) | 16.7 / 40.3 | 0.66 | 35.3K / 28.9K | 64.7K | 1.011 | 2.4 | 34.3 / 17.8 | 16 % | 4.2 | 13.2 / 30.0 / 4.2 / 4.1 |
+| gap (b) cut cadence 5 s | 1 / 2 | 25 (32/32) | 37.7 / 62.7 | 0.66 | 35.8K / 26.8K | 64.7K | 1.009 | 2.4 | 31.8 / 16.2 | 17 % | 4.6 | 15.6 / 30.0 / 4.9 / 3.8 |
+| P1' + C5 free (no gap) | 0 / 0 | 37 (1/32) | 2.4 / 3.5 | 0.67 | 38.9K / 36.5K | 64.7K | 1.006 | 2.4 | 33.7 / 29.6 | 20 % | 16.0 | 4.3 / 30.0 / 4.0 / 2.5 |
+| P1' + gap 1 s (no C5) | 0 / 0 | 31 (9/32) | 6.9 / 16.6 | 0.94 | 37.0K / 32.2K | 64.7K | 1.013 | 2.4 | 27.1 / 39.2 | 36 % | 62.6 | 6.3 / 30.0 / 1.9 / 3.4 |
+| P1' + C5 free + gap 1 s | 0 / 0 | 39 (2/32) | 1.0 / 4.8 | 0.65 | 41.2K / 35.0K | 64.7K | 1.012 | 2.4 | 21.6 / 54.6 | 34 % | 82.7 | 2.4 / 30.0 / 1.6 / 1.7 |
+| P1' + C5 costed + gap 1 s | 0 / 0 | 33 (4/32) | 1.3 / 8.2 | 0.67 | 38.5K / 35.2K | 64.6K | 1.014 | 2.4 | 22.6 / 50.5 | 30 % | 81.5 | 3.5 / 30.0 / 1.6 / 2.0 |
+| P1' + C5 free + (a) fast recheck | 0 / 0 | 37 (1/32) | 0.8 / 1.1 | 0.66 | 43.5K / 39.0K | 64.7K | 1.009 | 2.4 | 59.4 / 9.6 | 27 % | 16.0 | 4.7 / 30.0 / 1.0 / 1.2 |
+| P1' + C5 free + (b) cadence 2 s | 1 / 0 | 38 (16/32) | 5.3 / 11.2 | 1.02 | 35.5K / 28.9K | 64.7K | 1.014 | 2.4 | 36.9 / 26.2 | 22 % | 17.2 | 3.5 / 30.0 / 5.4 / 3.4 |
+| P1' + (b) cadence 2 s (no C5) | 1 / 2 | 36 (23/32) | 12.5 / 30.5 | 1.02 | 35.4K / 21.6K | 64.7K | 1.014 | 2.4 | 31.4 / 19.3 | 24 % | 15.6 | 11.2 / 30.0 / 5.0 / 6.1 |
+
+#### Tables, RAM 64K, stall regime
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 4 / 5 | 13 (32/32) | 31.0 / 35.9 | 1.02 | 20.7K / 15.2K | 94.3K | 1.031 | 4.1 | 38.5 / 16.3 | 13 % | 4.7 | 12.6 / 30.0 / 3.5 / 8.2 |
+| P1' alone | 2 / 0 | 30 (25/32) | 19.5 / 23.6 | 1.02 | 19.8K / 13.3K | 87.9K | 1.013 | 4.2 | 24.3 / 32.7 | 24 % | 22.4 | 10.3 / 30.0 / 3.8 / 5.9 |
+| P1' alone, lagged A, bias +15 % | 2 / 0 | 35 (25/32) | 12.1 / 20.1 | 1.02 | 19.5K / 13.0K | 86.7K | 1.011 | 4.2 | 22.5 / 35.1 | 24 % | 27.3 | 9.5 / 30.0 / 3.7 / 5.6 |
+| P1' alone, lagged A, bias -15 % | 2 / 2 | 32 (31/32) | 19.8 / 23.7 | 1.02 | 20.3K / 14.0K | 88.1K | 1.015 | 4.1 | 28.8 / 30.8 | 22 % | 23.8 | 10.1 / 30.0 / 3.4 / 6.2 |
+| C5 free | 6 / 10 | 13 (32/32) | 19.7 / 28.8 | 1.06 | 25.4K / 17.2K | 94.2K | 1.021 | 4.1 | 50.7 / 22.6 | 12 % | 4.7 | 2.1 / 30.0 / 4.0 / 4.5 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 5 / 8 | 17 (29/32) | 20.4 / 36.6 | 2.56 | 24.2K / 17.5K | 90.9K | 1.035 | 3.7 | 37.9 / 27.1 | 10 % | 8.2 | 5.1 / 30.0 / 3.7 / 4.4 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 6 / 9 | 17 (27/32) | 20.2 / 32.3 | 2.79 | 24.6K / 17.9K | 90.8K | 1.034 | 3.6 | 42.2 / 23.2 | 10 % | 8.7 | 4.9 / 30.0 / 3.6 / 4.4 |
+| C5 costed, 20 % proposals fail | 5 / 8 | 16 (26/32) | 20.8 / 34.6 | 1.41 | 23.7K / 18.1K | 89.7K | 1.037 | 3.8 | 39.7 / 24.4 | 10 % | 19.0 | 6.1 / 30.0 / 3.6 / 4.3 |
+| gap 1 s (collector pass gap) | 4 / 5 | 13 (32/32) | 31.0 / 32.9 | 1.02 | 20.1K / 15.8K | 94.3K | 1.025 | 4.1 | 36.1 / 22.4 | 13 % | 4.7 | 9.2 / 30.0 / 4.0 / 6.3 |
+| gap (a) fast recheck-only pass | 4 / 7 | 13 (32/32) | 30.4 / 32.0 | 1.02 | 20.9K / 19.3K | 94.3K | 1.043 | 4.1 | 45.2 / 16.4 | 17 % | 4.7 | 9.6 / 30.0 / 1.1 / 6.6 |
+| gap (b) cut cadence 1 s | 4 / 4 | 17 (32/32) | 31.4 / 35.5 | 1.04 | 20.7K / 13.4K | 94.3K | 1.025 | 4.1 | 36.0 / 19.2 | 10 % | 9.0 | 9.0 / 30.0 / 5.9 / 6.1 |
+| gap (b) cut cadence 2 s | 5 / 4 | 15 (32/32) | 32.4 / 35.6 | 1.02 | 21.0K / 13.2K | 94.3K | 1.024 | 4.1 | 36.4 / 16.8 | 11 % | 7.3 | 9.4 / 30.0 / 5.7 / 6.7 |
+| gap (b) cut cadence 5 s | 4 / 4 | 13 (32/32) | 31.5 / 35.4 | 1.02 | 21.0K / 13.5K | 94.3K | 1.017 | 4.1 | 37.5 / 17.2 | 11 % | 4.7 | 10.3 / 30.0 / 5.5 / 7.5 |
+| P1' + C5 free (no gap) | 2 / 0 | 29 (24/32) | 5.9 / 11.5 | 1.02 | 21.9K / 14.6K | 87.9K | 1.011 | 4.2 | 38.2 / 30.8 | 18 % | 21.5 | 1.2 / 30.0 / 4.6 / 4.0 |
+| P1' + gap 1 s (no C5) | 2 / 0 | 25 (28/32) | 23.5 / 27.4 | 1.02 | 20.5K / 15.7K | 87.9K | 1.012 | 4.2 | 26.7 / 43.9 | 34 % | 17.0 | 6.0 / 30.0 / 1.7 / 5.4 |
+| P1' + C5 free + gap 1 s | 1 / 0 | 29 (19/32) | 5.4 / 12.4 | 1.02 | 24.8K / 15.3K | 87.9K | 1.008 | 4.2 | 38.9 / 42.8 | 28 % | 21.1 | 0.8 / 30.0 / 2.2 / 3.3 |
+| P1' + C5 costed + gap 1 s | 1 / 0 | 34 (16/32) | 4.1 / 12.3 | 1.02 | 21.9K / 17.8K | 90.5K | 1.012 | 3.7 | 25.7 / 46.6 | 26 % | 24.8 | 3.9 / 30.0 / 2.0 / 4.1 |
+| P1' + C5 free + (a) fast recheck | 2 / 0 | 30 (26/32) | 7.0 / 12.4 | 1.02 | 23.1K / 14.6K | 87.9K | 1.012 | 4.2 | 54.7 / 22.6 | 23 % | 22.3 | 1.2 / 30.0 / 1.4 / 2.8 |
+| P1' + C5 free + (b) cadence 2 s | 2 / 0 | 26 (31/32) | 11.1 / 11.7 | 1.02 | 22.1K / 14.0K | 87.9K | 1.007 | 4.2 | 37.9 / 31.8 | 18 % | 17.8 | 1.0 / 30.0 / 4.8 / 4.1 |
+| P1' + (b) cadence 2 s (no C5) | 2 / 2 | 28 (32/32) | 20.4 / 30.2 | 1.02 | 19.9K / 13.0K | 87.9K | 1.011 | 4.2 | 25.2 / 34.6 | 23 % | 19.9 | 8.8 / 30.0 / 3.7 / 5.8 |
+
+#### Tables, network volume (band)
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 0 / 3 | none | 11.0 / 12.1 | 7.56 | 2.0K / 0.7K | 11.3K | 1.041 | 7.5 | 0.0 / 2.5 | 21 % | 40.6 | 7.4 / 30.0 / 3.2 / 0.8 |
+| P1' alone | 0 / 3 | none | 8.5 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 29 % | 36.0 | 7.4 / 30.0 / 15.8 / 0.8 |
+| P1' alone, lagged A, bias +15 % | 0 / 3 | none | 8.6 / 12.7 | 7.96 | 1.9K / 0.7K | 11.3K | 1.028 | 7.5 | 0.0 / 3.1 | 29 % | 37.2 | 7.3 / 30.0 / 15.6 / 0.7 |
+| P1' alone, lagged A, bias -15 % | 0 / 3 | none | 8.5 / 8.6 | 7.58 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 29 % | 35.8 | 7.4 / 30.0 / 16.6 / 0.8 |
+| C5 free | 0 / 3 | none | 7.9 / 12.2 | 7.56 | 2.0K / 0.8K | 11.3K | 1.026 | 7.5 | 0.0 / 2.8 | 21 % | 40.4 | 6.7 / 30.0 / 1.6 / 0.5 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 0 / 3 | none | 7.9 / 11.4 | 7.56 | 2.0K / 0.8K | 11.3K | 1.041 | 7.5 | 0.0 / 2.8 | 21 % | 41.9 | 6.8 / 30.0 / 2.4 / 0.5 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 0 / 3 | none | 7.9 / 11.4 | 7.56 | 2.0K / 0.8K | 11.3K | 1.041 | 7.5 | 0.0 / 2.8 | 21 % | 41.9 | 6.8 / 30.0 / 2.4 / 0.5 |
+| C5 costed, 20 % proposals fail | 0 / 3 | none | 8.6 / 11.4 | 7.56 | 2.0K / 0.8K | 11.3K | 1.041 | 7.5 | 0.0 / 2.5 | 21 % | 41.9 | 6.8 / 30.0 / 2.4 / 0.5 |
+| gap 1 s (collector pass gap) | 0 / 3 | none | 10.8 / 12.1 | 7.56 | 2.0K / 0.7K | 11.3K | 1.041 | 7.5 | 0.0 / 2.5 | 22 % | 40.6 | 7.4 / 30.0 / 1.7 / 0.8 |
+| gap (a) fast recheck-only pass | 0 / 3 | none | 10.8 / 14.7 | 7.56 | 2.0K / 0.7K | 11.3K | 1.022 | 7.5 | 0.0 / 2.8 | 22 % | 39.9 | 7.4 / 30.0 / 1.6 / 0.7 |
+| gap (b) cut cadence 1 s | 0 / 5 | none | 8.2 / 14.7 | 7.56 | 2.0K / 0.7K | 11.3K | 1.046 | 7.5 | 0.0 / 1.4 | 18 % | 34.0 | 7.4 / 30.0 / 4.5 / 0.0 |
+| gap (b) cut cadence 2 s | 0 / 2 | none | 8.4 / 9.6 | 7.56 | 2.0K / 0.7K | 11.3K | 1.018 | 7.5 | 0.0 / 1.6 | 22 % | 35.1 | 7.4 / 30.0 / 3.1 / 0.0 |
+| gap (b) cut cadence 5 s | 0 / 3 | none | 10.6 / 12.3 | 7.56 | 2.0K / 0.7K | 11.3K | 1.038 | 7.5 | 0.0 / 2.5 | 21 % | 40.6 | 7.4 / 30.0 / 3.2 / 0.8 |
+| P1' + C5 free (no gap) | 0 / 3 | none | 8.5 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 29 % | 35.6 | 6.7 / 30.0 / 16.2 / 0.5 |
+| P1' + gap 1 s (no C5) | 0 / 3 | none | 8.5 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 29 % | 36.0 | 7.4 / 30.0 / 15.8 / 0.8 |
+| P1' + C5 free + gap 1 s | 0 / 3 | none | 8.5 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 29 % | 35.6 | 6.7 / 30.0 / 16.2 / 0.5 |
+| P1' + C5 costed + gap 1 s | 0 / 3 | none | 8.6 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 3.1 | 28 % | 35.6 | 6.7 / 30.0 / 16.5 / 0.5 |
+| P1' + C5 free + (a) fast recheck | 0 / 1 | none | 8.5 / 8.6 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 2.4 | 25 % | 35.4 | 6.6 / 30.0 / 9.9 / 0.5 |
+| P1' + C5 free + (b) cadence 2 s | 0 / 3 | none | 8.5 / 15.2 | 7.56 | 1.9K / 0.7K | 11.3K | 1.029 | 7.5 | 0.0 / 2.5 | 20 % | 50.5 | 6.7 / 30.0 / 5.8 / 0.5 |
+| P1' + (b) cadence 2 s (no C5) | 0 / 3 | none | 8.5 / 15.0 | 7.56 | 1.9K / 0.7K | 11.3K | 1.037 | 7.5 | 0.0 / 2.3 | 20 % | 51.3 | 7.5 / 30.0 / 5.7 / 0.7 |
+
+#### Tables, M15, faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 1 | 55 (17/24) | 36.8 / 37.5 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % | 44.5 | 20.7 / 30.0 / 2.1 / 0.0 |
+| P1' alone | 0 / 2 | 63 (14/24) | 35.4 / 57.6 | 2.57 | 17.2K / 12.9K | 82.2K | 1.026 | 1.4 | 0.0 / 22.5 | 20 % | 52.0 | 15.2 / 30.0 / 2.5 / 2.1 |
+| P1' alone, lagged A, bias +15 % | 0 / 5 | 68 (15/24) | 31.2 / 37.6 | 1.58 | 17.8K / 15.5K | 82.2K | 1.031 | 1.4 | 0.0 / 24.3 | 20 % | 56.9 | 11.9 / 30.0 / 3.2 / 2.0 |
+| P1' alone, lagged A, bias -15 % | 1 / 2 | 60 (17/24) | 36.5 / 70.3 | 5.81 | 16.4K / 14.2K | 82.2K | 1.030 | 1.4 | 0.0 / 20.2 | 22 % | 49.2 | 16.3 / 30.0 / 2.1 / 2.3 |
+| C5 free | 1 / 2 | 54 (17/24) | 35.4 / 36.1 | 12.38 | 19.1K / 13.4K | 82.2K | 1.029 | 1.4 | 0.0 / 23.0 | 23 % | 43.5 | 10.2 / 30.0 / 4.7 / 2.3 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 1 / 1 | 57 (17/24) | 35.3 / 36.3 | 16.66 | 17.8K / 14.2K | 82.2K | 1.029 | 1.4 | 0.0 / 22.6 | 22 % | 46.0 | 14.9 / 30.0 / 4.1 / 2.1 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 1 / 1 | 57 (17/24) | 35.3 / 36.3 | 16.66 | 17.8K / 14.2K | 82.2K | 1.029 | 1.4 | 0.0 / 22.6 | 22 % | 46.0 | 14.9 / 30.0 / 4.1 / 2.1 |
+| C5 costed, 20 % proposals fail | 1 / 0 | 57 (17/24) | 35.5 / 37.2 | 16.71 | 17.7K / 13.9K | 82.2K | 1.029 | 1.4 | 0.0 / 22.0 | 23 % | 46.0 | 15.6 / 30.0 / 4.0 / 2.1 |
+| gap 1 s (collector pass gap) | 0 / 3 | 59 (15/24) | 36.5 / 66.3 | 6.55 | 15.3K / 15.3K | 82.2K | 1.028 | 1.4 | 0.0 / 23.8 | 19 % | 47.9 | 14.0 / 30.0 / 2.2 / 2.1 |
+| gap (a) fast recheck-only pass | 1 / 1 | 55 (17/24) | 36.8 / 37.6 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % | 44.5 | 20.7 / 30.0 / 2.1 / 2.1 |
+| gap (b) cut cadence 1 s | 5 / 9 | 14 (24/24) | 33.0 / 35.3 | 5.46 | 24.2K / 17.8K | 82.2K | 1.035 | 1.4 | 0.1 / 30.2 | 21 % | 2.7 | 6.6 / 30.0 / 4.2 / 2.3 |
+| gap (b) cut cadence 2 s | 2 / 6 | 55 (17/24) | 35.0 / 37.3 | 3.71 | 16.1K / 13.6K | 82.2K | 1.032 | 1.4 | 0.0 / 24.6 | 22 % | 44.2 | 8.7 / 30.0 / 3.1 / 2.4 |
+| gap (b) cut cadence 5 s | 1 / 1 | 55 (17/24) | 36.8 / 57.6 | 28.05 | 16.5K / 12.7K | 82.2K | 1.030 | 1.4 | 0.0 / 19.8 | 24 % | 44.5 | 20.2 / 30.0 / 2.2 / 0.7 |
+| P1' + C5 free (no gap) | 0 / 3 | 102 (15/24) | 32.7 / 36.2 | 1.02 | 17.5K / 17.5K | 82.2K | 1.028 | 1.4 | 0.0 / 28.8 | 20 % | 90.8 | 4.5 / 30.0 / 4.2 / 2.2 |
+| P1' + gap 1 s (no C5) | 0 / 5 | 103 (16/24) | 33.2 / 37.1 | 1.02 | 15.3K / 18.0K | 82.2K | 1.032 | 1.4 | 0.0 / 26.9 | 22 % | 92.3 | 11.2 / 30.0 / 2.5 / 1.9 |
+| P1' + C5 free + gap 1 s | 1 / 6 | 62 (16/24) | 29.6 / 35.3 | 1.02 | 18.9K / 19.6K | 82.2K | 1.031 | 1.4 | 0.0 / 31.2 | 21 % | 51.7 | 3.5 / 30.0 / 3.0 / 1.6 |
+| P1' + C5 costed + gap 1 s | 1 / 6 | 62 (16/24) | 29.9 / 35.2 | 1.63 | 17.2K / 17.6K | 82.2K | 1.030 | 1.4 | 0.0 / 31.4 | 21 % | 51.5 | 6.2 / 30.0 / 2.8 / 1.7 |
+| P1' + C5 free + (a) fast recheck | 0 / 1 | 100 (14/24) | 34.9 / 36.6 | 1.02 | 17.5K / 17.5K | 82.2K | 1.015 | 1.4 | 0.0 / 20.1 | 18 % | 89.3 | 5.9 / 30.0 / 3.0 / 2.6 |
+| P1' + C5 free + (b) cadence 2 s | 4 / 10 | 15 (24/24) | 24.7 / 29.3 | 1.02 | 24.2K / 18.9K | 82.2K | 1.028 | 1.4 | 0.1 / 35.1 | 23 % | 3.8 | 0.6 / 30.0 / 4.2 / 2.0 |
+| P1' + (b) cadence 2 s (no C5) | 3 / 6 | 15 (24/24) | 27.5 / 32.5 | 2.26 | 24.0K / 16.3K | 82.2K | 1.030 | 1.4 | 0.1 / 30.8 | 25 % | 3.8 | 6.7 / 30.0 / 4.2 / 2.4 |
+
+#### Tables, M15, stall regime
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 2 / 3 | 18 (24/24) | 35.3 / 36.1 | 14.63 | 18.4K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 29.8 | 20 % | 11.5 | 6.9 / 30.0 / 4.7 / 2.9 |
+| P1' alone | 2 / 3 | 22 (24/24) | 32.2 / 36.8 | 14.41 | 18.2K / 15.0K | 81.2K | 1.028 | 2.0 | 0.0 / 30.7 | 24 % | 15.8 | 7.0 / 30.0 / 4.5 / 3.2 |
+| P1' alone, lagged A, bias +15 % | 2 / 3 | 22 (24/24) | 30.3 / 36.7 | 14.13 | 18.2K / 14.3K | 80.6K | 1.027 | 2.0 | 0.0 / 30.1 | 24 % | 16.0 | 6.9 / 30.0 / 4.6 / 2.9 |
+| P1' alone, lagged A, bias -15 % | 2 / 2 | 22 (24/24) | 32.2 / 36.8 | 14.41 | 18.2K / 15.0K | 81.6K | 1.033 | 2.0 | 0.0 / 30.7 | 25 % | 15.6 | 6.9 / 30.0 / 4.5 / 3.2 |
+| C5 free | 2 / 4 | 18 (24/24) | 31.7 / 32.1 | 14.53 | 18.2K / 16.3K | 83.4K | 1.035 | 2.0 | 0.0 / 34.4 | 18 % | 11.7 | 0.2 / 30.0 / 5.3 / 2.9 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 3 / 4 | 16 (24/24) | 32.2 / 33.2 | 23.88 | 18.5K / 16.0K | 83.4K | 1.035 | 2.0 | 0.0 / 34.9 | 18 % | 9.7 | 1.8 / 30.0 / 4.7 / 3.1 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 3 / 5 | 16 (24/24) | 32.2 / 33.2 | 23.76 | 18.5K / 15.9K | 83.4K | 1.035 | 2.0 | 0.0 / 34.8 | 17 % | 9.7 | 1.7 / 30.0 / 4.7 / 3.1 |
+| C5 costed, 20 % proposals fail | 2 / 4 | 16 (24/24) | 32.2 / 33.3 | 15.24 | 18.4K / 15.6K | 83.4K | 1.035 | 2.0 | 0.0 / 34.6 | 18 % | 9.7 | 2.1 / 30.0 / 4.6 / 3.6 |
+| gap 1 s (collector pass gap) | 2 / 5 | 17 (24/24) | 32.3 / 35.9 | 21.57 | 18.2K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 34.5 | 21 % | 10.4 | 5.0 / 30.0 / 3.9 / 3.1 |
+| gap (a) fast recheck-only pass | 3 / 4 | 18 (24/24) | 38.5 / 45.0 | 31.35 | 18.6K / 14.6K | 83.4K | 1.035 | 2.0 | 0.0 / 27.1 | 18 % | 11.5 | 6.5 / 30.0 / 1.7 / 4.8 |
+| gap (b) cut cadence 1 s | 2 / 3 | 18 (24/24) | 35.5 / 36.6 | 14.60 | 18.5K / 15.2K | 83.4K | 1.035 | 2.0 | 0.0 / 30.0 | 20 % | 11.6 | 6.8 / 30.0 / 4.4 / 3.1 |
+| gap (b) cut cadence 2 s | 3 / 3 | 18 (24/24) | 35.5 / 36.6 | 14.61 | 18.5K / 15.2K | 83.4K | 1.035 | 2.0 | 0.0 / 31.1 | 20 % | 11.6 | 6.9 / 30.0 / 4.5 / 2.9 |
+| gap (b) cut cadence 5 s | 3 / 3 | 18 (24/24) | 35.5 / 36.0 | 23.94 | 18.4K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 28.7 | 18 % | 11.0 | 6.8 / 30.0 / 5.7 / 3.0 |
+| P1' + C5 free (no gap) | 2 / 3 | 21 (24/24) | 27.5 / 32.1 | 5.00 | 18.3K / 15.9K | 81.2K | 1.027 | 2.0 | 0.0 / 35.6 | 22 % | 14.4 | 0.2 / 30.0 / 4.4 / 2.6 |
+| P1' + gap 1 s (no C5) | 2 / 3 | 20 (24/24) | 31.9 / 36.9 | 1.02 | 18.1K / 14.7K | 81.2K | 1.027 | 2.0 | 0.0 / 35.5 | 32 % | 13.2 | 4.8 / 30.0 / 3.3 / 2.6 |
+| P1' + C5 free + gap 1 s | 3 / 4 | 17 (24/24) | 29.0 / 32.4 | 1.02 | 18.9K / 18.2K | 81.2K | 1.023 | 2.0 | 0.0 / 39.4 | 29 % | 10.7 | 0.2 / 30.0 / 3.2 / 2.4 |
+| P1' + C5 costed + gap 1 s | 3 / 4 | 17 (24/24) | 30.8 / 35.1 | 1.02 | 18.3K / 18.1K | 81.2K | 1.023 | 2.0 | 0.0 / 36.8 | 28 % | 10.9 | 1.3 / 30.0 / 3.3 / 2.6 |
+| P1' + C5 free + (a) fast recheck | 2 / 3 | 21 (24/24) | 32.2 / 34.1 | 24.42 | 18.7K / 15.2K | 81.2K | 1.035 | 2.0 | 0.0 / 34.1 | 20 % | 14.4 | 0.3 / 30.0 / 1.4 / 4.6 |
+| P1' + C5 free + (b) cadence 2 s | 3 / 3 | 20 (24/24) | 27.2 / 31.8 | 3.21 | 18.2K / 16.0K | 81.2K | 1.024 | 2.0 | 0.0 / 35.6 | 23 % | 13.7 | 0.3 / 30.0 / 4.1 / 2.7 |
+| P1' + (b) cadence 2 s (no C5) | 2 / 2 | 22 (24/24) | 32.5 / 36.9 | 14.54 | 18.3K / 14.8K | 81.2K | 1.028 | 2.0 | 0.0 / 30.7 | 24 % | 15.9 | 7.0 / 30.0 / 4.3 / 3.1 |
+Exception in WebSocket on_incoming_frame_payload callback
+Traceback (most recent call last):
+  File "awscrt/websocket.py", line 501, in _on_incoming_frame_payload
+  File "awscli/customizations/ec2instanceconnect/websocket.py", line 299, in _on_incoming_frame_payload_data
+  File "awscli/customizations/ec2instanceconnect/websocket.py", line 83, in write
+BrokenPipeError: [Errno 32] Broken pipe
+
+aws: [ERROR]: AWS_ERROR_HTTP_CALLBACK_FAILURE: A callback has reported failure.
+Exception ignored while flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe
+
+#### Tables, RAM 16K (not evidence), faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 0 / 2 | 48 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.7K | 83.6K | 1.010 | 1.4 | 9.8 / 32.2 | 33 % | 93.3 | 24.3 / 30.0 / 5.5 / 4.9 |
+| P1' alone | 0 / 0 | none | 37.3 / 42.6 | 0.40 | 34.9K / 43.4K | 83.6K | 0.999 | 1.4 | 9.6 / 31.6 | 31 % | 101.6 | 28.9 / 30.0 / 6.0 / 4.9 |
+| P1' alone, lagged A, bias +15 % | 0 / 0 | none | 14.8 / 28.3 | 0.40 | 34.9K / 43.4K | 83.6K | 0.993 | 1.4 | 10.2 / 29.3 | 32 % | 101.3 | 31.5 / 30.0 / 5.1 / 5.9 |
+| P1' alone, lagged A, bias -15 % | 0 / 1 | 54 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.1K | 83.6K | 1.008 | 1.4 | 10.7 / 30.4 | 32 % | 101.8 | 26.3 / 30.0 / 5.7 / 5.0 |
+| C5 free | 1 / 0 | 45 (10/16) | 0.9 / 2.4 | 0.84 | 60.5K / 46.7K | 83.6K | 1.004 | 1.4 | 16.8 / 37.5 | 35 % | 16.1 | 1.9 / 30.0 / 5.3 / 3.3 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 0 / 2 | 50 (4/16) | 13.2 / 21.2 | 0.40 | 52.8K / 43.7K | 83.6K | 1.008 | 1.4 | 12.1 / 36.0 | 32 % | 69.1 | 7.2 / 30.0 / 5.5 / 4.9 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 0 / 2 | 50 (4/16) | 13.4 / 21.5 | 0.40 | 52.8K / 43.9K | 83.6K | 1.009 | 1.4 | 12.2 / 36.6 | 32 % | 69.6 | 7.5 / 30.0 / 5.6 / 4.9 |
+| C5 costed, 20 % proposals fail | 0 / 3 | 50 (3/16) | 14.3 / 21.9 | 0.40 | 52.3K / 42.6K | 83.6K | 1.009 | 1.4 | 12.1 / 36.4 | 31 % | 71.5 | 8.3 / 30.0 / 5.4 / 5.3 |
+| gap 1 s (collector pass gap) | 0 / 3 | 47 (3/16) | 42.3 / 42.6 | 0.40 | 34.9K / 49.6K | 83.6K | 1.008 | 1.4 | 8.8 / 34.7 | 33 % | 88.1 | 21.1 / 30.0 / 3.7 / 4.5 |
+| gap (a) fast recheck-only pass | 0 / 2 | 59 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.6K | 83.6K | 1.010 | 1.4 | 13.8 / 29.1 | 34 % | 93.3 | 23.0 / 30.0 / 3.7 / 5.0 |
+| gap (b) cut cadence 1 s | 1 / 1 | 54 (2/16) | 32.6 / 32.9 | 0.61 | 34.0K / 37.8K | 83.6K | 1.017 | 1.4 | 9.6 / 27.1 | 29 % | 36.6 | 20.5 / 30.6 / 4.7 / 5.0 |
+| gap (b) cut cadence 2 s | 1 / 0 | 52 (3/16) | 30.0 / 30.0 | 0.72 | 34.6K / 51.8K | 83.6K | 1.013 | 1.4 | 10.9 / 33.0 | 32 % | 36.6 | 17.0 / 30.0 / 6.6 / 6.3 |
+| gap (b) cut cadence 5 s | 1 / 2 | 47 (6/16) | 30.0 / 32.4 | 0.78 | 34.8K / 50.7K | 83.6K | 1.008 | 1.4 | 11.8 / 26.6 | 32 % | 36.6 | 18.1 / 30.0 / 6.1 / 6.2 |
+| P1' + C5 free (no gap) | 0 / 0 | none | 0.9 / 1.0 | 0.75 | 59.9K / 45.5K | 83.6K | 0.998 | 1.4 | 17.7 / 36.2 | 35 % | - | 2.0 / 30.0 / 5.9 / 3.1 |
+| P1' + gap 1 s (no C5) | 0 / 0 | none | 37.2 / 42.6 | 0.40 | 34.9K / 43.8K | 83.6K | 0.996 | 1.4 | 9.0 / 34.0 | 32 % | 92.1 | 27.2 / 30.0 / 3.4 / 4.9 |
+| P1' + C5 free + gap 1 s | 0 / 0 | none | 0.9 / 1.0 | 0.55 | 59.8K / 54.0K | 83.6K | 0.994 | 1.4 | 11.5 / 47.2 | 40 % | - | 1.5 / 30.0 / 4.0 / 2.8 |
+| P1' + C5 costed + gap 1 s | 0 / 0 | 57 (1/16) | 9.9 / 12.6 | 0.41 | 52.0K / 45.4K | 83.6K | 0.994 | 1.4 | 10.1 / 38.2 | 37 % | 74.0 | 8.0 / 30.0 / 4.0 / 5.0 |
+| P1' + C5 free + (a) fast recheck | 0 / 0 | none | 0.5 / 1.0 | 0.40 | 54.1K / 50.6K | 83.6K | 0.989 | 1.4 | 33.4 / 21.2 | 34 % | - | 3.1 / 30.0 / 3.6 / 2.6 |
+| P1' + C5 free + (b) cadence 2 s | 0 / 0 | none | 0.6 / 0.9 | 0.51 | 59.4K / 43.8K | 83.6K | 0.976 | 1.4 | 17.8 / 36.3 | 36 % | - | 1.6 / 30.0 / 5.6 / 3.3 |
+| P1' + (b) cadence 2 s (no C5) | 1 / 0 | none | 22.7 / 23.6 | 0.56 | 33.8K / 49.4K | 83.6K | 1.008 | 1.4 | 10.7 / 30.5 | 35 % | 44.1 | 18.1 / 30.0 / 5.9 / 6.3 |
+
+#### Tables, RAM 16K (not evidence), stall regime
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 1 | 39 (16/16) | 13.0 / 15.1 | 1.02 | 46.1K / 25.8K | 110.0K | 1.007 | 2.0 | 4.4 / 47.3 | 26 % | 23.3 | 8.7 / 30.0 / 6.2 / 6.1 |
+| P1' alone | 0 / 0 | 57 (1/16) | 1.0 / 1.0 | 1.02 | 44.1K / 24.0K | 110.0K | 0.991 | 2.0 | 4.2 / 44.7 | 28 % | 40.9 | 8.8 / 30.0 / 6.7 / 6.4 |
+| P1' alone, lagged A, bias +15 % | 0 / 0 | none | 1.0 / 1.0 | 1.02 | 43.9K / 23.4K | 110.0K | 0.986 | 2.0 | 4.1 / 44.9 | 28 % | 49.2 | 9.2 / 30.0 / 6.7 / 6.2 |
+| P1' alone, lagged A, bias -15 % | 0 / 0 | 51 (1/16) | 1.0 / 1.0 | 1.02 | 44.5K / 27.0K | 110.0K | 0.996 | 2.0 | 4.3 / 45.1 | 28 % | 34.7 | 8.9 / 30.0 / 6.7 / 6.3 |
+| C5 free | 0 / 0 | 38 (7/16) | 1.0 / 1.1 | 1.02 | 45.6K / 40.2K | 110.0K | 1.000 | 2.0 | 19.4 / 44.4 | 22 % | 21.7 | 0.3 / 30.0 / 6.3 / 5.2 |
+| C5 costed (list sync, flags, skipped while a pass runs) | 0 / 1 | 38 (7/16) | 2.1 / 12.2 | 1.02 | 47.5K / 38.6K | 110.0K | 1.003 | 1.9 | 6.3 / 49.2 | 20 % | 27.0 | 3.0 / 30.0 / 5.8 / 6.2 |
+| C5 costed, disk (5.5 ms flags, 3 ms sync) | 0 / 0 | 38 (7/16) | 2.1 / 12.8 | 1.02 | 47.4K / 38.9K | 110.0K | 1.003 | 1.9 | 5.0 / 51.3 | 20 % | 22.6 | 3.0 / 30.0 / 5.7 / 5.9 |
+| C5 costed, 20 % proposals fail | 0 / 1 | 38 (6/16) | 2.1 / 13.3 | 1.02 | 47.3K / 38.9K | 110.0K | 1.001 | 1.9 | 4.4 / 51.2 | 21 % | 73.8 | 3.0 / 30.0 / 5.7 / 5.7 |
+| gap 1 s (collector pass gap) | 2 / 2 | 37 (16/16) | 11.3 / 14.6 | 1.02 | 46.1K / 36.8K | 110.0K | 1.003 | 2.0 | 2.4 / 52.2 | 34 % | 20.8 | 6.0 / 30.0 / 4.1 / 5.4 |
+| gap (a) fast recheck-only pass | 1 / 1 | 39 (16/16) | 7.1 / 15.1 | 1.02 | 46.1K / 30.6K | 110.0K | 1.009 | 2.0 | 14.8 / 37.5 | 27 % | 23.3 | 7.1 / 30.0 / 3.1 / 5.4 |
+| gap (b) cut cadence 1 s | 1 / 1 | 39 (16/16) | 13.7 / 15.1 | 1.02 | 46.0K / 25.8K | 110.0K | 1.006 | 2.0 | 4.5 / 47.4 | 26 % | 23.5 | 8.8 / 30.0 / 6.1 / 5.9 |
+| gap (b) cut cadence 2 s | 1 / 1 | 39 (16/16) | 13.3 / 14.8 | 1.02 | 46.2K / 25.7K | 110.0K | 1.007 | 2.0 | 4.0 / 47.4 | 26 % | 23.2 | 8.7 / 30.0 / 6.1 / 5.8 |
+| gap (b) cut cadence 5 s | 2 / 1 | 39 (16/16) | 13.1 / 15.1 | 1.02 | 46.3K / 25.1K | 110.0K | 1.008 | 2.0 | 4.1 / 47.4 | 26 % | 23.4 | 8.8 / 30.0 / 6.0 / 5.9 |
+| P1' + C5 free (no gap) | 0 / 0 | none | 1.0 / 1.0 | 0.89 | 44.5K / 38.9K | 110.0K | 0.982 | 2.0 | 19.0 / 43.0 | 22 % | - | 0.2 / 30.0 / 6.7 / 4.7 |
+| P1' + gap 1 s (no C5) | 0 / 0 | 54 (1/16) | 1.0 / 1.0 | 1.01 | 44.8K / 35.8K | 110.0K | 0.989 | 2.0 | 2.6 / 50.7 | 35 % | 37.7 | 6.3 / 30.0 / 3.9 / 5.6 |
+| P1' + C5 free + gap 1 s | 0 / 0 | none | 0.8 / 1.0 | 0.71 | 44.4K / 40.4K | 110.0K | 0.980 | 2.0 | 16.0 / 50.4 | 30 % | - | 0.3 / 30.0 / 4.6 / 4.4 |
+| P1' + C5 costed + gap 1 s | 0 / 0 | none | 1.8 / 2.1 | 0.74 | 45.7K / 39.6K | 110.0K | 0.983 | 1.9 | 3.6 / 60.6 | 28 % | - | 2.3 / 30.0 / 3.9 / 4.9 |
+| P1' + C5 free + (a) fast recheck | 0 / 0 | none | 1.0 / 1.0 | 0.74 | 44.5K / 39.5K | 110.0K | 0.982 | 2.0 | 27.2 / 36.6 | 24 % | - | 0.3 / 30.0 / 3.9 / 4.2 |
+| P1' + C5 free + (b) cadence 2 s | 0 / 0 | none | 1.0 / 1.0 | 0.89 | 44.5K / 39.0K | 110.0K | 0.984 | 2.0 | 18.6 / 43.1 | 23 % | - | 0.3 / 30.0 / 6.6 / 4.9 |
+| P1' + (b) cadence 2 s (no C5) | 0 / 0 | 55 (1/16) | 1.0 / 1.0 | 1.02 | 44.2K / 23.7K | 110.0K | 0.992 | 2.0 | 4.1 / 45.2 | 28 % | 39.5 | 9.1 / 30.0 / 6.4 / 6.4 |
+
 ## Gates and deviations
 
 * `tools/ci.sh` on the remote: `ci: all green` (fmt, clippy `-D warnings`, `cargo test --workspace` including 25 simulator tests, the crashpoint builds, ownership

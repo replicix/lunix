@@ -157,6 +157,9 @@ struct Sim<'p> {
     amp_pre_band: Option<f64>,
     a_hat: f64,
     a_prev: (f64, f64),
+    a_hist: VecDeque<(f64, f64)>,
+    first_stop_abs: Option<f64>,
+    c5_skipped: u64,
     store_rate: f64,
     cw_prev: f64,
     last_refresh: Duration,
@@ -326,6 +329,9 @@ impl<'p> Sim<'p> {
             amp_pre_band: None,
             a_hat: 1.0,
             a_prev: (0.0, 0.0),
+            a_hist: VecDeque::new(),
+            first_stop_abs: None,
+            c5_skipped: 0,
             store_rate: 0.0,
             cw_prev: 0.0,
             last_refresh: base,
@@ -499,6 +505,7 @@ impl<'p> Sim<'p> {
         let stopped = |s: ThrottleState| matches!(s, ThrottleState::Stop | ThrottleState::Full);
         if stopped(st) && self.stop_start.is_none() {
             self.stop_start = Some(rel);
+            self.first_stop_abs.get_or_insert(rel);
             if let Some(c) = &mut self.cell {
                 if c.first_stop.is_none() {
                     c.first_stop = Some(rel - c.start);
@@ -784,10 +791,14 @@ impl<'p> Sim<'p> {
         let cut_t = Duration::from_secs_f64(self.sc.commit_interval_s);
         let appended = self.ring_appended > 0;
         let full = self.ring_reserved as f64 >= self.sc.cut_trigger * self.sc.ring_park as f64;
-        (appended
-            && (full
-                || !self.ring_parked.is_empty()
-                || self.now.saturating_sub(self.last_commit) >= cut_t))
+        let cadence = self.sc.cut_cadence_s > 0.0
+            && self.prev_state != ThrottleState::Open
+            && self.now.saturating_sub(self.last_commit).as_secs_f64() >= self.sc.cut_cadence_s;
+        (appended && cadence)
+            || (appended
+                && (full
+                    || !self.ring_parked.is_empty()
+                    || self.now.saturating_sub(self.last_commit) >= cut_t))
             || (self.store.has_unnamed()
                 && self.now.saturating_sub(self.last_commit) >= Duration::from_secs(1))
     }
@@ -965,13 +976,47 @@ impl<'p> Sim<'p> {
         self.ring_appended = self.ring_appended.saturating_sub(job.bytes);
         self.store.write_segments(job.distinct, job.distinct, false);
         self.store.cut_done(job.distinct, self.now, &mut self.rng);
+        let mut c5_block = Duration::ZERO;
         if self.sc.condemn_at_cut {
-            let c = self.store.mark(self.now);
-            let listed = self.store.condemned_bytes();
-            self.gc.external_condemn(c, self.now, listed);
+            if self.sc.c5_cost {
+                // A proposal: the collector flags what is dead (variant N+2);
+                // it costs a list sync and a flag per segment, runs only
+                // while no pass is in progress, and can fail.
+                let n = self.store.condemnable_count();
+                if n > 0 {
+                    if self.gc.busy() || self.jit.unit() < self.sc.c5_error {
+                        self.c5_skipped += 1;
+                    } else {
+                        let work = Duration::from_secs_f64(
+                            (self.sc.list_sync_ms + n as f64 * self.sc.condemn_ms) / 1000.0,
+                        );
+                        let c = self.store.mark(self.now);
+                        self.store.shift_condemned(self.now, work);
+                        let listed = self.store.condemned_bytes();
+                        self.gc.external_condemn(c, self.now, listed);
+                        c5_block = work;
+                    }
+                }
+            } else {
+                let c = self.store.mark(self.now);
+                let listed = self.store.condemned_bytes();
+                self.gc.external_condemn(c, self.now, listed);
+            }
         }
         self.cut_written += job.store_bytes;
         self.cut_journal += job.bytes as f64;
+        if self.sc.a_lag && job.bytes > 0 {
+            self.a_hist.push_back((job.store_bytes, job.bytes as f64));
+            if self.a_hist.len() > 8 {
+                self.a_hist.pop_front();
+            }
+            let (s8, j8) = self
+                .a_hist
+                .iter()
+                .fold((0.0, 0.0), |a, x| (a.0 + x.0, a.1 + x.1));
+            let last = job.store_bytes / job.bytes as f64;
+            self.a_hat = (s8 / j8).max(last) * (1.0 + self.sc.a_bias);
+        }
         self.written += job.store_bytes;
         let took = self.now.saturating_sub(job.start);
         let since = self.prev_cut_end.map(|e| self.now.saturating_sub(e));
@@ -999,6 +1044,11 @@ impl<'p> Sim<'p> {
         } else {
             self.coord = Coord::Idle;
         }
+        if !c5_block.is_zero() {
+            self.coord = Coord::Blocked {
+                until: self.now + c5_block,
+            };
+        }
     }
 
     // ----- the trace -----
@@ -1013,7 +1063,7 @@ impl<'p> Sim<'p> {
         let (cw, cj) = (self.cut_written, self.cut_journal);
         self.store_rate = 0.7 * self.store_rate + 0.3 * (cw - self.cw_prev);
         self.cw_prev = cw;
-        if cj - self.a_prev.1 > 1e6 {
+        if !self.sc.a_lag && cj - self.a_prev.1 > 1e6 {
             let a = (cw - self.a_prev.0) / (cj - self.a_prev.1);
             self.a_hat = 0.7 * self.a_hat + 0.3 * a;
             self.a_prev = (cw, cj);
@@ -1079,6 +1129,9 @@ impl<'p> Sim<'p> {
             dead.grace /= w;
             dead.recheck /= w;
         }
+        if st.release_bytes > 0.0 {
+            dead.delete = st.release_weighted / st.release_bytes;
+        }
         let total = self.sc.total_secs();
         // The first-fill window is the first 90 s for every row, whatever the
         // candidate does to the first delete.
@@ -1107,6 +1160,7 @@ impl<'p> Sim<'p> {
             },
             marks: st.marks,
             urgent: st.urgent,
+            first_stop_abs: self.first_stop_abs,
             peak_condemned: st.peak_condemned,
             reclaim_whole: self.store.condemned_whole,
             reclaim_moved: self.store.condemned_moved,

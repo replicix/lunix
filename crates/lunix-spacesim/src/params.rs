@@ -147,6 +147,20 @@ pub struct Scenario {
     /// (a usage table updated at the cut, G2); the delete still needs a later
     /// mark that began after the grace.
     pub condemn_at_cut: bool,
+    /// A cut is forced at least this often (seconds) while the gate is not
+    /// open and journal bytes wait (0: only the code's triggers).
+    pub cut_cadence_s: f64,
+    /// `A_hat` from the last 8 cuts, byte-weighted, maximum with the last (a
+    /// lagging estimator) instead of the exact EWMA.
+    pub a_lag: bool,
+    /// A relative bias on `A_hat` (+0.15: 15 % too high).
+    pub a_bias: f64,
+    /// Condemn-on-cut costs coordinator time: a list sync and the flags.
+    pub c5_cost: bool,
+    /// The list sync of one proposal, milliseconds.
+    pub list_sync_ms: f64,
+    /// Share of proposals that fail (the list write errors) and are skipped.
+    pub c5_error: f64,
     /// Cost of one punch call, microseconds.
     pub punch_call_us: f64,
     /// Cost of the `fdatasync` after 8 192 punches, milliseconds.
@@ -255,6 +269,11 @@ impl Scenario {
             "ram-16k" => Self::ram_16k(),
             "netvol-64k" => Self::netvol(65_536),
             "netvol-16k" => Self::netvol(16_384),
+            "netvol-band" => Self {
+                name: "netvol-band".into(),
+                cache_max: Some(6 * GIB),
+                ..Self::netvol(65_536)
+            },
             "m15-8g" => Self::m15_8g(),
             _ => bail!(
                 "unknown scenario {name:?}; known: {}",
@@ -291,6 +310,12 @@ impl Scenario {
             compaction: true,
             p7: false,
             condemn_at_cut: false,
+            cut_cadence_s: 0.0,
+            a_lag: false,
+            a_bias: 0.0,
+            c5_cost: false,
+            list_sync_ms: 0.1,
+            c5_error: 0.0,
             punch_call_us: 8.0,
             punch_sync_ms: 19.0,
             cache_max: Some(32 * GIB),
@@ -434,6 +459,12 @@ impl Scenario {
             "punch" => self.punch = parse_bool(val)?,
             "compaction" => self.compaction = parse_bool(val)?,
             "p7" => self.p7 = parse_bool(val)?,
+            "cut_cadence_s" => self.cut_cadence_s = f()?,
+            "a_lag" => self.a_lag = parse_bool(val)?,
+            "a_bias" => self.a_bias = f()?,
+            "c5_cost" => self.c5_cost = parse_bool(val)?,
+            "list_sync_ms" => self.list_sync_ms = f()?,
+            "c5_error" => self.c5_error = f()?,
             "condemn_at_cut" => self.condemn_at_cut = parse_bool(val)?,
             "punch_call_us" => self.punch_call_us = f()?,
             "punch_sync_ms" => self.punch_sync_ms = f()?,

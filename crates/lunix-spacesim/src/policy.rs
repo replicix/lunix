@@ -122,6 +122,8 @@ pub struct GcSettings {
     pub busy_interval: Option<Duration>,
     /// A pass is due when the store grew by this much since the last mark.
     pub growth_trigger: Option<f64>,
+    /// A fast recheck-only pass (no compaction) when a grace ended.
+    pub fast_recheck: bool,
     /// The compaction threshold (G5: from the headroom); none: the volume's.
     pub compact_threshold: Option<f64>,
 }
@@ -150,6 +152,7 @@ impl GcSettings {
             no_yield: false,
             busy_interval: None,
             growth_trigger: None,
+            fast_recheck: false,
             compact_threshold: None,
         }
     }
@@ -220,6 +223,7 @@ fn base_settings(level: Level, inp: &PolicyInput<'_>) -> GcSettings {
         no_yield: false,
         busy_interval: None,
         growth_trigger: None,
+        fast_recheck: false,
         compact_threshold: None,
     }
 }
@@ -446,6 +450,8 @@ pub struct TunablePolicy {
     g5: bool,
     p5: bool,
     p6: bool,
+    fast_recheck: bool,
+    wobble: bool,
 }
 
 impl Default for TunablePolicy {
@@ -461,6 +467,8 @@ impl Default for TunablePolicy {
             g5: false,
             p5: false,
             p6: false,
+            fast_recheck: false,
+            wobble: true,
         }
     }
 }
@@ -481,6 +489,8 @@ impl Policy for TunablePolicy {
             "g5" => self.g5 = matches!(val, "true" | "on" | "1"),
             "p5" => self.p5 = matches!(val, "true" | "on" | "1"),
             "p6" => self.p6 = matches!(val, "true" | "on" | "1"),
+            "fast_recheck" => self.fast_recheck = matches!(val, "true" | "on" | "1"),
+            "wobble" => self.wobble = matches!(val, "true" | "on" | "1"),
             _ => bail!("policy tunable has no parameter {key:?}"),
         }
         Ok(())
@@ -530,6 +540,7 @@ impl Policy for TunablePolicy {
             let x = t.headroom as f64 / t.soft as f64;
             s.compact_threshold = Some(0.5 + 0.4 * (1.0 - x));
         }
+        s.fast_recheck = self.fast_recheck;
         if self.growth_gib > 0.0 {
             s.growth_trigger = Some(self.growth_gib * (1u64 << 30) as f64);
         }
@@ -562,7 +573,11 @@ impl Policy for TunablePolicy {
         let r_min = 4.0 * 1048576.0;
         // P1': the estimate of A is noisy (+-15 %, a deterministic wobble) and
         // the floor is in journal bytes, as the gate's own.
-        let wobble = 1.0 + ((v.now.as_secs() % 7) as f64 - 3.0) * 0.05;
+        let wobble = if self.wobble {
+            1.0 + ((v.now.as_secs() % 7) as f64 - 3.0) * 0.05
+        } else {
+            1.0
+        };
         let a = (v.a_hat * wobble).max(1.0);
         Some((r_mid * x / (1.0 - x).max(1e-6) / a).max(r_min))
     }

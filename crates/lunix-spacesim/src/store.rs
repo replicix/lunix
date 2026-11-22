@@ -390,6 +390,22 @@ impl Store {
         total
     }
 
+    /// How many segments `mark` would condemn now.
+    pub fn condemnable_count(&self) -> u64 {
+        let (cuts, retain) = (self.cuts, self.retain_cuts);
+        self.segs
+            .iter()
+            .filter(|s| {
+                !s.unnamed
+                    && match s.state {
+                        SegState::Live => s.live <= 0.0 && s.died_cut + retain <= cuts,
+                        SegState::Moved { ready_cut } => ready_cut <= cuts,
+                        SegState::Condemned { .. } => false,
+                    }
+            })
+            .count() as u64
+    }
+
     /// Deletes the condemned segments whose grace `grace` ended at or before
     /// `before` (the start of the rechecking mark), recording their dead
     /// times. Returns the bytes freed.

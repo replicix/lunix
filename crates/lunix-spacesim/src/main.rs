@@ -81,6 +81,9 @@ enum Cmd {
         /// key=value overrides applied to every row; repeatable.
         #[arg(long = "set")]
         sets: Vec<String>,
+        /// The round-3 rows instead of the full matrix.
+        #[arg(long)]
+        round3: bool,
     },
     /// The calibration table: `main` on the measured cells, and the two
     /// null-result policies beside it.
@@ -204,11 +207,12 @@ fn main() -> Result<()> {
             n,
             merge,
             sets,
+            round3,
         } => {
             let sets = sets.iter().map(|s| kv(s)).collect::<Result<Vec<_>>>()?;
             print!(
                 "{}",
-                lunix_spacesim::experiments::table(&scenario, &merge, n, &sets)?
+                lunix_spacesim::experiments::table(&scenario, &merge, n, &sets, round3)?
             );
         }
         Cmd::Calibrate { n } => {

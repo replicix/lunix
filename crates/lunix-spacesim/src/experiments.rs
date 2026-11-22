@@ -223,11 +223,18 @@ fn med(runs: &[RunReport], f: impl Fn(&RunReport) -> f64) -> f64 {
 ///
 /// # Errors
 /// As [`run_seeds`].
-pub fn table(scenario: &str, merge: &str, n: u64, extra: &[(String, String)]) -> Result<String> {
+pub fn table(
+    scenario: &str,
+    merge: &str,
+    n: u64,
+    extra: &[(String, String)],
+    round3: bool,
+) -> Result<String> {
+    let list: &[Cand] = if round3 { ROUND3 } else { CANDIDATES };
     let mut out = String::new();
-    let _ = writeln!(out, "| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |");
-    let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|");
-    for cand in CANDIDATES {
+    let _ = writeln!(out, "| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy | dwell s | dead det / grace / recheck / delete s |");
+    let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for cand in list {
         let mut sets: Vec<(String, String)> = vec![("merge".into(), merge.into())];
         sets.extend(extra.iter().cloned());
         for (k, v) in cand.sets {
@@ -248,9 +255,18 @@ pub fn table(scenario: &str, merge: &str, n: u64, extra: &[(String, String)]) ->
                 runs.len()
             )
         };
+        let dw: Vec<f64> = runs
+            .iter()
+            .filter_map(|r| Some(r.first_stop_abs? - r.band_entry?.1))
+            .collect();
+        let dwell = if dw.is_empty() {
+            "-".to_string()
+        } else {
+            format!("{:.1}", Spread::of(dw).median)
+        };
         let _ = writeln!(
             out,
-            "| {} | {:.0} / {:.0} | {} | {:.1} / {:.1} | {:.2} | {:.1}K / {:.1}K | {:.1}K | {:.3} | {:.1} | {:.1} / {:.1} | {:.0} % |",
+            "| {} | {:.0} / {:.0} | {} | {:.1} / {:.1} | {:.2} | {:.1}K / {:.1}K | {:.1}K | {:.3} | {:.1} | {:.1} / {:.1} | {:.0} % | {} | {:.1} / {:.1} / {:.1} / {:.1} |",
             cand.name,
             med(&runs, |r| r.first_fill.stops as f64),
             med(&runs, |r| r.steady.stops as f64),
@@ -266,7 +282,129 @@ pub fn table(scenario: &str, merge: &str, n: u64, extra: &[(String, String)]) ->
             med(&runs, |r| r.reclaim_whole) / 1e9,
             med(&runs, |r| r.reclaim_moved) / 1e9,
             med(&runs, |r| r.gc_share) * 100.0,
+            dwell,
+            med(&runs, |r| r.dead.retention + r.dead.detection),
+            med(&runs, |r| r.dead.grace),
+            med(&runs, |r| r.dead.recheck),
+            med(&runs, |r| r.dead.delete),
         );
     }
     Ok(out)
 }
+
+/// The round-3 rows: the missing combinations, the gap split, C5 with its
+/// cost, and a lagging, biased estimator.
+pub const ROUND3: &[Cand] = &[
+    c("base (main)", "main", &[]),
+    c("P1' alone", "tunable", &[("policy.p1", "true")]),
+    c(
+        "P1' alone, lagged A, bias +15 %",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("policy.wobble", "false"),
+            ("a_lag", "true"),
+            ("a_bias", "0.15"),
+        ],
+    ),
+    c(
+        "P1' alone, lagged A, bias -15 %",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("policy.wobble", "false"),
+            ("a_lag", "true"),
+            ("a_bias", "-0.15"),
+        ],
+    ),
+    c("C5 free", "main", &[("condemn_at_cut", "true")]),
+    c(
+        "C5 costed (list sync, flags, skipped while a pass runs)",
+        "main",
+        &[("condemn_at_cut", "true"), ("c5_cost", "true")],
+    ),
+    c(
+        "C5 costed, disk (5.5 ms flags, 3 ms sync)",
+        "main",
+        &[
+            ("condemn_at_cut", "true"),
+            ("c5_cost", "true"),
+            ("condemn_ms", "5.5"),
+            ("list_sync_ms", "3"),
+        ],
+    ),
+    c(
+        "C5 costed, 20 % proposals fail",
+        "main",
+        &[
+            ("condemn_at_cut", "true"),
+            ("c5_cost", "true"),
+            ("c5_error", "0.2"),
+        ],
+    ),
+    c(
+        "gap 1 s (collector pass gap)",
+        "tunable",
+        &[("policy.busy_interval_s", "1")],
+    ),
+    c(
+        "gap (a) fast recheck-only pass",
+        "tunable",
+        &[("policy.fast_recheck", "true")],
+    ),
+    c("gap (b) cut cadence 1 s", "main", &[("cut_cadence_s", "1")]),
+    c("gap (b) cut cadence 2 s", "main", &[("cut_cadence_s", "2")]),
+    c("gap (b) cut cadence 5 s", "main", &[("cut_cadence_s", "5")]),
+    c(
+        "P1' + C5 free (no gap)",
+        "tunable",
+        &[("policy.p1", "true"), ("condemn_at_cut", "true")],
+    ),
+    c(
+        "P1' + gap 1 s (no C5)",
+        "tunable",
+        &[("policy.p1", "true"), ("policy.busy_interval_s", "1")],
+    ),
+    c(
+        "P1' + C5 free + gap 1 s",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("condemn_at_cut", "true"),
+            ("policy.busy_interval_s", "1"),
+        ],
+    ),
+    c(
+        "P1' + C5 costed + gap 1 s",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("condemn_at_cut", "true"),
+            ("c5_cost", "true"),
+            ("policy.busy_interval_s", "1"),
+        ],
+    ),
+    c(
+        "P1' + C5 free + (a) fast recheck",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("condemn_at_cut", "true"),
+            ("policy.fast_recheck", "true"),
+        ],
+    ),
+    c(
+        "P1' + C5 free + (b) cadence 2 s",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("condemn_at_cut", "true"),
+            ("cut_cadence_s", "2"),
+        ],
+    ),
+    c(
+        "P1' + (b) cadence 2 s (no C5)",
+        "tunable",
+        &[("policy.p1", "true"), ("cut_cadence_s", "2")],
+    ),
+];

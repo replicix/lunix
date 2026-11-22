@@ -167,6 +167,10 @@ pub struct GcStats {
     pub mark_time: Duration,
     /// Collector time used in all (marks, index work, copying).
     pub busy_time: Duration,
+    /// Sum of bytes x delay between the end of the recheck and the release.
+    pub release_weighted: f64,
+    /// Bytes released through that delay.
+    pub release_bytes: f64,
 }
 
 /// The collector.
@@ -185,6 +189,9 @@ pub struct Gc {
     tokens: f64,
     tokens_at: Duration,
     pending_release: f64,
+    recheck_next: bool,
+    recheck_only: bool,
+    cost_work: Duration,
     pass: PassSummary,
     /// Counters.
     pub stats: GcStats,
@@ -213,6 +220,9 @@ impl Gc {
             tokens: 0.0,
             tokens_at: Duration::ZERO,
             pending_release: 0.0,
+            recheck_next: false,
+            recheck_only: false,
+            cost_work: Duration::ZERO,
             pass: PassSummary::default(),
             stats: GcStats::default(),
             urgent_end: None,
@@ -241,6 +251,20 @@ impl Gc {
         };
         let gap = self.min_gap(env.cfg, env.settings);
         let grace = env.settings.params.grace;
+        self.recheck_next = false;
+        if env.settings.fast_recheck {
+            // A recheck-only pass: no compaction, so only the mark's own
+            // duty bounds the gap.
+            let fast = Duration::from_secs(1).max(self.last_mark.saturating_mul(DUTY_FACTOR));
+            if waited(self.last_end, fast)
+                && env
+                    .store
+                    .grace_ended_since(grace, now, self.last_mark_start)
+            {
+                self.recheck_next = true;
+                return true;
+            }
+        }
         let first = if self.last_aborted {
             env.cfg.pass_interval.max(gap)
         } else {
@@ -298,6 +322,7 @@ impl Gc {
                         end: now + dur,
                         start: now,
                     };
+                    self.recheck_only = self.recheck_next;
                     self.pass = PassSummary::default();
                     self.last_written = env.written;
                     self.last_tip_cut = Some(env.store.cuts);
@@ -319,6 +344,8 @@ impl Gc {
                     }
                     used += need;
                     let pr = std::mem::take(&mut self.pending_release);
+                    self.stats.release_weighted += pr * self.cost_work.as_secs_f64();
+                    self.stats.release_bytes += pr;
                     env.books.release(env.gate, pr);
                     match plan {
                         Some(plan) => {
@@ -402,13 +429,13 @@ impl Gc {
         };
         let threshold = env.settings.compact_threshold.unwrap_or(env.cfg.threshold);
         let mut punch_work = Duration::ZERO;
-        if env.cfg.punch {
+        if env.cfg.punch && !self.recheck_only {
             let (_, calls) = env.store.mark_punch(threshold, end);
             self.stats.punch_calls += calls;
             punch_work = env.cfg.punch_call.mul_f64(calls as f64)
                 + env.cfg.punch_sync.mul_f64((calls as f64 / 8192.0).ceil());
         }
-        let plan = if rate > 0 && env.cfg.compaction {
+        let plan = if rate > 0 && env.cfg.compaction && !self.recheck_only {
             let p = env.store.plan_compaction(threshold, budget);
             (p.live_bytes > 1.0).then_some(p)
         } else {
@@ -434,6 +461,7 @@ impl Gc {
                 None => self.finish_pass(env, end),
             }
         } else {
+            self.cost_work = work;
             self.phase = Phase::Costs {
                 end: end + work,
                 plan,

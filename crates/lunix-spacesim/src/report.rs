@@ -126,6 +126,8 @@ pub struct DeadSummary {
     pub grace: f64,
     /// Recheck.
     pub recheck: f64,
+    /// From the recheck to the release of the bytes (the pass's index work).
+    pub delete: f64,
 }
 
 /// A whole run.
@@ -159,6 +161,8 @@ pub struct RunReport {
     pub marks: u64,
     /// Urgent passes.
     pub urgent: u64,
+    /// Seconds from the overwrite's start to the first stop.
+    pub first_stop_abs: Option<f64>,
     /// Peak condemned list, bytes.
     pub peak_condemned: f64,
     /// Bytes condemned because every chunk died (whole-dead path).
