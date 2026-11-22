@@ -533,3 +533,16 @@ paths = [
   "docs/plans/v1/reports/p1-gate.md",
   "tools/ownership.toml",
 ]
+
+# spacesim: a dev-only simulator of the space gate (ADR-32) for trying
+# admission and GC policies in seconds; the engine change only exposes
+# DrainHistory, RingPacer and the pressure helpers.
+[spacesim]
+paths = [
+  "Cargo.lock",
+  "crates/lunix-engine/src/cut.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-spacesim/**",
+  "docs/plans/v1/reports/p1-spacesim.md",
+  "tools/ownership.toml",
+]

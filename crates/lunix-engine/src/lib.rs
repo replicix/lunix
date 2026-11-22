@@ -55,14 +55,20 @@ mod recover;
 mod stats;
 
 pub use config::{EngineConfig, OnJournalDamage};
-pub use cut::{CutStats, WriteStats, LATENCY_BUCKETS};
+pub use cut::{
+    CutStats, DrainHistory, RingPacer, WriteStats, HISTORY, LATENCY_BUCKETS, PACE_HOLD,
+    PACE_OFF_RATIO, PACE_ON_RATIO,
+};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
 #[cfg(feature = "testsupport")]
 pub use engine::CoordHold;
 pub use engine::{CommitOutcome, Engine, GcStatusHandle, TipView};
 pub use error::OpenError;
-pub use pressure::{Pressure, PressureTracker};
+pub use pressure::{
+    yielding, Pressure, PressureTracker, BUDGET_FACTOR, HOLD, YIELD_HOLD_MS, YIELD_RATE_DIVISOR,
+    YIELD_RATE_FLOOR,
+};
 pub use read::{ChunkReader, Expectation};
 pub use recover::RecoveryReport;
 

@@ -17,11 +17,11 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Cuts the drain rate is averaged over.
-pub(crate) const HISTORY: usize = 4;
+pub const HISTORY: usize = 4;
 
 /// The journal bytes and duration of the last [`HISTORY`] committed cuts.
 #[derive(Debug, Default)]
-pub(crate) struct DrainHistory {
+pub struct DrainHistory {
     /// Journal bytes, C1 to C9 time, and the time from the end of the cut
     /// before to the end of this one (never more than twice the cut's own).
     cuts: VecDeque<(u64, Duration, Duration)>,
@@ -30,7 +30,7 @@ pub(crate) struct DrainHistory {
 impl DrainHistory {
     /// Notes a committed cut of `bytes` that took `took`, `since_last` after
     /// the end of the cut before it (`None` for the first).
-    pub(crate) fn push(&mut self, bytes: u64, took: Duration, since_last: Option<Duration>) {
+    pub fn push(&mut self, bytes: u64, took: Duration, since_last: Option<Duration>) {
         if self.cuts.len() == HISTORY {
             self.cuts.pop_front();
         }
@@ -44,7 +44,7 @@ impl DrainHistory {
     /// bytes over the time from cut end to cut end, so it is below the rate
     /// of the cuts themselves by the gaps between them (milestone jstall).
     /// `None` without a history.
-    pub(crate) fn sustained_rate(&self) -> Option<u64> {
+    pub fn sustained_rate(&self) -> Option<u64> {
         let bytes: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
         let span: u128 = self.cuts.iter().map(|c| c.2.as_nanos()).sum();
         if span == 0 || bytes == 0 {
@@ -55,7 +55,7 @@ impl DrainHistory {
 
     /// The journal bytes the drain rate of the history moves in `target`;
     /// `None` without a history or when it took no measurable time.
-    pub(crate) fn budget(&self, target: Duration) -> Option<u64> {
+    pub fn budget(&self, target: Duration) -> Option<u64> {
         let bytes: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
         let took: u128 = self.cuts.iter().map(|c| c.1.as_nanos()).sum();
         if took == 0 || bytes == 0 {
@@ -70,15 +70,15 @@ impl DrainHistory {
 pub const LATENCY_BUCKETS: usize = 32;
 
 /// The fill ratio at which the ring pace starts (milestone jstall).
-pub(crate) const PACE_ON_RATIO: f64 = 0.75;
+pub const PACE_ON_RATIO: f64 = 0.75;
 
 /// The fill ratio below which the ring pace may end.
-pub(crate) const PACE_OFF_RATIO: f64 = 0.5;
+pub const PACE_OFF_RATIO: f64 = 0.5;
 
 /// How long after the last write that waited for the ring the pace stays on
 /// whatever the fill ratio says: a lane can be full while the whole ring is
 /// not (the load maps to some queues only).
-pub(crate) const PACE_HOLD: Duration = Duration::from_secs(5);
+pub const PACE_HOLD: Duration = Duration::from_secs(5);
 
 /// The ring pace (milestone jstall): while the journal ring is nearly full,
 /// or a write waited for it a moment ago, writes are admitted at the drain
@@ -86,7 +86,7 @@ pub(crate) const PACE_HOLD: Duration = Duration::from_secs(5);
 /// instead of the stop of two cuts. A plain state machine: no clock of its
 /// own, no lock.
 #[derive(Debug, Default)]
-pub(crate) struct RingPacer {
+pub struct RingPacer {
     on: bool,
     waited_at: Option<Duration>,
 }
@@ -98,7 +98,7 @@ impl RingPacer {
     /// the last [`PACE_HOLD`]; `None` otherwise. It starts at
     /// [`PACE_ON_RATIO`] and ends below [`PACE_OFF_RATIO`] with nothing
     /// waiting lately.
-    pub(crate) fn observe(
+    pub fn observe(
         &mut self,
         ratio: f64,
         waiting: bool,

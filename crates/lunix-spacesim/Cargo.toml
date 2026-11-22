@@ -1,0 +1,27 @@
+[package]
+name = "lunix-spacesim"
+description = "Dev-only simulator of the space gate (ADR-32) against a model of the journal, cuts, store, GC and device."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "lunix_spacesim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spacesim"
+path = "src/main.rs"
+
+[dependencies]
+lunix-format.workspace = true
+lunix-iface.workspace = true
+lunix-space.workspace = true
+lunix-engine.workspace = true
+anyhow.workspace = true
+clap.workspace = true
