@@ -630,6 +630,89 @@ fn a_write_that_waited_for_the_ring_keeps_the_pace_on_for_a_few_seconds() {
     assert_eq!(r.space.ring_pace(), None, "7 s after the last wait");
 }
 
+// ----------------------------------------------------------------- store pace
+
+#[test]
+fn the_engine_tells_the_gate_the_store_factor_and_the_cut_in_flight() {
+    let v = ring(1, 64);
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    assert_eq!(r.space.store_pace(), (2000, 0), "two before a measured cut");
+    writes(&mut r, 0, 20);
+    r.engine.commit_now(false).expect("first cut");
+    let st = r.engine.cut_stats();
+    assert!(st.last_cut_bytes > 0);
+    // The first cut had no history: it predicted the initial two.
+    assert_eq!(st.store_pred_milli, 2000);
+    assert!(st.store_real_milli > 0, "{st:?}");
+    // The cut said its journal bytes while it ran, and none after it; the
+    // new factor came with the end of the cut, one push, not two.
+    assert_eq!(r.space.store_in_flight_max(), st.last_cut_bytes);
+    // A cut under 1 MiB of journal is measured for the status but is not in
+    // the window: the factor stays the initial one.
+    assert_eq!(r.space.store_pace(), (2000, 0));
+    assert_eq!(
+        r.space.store_pace_log(),
+        vec![(2000, st.last_cut_bytes), (2000, 0)]
+    );
+    // The next cut predicts the same.
+    writes(&mut r, 20, 20);
+    r.engine.commit_now(false).expect("second cut");
+    assert_eq!(r.engine.cut_stats().store_pred_milli, 2000);
+}
+
+#[test]
+fn a_cut_whose_segment_bound_failed_is_not_announced() {
+    // A ledger too small for the bound (5 chunks of 16 KiB and 64 KiB) but
+    // not for what the cut writes: the bytes stay in `J`.
+    let mut v = ring(1, 64);
+    v.space_cfg = Some(lunix_testkit::MemSpaceConfig::new(200 << 10));
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    writes(&mut r, 0, 20);
+    r.engine.commit_now(false).expect("cut");
+    assert!(r.engine.cut_stats().last_cut_bytes > 0);
+    assert_eq!(
+        r.space.store_in_flight_max(),
+        0,
+        "{:?}",
+        r.space.store_pace_log()
+    );
+    assert_eq!(r.space.store_pace().1, 0);
+}
+
+#[test]
+fn a_cut_bounded_by_the_leaf_cap_announces_the_cut_it_commits() {
+    let mut v = Vol::create(CS, 64, 1, JournalMode::Immediate);
+    v.tweak = |cfg| {
+        cfg.map_fanout = 4;
+        cfg.max_leaves_per_cut = 2;
+    };
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    for c in 0..20u64 {
+        assert!(r
+            .write(0, c * u64::from(CS), &pattern(c, CS as usize), false)
+            .is_ok());
+    }
+    r.engine.commit_now(false).expect("one cut");
+    let st = r.engine.cut_stats();
+    let announced: Vec<u64> = r
+        .space
+        .store_pace_log()
+        .iter()
+        .map(|p| p.1)
+        .filter(|b| *b > 0)
+        .collect();
+    // The cap cuts the 20 chunks short: what is announced is the cut that
+    // committed, not everything written (a retry smaller, which this path
+    // would announce again, is the same call).
+    assert_eq!(
+        announced.last().copied(),
+        Some(st.last_cut_bytes),
+        "{announced:?}"
+    );
+    assert!(st.last_cut_bytes < 20 * (u64::from(CS) + 64), "{st:?}");
+    assert_eq!(r.space.store_pace().1, 0);
+}
+
 // ------------------------------------------------------------------- GC yield
 
 /// What the scripted collector saw and does.
