@@ -69,6 +69,10 @@ pub struct GcCfg {
     pub batch: bool,
     /// Compaction on.
     pub compaction: bool,
+    /// One punch call.
+    pub punch_call: Duration,
+    /// The sync after 8 192 punches.
+    pub punch_sync: Duration,
     /// G7: punch dead ranges.
     pub punch: bool,
 }
@@ -155,6 +159,8 @@ pub struct GcStats {
     pub first_condemn: Option<Duration>,
     /// Time of the first delete, if any.
     pub first_delete: Option<Duration>,
+    /// Punch calls made (G7).
+    pub punch_calls: u64,
     /// Largest condemned list, bytes.
     pub peak_condemned: f64,
     /// Coordinator time the marks took.
@@ -178,6 +184,7 @@ pub struct Gc {
     last_written: f64,
     tokens: f64,
     tokens_at: Duration,
+    pending_release: f64,
     pass: PassSummary,
     /// Counters.
     pub stats: GcStats,
@@ -205,6 +212,7 @@ impl Gc {
             last_written: 0.0,
             tokens: 0.0,
             tokens_at: Duration::ZERO,
+            pending_release: 0.0,
             pass: PassSummary::default(),
             stats: GcStats::default(),
             urgent_end: None,
@@ -310,6 +318,8 @@ impl Gc {
                         break;
                     }
                     used += need;
+                    let pr = std::mem::take(&mut self.pending_release);
+                    env.books.release(env.gate, pr);
                     match plan {
                         Some(plan) => {
                             self.tokens = self.tokens.max(0.0);
@@ -364,10 +374,22 @@ impl Gc {
         self.last_mark_start = Some(start);
         // The recheck: entries whose grace ended before this mark began.
         let freed = env.store.delete_due(start, env.settings.params.grace, end);
-        env.books.release(env.gate, freed);
+        // The deletes release object by object while the pass works: the
+        // bytes are given back when its index work is over.
+        self.pending_release += freed;
         self.note_deleted(freed, end);
-        // Then what is newly dead.
+        // Then what is newly dead; the grace starts after every flag is set.
         let condemned = env.store.mark(end);
+        let flag_time = env
+            .cfg
+            .condemn
+            .mul_f64(env.store.last_condemned_segs as f64);
+        let flag_time = if env.cfg.batch {
+            flag_time / 10
+        } else {
+            flag_time
+        };
+        env.store.shift_condemned(end, flag_time);
         self.note_condemned(condemned, end, env.store.condemned_bytes());
         self.pass.condemned += condemned;
         self.pass.deleted += freed;
@@ -379,8 +401,12 @@ impl Gc {
             env.settings.per_pass_bytes as f64
         };
         let threshold = env.settings.compact_threshold.unwrap_or(env.cfg.threshold);
+        let mut punch_work = Duration::ZERO;
         if env.cfg.punch {
-            env.store.mark_punch(threshold, end);
+            let (_, calls) = env.store.mark_punch(threshold, end);
+            self.stats.punch_calls += calls;
+            punch_work = env.cfg.punch_call.mul_f64(calls as f64)
+                + env.cfg.punch_sync.mul_f64((calls as f64 / 8192.0).ceil());
         }
         let plan = if rate > 0 && env.cfg.compaction {
             let p = env.store.plan_compaction(threshold, budget);
@@ -395,8 +421,10 @@ impl Gc {
             .condemn
             .mul_f64(env.store.last_condemned_segs as f64)
             + env.cfg.delete.mul_f64(env.store.last_deleted_segs as f64);
-        let work = if env.cfg.batch { work / 10 } else { work };
+        let work = if env.cfg.batch { work / 10 } else { work } + punch_work;
         if work.is_zero() {
+            let pr = std::mem::take(&mut self.pending_release);
+            env.books.release(env.gate, pr);
             match plan {
                 Some(plan) => {
                     self.tokens = self.tokens.max(0.0);
@@ -461,6 +489,19 @@ impl Gc {
             self.stats.first_delete = Some(at);
         }
         self.stats.deleted += bytes;
+    }
+
+    /// The earliest time the next scheduled mark can begin (the pass cadence:
+    /// `min_gap` after the last pass).
+    pub fn next_mark_at(&self, cfg: &GcCfg, s: &GcSettings) -> Duration {
+        self.last_end
+            .unwrap_or(Duration::ZERO)
+            .saturating_add(self.min_gap(cfg, s))
+    }
+
+    /// A condemnation made outside a pass (at a cut, from a usage table).
+    pub fn external_condemn(&mut self, bytes: f64, at: Duration, listed: f64) {
+        self.note_condemned(bytes, at, listed);
     }
 
     /// True when the ladder may run an urgent pass now (its back-off).
@@ -557,6 +598,8 @@ mod tests {
             delete: Duration::from_millis(13),
             batch: false,
             compaction: true,
+            punch_call: Duration::from_micros(8),
+            punch_sync: Duration::from_millis(19),
             punch: false,
         };
         let gc = Gc::new(Some(Duration::ZERO));

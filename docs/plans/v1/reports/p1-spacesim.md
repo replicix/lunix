@@ -147,6 +147,43 @@ G5's "skip segments expected to die within the payoff time" and debt pacing; the
 that returns none); P7 (cap clock from the last stop exit) needs a product change in the gate and cannot be a simulator-side hook; the report's first-fill window
 is "overwrite start to first delete plus 30 s" and the dead-time split has no "waiting to be a candidate" term yet.
 
+## Round 2 model work (before the round-2 experiment matrix)
+
+Status of the six items: (2), (3 as far as possible), (6) and the cost part of (5) are done; (1), (4) and the btrfs part of (5) are not.
+
+1. **Amplification mechanism: not resolved; what the code and the data say.** The calibrated `main` still has 4.2 stored bytes per admitted byte against about 2.8 measured; `merge` stays a
+   sensitivity knob (1.0 = 4.2, 0.4 = 2.8; the experiments run both). Checked: (a) the fio job (`bench/phase1/perf/fio/w4k.fio`) is 8 jobs on disjoint 256 MiB slices (`offset_increment`), the same
+   `randseed` for every job, `refill_buffers=1`, `buffer_compress_percentage=50`, fio's default random map (a block is rewritten only after a whole pass over the slice): per cut this still touches about 0.9 distinct
+   chunks per write, not fewer; (b) the overlay coalesces writes to a chunk within a cut, which the model does (`distinct = W (1 - e^(-n/W))`); (c) dedup hits are 0 and no chunk is zero in the status; (d) the resident
+   journal window serves reads, it does not merge writes. The status data are consistent with two populations of cuts: the 1 Hz samples of `last_cut_bytes` show both 30 MiB (110 ms) and 228-374 MiB (400-530 ms)
+   cuts, and `commits` rises by 8 per 5 s at 300 MB/s (190 MB of journal per commit if all were data cuts), but a cut of 30 MiB (7.2 K writes) would write 6.5 K chunks = 215 MB, which at 9 cuts a second is more than the store
+   grew (0.5-0.9 GB/s). Either most small commits are collector-only (moves, naming) and carry no journal bytes, or the store writes fewer bytes per dirty chunk than the model (the cut's pack may skip a chunk whose
+   dirty pieces equal the stored copy, or write partial chunks); the status alone cannot tell, and the code does not show a coalescing step that would explain a factor of 1.5. The right next measurement is one status
+   trace with `stage_ns` and the commit counter at 100 ms, or a counter of store bytes per cut. Not done: modelling it.
+2. **`next_delete_in` and the forecast: done.** `Store::forecast` lists `(time until a condemned segment's or punch request's grace ends, bytes)`; `Gc::next_mark_at` gives the earliest mark (the pass cadence: `min_gap` after
+   the last pass); the policy sees both in `AdmissionView` (`forecast`, `next_delete_in` = the later of the two, `gap`, `store_rate`). P5 (time-to-limit pacing, horizon 40 s, budget = room + what falls due) and P6 (the
+   gate's curve with an ETA floor, `r_floor = (H_proj - m) / t_next`, clamped 0.25-4 MiB/s) are `tunable` policies, applied in front of the real gate and charged `A_hat` per byte. First results (RAM 64K, 8 seeds):
+   P5 at 4.2: stops 1/4, longest 1.0 s, but IOPS 13 K / 10 K (it paces for the whole run); at 2.8: 0/0, 0.3 s, 27 K / 24 K. P6 at 4.2: stops 0/0 in the first window but a longest completion of 18.5 s and a first stop in 2 of 8 seeds
+   (the floor is too weak when the first graces are not yet listed); at 2.8: 0/0, 2.4 s, same as P1. Not yet in the ranking.
+3. **P7: not expressible, tried an emulation, it does nothing.** The real gate grants the queue at the instant the headroom returns (inside `release`/`transfer`, `ledger.rs` `grant_waiters`), with every request past its cap
+   admitted together; a simulator-side cancel and re-issue at the state change runs after those grants and so changes nothing (`p7` in `Scenario`, identical output to `main`). It needs a change in the gate's cap clock
+   (`ledger.rs` `cap_at`) and a sim-only patched copy of `ledger.rs` was not made. No P7 row in the matrix.
+4. **Skew workloads (zipf, hot/cold) and G6: not done.** A segment carries one live count; per-class counts, per-class death probabilities and K open segments by class need the store's segment type reworked
+   (a vector of classes per segment, class-wise distinct counts per cut, segregated segment writes). It is the next structural piece of work.
+5. **Punch cost and fragmentation: cost done, the rest not.** `punch_call_us` (8) and `punch_sync_ms` (19 per 8 192 punches, the middle of `punch-fs-test.md`'s 7-31 ms) are charged to the pass that lists the dead
+   ranges (one call per segment with new dead bytes); `GcStats::punch_calls` counts the calls. The G7 rows in round 1 had no such cost; with it the RAM 64K G7 rows are: grace 30 s stops 2/7, longest 10.5 s (was 9.6),
+   grace 5 s 2/7, 7.8 s: the cost does not move them. Extent growth and the btrfs mode (only whole-extent ranges freed) are not modelled.
+6. **Pass-cadence floor and incremental condemnation: done.** The dead time of a wholly dead segment, from the model (RAM 64K, one seed): grace 30 s gives retention 1.5 + detection 14.9 + grace 30 + recheck 0.3 s;
+   grace 5 s gives 1.5 + 14.9 + 5 + 8.7; grace 2 s gives 1.5 + 14.9 + 2 + 11.7. **Grace and recheck always sum to about 13-30 s, so shortening the grace only moves time into the recheck: the delete is made by the first
+   pass whose mark began after the grace ended, and passes are `min_gap` = max(`busy_interval` 5 s, 3 x mark time) apart (`collector.rs` `due`, `min_gap`).** The 14.9 s of detection is the idle cadence (a pass that did no reclaim
+   work waits `pass_interval` 30 s). With a 1 s gap the sum falls to 3.7 + 9.2 + 2 + 3.7 and the detection is what is left. `condemn_at_cut` (G2: a usage table updated at every cut condemns wholly dead segments at once, without a mark)
+   takes detection to 0.0 s (1.9 + 0 + 2 + 4.0 s). **Is it consistent with the code's safety rules?** Only in part: condemning needs the liveness the mark computes (a segment named by a retained root or an unnamed output must not
+   be flagged; dedup must stop returning it); a per-segment live count kept at the cut and the retained-set check give the same information, so flagging at the cut is safe if the flag step (the list, then the index flags) is done with the retained
+   roots in hand; the delete keeps its rule (a later mark that began after the grace). In the matrix: RAM 64K at 4.2, G2 alone: stops 4/11, longest 30.5 -> 20.0 s, IOPS 24.7 K / 14.3 K -> 30.7 K / 18.3 K; at 2.8: 1/0, 12.1 -> 10.6 s.
+   Combined with a short grace and gap it is what removes the 15 s detection term.
+
+The calibration table of round 2 stands: none of these changes touches `main`'s defaults (the new switches are off), so its numbers are unchanged.
+
 ## Experiments: candidate policies at two store-amplification levels
 
 Run by `spacesim experiments -s <cell> -n 8 --merge <m>`: 8 seeds per row, the phase of the collector's idle cadence drawn per seed, medians. The amplification knob is
@@ -157,7 +194,7 @@ Columns: stops in the first-fill window / steady state (first fill = overwrite s
 (max over cells, median over seeds); p99.9 of the first cell; IOPS first fill / steady; burst IOPS (first 10 s); peak `used`/limit; amplification; reclaim by path (whole-dead segments / compaction sources,
 GB over the run); collector busy share. P7 (cap from the last stop exit) changes the gate and has no row; P5/P6 were not run. "Grace 0 s" is a grace of zero with the pass cadence unchanged.
 
-### Ranked recommendation (what to implement for real, in order)
+### Ranked recommendation of round 1 (superseded by the Round 2 ranking where they differ: that model had a 36 MiB cut rule and 3 retained FULLs)
 
 A candidate counts as a win only if it wins at both amplification levels on RAM 64K and does not lose on the others.
 
@@ -457,6 +494,382 @@ death rate. The ranking is by the effect on stops and longest completion at both
 | combo C: P2 + P1 | 0 / 0 | none | 5.0 | 3.26 | 2.3K / 0.0K | 7.6K | 0.141 | 5.0 | 0.0 / 0.0 | 5 % |
 | combo D: P2 + G9 + P0a | 0 / 0 | none | 5.0 | 3.26 | 2.3K / 0.0K | 7.6K | 0.139 | 5.0 | 0.0 / 0.0 | 5 % |
 | combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 3.4 | 3.12 | 2.7K / 1.8K | 7.6K | 0.106 | 5.0 | 0.0 / 0.0 | 1 % |
+
+## Round 2: the model fix, the t6t8 confirmations, the re-baselined matrix
+
+### Model changes and what the code says
+
+* **Retention is 2 FULLs after the death cut** (settled): `coord.rs:918-919` sets `chain_floor = commit_seq - (retain_last - 1)`; GC keeps the FULLs from the lowest floor any retained FULL records (`docs/reference/gc.md`
+  "Roots": the tip, its predecessor and one below). A segment whose last chunk died in cut `k` is last named by FULL `k-1`, and the kept window at cut `m` is `m-2 ..= m`, so it is free at `m = k+2`: `retain_cuts = 2`
+  (round 1 used 3, which the first GC note's "three FULLs" suggested; the three are the window, not the delay).
+* **Cut triggers are the code's** (`coord.rs:499-533`): `cut_trigger` 1.0 (the ring is full or a write parked), `T` = 30 s, GC naming cuts once per second while moves are pending (`has_unnamed`, `MOVES_CUT_GAP`),
+  and a drain-budgeted prefix; no 36 MiB rule. `merge` is 1.0 by default and stays only as a sensitivity knob; the old calibrated regime is `cut_trigger = 0.08`, kept as a **stall regime** for the matrix (below).
+  `ring_park` 448 MiB is the peak of the measured ledger journal: two loaded lanes (see the confirmations) of 4 x 64 MiB files.
+* **Collector order**: the mark condemns, the grace starts after every flag is set (`shift_condemned`, `condemn_ms` per segment), and the bytes of the deletes are released when the pass's index work ends, not at the mark
+  (`collector.rs:1399-1420, :1492, :1558`). The pass cadence floor is `min_gap = max(busy_interval, 3 x mark)` after the previous pass ends (`collector.rs:925-934, :965-976`).
+* **P1'**: the floor is in journal bytes (`max(curve / A, r_min)`), `A_hat` has a +-15 % deterministic wobble. The gate's own delay cap (10 s from arrival) applies.
+* **Statistics**: 32 seeds (24 for M15, 16 for 16K, 8 for the network volume), a separate random stream for the timing jitter, a fixed first-fill window (the first 90 s) for every row, and `longest` as median / p90 of the
+  per-run longest completion.
+
+### Confirmations from the t6t8 data (origin/p1/m16, `writes-ram`)
+
+* **Loaded lanes**: `freed_files_by_lane` is `[0, 0, n, m]` in all six RAM cells: two lanes carry the load, so the fill ratio is at most 0.5 and the fill trigger never fires.
+* **Commits per second** from the 1 Hz status samples: 0.2-1.2 per second in `slowdown` (median about 0.5), 0-0.4 in `stop`, 0.4-1.8 in `open`: in the band the FULLs come about every 2 s, not every 100 ms.
+* **Last-cut bytes** (samples): 1 to 450 MiB in the same cell (29, 33, 228, 1, 20, 350, 30, 117 MiB in rep 1), i.e. small naming/GC cuts and large ring cuts side by side, as the note said.
+* **The first scheduled GC pass came before the stop** (rep 1, `lunixd.1.log`): throttle on at 955.3 s, pass 1 (`how=step`, 134 ms) at 961.2 s condemned **779 segments (12.5 GB)**, the stop at 961.8 s, an urgent pass at 961.8 s
+  condemned 97 more, the deleting pass at 994.3 s (33 s after the condemn: the 30 s grace plus about 3 s) took 3.1 s wall (delete phase 1 993 ms for 1 144 units) and freed 12 237 MB; throttle off at 996.5 s. So the stall is one grace,
+  and the whole-dead pool was 12.5 GB at the stop (round 1's "about 1 GB condemned" was `condemned_pending` after the first deletes).
+* **Index work per object on tmpfs**: condemn 12 ms for 885 units (0.014 ms), delete 1.7 ms per unit, mark 80-98 ms for 15 units. The gcrate figures (5.5 / 13 ms) are disk figures; the defaults of `condemn_ms` / `delete_ms` are those
+  and over-price the RAM cell (set `--set condemn_ms=0.015 --set delete_ms=1.7` for it).
+
+### New calibration (`main`, faithful triggers, 32 seeds)
+
+| cell | measured | simulated | verdict |
+|---|---|---|---|
+| RAM 64K store bytes per admitted byte, pre-band | about 2.8 | 2.4 (2.3-2.4) | 15 % low, no knob (was 4.2 with the crutch) |
+| first stop | about 20-27 s (t6t8); 12-15 s (brief) | 25 s (24-27), 32 of 32 | match (t6t8) |
+| stops per cell (first-fill / steady) | 1-7 | 1 / 2 | low |
+| longest completion, median / p90 over runs | 18-33 s | 35.1 / 68.3 s | stall present, bimodal and heavy-tailed |
+| sustained IOPS first-fill / steady | 24-25 K | 35.8 K / 28.9 K | +45 % / +17 % |
+| reclaim at first band entry | 0 | 3 (0-8) MB/s | match |
+| RAM 16K longest | 5.8 s, 43.6 K IOPS | 42 s (2 of 16 stop), 35 K | **does not reproduce** |
+| network volume 64K | 0 stops, 3.3 K IOPS | 0 stops, 2.0 K (0.8 K steady), longest 7.6 s | gate match; IOPS 1.7x low |
+| M15 8 GiB | stops 0-2, 14-38 s | stops 1 / 1, 36.8 s | match |
+
+The stall regime (`cut_trigger` 0.08, the round-1 calibration) gives RAM 64K: first stop 13 s, stops 4 / 5, longest 31.0 / 35.9 s, IOPS 20.7 K / 15.2 K, A 4.2; RAM 16K longest 13.0 s. The two regimes bracket the measurement
+(64K: faithful reproduces the first stop, A and the stall length but runs too fast; stall regime reproduces the stop count and IOPS but not A), and **a candidate counts as a winner only if it wins in both**.
+
+### Results (full tables below; `longest` is median / p90 s)
+
+RAM 64K, faithful / stall regime:
+
+| candidate | faithful: stops, longest, IOPS | stall regime: stops, longest, IOPS |
+|---|---|---|
+| base (main) | 1/2, 35.1 / 68.3, 35.8 K / 28.9 K | 4/5, 31.0 / 35.9, 20.7 K / 15.2 K |
+| P1 (pace in store bytes, journal-unit floor) | 0/0, 4.3 / 50.9 | 2/0, 19.5 / 23.6 |
+| P5 (time-to-limit) | 0/0, 4.6 / 10.4, 31 K | 1/4, 1.0 / 5.2, **12.2 K** |
+| P6 (ETA floor) | 0/0, 3.5 / 9.3 | 1/0, 19.3 / 27.1 |
+| C6 gap 1 s only | 1/4, 13.8 / 68.3 | 4/5, 31.0 / 32.9 |
+| G2/C5 condemn at each cut | 2/4, 8.3 / 11.4, 40 K | 6/10, 19.7 / 28.8, 25 K |
+| C5 + gap 1 s | 3/4, 6.9 / 9.6, 45 K | 7/12, 22.0 / 29.8 |
+| P1 + C5 + gap 1 s | 0/0, 1.0 / 4.8, 41 K | 1/0, 5.4 / 12.4, 25 K |
+| C5 + gap 1 s + grace 2 s (needs reader fix) | 0/0, 0.7 / 0.7, 67 K | 3/4, 29.1 / 29.2, 43 K |
+| P4 grace 0 s + gap 1 s | 0/0, 0.7 / 6.6, 67 K | 6/7, 6.7 / 8.8, 46 K |
+| G7 punch, grace 30 s | 2/3, 11.2 / 40.9 | 3/7, 15.1 / 30.0 |
+| G9 grace from death | 2/1, 5.4 / 12.1 | 6/11, 19.5 / 30.9 |
+| P0a / P0c | 13.8 / 31.6 and 12.7 / 68.3 | 31.0 / 35.6 and 31.1 / 32.5 |
+| G1+G3+G4, G5, P2 | no gain (P2 1 GiB is worse: 64.7 s) | no gain |
+
+Across M15 (cap-bound: the dead time must shrink), RAM 16K and the network volume: only the grace-shortening rows move the M15 cell (P4 5 s + gap: 12.3 / 17.0 s; C5 + gap + grace 2 s: 9.0 / 0.8 s; combo E 10.1 / 0.6 s), P1 does not (35.4 s),
+P1 + C5 + gap does little (29.6 / 29.0 s). On RAM 16K C5 + gap 1 s gives 1.0 / 1.0 s in both regimes and P1 + C5 + gap 1 s 0.9 / 0.8 s. The network volume is unchanged by every row (no regression).
+
+### Ranked recommendation (confidence in brackets; low where the two regimes disagree)
+
+1. **P1' + condemn-on-cut + a 1 s pass gap under pressure** (no reader-quiescence dependency, no FREEZE): the only row that wins in both regimes on both RAM cells (64K: longest 1.0 / 5.4 s against 35 / 31 s, stops 0-1; 16K: 0.9 / 0.8 s).
+   It does nothing for a cap-bound volume (M15). Confidence: medium. Parts: P1' is the gate-only piece (largest single effect on 64K, none on M15), condemn-on-cut and the gap are collector scheduling changes (the safety argument is in the round-2 item 6 text above).
+2. **Add a short grace (2-5 s) behind reader quiescence or a revalidating read**: the only lever on a cap-bound volume (M15 longest 36.8 s -> 9.0 s with C5 + gap + grace 2 s, sustained IOPS 17 K -> 49 K) and on the rate law `G / D`.
+   Confidence: medium on the effect, and the correctness work is the dependency. In the stall regime at RAM 64K it is not enough alone (29 s): it needs the gap and condemn-on-cut, and still P1' for the first fill.
+3. **P5 (time-to-limit pacing)**: removes the stall (1.0 / 5.2 s) at the price of halving the IOPS in the stall regime (12 K against 20 K); needs tuning (a bounded envelope) before it is a candidate. Confidence: low.
+4. **G7 and G9**: behind the above: G7 at the 30 s grace only reaches 11-15 s at RAM 64K and its grace-5 s rows do not hold in both regimes; G9 5.4 / 19.5 s. Not recommended before the model has skew and the real punch cost.
+5. **No gain, do not implement:** P0a/b/c (hygiene only), P2, G5, G1/G3/G4 alone (G1 lowers the collector's share from 18 % to 8 %), `gate-gc`, `leadzone`.
+
+Caveats: the faithful baseline does not reproduce RAM 16K (42 s against 5.8 s measured), runs 45 % too fast at 64K and under-counts stops, so every ranking is conditional on the two regimes agreeing; skew workloads, G6 and the realistic G7 rows of the
+note (C8, C9), 16 GiB working sets, the P7 row (C4: not expressible, see round-2 item 3) and the revalidating-read variant (C7, priced here only as a short grace) are **not done**; P5' with the whole-pipeline envelope (C3) is the original P5 here.
+
+
+#### RAM 64K, faithful triggers
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 2 | 25 (32/32) | 35.1 / 68.3 | 0.66 | 35.8K / 28.9K | 64.7K | 1.011 | 2.4 | 30.7 / 16.8 | 18 % |
+| gate-gc | 1 / 2 | 25 (32/32) | 37.7 / 68.3 | 0.66 | 36.7K / 28.6K | 64.7K | 1.012 | 2.4 | 32.2 / 17.9 | 17 % |
+| leadzone | 1 / 2 | 25 (32/32) | 38.8 / 68.3 | 0.66 | 35.8K / 29.3K | 64.7K | 1.011 | 2.4 | 31.3 / 14.1 | 18 % |
+| P0a bound compressed | 2 / 3 | 35 (29/32) | 13.8 / 31.6 | 0.98 | 38.0K / 29.2K | 64.7K | 1.016 | 2.4 | 32.8 / 22.3 | 25 % |
+| P0b true-up early | 1 / 2 | 25 (32/32) | 17.2 / 68.4 | 0.66 | 35.8K / 29.9K | 64.7K | 1.012 | 2.4 | 32.6 / 17.5 | 19 % |
+| P0c limit anchored on disk | 1 / 3 | 25 (32/32) | 12.7 / 68.3 | 0.66 | 35.5K / 30.0K | 64.7K | 1.012 | 2.4 | 32.2 / 18.6 | 21 % |
+| P1 pace in store bytes | 0 / 0 | 40 (1/32) | 4.3 / 50.9 | 0.78 | 36.1K / 29.9K | 64.7K | 1.008 | 2.4 | 30.1 / 23.0 | 25 % |
+| P2 growth pass 1 GiB | 1 / 1 | 25 (32/32) | 64.7 / 71.5 | 0.65 | 20.8K / 27.2K | 65.1K | 1.010 | 2.4 | 26.5 / 10.4 | 15 % |
+| P2 growth pass 0.25 GiB | 1 / 1 | 25 (32/32) | 64.7 / 71.5 | 0.65 | 20.8K / 27.2K | 65.1K | 1.010 | 2.4 | 26.5 / 10.4 | 15 % |
+| G9 grace from death | 2 / 1 | 25 (32/32) | 5.4 / 12.1 | 0.66 | 43.0K / 40.6K | 64.7K | 1.012 | 2.4 | 45.7 / 21.0 | 20 % |
+| P3 grace 15 s | 1 / 1 | 25 (32/32) | 12.2 / 43.5 | 0.66 | 41.1K / 40.9K | 64.7K | 1.012 | 2.4 | 48.1 / 17.7 | 28 % |
+| P3 grace 10 s | 1 / 1 | 25 (32/32) | 12.7 / 15.4 | 0.66 | 48.2K / 42.8K | 64.7K | 1.010 | 2.4 | 52.7 / 17.0 | 29 % |
+| P3 grace 5 s | 1 / 0 | 25 (24/32) | 11.5 / 14.8 | 0.65 | 53.7K / 49.2K | 64.7K | 1.009 | 2.4 | 61.4 / 18.6 | 33 % |
+| P3 grace 2 s | 1 / 0 | 25 (24/32) | 12.4 / 62.7 | 0.65 | 53.7K / 48.5K | 64.7K | 1.009 | 2.4 | 60.5 / 18.6 | 33 % |
+| P3 grace 0 s | 1 / 0 | 25 (24/32) | 12.5 / 68.3 | 0.65 | 53.7K / 47.4K | 64.7K | 1.009 | 2.4 | 60.3 / 18.3 | 33 % |
+| P4 grace 5 s + gap 1 s | 1 / 0 | 25 (17/32) | 3.1 / 6.8 | 0.65 | 63.3K / 65.1K | 64.7K | 1.008 | 2.4 | 70.0 / 32.5 | 46 % |
+| P4 grace 0 s + gap 1 s | 0 / 0 | 25 (11/32) | 0.7 / 6.6 | 0.65 | 66.5K / 66.7K | 64.7K | 0.985 | 2.4 | 75.6 / 31.5 | 46 % |
+| G5 threshold from headroom | 1 / 2 | 25 (32/32) | 35.1 / 68.3 | 0.66 | 35.6K / 28.9K | 64.7K | 1.011 | 2.4 | 32.0 / 16.7 | 19 % |
+| G1 batched index work | 1 / 3 | 25 (30/32) | 13.2 / 63.3 | 0.66 | 37.4K / 33.9K | 64.7K | 1.014 | 2.4 | 31.0 / 25.8 | 8 % |
+| G3 incremental mark | 1 / 2 | 25 (32/32) | 36.9 / 66.9 | 0.66 | 35.8K / 28.9K | 64.7K | 1.011 | 2.4 | 32.4 / 17.5 | 17 % |
+| G4 two collector threads | 1 / 2 | 25 (32/32) | 38.8 / 62.6 | 0.66 | 35.4K / 26.6K | 64.7K | 1.011 | 2.4 | 30.6 / 15.8 | 30 % |
+| G1+G3+G4 | 1 / 4 | 25 (30/32) | 15.5 / 62.4 | 0.66 | 37.8K / 36.6K | 64.7K | 1.014 | 2.4 | 30.5 / 31.0 | 9 % |
+| G7 punch, grace 30 s | 2 / 3 | 25 (32/32) | 11.2 / 40.9 | 0.66 | 39.0K / 36.1K | 64.7K | 1.012 | 2.4 | 58.2 / 0.0 | 19 % |
+| G7 punch, grace 5 s | 2 / 3 | 25 (30/32) | 1.2 / 42.0 | 0.65 | 61.4K / 57.8K | 64.7K | 1.012 | 2.4 | 73.4 / 0.0 | 36 % |
+| P5 time-to-limit pacing | 0 / 0 | 52 (3/32) | 4.6 / 10.4 | 0.65 | 31.3K / 32.6K | 48.4K | 1.007 | 2.5 | 23.1 / 28.9 | 26 % |
+| P6 ETA floor | 0 / 0 | 40 (1/32) | 3.5 / 9.3 | 0.77 | 36.0K / 29.8K | 64.7K | 1.008 | 2.4 | 30.3 / 24.2 | 24 % |
+| G2 condemn at each cut | 2 / 4 | 25 (32/32) | 8.3 / 11.4 | 0.66 | 40.3K / 38.3K | 64.7K | 1.014 | 2.4 | 41.6 / 23.3 | 15 % |
+| P1' + P6 (ETA floor) | 0 / 0 | 40 (1/32) | 3.5 / 9.3 | 0.77 | 36.0K / 29.8K | 64.7K | 1.008 | 2.4 | 30.3 / 24.2 | 24 % |
+| C6 gap 1 s only | 1 / 4 | 25 (29/32) | 13.8 / 68.3 | 0.65 | 39.0K / 36.3K | 64.7K | 1.014 | 2.4 | 28.3 / 36.0 | 31 % |
+| C5 condemn at cut + gap 1 s | 3 / 4 | 25 (32/32) | 6.9 / 9.6 | 0.66 | 44.7K / 39.5K | 64.7K | 1.015 | 2.4 | 21.6 / 56.8 | 29 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 0 / 0 | none | 0.7 / 0.7 | 0.65 | 66.8K / 66.9K | 64.7K | 0.933 | 2.4 | 102.8 / 7.7 | 47 % |
+| P1' + C5 + gap 1 s | 0 / 0 | 39 (2/32) | 1.0 / 4.8 | 0.65 | 41.2K / 35.0K | 64.7K | 1.012 | 2.4 | 21.6 / 54.6 | 34 % |
+| combo A: P2 + grace 5 s + gap 1 s | 2 / 0 | 25 (29/32) | 1.4 / 3.5 | 0.65 | 59.3K / 64.6K | 65.1K | 1.011 | 2.4 | 69.5 / 32.0 | 51 % |
+| combo B: A + P0a | 1 / 0 | 31 (23/32) | 3.4 / 7.2 | 0.67 | 59.1K / 63.6K | 65.1K | 1.013 | 2.4 | 70.4 / 30.1 | 52 % |
+| combo C: P2 + P1 | 0 / 0 | 41 (3/32) | 1.0 / 42.8 | 0.86 | 35.9K / 28.8K | 65.1K | 1.008 | 2.4 | 32.1 / 18.7 | 29 % |
+| combo D: P2 + G9 + P0a | 1 / 0 | 31 (26/32) | 1.2 / 5.9 | 1.01 | 44.1K / 42.3K | 65.1K | 1.008 | 2.4 | 42.2 / 26.1 | 35 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | 52 (1/32) | 0.7 / 0.7 | 0.65 | 66.5K / 67.0K | 64.9K | 0.967 | 2.4 | 81.8 / 0.0 | 43 % |
+
+#### RAM 64K, stall regime (cut_trigger 0.08)
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 4 / 5 | 13 (32/32) | 31.0 / 35.9 | 1.02 | 20.7K / 15.2K | 94.3K | 1.031 | 4.1 | 38.5 / 16.3 | 13 % |
+| gate-gc | 4 / 4 | 13 (30/32) | 31.1 / 36.0 | 1.02 | 20.9K / 16.4K | 94.3K | 1.023 | 4.1 | 37.5 / 18.1 | 15 % |
+| leadzone | 4 / 5 | 13 (32/32) | 31.0 / 35.9 | 1.02 | 20.7K / 15.2K | 94.3K | 1.029 | 4.1 | 38.4 / 16.2 | 13 % |
+| P0a bound compressed | 2 / 4 | 19 (32/32) | 31.0 / 35.6 | 1.02 | 21.2K / 16.4K | 94.0K | 1.029 | 4.1 | 41.3 / 19.4 | 15 % |
+| P0b true-up early | 4 / 5 | 14 (31/32) | 31.1 / 35.9 | 1.02 | 20.0K / 14.5K | 94.1K | 1.031 | 4.1 | 38.3 / 17.1 | 14 % |
+| P0c limit anchored on disk | 4 / 4 | 17 (32/32) | 31.1 / 32.5 | 1.02 | 20.3K / 14.4K | 89.4K | 1.043 | 4.2 | 34.3 / 20.9 | 15 % |
+| P1 pace in store bytes | 2 / 0 | 30 (25/32) | 19.5 / 23.6 | 1.02 | 19.8K / 13.3K | 87.9K | 1.013 | 4.2 | 24.3 / 32.7 | 24 % |
+| P2 growth pass 1 GiB | 4 / 5 | 14 (32/32) | 31.2 / 35.9 | 1.02 | 21.0K / 15.7K | 93.8K | 1.035 | 4.1 | 39.8 / 18.4 | 14 % |
+| P2 growth pass 0.25 GiB | 4 / 5 | 15 (32/32) | 31.2 / 35.5 | 9.32 | 20.6K / 13.3K | 92.8K | 1.026 | 4.0 | 35.6 / 19.0 | 13 % |
+| G9 grace from death | 6 / 11 | 13 (32/32) | 19.5 / 30.9 | 5.96 | 25.8K / 18.1K | 94.3K | 1.043 | 4.1 | 48.0 / 24.1 | 17 % |
+| P3 grace 15 s | 5 / 4 | 13 (32/32) | 30.7 / 33.1 | 1.02 | 22.2K / 18.6K | 94.3K | 1.028 | 4.1 | 45.0 / 18.5 | 15 % |
+| P3 grace 10 s | 5 / 6 | 13 (32/32) | 17.9 / 33.2 | 1.02 | 28.8K / 23.4K | 94.3K | 1.021 | 4.1 | 57.3 / 21.1 | 21 % |
+| P3 grace 5 s | 4 / 4 | 13 (32/32) | 31.5 / 33.2 | 1.02 | 28.2K / 17.8K | 94.3K | 1.020 | 4.1 | 51.9 / 17.2 | 15 % |
+| P3 grace 2 s | 4 / 4 | 13 (32/32) | 31.4 / 33.1 | 1.02 | 27.9K / 16.8K | 94.3K | 1.023 | 4.1 | 49.6 / 16.1 | 13 % |
+| P3 grace 0 s | 4 / 4 | 13 (32/32) | 31.4 / 33.1 | 1.02 | 27.9K / 16.8K | 94.3K | 1.023 | 4.1 | 49.6 / 16.1 | 13 % |
+| P4 grace 5 s + gap 1 s | 5 / 8 | 13 (32/32) | 31.0 / 33.0 | 1.02 | 28.4K / 33.7K | 94.3K | 1.048 | 4.1 | 70.4 / 30.2 | 26 % |
+| P4 grace 0 s + gap 1 s | 6 / 7 | 13 (32/32) | 6.7 / 8.8 | 1.02 | 46.2K / 40.0K | 94.3K | 1.034 | 4.1 | 99.3 / 31.5 | 35 % |
+| G5 threshold from headroom | 4 / 4 | 13 (32/32) | 31.3 / 35.8 | 1.02 | 20.6K / 13.4K | 94.3K | 1.017 | 4.1 | 34.6 / 17.6 | 12 % |
+| G1 batched index work | 4 / 7 | 13 (32/32) | 29.8 / 35.7 | 1.02 | 23.2K / 19.5K | 94.2K | 1.017 | 4.1 | 36.6 / 35.4 | 6 % |
+| G3 incremental mark | 4 / 5 | 13 (32/32) | 30.7 / 35.1 | 1.02 | 19.5K / 15.4K | 94.3K | 1.022 | 4.1 | 36.4 / 20.2 | 13 % |
+| G4 two collector threads | 4 / 5 | 13 (32/32) | 31.3 / 35.8 | 1.02 | 19.9K / 15.5K | 94.3K | 1.017 | 4.1 | 34.6 / 22.2 | 35 % |
+| G1+G3+G4 | 4 / 7 | 13 (32/32) | 29.0 / 35.0 | 1.02 | 22.8K / 18.4K | 94.2K | 1.017 | 4.1 | 30.8 / 40.6 | 10 % |
+| G7 punch, grace 30 s | 3 / 7 | 13 (32/32) | 15.1 / 30.0 | 1.02 | 21.9K / 18.6K | 94.2K | 1.036 | 4.2 | 58.8 / 0.0 | 16 % |
+| G7 punch, grace 5 s | 3 / 4 | 13 (32/32) | 30.6 / 33.0 | 1.02 | 30.7K / 20.2K | 94.3K | 1.047 | 4.2 | 66.0 / 0.0 | 14 % |
+| P5 time-to-limit pacing | 1 / 4 | 53 (22/32) | 1.0 / 5.2 | 0.78 | 12.2K / 10.6K | 25.4K | 1.011 | 6.5 | 2.0 / 52.4 | 31 % |
+| P6 ETA floor | 1 / 0 | 33 (22/32) | 19.3 / 27.1 | 3.69 | 20.1K / 13.2K | 87.9K | 1.010 | 4.2 | 25.0 / 33.5 | 25 % |
+| G2 condemn at each cut | 6 / 10 | 13 (32/32) | 19.7 / 28.8 | 1.06 | 25.4K / 17.2K | 94.2K | 1.021 | 4.1 | 50.7 / 22.6 | 12 % |
+| P1' + P6 (ETA floor) | 1 / 0 | 33 (22/32) | 19.3 / 27.1 | 3.69 | 20.1K / 13.2K | 87.9K | 1.010 | 4.2 | 25.0 / 33.5 | 25 % |
+| C6 gap 1 s only | 4 / 5 | 13 (32/32) | 31.0 / 32.9 | 1.02 | 20.1K / 15.8K | 94.3K | 1.025 | 4.1 | 36.1 / 22.4 | 13 % |
+| C5 condemn at cut + gap 1 s | 7 / 12 | 13 (32/32) | 22.0 / 29.8 | 4.84 | 25.3K / 17.7K | 94.2K | 1.038 | 4.1 | 41.3 / 38.8 | 17 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 3 / 4 | 22 (29/32) | 29.1 / 29.2 | 0.43 | 43.0K / 41.6K | 101.2K | 1.032 | 4.1 | 154.0 / 3.0 | 24 % |
+| P1' + C5 + gap 1 s | 1 / 0 | 29 (19/32) | 5.4 / 12.4 | 1.02 | 24.8K / 15.3K | 87.9K | 1.008 | 4.2 | 38.9 / 42.8 | 28 % |
+| combo A: P2 + grace 5 s + gap 1 s | 6 / 8 | 13 (32/32) | 12.8 / 31.7 | 2.70 | 40.4K / 34.1K | 94.6K | 1.052 | 4.1 | 72.2 / 39.3 | 30 % |
+| combo B: A + P0a | 5 / 7 | 17 (32/32) | 6.3 / 31.4 | 2.58 | 40.7K / 35.1K | 94.4K | 1.042 | 4.1 | 71.9 / 43.4 | 35 % |
+| combo C: P2 + P1 | 2 / 0 | 30 (29/32) | 19.9 / 23.2 | 1.02 | 20.4K / 13.7K | 89.1K | 1.014 | 4.1 | 24.9 / 35.4 | 24 % |
+| combo D: P2 + G9 + P0a | 3 / 8 | 17 (32/32) | 20.8 / 31.3 | 1.01 | 25.1K / 18.6K | 93.7K | 1.035 | 4.1 | 39.1 / 29.3 | 19 % |
+| combo E: G7 + P2 + grace 5 s | 5 / 8 | 22 (32/32) | 5.0 / 6.0 | 0.49 | 51.7K / 42.9K | 95.4K | 1.077 | 4.1 | 116.0 / 0.0 | 35 % |
+
+#### RAM 16K, faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 0 / 2 | 48 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.7K | 83.6K | 1.010 | 1.4 | 9.8 / 32.2 | 33 % |
+| gate-gc | 0 / 1 | 50 (3/16) | 42.3 / 42.6 | 0.40 | 34.9K / 45.2K | 83.6K | 1.009 | 1.4 | 8.3 / 33.1 | 29 % |
+| leadzone | 0 / 2 | 48 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.4K | 83.6K | 1.010 | 1.4 | 10.2 / 32.4 | 33 % |
+| P0a bound compressed | 1 / 0 | 55 (2/16) | 31.0 / 31.0 | 0.67 | 35.1K / 46.5K | 83.6K | 1.017 | 1.4 | 11.1 / 30.0 | 35 % |
+| P0b true-up early | 0 / 2 | 47 (3/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.8K | 83.6K | 1.014 | 1.4 | 10.4 / 32.3 | 35 % |
+| P0c limit anchored on disk | 0 / 1 | 47 (4/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.2K | 83.6K | 1.011 | 1.4 | 8.2 / 33.0 | 32 % |
+| P1 pace in store bytes | 0 / 0 | none | 37.3 / 42.6 | 0.40 | 34.9K / 43.4K | 83.6K | 0.999 | 1.4 | 9.6 / 31.6 | 31 % |
+| P2 growth pass 1 GiB | 0 / 2 | 47 (7/16) | 5.8 / 22.3 | 0.44 | 54.7K / 40.5K | 83.6K | 1.014 | 1.4 | 14.7 / 32.5 | 41 % |
+| P2 growth pass 0.25 GiB | 0 / 1 | 47 (6/16) | 1.0 / 22.3 | 0.44 | 54.7K / 39.8K | 83.7K | 1.015 | 1.4 | 15.5 / 32.3 | 41 % |
+| G9 grace from death | 0 / 0 | 48 (2/16) | 1.0 / 16.7 | 0.40 | 55.1K / 49.0K | 83.6K | 1.003 | 1.4 | 11.0 / 39.1 | 35 % |
+| P3 grace 15 s | 0 / 0 | 48 (1/16) | 42.3 / 42.7 | 0.40 | 34.9K / 51.5K | 83.6K | 0.998 | 1.4 | 11.9 / 30.8 | 39 % |
+| P3 grace 10 s | 0 / 1 | 48 (1/16) | 15.5 / 15.9 | 0.40 | 53.6K / 50.1K | 83.6K | 1.011 | 1.4 | 15.9 / 28.2 | 43 % |
+| P3 grace 5 s | 0 / 0 | none | 15.5 / 15.9 | 0.40 | 53.6K / 67.2K | 83.6K | 0.991 | 1.4 | 15.7 / 38.6 | 43 % |
+| P3 grace 2 s | 0 / 0 | none | 15.5 / 15.9 | 0.40 | 53.6K / 67.2K | 83.6K | 0.991 | 1.4 | 15.7 / 38.6 | 43 % |
+| P3 grace 0 s | 0 / 0 | none | 15.5 / 15.9 | 0.40 | 53.6K / 67.2K | 83.6K | 0.991 | 1.4 | 15.7 / 38.6 | 43 % |
+| P4 grace 5 s + gap 1 s | 0 / 1 | 43 (1/16) | 7.6 / 9.5 | 0.40 | 53.5K / 64.9K | 83.6K | 1.001 | 1.4 | 17.1 / 40.9 | 51 % |
+| P4 grace 0 s + gap 1 s | 0 / 0 | none | 7.6 / 9.5 | 0.40 | 54.6K / 76.6K | 83.6K | 0.988 | 1.4 | 15.7 / 42.5 | 52 % |
+| G5 threshold from headroom | 0 / 2 | 48 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 45.7K | 83.6K | 1.012 | 1.4 | 10.6 / 30.5 | 33 % |
+| G1 batched index work | 0 / 2 | 43 (4/16) | 33.0 / 33.4 | 0.40 | 41.7K / 43.7K | 83.6K | 1.011 | 1.4 | 9.4 / 32.4 | 29 % |
+| G3 incremental mark | 0 / 3 | 50 (3/16) | 39.3 / 39.4 | 0.40 | 35.5K / 45.6K | 83.6K | 1.011 | 1.4 | 8.2 / 34.1 | 29 % |
+| G4 two collector threads | 0 / 2 | 50 (2/16) | 42.3 / 42.7 | 0.40 | 34.9K / 44.2K | 83.6K | 1.012 | 1.4 | 10.8 / 31.4 | 54 % |
+| G1+G3+G4 | 0 / 1 | 45 (3/16) | 61.0 / 61.4 | 0.40 | 34.9K / 42.2K | 83.6K | 1.006 | 1.4 | 7.8 / 31.9 | 38 % |
+| G7 punch, grace 30 s | 0 / 0 | none | 1.5 / 13.0 | 0.40 | 59.7K / 60.3K | 83.6K | 0.988 | 1.4 | 41.7 / 0.0 | 27 % |
+| G7 punch, grace 5 s | 0 / 0 | none | 0.4 / 0.5 | 0.40 | 75.1K / 79.7K | 83.6K | 0.986 | 1.4 | 33.4 / 0.0 | 34 % |
+| P5 time-to-limit pacing | 2 / 0 | none | 13.1 / 13.8 | 0.41 | 33.4K / 41.6K | 76.6K | 1.011 | 1.4 | 6.2 / 32.0 | 40 % |
+| P6 ETA floor | 0 / 0 | none | 42.3 / 43.0 | 0.40 | 34.9K / 43.5K | 83.6K | 0.998 | 1.4 | 9.8 / 29.6 | 33 % |
+| G2 condemn at each cut | 1 / 0 | 45 (10/16) | 0.9 / 2.4 | 0.84 | 60.5K / 46.7K | 83.6K | 1.004 | 1.4 | 16.8 / 37.5 | 35 % |
+| P1' + P6 (ETA floor) | 0 / 0 | none | 42.3 / 43.0 | 0.40 | 34.9K / 43.5K | 83.6K | 0.998 | 1.4 | 9.8 / 29.6 | 33 % |
+| C6 gap 1 s only | 0 / 3 | 47 (3/16) | 42.3 / 42.6 | 0.40 | 34.9K / 49.6K | 83.6K | 1.008 | 1.4 | 8.8 / 34.7 | 33 % |
+| C5 condemn at cut + gap 1 s | 1 / 0 | 46 (8/16) | 1.0 / 2.4 | 0.46 | 60.8K / 56.6K | 83.6K | 1.007 | 1.4 | 11.3 / 48.0 | 41 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 0 / 0 | none | 0.4 / 0.4 | 0.40 | 80.2K / 79.5K | 83.6K | 0.965 | 1.4 | 67.2 / 8.1 | 61 % |
+| P1' + C5 + gap 1 s | 0 / 0 | none | 0.9 / 1.0 | 0.55 | 59.8K / 54.0K | 83.6K | 0.994 | 1.4 | 11.5 / 47.2 | 40 % |
+| combo A: P2 + grace 5 s + gap 1 s | 0 / 1 | 42 (4/16) | 0.7 / 1.0 | 0.41 | 66.7K / 63.2K | 83.6K | 1.004 | 1.4 | 19.0 / 46.0 | 60 % |
+| combo B: A + P0a | 0 / 0 | 43 (1/16) | 0.9 / 1.0 | 0.44 | 66.0K / 59.4K | 83.6K | 0.993 | 1.4 | 20.3 / 44.1 | 61 % |
+| combo C: P2 + P1 | 2 / 0 | 54 (9/16) | 14.8 / 15.0 | 1.02 | 48.6K / 44.6K | 83.6K | 1.010 | 1.4 | 15.1 / 31.1 | 42 % |
+| combo D: P2 + G9 + P0a | 0 / 0 | none | 0.4 / 0.5 | 0.40 | 62.5K / 49.0K | 83.6K | 0.967 | 1.4 | 10.6 / 42.8 | 44 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 0.4 / 0.4 | 0.40 | 81.0K / 81.6K | 83.6K | 0.952 | 1.4 | 39.8 / 0.0 | 38 % |
+
+#### RAM 16K, stall regime
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 1 | 39 (16/16) | 13.0 / 15.1 | 1.02 | 46.1K / 25.8K | 110.0K | 1.007 | 2.0 | 4.4 / 47.3 | 26 % |
+| gate-gc | 2 / 2 | 39 (13/16) | 12.7 / 15.0 | 1.02 | 46.6K / 26.2K | 110.0K | 1.005 | 2.0 | 3.8 / 46.1 | 28 % |
+| leadzone | 1 / 2 | 39 (16/16) | 13.1 / 15.1 | 1.02 | 46.2K / 26.4K | 110.0K | 1.009 | 2.0 | 4.5 / 46.4 | 26 % |
+| P0a bound compressed | 1 / 2 | 40 (16/16) | 13.8 / 15.2 | 1.02 | 46.1K / 26.5K | 110.0K | 1.007 | 2.0 | 4.4 / 47.5 | 26 % |
+| P0b true-up early | 2 / 2 | 39 (16/16) | 13.7 / 15.0 | 1.02 | 46.1K / 25.3K | 110.0K | 1.007 | 2.0 | 4.7 / 46.8 | 26 % |
+| P0c limit anchored on disk | 1 / 1 | 40 (16/16) | 14.5 / 15.0 | 1.02 | 46.0K / 25.6K | 110.0K | 1.007 | 2.0 | 4.5 / 46.7 | 26 % |
+| P1 pace in store bytes | 0 / 0 | 57 (1/16) | 1.0 / 1.0 | 1.02 | 44.1K / 24.0K | 110.0K | 0.991 | 2.0 | 4.2 / 44.7 | 28 % |
+| P2 growth pass 1 GiB | 1 / 0 | 41 (16/16) | 6.1 / 6.2 | 1.02 | 46.6K / 25.8K | 110.0K | 1.009 | 2.0 | 2.4 / 50.0 | 28 % |
+| P2 growth pass 0.25 GiB | 1 / 0 | 41 (16/16) | 6.1 / 6.2 | 1.02 | 46.6K / 25.9K | 110.0K | 1.008 | 2.0 | 2.8 / 48.9 | 28 % |
+| G9 grace from death | 1 / 0 | 39 (10/16) | 1.0 / 1.0 | 1.01 | 46.8K / 39.4K | 110.0K | 1.001 | 2.0 | 3.2 / 52.4 | 29 % |
+| P3 grace 15 s | 0 / 0 | 44 (1/16) | 0.4 / 0.7 | 0.36 | 52.2K / 44.5K | 110.0K | 0.983 | 2.0 | 2.4 / 61.4 | 29 % |
+| P3 grace 10 s | 0 / 0 | 44 (1/16) | 0.7 / 0.8 | 0.36 | 51.7K / 45.1K | 110.0K | 0.994 | 2.0 | 5.7 / 60.7 | 29 % |
+| P3 grace 5 s | 0 / 0 | none | 0.2 / 0.3 | 0.17 | 62.6K / 50.4K | 110.0K | 0.968 | 2.0 | 3.6 / 67.6 | 30 % |
+| P3 grace 2 s | 0 / 0 | none | 0.2 / 0.3 | 0.17 | 62.6K / 50.4K | 110.0K | 0.968 | 2.0 | 3.6 / 67.6 | 30 % |
+| P3 grace 0 s | 0 / 0 | none | 0.2 / 0.3 | 0.17 | 62.6K / 50.4K | 110.0K | 0.968 | 2.0 | 3.6 / 67.6 | 30 % |
+| P4 grace 5 s + gap 1 s | 0 / 0 | 41 (1/16) | 0.4 / 0.7 | 0.31 | 68.7K / 54.1K | 110.0K | 0.983 | 2.0 | 9.0 / 72.5 | 35 % |
+| P4 grace 0 s + gap 1 s | 0 / 0 | none | 0.1 / 0.2 | 0.12 | 69.2K / 61.0K | 110.0K | 0.958 | 2.0 | 2.9 / 87.6 | 36 % |
+| G5 threshold from headroom | 1 / 1 | 39 (16/16) | 6.0 / 16.9 | 1.02 | 46.1K / 24.6K | 110.0K | 1.014 | 2.0 | 3.6 / 48.3 | 26 % |
+| G1 batched index work | 2 / 0 | 39 (16/16) | 5.8 / 6.1 | 1.02 | 45.2K / 37.6K | 110.0K | 1.005 | 2.0 | 1.8 / 59.2 | 16 % |
+| G3 incremental mark | 1 / 2 | 39 (16/16) | 11.4 / 18.9 | 1.02 | 46.4K / 30.2K | 110.0K | 1.006 | 2.0 | 2.8 / 49.0 | 21 % |
+| G4 two collector threads | 1 / 1 | 39 (16/16) | 13.0 / 15.2 | 1.02 | 46.0K / 26.0K | 110.0K | 1.009 | 2.0 | 4.4 / 47.2 | 57 % |
+| G1+G3+G4 | 2 / 0 | 38 (15/16) | 5.1 / 17.0 | 1.02 | 44.9K / 40.2K | 110.0K | 1.003 | 2.0 | 1.3 / 62.5 | 22 % |
+| G7 punch, grace 30 s | 0 / 0 | none | 0.6 / 1.0 | 0.47 | 52.4K / 43.0K | 110.0K | 0.989 | 2.0 | 47.6 / 0.0 | 26 % |
+| G7 punch, grace 5 s | 0 / 0 | none | 0.2 / 0.4 | 0.12 | 80.5K / 64.2K | 110.0K | 0.972 | 2.0 | 30.4 / 0.0 | 28 % |
+| P5 time-to-limit pacing | 0 / 0 | none | 0.2 / 0.3 | 0.08 | 34.9K / 31.8K | 58.2K | 0.962 | 2.0 | 0.0 / 46.2 | 34 % |
+| P6 ETA floor | 0 / 0 | none | 1.7 / 2.2 | 1.34 | 44.2K / 23.9K | 110.0K | 0.991 | 2.0 | 4.3 / 45.0 | 28 % |
+| G2 condemn at each cut | 0 / 0 | 38 (7/16) | 1.0 / 1.1 | 1.02 | 45.6K / 40.2K | 110.0K | 1.000 | 2.0 | 19.4 / 44.4 | 22 % |
+| P1' + P6 (ETA floor) | 0 / 0 | none | 1.7 / 2.2 | 1.34 | 44.2K / 23.9K | 110.0K | 0.991 | 2.0 | 4.3 / 45.0 | 28 % |
+| C6 gap 1 s only | 2 / 2 | 37 (16/16) | 11.3 / 14.6 | 1.02 | 46.1K / 36.8K | 110.0K | 1.003 | 2.0 | 2.4 / 52.2 | 34 % |
+| C5 condemn at cut + gap 1 s | 0 / 0 | 38 (3/16) | 1.0 / 1.0 | 1.02 | 45.7K / 42.1K | 110.0K | 0.998 | 2.0 | 16.0 / 51.2 | 30 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 0 / 0 | none | 0.1 / 0.1 | 0.07 | 91.2K / 85.2K | 110.0K | 0.939 | 2.0 | 103.3 / 19.5 | 28 % |
+| P1' + C5 + gap 1 s | 0 / 0 | none | 0.8 / 1.0 | 0.71 | 44.4K / 40.4K | 110.0K | 0.980 | 2.0 | 16.0 / 50.4 | 30 % |
+| combo A: P2 + grace 5 s + gap 1 s | 0 / 0 | none | 0.1 / 0.2 | 0.11 | 72.1K / 61.1K | 110.0K | 0.956 | 2.0 | 2.6 / 84.0 | 36 % |
+| combo B: A + P0a | 0 / 0 | none | 0.2 / 0.2 | 0.14 | 72.2K / 61.2K | 110.0K | 0.958 | 2.0 | 2.6 / 83.9 | 36 % |
+| combo C: P2 + P1 | 0 / 0 | none | 1.0 / 1.0 | 1.02 | 44.7K / 26.4K | 110.0K | 0.988 | 2.0 | 2.1 / 49.3 | 29 % |
+| combo D: P2 + G9 + P0a | 0 / 0 | none | 1.0 / 1.0 | 1.01 | 47.2K / 39.4K | 110.0K | 0.996 | 2.0 | 3.1 / 53.3 | 29 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 0.1 / 0.1 | 0.08 | 89.9K / 76.7K | 110.0K | 0.944 | 2.0 | 16.4 / 0.0 | 32 % |
+
+#### M15 8 GiB, faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 1 / 1 | 55 (17/24) | 36.8 / 37.5 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % |
+| gate-gc | 0 / 0 | 98 (10/24) | 37.0 / 65.3 | 9.22 | 15.3K / 11.5K | 82.2K | 0.989 | 1.4 | 0.0 / 19.5 | 8 % |
+| leadzone | 1 / 1 | 55 (17/24) | 36.8 / 37.5 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % |
+| P0a bound compressed | 2 / 6 | 33 (24/24) | 26.4 / 32.7 | 2.76 | 22.1K / 17.4K | 82.2K | 1.035 | 1.4 | 0.0 / 29.1 | 21 % |
+| P0b true-up early | 1 / 1 | 55 (17/24) | 36.8 / 37.5 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % |
+| P0c limit anchored on disk | 1 / 1 | 55 (17/24) | 36.8 / 37.5 | 28.81 | 16.5K / 12.7K | 82.2K | 1.029 | 1.4 | 0.0 / 20.0 | 25 % |
+| P1 pace in store bytes | 0 / 2 | 63 (14/24) | 35.4 / 57.6 | 2.57 | 17.2K / 12.9K | 82.2K | 1.026 | 1.4 | 0.0 / 22.5 | 20 % |
+| P2 growth pass 1 GiB | 1 / 0 | 49 (24/24) | 37.2 / 37.4 | 34.21 | 15.1K / 16.5K | 82.3K | 1.016 | 1.4 | 0.0 / 19.8 | 29 % |
+| P2 growth pass 0.25 GiB | 1 / 2 | 65 (22/24) | 36.9 / 37.4 | 28.66 | 13.9K / 16.5K | 82.3K | 1.031 | 1.4 | 0.0 / 19.8 | 27 % |
+| G9 grace from death | 1 / 2 | 52 (15/24) | 33.9 / 37.4 | 8.06 | 23.1K / 6.7K | 82.2K | 1.031 | 1.4 | 0.0 / 12.4 | 16 % |
+| P3 grace 15 s | 1 / 1 | 55 (17/24) | 36.5 / 39.9 | 2.93 | 20.3K / 12.0K | 82.2K | 1.029 | 1.4 | 0.0 / 20.2 | 26 % |
+| P3 grace 10 s | 0 / 0 | 60 (13/24) | 41.4 / 67.7 | 13.93 | 22.8K / 8.3K | 82.2K | 1.006 | 1.4 | 0.0 / 18.0 | 21 % |
+| P3 grace 5 s | 1 / 3 | 58 (17/24) | 16.5 / 17.6 | 2.30 | 28.2K / 24.8K | 82.2K | 1.029 | 1.4 | 0.0 / 38.1 | 27 % |
+| P3 grace 2 s | 1 / 3 | 58 (17/24) | 16.5 / 17.6 | 2.30 | 28.2K / 24.8K | 82.2K | 1.029 | 1.4 | 0.0 / 38.1 | 27 % |
+| P3 grace 0 s | 1 / 3 | 58 (17/24) | 16.5 / 17.6 | 2.30 | 28.2K / 24.8K | 82.2K | 1.029 | 1.4 | 0.0 / 38.1 | 27 % |
+| P4 grace 5 s + gap 1 s | 2 / 5 | 38 (17/24) | 12.3 / 15.4 | 1.37 | 32.9K / 35.5K | 82.2K | 1.031 | 1.4 | 0.0 / 52.1 | 37 % |
+| P4 grace 0 s + gap 1 s | 2 / 7 | 38 (17/24) | 9.9 / 13.7 | 1.53 | 41.1K / 41.4K | 82.2K | 1.032 | 1.4 | 0.0 / 57.7 | 37 % |
+| G5 threshold from headroom | 1 / 1 | 55 (17/24) | 36.7 / 37.9 | 26.69 | 16.5K / 12.0K | 82.2K | 1.032 | 1.4 | 0.0 / 20.0 | 24 % |
+| G1 batched index work | 1 / 1 | 54 (16/24) | 32.9 / 65.7 | 6.59 | 17.8K / 11.6K | 82.2K | 1.024 | 1.4 | 0.0 / 19.7 | 25 % |
+| G3 incremental mark | 0 / 0 | 87 (10/24) | 62.4 / 65.4 | 16.51 | 15.2K / 6.0K | 82.2K | 0.985 | 1.4 | 0.0 / 13.3 | 26 % |
+| G4 two collector threads | 1 / 0 | 58 (16/24) | 36.7 / 65.2 | 26.40 | 15.1K / 12.0K | 82.2K | 1.023 | 1.4 | 0.0 / 19.8 | 32 % |
+| G1+G3+G4 | 0 / 0 | 101 (9/24) | 61.0 / 61.4 | 9.99 | 15.2K / 6.0K | 82.2K | 0.985 | 1.4 | 0.0 / 13.3 | 24 % |
+| G7 punch, grace 30 s | 0 / 0 | none | 37.0 / 126.1 | 0.43 | 20.3K / 19.9K | 82.2K | 0.986 | 1.4 | 0.4 / 0.0 | 3 % |
+| G7 punch, grace 5 s | 0 / 0 | none | 32.4 / 65.4 | 2.06 | 30.4K / 53.3K | 82.2K | 0.987 | 1.4 | 0.5 / 0.0 | 26 % |
+| P5 time-to-limit pacing | 0 / 3 | 107 (23/24) | 31.9 / 36.3 | 6.62 | 18.4K / 15.3K | 43.0K | 1.028 | 1.4 | 0.0 / 25.6 | 28 % |
+| P6 ETA floor | 0 / 3 | 63 (15/24) | 35.3 / 38.6 | 4.59 | 16.9K / 16.1K | 82.2K | 1.028 | 1.4 | 0.0 / 20.0 | 19 % |
+| G2 condemn at each cut | 1 / 2 | 54 (17/24) | 35.4 / 36.1 | 12.38 | 19.1K / 13.4K | 82.2K | 1.029 | 1.4 | 0.0 / 23.0 | 23 % |
+| P1' + P6 (ETA floor) | 0 / 3 | 63 (15/24) | 35.3 / 38.6 | 4.59 | 16.9K / 16.1K | 82.2K | 1.028 | 1.4 | 0.0 / 20.0 | 19 % |
+| C6 gap 1 s only | 0 / 3 | 59 (15/24) | 36.5 / 66.3 | 6.55 | 15.3K / 15.3K | 82.2K | 1.028 | 1.4 | 0.0 / 23.8 | 19 % |
+| C5 condemn at cut + gap 1 s | 0 / 3 | 95 (16/24) | 35.7 / 38.6 | 4.92 | 17.0K / 15.5K | 82.2K | 1.032 | 1.4 | 0.0 / 27.9 | 18 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 2 / 5 | 38 (17/24) | 9.0 / 9.4 | 0.42 | 49.4K / 47.8K | 82.2K | 1.031 | 1.4 | 0.0 / 70.9 | 39 % |
+| P1' + C5 + gap 1 s | 1 / 6 | 62 (16/24) | 29.6 / 35.3 | 1.02 | 18.9K / 19.6K | 82.2K | 1.031 | 1.4 | 0.0 / 31.2 | 21 % |
+| combo A: P2 + grace 5 s + gap 1 s | 3 / 5 | 28 (24/24) | 12.7 / 15.4 | 1.95 | 35.6K / 36.5K | 82.3K | 1.032 | 1.4 | 0.0 / 53.6 | 39 % |
+| combo B: A + P0a | 4 / 4 | 23 (24/24) | 11.6 / 16.1 | 1.01 | 38.3K / 38.2K | 82.3K | 1.034 | 1.4 | 0.1 / 57.6 | 44 % |
+| combo C: P2 + P1 | 0 / 5 | 103 (20/24) | 37.4 / 38.6 | 4.09 | 15.3K / 16.8K | 82.3K | 1.030 | 1.4 | 0.0 / 23.7 | 22 % |
+| combo D: P2 + G9 + P0a | 4 / 6 | 19 (24/24) | 32.0 / 32.4 | 1.02 | 25.0K / 19.7K | 82.3K | 1.035 | 1.4 | 0.1 / 33.4 | 24 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 10.1 / 12.4 | 0.78 | 64.6K / 56.1K | 82.2K | 0.983 | 1.4 | 0.6 / 0.0 | 40 % |
+
+#### M15 8 GiB, stall regime
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 2 / 3 | 18 (24/24) | 35.3 / 36.1 | 14.63 | 18.4K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 29.8 | 20 % |
+| gate-gc | 2 / 3 | 14 (24/24) | 35.5 / 47.0 | 31.75 | 16.2K / 13.4K | 83.4K | 1.035 | 2.0 | 0.0 / 28.5 | 17 % |
+| leadzone | 2 / 3 | 18 (24/24) | 35.3 / 36.1 | 14.63 | 18.4K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 29.8 | 20 % |
+| P0a bound compressed | 2 / 2 | 18 (24/24) | 32.7 / 35.8 | 14.58 | 18.4K / 14.9K | 83.5K | 1.035 | 2.0 | 0.0 / 30.1 | 19 % |
+| P0b true-up early | 2 / 3 | 18 (24/24) | 35.0 / 35.8 | 14.71 | 18.5K / 15.0K | 83.4K | 1.035 | 2.0 | 0.0 / 29.7 | 18 % |
+| P0c limit anchored on disk | 2 / 3 | 18 (24/24) | 35.3 / 36.1 | 14.63 | 18.4K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 29.8 | 20 % |
+| P1 pace in store bytes | 2 / 3 | 22 (24/24) | 32.2 / 36.8 | 14.41 | 18.2K / 15.0K | 81.2K | 1.028 | 2.0 | 0.0 / 30.7 | 24 % |
+| P2 growth pass 1 GiB | 3 / 2 | 14 (24/24) | 35.7 / 35.9 | 27.89 | 18.3K / 15.0K | 83.5K | 1.035 | 2.0 | 0.0 / 29.8 | 22 % |
+| P2 growth pass 0.25 GiB | 3 / 3 | 20 (24/24) | 35.7 / 35.8 | 29.78 | 18.2K / 15.0K | 83.5K | 1.035 | 2.0 | 0.0 / 29.6 | 21 % |
+| G9 grace from death | 2 / 4 | 18 (24/24) | 32.7 / 34.1 | 14.76 | 18.7K / 15.6K | 83.4K | 1.035 | 2.0 | 0.0 / 34.5 | 19 % |
+| P3 grace 15 s | 2 / 4 | 18 (24/24) | 32.6 / 33.4 | 15.88 | 18.7K / 16.1K | 83.4K | 1.035 | 2.0 | 0.0 / 34.5 | 17 % |
+| P3 grace 10 s | 3 / 3 | 18 (24/24) | 19.3 / 20.4 | 1.02 | 26.7K / 20.6K | 83.4K | 1.034 | 2.0 | 0.0 / 45.8 | 29 % |
+| P3 grace 5 s | 2 / 0 | 18 (23/24) | 19.5 / 21.1 | 0.95 | 27.5K / 26.8K | 83.4K | 1.034 | 2.0 | 0.0 / 52.5 | 37 % |
+| P3 grace 2 s | 2 / 0 | 18 (23/24) | 19.5 / 21.1 | 0.95 | 27.5K / 26.8K | 83.4K | 1.034 | 2.0 | 0.0 / 52.5 | 37 % |
+| P3 grace 0 s | 2 / 0 | 18 (23/24) | 19.5 / 21.1 | 0.95 | 27.5K / 26.8K | 83.4K | 1.034 | 2.0 | 0.0 / 52.5 | 37 % |
+| P4 grace 5 s + gap 1 s | 3 / 5 | 17 (24/24) | 17.0 / 25.9 | 1.02 | 27.5K / 27.8K | 83.4K | 1.035 | 2.0 | 0.0 / 56.7 | 38 % |
+| P4 grace 0 s + gap 1 s | 1 / 0 | 17 (22/24) | 11.2 / 18.1 | 0.49 | 35.9K / 32.6K | 83.4K | 1.028 | 2.0 | 0.0 / 65.3 | 46 % |
+| G5 threshold from headroom | 2 / 2 | 18 (24/24) | 32.4 / 33.5 | 31.28 | 18.5K / 15.3K | 83.4K | 1.035 | 2.0 | 0.0 / 30.4 | 12 % |
+| G1 batched index work | 2 / 4 | 18 (24/24) | 32.0 / 32.2 | 21.31 | 18.2K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 34.6 | 13 % |
+| G3 incremental mark | 3 / 5 | 17 (24/24) | 31.1 / 40.0 | 13.21 | 18.2K / 14.8K | 83.4K | 1.035 | 2.0 | 0.0 / 32.3 | 14 % |
+| G4 two collector threads | 2 / 4 | 18 (24/24) | 35.1 / 35.9 | 16.80 | 18.1K / 15.0K | 83.4K | 1.035 | 2.0 | 0.0 / 31.5 | 23 % |
+| G1+G3+G4 | 2 / 5 | 16 (24/24) | 29.4 / 35.0 | 9.73 | 17.7K / 16.1K | 83.4K | 1.035 | 2.0 | 0.0 / 33.3 | 8 % |
+| G7 punch, grace 30 s | 5 / 5 | 22 (24/24) | 6.2 / 31.6 | 1.02 | 22.8K / 19.5K | 83.4K | 1.013 | 2.0 | 1.1 / 0.0 | 22 % |
+| G7 punch, grace 5 s | 3 / 0 | 22 (24/24) | 6.1 / 31.6 | 1.01 | 33.9K / 39.5K | 83.4K | 1.010 | 2.0 | 0.4 / 0.0 | 37 % |
+| P5 time-to-limit pacing | 1 / 0 | 56 (15/24) | 1.0 / 6.1 | 0.75 | 14.0K / 12.8K | 28.2K | 1.001 | 2.0 | 0.0 / 29.8 | 32 % |
+| P6 ETA floor | 2 / 2 | 23 (24/24) | 32.7 / 37.1 | 14.86 | 18.3K / 15.0K | 81.2K | 1.030 | 2.0 | 0.0 / 30.8 | 24 % |
+| G2 condemn at each cut | 2 / 4 | 18 (24/24) | 31.7 / 32.1 | 14.53 | 18.2K / 16.3K | 83.4K | 1.035 | 2.0 | 0.0 / 34.4 | 18 % |
+| P1' + P6 (ETA floor) | 2 / 2 | 23 (24/24) | 32.7 / 37.1 | 14.86 | 18.3K / 15.0K | 81.2K | 1.030 | 2.0 | 0.0 / 30.8 | 24 % |
+| C6 gap 1 s only | 2 / 5 | 17 (24/24) | 32.3 / 35.9 | 21.57 | 18.2K / 15.1K | 83.4K | 1.035 | 2.0 | 0.0 / 34.5 | 21 % |
+| C5 condemn at cut + gap 1 s | 2 / 5 | 16 (24/24) | 32.1 / 32.7 | 10.32 | 18.8K / 18.8K | 83.4K | 1.034 | 2.0 | 0.0 / 39.9 | 26 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 1 / 0 | 18 (12/24) | 0.8 / 12.0 | 0.26 | 49.9K / 46.4K | 83.4K | 1.001 | 2.0 | 0.0 / 91.7 | 45 % |
+| P1' + C5 + gap 1 s | 3 / 4 | 17 (24/24) | 29.0 / 32.4 | 1.02 | 18.9K / 18.2K | 81.2K | 1.023 | 2.0 | 0.0 / 39.4 | 29 % |
+| combo A: P2 + grace 5 s + gap 1 s | 3 / 5 | 17 (24/24) | 11.9 / 16.5 | 1.02 | 30.3K / 28.4K | 83.5K | 1.034 | 2.0 | 0.0 / 58.9 | 41 % |
+| combo B: A + P0a | 2 / 4 | 17 (24/24) | 15.9 / 16.7 | 1.02 | 29.7K / 27.8K | 83.6K | 1.035 | 2.0 | 0.0 / 58.5 | 41 % |
+| combo C: P2 + P1 | 2 / 5 | 22 (24/24) | 29.5 / 31.1 | 14.09 | 18.3K / 14.3K | 81.4K | 1.029 | 2.0 | 0.0 / 30.1 | 24 % |
+| combo D: P2 + G9 + P0a | 2 / 3 | 21 (24/24) | 32.3 / 32.4 | 30.98 | 18.3K / 15.2K | 83.6K | 1.035 | 2.0 | 0.0 / 33.3 | 17 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | 91 (5/24) | 0.6 / 0.7 | 0.36 | 50.5K / 48.8K | 83.5K | 0.996 | 2.0 | 0.5 / 0.0 | 49 % |
+
+#### network volume 64K, faithful
+
+| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base (main) | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| gate-gc | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| leadzone | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P0a bound compressed | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.107 | 7.5 | 0.0 / 2.8 | 22 % |
+| P0b true-up early | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P0c limit anchored on disk | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P1 pace in store bytes | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P2 growth pass 1 GiB | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P2 growth pass 0.25 GiB | 0 / 0 | none | 7.6 / 7.6 | 7.41 | 2.0K / 0.8K | 11.3K | 0.109 | 7.5 | 0.0 / 2.6 | 25 % |
+| G9 grace from death | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P3 grace 15 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P3 grace 10 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P3 grace 5 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P3 grace 2 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P3 grace 0 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P4 grace 5 s + gap 1 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P4 grace 0 s + gap 1 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| G5 threshold from headroom | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| G1 batched index work | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| G3 incremental mark | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 21 % |
+| G4 two collector threads | 0 / 0 | none | 7.6 / 7.6 | 7.31 | 2.0K / 0.8K | 11.3K | 0.123 | 7.5 | 0.0 / 3.0 | 39 % |
+| G1+G3+G4 | 0 / 0 | none | 7.6 / 7.6 | 7.31 | 2.0K / 0.8K | 11.3K | 0.123 | 7.5 | 0.0 / 3.6 | 36 % |
+| G7 punch, grace 30 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.7K | 11.3K | 0.090 | 7.5 | 0.0 / 0.0 | 1 % |
+| G7 punch, grace 5 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.7K | 11.3K | 0.090 | 7.5 | 0.0 / 0.0 | 1 % |
+| P5 time-to-limit pacing | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P6 ETA floor | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| G2 condemn at each cut | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P1' + P6 (ETA floor) | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| C6 gap 1 s only | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| C5 condemn at cut + gap 1 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| C5+C7 condemn at cut, gap 1 s, grace 2 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| P1' + C5 + gap 1 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| combo A: P2 + grace 5 s + gap 1 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| combo B: A + P0a | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.107 | 7.5 | 0.0 / 2.8 | 22 % |
+| combo C: P2 + P1 | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.110 | 7.5 | 0.0 / 2.8 | 22 % |
+| combo D: P2 + G9 + P0a | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.8K | 11.3K | 0.107 | 7.5 | 0.0 / 2.8 | 22 % |
+| combo E: G7 + P2 + grace 5 s | 0 / 0 | none | 7.6 / 7.6 | 7.56 | 2.0K / 0.7K | 11.3K | 0.090 | 7.5 | 0.0 / 0.0 | 1 % |
 
 ## Gates and deviations
 

@@ -139,6 +139,18 @@ pub struct Scenario {
     pub punch: bool,
     /// Compaction on or off.
     pub compaction: bool,
+    /// P7, emulated in the simulator (not the real gate): when the gate leaves
+    /// `stop`, the requests it holds are re-issued with their arrival set to
+    /// the exit, so the delay cap counts from `max(arrival, exit)`.
+    pub p7: bool,
+    /// Condemn wholly dead segments at every cut instead of at the next pass
+    /// (a usage table updated at the cut, G2); the delete still needs a later
+    /// mark that began after the grace.
+    pub condemn_at_cut: bool,
+    /// Cost of one punch call, microseconds.
+    pub punch_call_us: f64,
+    /// Cost of the `fdatasync` after 8 192 punches, milliseconds.
+    pub punch_sync_ms: f64,
     /// The volume's cap (`cache_max`), bytes; none = the file system decides.
     pub cache_max: Option<u64>,
     /// The reserved headroom region, bytes.
@@ -186,8 +198,11 @@ pub struct Scenario {
     pub condemn_ms: f64,
     /// Index work to delete one segment, milliseconds (gcrate: 13).
     pub delete_ms: f64,
-    /// FULL commits that keep a dead segment out of reach (the retained
-    /// set is the tip, its predecessor and one more: 3).
+    /// FULLs after the one that no longer names a segment before it leaves
+    /// the retained roots: GC keeps the tip, its predecessor and one below
+    /// (`coord.rs:918-919`, `chain_floor = seq - (retain_last - 1)`, and the
+    /// predecessor's own floor), and the segment is last named by the FULL
+    /// before its death cut, so it is free after 2 more.
     pub retain_cuts: u64,
     /// G1: the per-object index work is done once per pass (a tenth).
     pub batch_index: bool,
@@ -274,6 +289,10 @@ impl Scenario {
             grace_from_death: false,
             punch: false,
             compaction: true,
+            p7: false,
+            condemn_at_cut: false,
+            punch_call_us: 8.0,
+            punch_sync_ms: 19.0,
             cache_max: Some(32 * GIB),
             headroom: 256 * MIB,
             segment: 16 * MIB,
@@ -283,7 +302,7 @@ impl Scenario {
             ring_file: 32 * MIB,
             cut_target_s: 1.0,
             commit_interval_s: 30.0,
-            cut_trigger: 0.08,
+            cut_trigger: 1.0,
             meta_per_cut: MIB,
             gc_rate: 64 * MIB,
             gc_grace_s: 60.0,
@@ -296,7 +315,7 @@ impl Scenario {
             mark_per_chunk_us: 6.0,
             condemn_ms: 5.5,
             delete_ms: 13.0,
-            retain_cuts: 3,
+            retain_cuts: 2,
             batch_index: false,
             incremental_mark: false,
             gc_workers: 0,
@@ -332,7 +351,6 @@ impl Scenario {
             fs_external: 10 * MIB,
             cache_max: Some(64 * GIB),
             device: Device::netvol(),
-            cut_trigger: 0.13,
             ..Self::ram_64k()
         }
     }
@@ -415,6 +433,10 @@ impl Scenario {
             "grace_from_death" => self.grace_from_death = parse_bool(val)?,
             "punch" => self.punch = parse_bool(val)?,
             "compaction" => self.compaction = parse_bool(val)?,
+            "p7" => self.p7 = parse_bool(val)?,
+            "condemn_at_cut" => self.condemn_at_cut = parse_bool(val)?,
+            "punch_call_us" => self.punch_call_us = f()?,
+            "punch_sync_ms" => self.punch_sync_ms = f()?,
             "bound_mode" => {
                 self.bound_mode = match val {
                     "uncompressed" => BoundMode::Uncompressed,

@@ -73,11 +73,14 @@ enum Cmd {
     Experiments {
         #[arg(short, long, default_value = "ram-64k")]
         scenario: String,
-        #[arg(short, long, default_value_t = 8)]
+        #[arg(short, long, default_value_t = 32)]
         n: u64,
         /// The merge factor of the amplification level.
         #[arg(long, default_value = "1.0")]
         merge: String,
+        /// key=value overrides applied to every row; repeatable.
+        #[arg(long = "set")]
+        sets: Vec<String>,
     },
     /// The calibration table: `main` on the measured cells, and the two
     /// null-result policies beside it.
@@ -196,10 +199,16 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Experiments { scenario, n, merge } => {
+        Cmd::Experiments {
+            scenario,
+            n,
+            merge,
+            sets,
+        } => {
+            let sets = sets.iter().map(|s| kv(s)).collect::<Result<Vec<_>>>()?;
             print!(
                 "{}",
-                lunix_spacesim::experiments::table(&scenario, &merge, n)?
+                lunix_spacesim::experiments::table(&scenario, &merge, n, &sets)?
             );
         }
         Cmd::Calibrate { n } => {

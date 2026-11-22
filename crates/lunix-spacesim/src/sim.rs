@@ -104,6 +104,9 @@ struct Sim<'p> {
     fs: Arc<ManualFs>,
     gate: Arc<LunixSpace>,
     rng: Rng,
+    /// The stream of the timing jitter, apart from the deaths' stream, so
+    /// that candidates of one seed see the same draws where they can.
+    jit: Rng,
     now: Duration,
     base: Duration,
     dt: Duration,
@@ -154,6 +157,8 @@ struct Sim<'p> {
     amp_pre_band: Option<f64>,
     a_hat: f64,
     a_prev: (f64, f64),
+    store_rate: f64,
+    cw_prev: f64,
     last_refresh: Duration,
     peak_ratio: f64,
 }
@@ -238,6 +243,8 @@ impl<'p> Sim<'p> {
             delete: Duration::from_secs_f64(sc.delete_ms / 1000.0),
             batch: sc.batch_index,
             compaction: sc.compaction,
+            punch_call: Duration::from_secs_f64(sc.punch_call_us * 1e-6),
+            punch_sync: Duration::from_secs_f64(sc.punch_sync_ms * 1e-3),
             punch: sc.punch,
         };
         let base_params = GcParams {
@@ -272,6 +279,7 @@ impl<'p> Sim<'p> {
             fs,
             gate,
             rng,
+            jit: Rng::new(sc.seed ^ 0x5DEE_CE66),
             now,
             base,
             dt: sc.step(),
@@ -318,6 +326,8 @@ impl<'p> Sim<'p> {
             amp_pre_band: None,
             a_hat: 1.0,
             a_prev: (0.0, 0.0),
+            store_rate: 0.0,
+            cw_prev: 0.0,
             last_refresh: base,
             peak_ratio: 0.0,
         })
@@ -507,6 +517,9 @@ impl<'p> Sim<'p> {
                     last.episodes.push(ep);
                 }
                 self.gc.urgent_reset();
+                if self.sc.p7 {
+                    self.p7_reset();
+                }
             }
         }
         self.prev_state = st;
@@ -547,18 +560,45 @@ impl<'p> Sim<'p> {
             self.gate.set_ring_pace(want);
             self.ring_pace_on = on;
         }
+        let forecast = if self.policy.wants_forecast() {
+            self.store.forecast(self.eff.params.grace, self.now)
+        } else {
+            Vec::new()
+        };
+        let gap = self
+            .gc
+            .next_mark_at(&self.gcfg, &self.eff)
+            .saturating_sub(self.now);
         let view = AdmissionView {
             now: self.now,
             snap,
             a_hat: self.a_hat,
             journal_debt: self.ring_reserved,
-            next_delete_in: self.next_delete_in(),
+            next_delete_in: forecast.first().map(|f| f.0.max(gap)),
+            forecast: &forecast,
+            store_rate: self.store_rate,
+            gap,
         };
         self.adm_rate = self.policy.admission_rate(&view);
     }
 
-    fn next_delete_in(&self) -> Option<Duration> {
-        None
+    /// P7, emulated: the gate left `stop`; the requests it holds are issued
+    /// again with their arrival set to now (a cancel and a new reservation),
+    /// so the delay cap counts from the exit. `full_timeout` restarts too,
+    /// which the real P7 would not do.
+    fn p7_reset(&mut self) {
+        let list = std::mem::take(&mut self.waiting);
+        for i in list {
+            let w = match &self.slots[i].st {
+                SlotSt::Waiting(w) => w.clone(),
+                _ => continue,
+            };
+            if w.cancel() {
+                self.issue(i, self.now, ReserveClass::Bulk);
+            } else {
+                self.waiting.push(i);
+            }
+        }
     }
 
     // ----- requests -----
@@ -815,7 +855,7 @@ impl<'p> Sim<'p> {
             settings: &self.eff,
             cfg: &self.gcfg,
             now: self.now,
-            rng: &mut self.rng,
+            rng: &mut self.jit,
             written: self.written,
             growth_trigger: None,
             slow: 1.0,
@@ -835,7 +875,7 @@ impl<'p> Sim<'p> {
             settings: &self.eff,
             cfg: &self.gcfg,
             now: self.now,
-            rng: &mut self.rng,
+            rng: &mut self.jit,
             written: self.written,
             growth_trigger: self.eff.growth_trigger,
             slow: 1.0,
@@ -891,7 +931,7 @@ impl<'p> Sim<'p> {
         } else {
             d.store_bw
         };
-        let secs = (d.cut_fixed_ms / 1000.0 + store_bytes / bw) * self.rng.jitter(d.jitter);
+        let secs = (d.cut_fixed_ms / 1000.0 + store_bytes / bw) * self.jit.jitter(d.jitter);
         let secs = secs.max(0.001);
         self.coord = Coord::Cutting(CutJob {
             start: self.now,
@@ -925,6 +965,11 @@ impl<'p> Sim<'p> {
         self.ring_appended = self.ring_appended.saturating_sub(job.bytes);
         self.store.write_segments(job.distinct, job.distinct, false);
         self.store.cut_done(job.distinct, self.now, &mut self.rng);
+        if self.sc.condemn_at_cut {
+            let c = self.store.mark(self.now);
+            let listed = self.store.condemned_bytes();
+            self.gc.external_condemn(c, self.now, listed);
+        }
         self.cut_written += job.store_bytes;
         self.cut_journal += job.bytes as f64;
         self.written += job.store_bytes;
@@ -966,6 +1011,8 @@ impl<'p> Sim<'p> {
         let t = snap.throttle;
         // A over the last interval: store bytes per journal byte cut.
         let (cw, cj) = (self.cut_written, self.cut_journal);
+        self.store_rate = 0.7 * self.store_rate + 0.3 * (cw - self.cw_prev);
+        self.cw_prev = cw;
         if cj - self.a_prev.1 > 1e6 {
             let a = (cw - self.a_prev.0) / (cj - self.a_prev.1);
             self.a_hat = 0.7 * self.a_hat + 0.3 * a;
@@ -1033,7 +1080,9 @@ impl<'p> Sim<'p> {
             dead.recheck /= w;
         }
         let total = self.sc.total_secs();
-        let ff_end = first_delete_s.map_or(total, |d| d + 30.0).min(total);
+        // The first-fill window is the first 90 s for every row, whatever the
+        // candidate does to the first delete.
+        let ff_end = 90.0_f64.min(total);
         let first_fill = window(&self.trace, 0.0, ff_end);
         let steady = window(&self.trace, ff_end, total + 1.0);
         RunReport {

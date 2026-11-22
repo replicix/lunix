@@ -27,8 +27,8 @@ const fn c(
     Cand { name, policy, sets }
 }
 
-/// The candidates. P7 (cap from the last stop exit) changes the gate and has
-/// no row; P5/P6 need the collector's forecast and have none.
+/// The candidates. P7 (cap from the last stop exit) changes the gate's grant
+/// loop and has no row (a simulator-side emulation does nothing); P5/P6 need the collector's forecast and have none.
 pub const CANDIDATES: &[Cand] = &[
     c("base (main)", "main", &[]),
     c("gate-gc", "gate-gc", &[]),
@@ -115,6 +115,50 @@ pub const CANDIDATES: &[Cand] = &[
         ],
     ),
     c(
+        "P5 time-to-limit pacing",
+        "tunable",
+        &[("policy.p5", "true")],
+    ),
+    c("P6 ETA floor", "tunable", &[("policy.p6", "true")]),
+    c(
+        "G2 condemn at each cut",
+        "main",
+        &[("condemn_at_cut", "true")],
+    ),
+    c(
+        "P1' + P6 (ETA floor)",
+        "tunable",
+        &[("policy.p1", "true"), ("policy.p6", "true")],
+    ),
+    c(
+        "C6 gap 1 s only",
+        "tunable",
+        &[("policy.busy_interval_s", "1")],
+    ),
+    c(
+        "C5 condemn at cut + gap 1 s",
+        "tunable",
+        &[("condemn_at_cut", "true"), ("policy.busy_interval_s", "1")],
+    ),
+    c(
+        "C5+C7 condemn at cut, gap 1 s, grace 2 s",
+        "tunable",
+        &[
+            ("condemn_at_cut", "true"),
+            ("policy.busy_interval_s", "1"),
+            ("policy.grace_s", "2"),
+        ],
+    ),
+    c(
+        "P1' + C5 + gap 1 s",
+        "tunable",
+        &[
+            ("policy.p1", "true"),
+            ("condemn_at_cut", "true"),
+            ("policy.busy_interval_s", "1"),
+        ],
+    ),
+    c(
         "combo A: P2 + grace 5 s + gap 1 s",
         "tunable",
         &[
@@ -160,6 +204,17 @@ pub const CANDIDATES: &[Cand] = &[
     ),
 ];
 
+fn p90(runs: &[RunReport]) -> f64 {
+    let mut v: Vec<f64> = runs
+        .iter()
+        .map(|r| r.cells.iter().map(|c| c.max).fold(0.0, f64::max))
+        .collect();
+    v.sort_by(f64::total_cmp);
+    v[((v.len() as f64 * 0.9).ceil() as usize)
+        .saturating_sub(1)
+        .min(v.len() - 1)]
+}
+
 fn med(runs: &[RunReport], f: impl Fn(&RunReport) -> f64) -> f64 {
     Spread::of(runs.iter().map(f).collect()).median
 }
@@ -168,12 +223,13 @@ fn med(runs: &[RunReport], f: impl Fn(&RunReport) -> f64) -> f64 {
 ///
 /// # Errors
 /// As [`run_seeds`].
-pub fn table(scenario: &str, merge: &str, n: u64) -> Result<String> {
+pub fn table(scenario: &str, merge: &str, n: u64, extra: &[(String, String)]) -> Result<String> {
     let mut out = String::new();
-    let _ = writeln!(out, "| candidate | stops ff / steady | first stop s | longest s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |");
+    let _ = writeln!(out, "| candidate | stops ff / steady | first stop s | longest med / p90 s | p99.9 s | IOPS ff / steady | burst IOPS | peak used/limit | amp | whole-dead / moved GB | gc busy |");
     let _ = writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|");
     for cand in CANDIDATES {
         let mut sets: Vec<(String, String)> = vec![("merge".into(), merge.into())];
+        sets.extend(extra.iter().cloned());
         for (k, v) in cand.sets {
             sets.push(((*k).into(), (*v).into()));
         }
@@ -194,12 +250,13 @@ pub fn table(scenario: &str, merge: &str, n: u64) -> Result<String> {
         };
         let _ = writeln!(
             out,
-            "| {} | {:.0} / {:.0} | {} | {:.1} | {:.2} | {:.1}K / {:.1}K | {:.1}K | {:.3} | {:.1} | {:.1} / {:.1} | {:.0} % |",
+            "| {} | {:.0} / {:.0} | {} | {:.1} / {:.1} | {:.2} | {:.1}K / {:.1}K | {:.1}K | {:.3} | {:.1} | {:.1} / {:.1} | {:.0} % |",
             cand.name,
             med(&runs, |r| r.first_fill.stops as f64),
             med(&runs, |r| r.steady.stops as f64),
             fs,
             med(&runs, |r| r.cells.iter().map(|c| c.max).fold(0.0, f64::max)),
+            p90(&runs),
             med(&runs, |r| r.cells.first().map_or(0.0, |c| c.p999)),
             med(&runs, |r| r.first_fill.iops) / 1e3,
             med(&runs, |r| r.steady.iops) / 1e3,

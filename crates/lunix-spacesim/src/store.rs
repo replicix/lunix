@@ -134,7 +134,7 @@ impl Store {
             segment_bytes,
             pattern,
             cuts: 0,
-            retain_cuts: 3,
+            retain_cuts: 2,
             cut_times: vec![Duration::ZERO],
             dead_times: Vec::new(),
             grace_from_death: false,
@@ -239,7 +239,7 @@ impl Store {
 
     /// G7: lists the dead bytes of partly live segments under `threshold`
     /// live fraction for freeing after the grace. Returns the bytes listed.
-    pub fn mark_punch(&mut self, threshold: f64, now: Duration) -> f64 {
+    pub fn mark_punch(&mut self, threshold: f64, now: Duration) -> (f64, u64) {
         let cuts = self.cuts;
         let cs = self.chunk_stored;
         let mut add = Vec::new();
@@ -262,8 +262,45 @@ impl Store {
             }
         }
         let total: f64 = add.iter().map(|a| a.1).sum();
+        let calls = add.len() as u64;
         self.punch_list.extend(add);
-        total
+        (total, calls)
+    }
+
+    /// The reclaim forecast: `(time until the grace ends, bytes)` of the
+    /// condemned segments and punch requests, soonest first, for a grace of
+    /// `grace` (the delete itself waits for the next mark, see
+    /// `Gc::next_mark_at`).
+    pub fn forecast(&self, grace: Duration, now: Duration) -> Vec<(Duration, f64)> {
+        let mut v: Vec<(Duration, f64)> = self
+            .segs
+            .iter()
+            .filter_map(|s| match s.state {
+                SegState::Condemned { at } => {
+                    Some((at.saturating_add(grace).saturating_sub(now), s.bytes))
+                }
+                _ => None,
+            })
+            .collect();
+        v.extend(
+            self.punch_list
+                .iter()
+                .map(|p| (p.2.saturating_add(grace).saturating_sub(now), p.1)),
+        );
+        v.sort_by_key(|e| e.0);
+        v
+    }
+
+    /// Moves the grace start of the segments condemned at `from` to `from + by`
+    /// (the grace starts after every flag is set).
+    pub fn shift_condemned(&mut self, from: Duration, by: Duration) {
+        for s in &mut self.segs {
+            if let SegState::Condemned { at } = s.state {
+                if at == from {
+                    s.state = SegState::Condemned { at: from + by };
+                }
+            }
+        }
     }
 
     /// Bytes on disk.

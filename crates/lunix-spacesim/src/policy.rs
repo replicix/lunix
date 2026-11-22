@@ -90,9 +90,15 @@ pub struct AdmissionView<'a> {
     pub a_hat: f64,
     /// Journal bytes admitted and not yet cut.
     pub journal_debt: u64,
-    /// Time until the next condemned object's grace ends and a mark may
-    /// delete it, if any is listed (the forecast of P5 and P6).
+    /// Time until the next condemned object can be deleted (its grace ends
+    /// and a mark may begin), if any is listed (the forecast of P5 and P6).
     pub next_delete_in: Option<Duration>,
+    /// `(time until deletable, bytes)` of everything listed, soonest first.
+    pub forecast: &'a [(Duration, f64)],
+    /// Store bytes written per second over the last seconds.
+    pub store_rate: f64,
+    /// The earliest time a scheduled mark can begin, from now.
+    pub gap: Duration,
 }
 
 /// What the collector gets until the next tick.
@@ -172,6 +178,10 @@ pub trait Policy {
     /// change what the gate charges); `None`: no extra pace.
     fn admission_rate(&mut self, _view: &AdmissionView<'_>) -> Option<f64> {
         None
+    }
+    /// True when the policy reads the reclaim forecast (it is costly).
+    fn wants_forecast(&self) -> bool {
+        false
     }
 }
 
@@ -434,6 +444,8 @@ pub struct TunablePolicy {
     growth_gib: f64,
     p1: bool,
     g5: bool,
+    p5: bool,
+    p6: bool,
 }
 
 impl Default for TunablePolicy {
@@ -447,6 +459,8 @@ impl Default for TunablePolicy {
             growth_gib: 0.0,
             p1: false,
             g5: false,
+            p5: false,
+            p6: false,
         }
     }
 }
@@ -465,6 +479,8 @@ impl Policy for TunablePolicy {
             "growth_gib" => self.growth_gib = val.parse()?,
             "p1" => self.p1 = matches!(val, "true" | "on" | "1"),
             "g5" => self.g5 = matches!(val, "true" | "on" | "1"),
+            "p5" => self.p5 = matches!(val, "true" | "on" | "1"),
+            "p6" => self.p6 = matches!(val, "true" | "on" | "1"),
             _ => bail!("policy tunable has no parameter {key:?}"),
         }
         Ok(())
@@ -520,7 +536,14 @@ impl Policy for TunablePolicy {
         s
     }
 
+    fn wants_forecast(&self) -> bool {
+        self.p5 || self.p6
+    }
+
     fn admission_rate(&mut self, v: &AdmissionView<'_>) -> Option<f64> {
+        if self.p5 || self.p6 {
+            return self.forecast_pace(v);
+        }
         if !self.p1 {
             return None;
         }
@@ -537,8 +560,59 @@ impl Policy for TunablePolicy {
         // The gate's curve read as a store rate, charged A_hat per byte.
         let r_mid = 64.0 * 1048576.0;
         let r_min = 4.0 * 1048576.0;
-        let store = (r_mid * x / (1.0 - x).max(1e-6)).max(r_min);
-        Some(store / v.a_hat.max(1.0))
+        // P1': the estimate of A is noisy (+-15 %, a deterministic wobble) and
+        // the floor is in journal bytes, as the gate's own.
+        let wobble = 1.0 + ((v.now.as_secs() % 7) as f64 - 3.0) * 0.05;
+        let a = (v.a_hat * wobble).max(1.0);
+        Some((r_mid * x / (1.0 - x).max(1e-6) / a).max(r_min))
+    }
+}
+
+impl TunablePolicy {
+    /// P5 (time-to-limit pacing against the reclaim forecast) and P6 (an ETA
+    /// floor for the bottom of the band), in store bytes, charged `a_hat` per
+    /// journal byte. Modelled in front of the real gate.
+    fn forecast_pace(&self, v: &AdmissionView<'_>) -> Option<f64> {
+        let t = &v.snap.throttle;
+        if t.soft == 0 {
+            return None;
+        }
+        let mib = 1048576.0;
+        let a = v.a_hat.max(1.0);
+        let extra = (a - 1.0) * v.journal_debt as f64;
+        let h_proj = (t.headroom as f64 - extra).max(0.0);
+        let margin = t.resume as f64 + 256.0 * mib;
+        let first = v.forecast.first().map(|f| f.0.max(v.gap));
+        let t_next = first
+            .unwrap_or(Duration::from_secs(40))
+            .as_secs_f64()
+            .max(1.0);
+        if self.p6 {
+            // The curve as it is, with a floor that makes the bottom of the
+            // band last until the next known reclaim.
+            let x = h_proj / t.soft as f64;
+            if x >= 1.0 {
+                return None;
+            }
+            let r_mid = 64.0 * mib;
+            let curve = r_mid * x / (1.0 - x).max(1e-6);
+            let floor = ((h_proj - margin).max(0.0) / t_next).clamp(0.25 * mib, 4.0 * mib);
+            return Some((curve / a).max(floor));
+        }
+        // P5: the horizon is the dead time; the budget is the room plus what
+        // is already due inside it.
+        let horizon = 40.0;
+        let due: f64 = v
+            .forecast
+            .iter()
+            .filter(|f| (f.0.max(v.gap)).as_secs_f64() <= horizon)
+            .map(|f| f.1)
+            .sum();
+        let budget = (h_proj - margin).max(0.0) + due;
+        if v.store_rate * horizon <= budget && h_proj >= t.soft as f64 {
+            return None;
+        }
+        Some((budget / horizon).max(4.0 * mib) / a)
     }
 }
 
