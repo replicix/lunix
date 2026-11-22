@@ -1200,6 +1200,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lunix-spacesim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "lunix-engine",
+ "lunix-format",
+ "lunix-iface",
+ "lunix-space",
+]
+
+[[package]]
 name = "lunix-store"
 version = "0.1.0"
 dependencies = [
