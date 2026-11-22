@@ -67,6 +67,10 @@ pub struct GcCfg {
     pub delete: Duration,
     /// G1: that work is batched per pass.
     pub batch: bool,
+    /// Compaction on.
+    pub compaction: bool,
+    /// G7: punch dead ranges.
+    pub punch: bool,
 }
 
 /// What a collector call works on.
@@ -375,7 +379,10 @@ impl Gc {
             env.settings.per_pass_bytes as f64
         };
         let threshold = env.settings.compact_threshold.unwrap_or(env.cfg.threshold);
-        let plan = if rate > 0 {
+        if env.cfg.punch {
+            env.store.mark_punch(threshold, end);
+        }
+        let plan = if rate > 0 && env.cfg.compaction {
             let p = env.store.plan_compaction(threshold, budget);
             (p.live_bytes > 1.0).then_some(p)
         } else {
@@ -493,7 +500,7 @@ impl Gc {
             + env.cfg.delete.mul_f64(env.store.last_deleted_segs as f64);
         let mut elapsed = mark + if env.cfg.batch { work / 10 } else { work };
         let mut compacted = 0.0;
-        if freed < want && env.settings.params.rate_bytes_per_s > 0 {
+        if freed < want && env.settings.params.rate_bytes_per_s > 0 && env.cfg.compaction {
             let plan = env.store.plan_compaction(
                 env.settings.compact_threshold.unwrap_or(env.cfg.threshold),
                 want - freed,
@@ -549,6 +556,8 @@ mod tests {
             condemn: Duration::from_millis(5),
             delete: Duration::from_millis(13),
             batch: false,
+            compaction: true,
+            punch: false,
         };
         let gc = Gc::new(Some(Duration::ZERO));
         let s = crate::policy::GcSettings::for_tests();

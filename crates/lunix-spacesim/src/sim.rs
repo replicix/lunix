@@ -22,7 +22,7 @@ use lunix_iface::space::{
 use lunix_space::{LunixSpace, ManualFs, SpaceConfig, ThrottleConfig};
 
 use crate::gc::{Books, Gc, GcCfg, GcEnv, Phase};
-use crate::params::{Pattern, Scenario};
+use crate::params::{BoundMode, Pattern, Scenario};
 use crate::policy::{AdmissionView, GcSettings, Level, Policy, PolicyInput};
 use crate::report::{window, CellReport, DeadSummary, Hist, RunReport, SecRow, StopEpisode};
 use crate::rng::Rng;
@@ -56,6 +56,7 @@ struct CutJob {
     distinct: f64,
     store_bytes: f64,
     bound: u64,
+    trued: bool,
 }
 
 #[derive(Debug)]
@@ -210,6 +211,7 @@ impl<'p> Sim<'p> {
         let wc = sc.ws_chunks();
         let mut store = Store::new(wc, sc.chunk_stored(), sc.segment as f64, sc.pattern);
         store.retain_cuts = sc.retain_cuts;
+        store.grace_from_death = sc.grace_from_death;
         // The volume is filled: the working set is on disk, one cut made it.
         let fill = store.write_segments(wc, wc, false);
         store.cut_done(0.0, base, &mut rng);
@@ -235,6 +237,8 @@ impl<'p> Sim<'p> {
             condemn: Duration::from_secs_f64(sc.condemn_ms / 1000.0),
             delete: Duration::from_secs_f64(sc.delete_ms / 1000.0),
             batch: sc.batch_index,
+            compaction: sc.compaction,
+            punch: sc.punch,
         };
         let base_params = GcParams {
             retain_last: 2,
@@ -453,7 +457,20 @@ impl<'p> Sim<'p> {
             let done = (self.now.saturating_sub(job.start).as_secs_f64() / total).clamp(0.0, 1.0);
             disk += job.store_bytes * done;
         }
-        let free = (self.sc.fs_total as f64 - disk).max(0.0) as u64;
+        let mut free = self.sc.fs_total as f64 - disk;
+        if self.sc.anchor_disk {
+            // P0 (c): the limit's anchor is the disk figure alone: what the
+            // ledger holds above the disk (the bound in flight) is taken off.
+            if let Coord::Cutting(job) = &self.coord {
+                if !job.trued {
+                    let total = job.end.saturating_sub(job.start).as_secs_f64().max(1e-9);
+                    let done =
+                        (self.now.saturating_sub(job.start).as_secs_f64() / total).clamp(0.0, 1.0);
+                    free -= (job.bound as f64 - job.store_bytes * done).max(0.0);
+                }
+            }
+        }
+        let free = free.max(0.0) as u64;
         self.fs.set_free(free);
     }
 
@@ -737,10 +754,17 @@ impl<'p> Sim<'p> {
 
     fn coordinator(&mut self, snap: &lunix_iface::space::SpaceSnapshot) {
         match std::mem::replace(&mut self.coord, Coord::Idle) {
-            Coord::Cutting(job) => {
+            Coord::Cutting(mut job) => {
                 if self.now >= job.end {
                     self.finish_cut(job);
                 } else {
+                    if self.sc.bound_mode == BoundMode::Early && !job.trued {
+                        let total = job.end.saturating_sub(job.start).as_secs_f64();
+                        if self.now.saturating_sub(job.start).as_secs_f64() >= 0.7 * total {
+                            self.true_up(&job);
+                            job.trued = true;
+                        }
+                    }
                     self.coord = Coord::Cutting(job);
                 }
             }
@@ -839,9 +863,14 @@ impl<'p> Sim<'p> {
                 .ceil()
                 .min(wc),
         };
+        let distinct = distinct * self.sc.merge;
         let store_bytes = distinct * self.sc.chunk_stored();
-        // The bound the cut reserves is the uncompressed size of its chunks.
-        let bound = (distinct * self.sc.chunk as f64) as u64;
+        // The bound the cut reserves: the uncompressed size of its chunks
+        // (the code), or the compressed estimate with a margin (P0 a).
+        let bound = match self.sc.bound_mode {
+            BoundMode::Compressed => (store_bytes * 1.15) as u64,
+            _ => (distinct * self.sc.chunk as f64) as u64,
+        };
         if self
             .books
             .charge_headroom(&self.gate, bound as f64)
@@ -871,16 +900,23 @@ impl<'p> Sim<'p> {
             distinct,
             store_bytes,
             bound,
+            trued: false,
         });
     }
 
-    fn finish_cut(&mut self, job: CutJob) {
+    /// C4: the bound is trued up to what was written.
+    fn true_up(&mut self, job: &CutJob) {
         let actual = job.store_bytes.round() as u64;
-        // C4: the bound is trued up to what was written.
         let _ = self
             .gate
             .transfer(SpaceKind::Segments, SpaceKind::Segments, job.bound, actual);
         self.books.segments = self.books.segments.saturating_sub(job.bound) + actual;
+    }
+
+    fn finish_cut(&mut self, job: CutJob) {
+        if !job.trued {
+            self.true_up(&job);
+        }
         // C9: the journal bytes go.
         if job.bytes > 0 {
             self.gate.release(SpaceKind::JournalReserved, job.bytes);

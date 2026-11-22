@@ -8,6 +8,7 @@
 //! modelled in discrete time. See `docs/plans/v1/reports/p1-spacesim.md`.
 
 pub mod calibration;
+pub mod experiments;
 pub mod gc;
 pub mod params;
 pub mod policy;

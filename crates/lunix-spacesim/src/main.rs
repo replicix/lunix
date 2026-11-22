@@ -68,6 +68,17 @@ enum Cmd {
         #[arg(short, long, default_value_t = 5)]
         n: u64,
     },
+    /// The candidate matrix as markdown: every candidate over seeds at two
+    /// store-amplification levels (`merge` 1.0 and 0.67).
+    Experiments {
+        #[arg(short, long, default_value = "ram-64k")]
+        scenario: String,
+        #[arg(short, long, default_value_t = 8)]
+        n: u64,
+        /// The merge factor of the amplification level.
+        #[arg(long, default_value = "1.0")]
+        merge: String,
+    },
     /// The calibration table: `main` on the measured cells, and the two
     /// null-result policies beside it.
     Calibrate {
@@ -184,6 +195,12 @@ fn main() -> Result<()> {
                     k += 1;
                 }
             }
+        }
+        Cmd::Experiments { scenario, n, merge } => {
+            print!(
+                "{}",
+                lunix_spacesim::experiments::table(&scenario, &merge, n)?
+            );
         }
         Cmd::Calibrate { n } => {
             for scenario in SCENARIO_NAMES {

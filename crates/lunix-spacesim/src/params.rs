@@ -69,6 +69,19 @@ impl Device {
     }
 }
 
+/// How the cut's C2 bound for its segments is reserved (P0).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoundMode {
+    /// The code today: the uncompressed bytes of the dirty chunks, held until
+    /// the cut's end.
+    Uncompressed,
+    /// (a) The expected compressed size with a margin, trued up at the end.
+    Compressed,
+    /// (b) The uncompressed bound, trued up when the segments are sealed (70 %
+    /// of the cut) instead of at its end.
+    Early,
+}
+
 /// Everything a run needs. Defaults are the RAM 64 KiB w4k cell.
 #[derive(Clone, Debug)]
 pub struct Scenario {
@@ -111,6 +124,21 @@ pub struct Scenario {
     /// Bytes of the file system used by others, apart from the ring files
     /// (which are preallocated at `journal_max` and counted by the probe).
     pub fs_external: u64,
+    /// Share of the distinct chunks of a cut that reach the store: below 1
+    /// it stands for writes merged before the cut (amplification knob).
+    pub merge: f64,
+    /// P0: how the C2 bound is reserved.
+    pub bound_mode: BoundMode,
+    /// P0 (c): the limit is anchored on the disk figure alone (the in-flight
+    /// over-count does not raise it).
+    pub anchor_disk: bool,
+    /// G9: the grace starts when the segment's last chunk died.
+    pub grace_from_death: bool,
+    /// G7 upper bound: dead bytes inside partly live segments are freed after
+    /// the grace without copying.
+    pub punch: bool,
+    /// Compaction on or off.
+    pub compaction: bool,
     /// The volume's cap (`cache_max`), bytes; none = the file system decides.
     pub cache_max: Option<u64>,
     /// The reserved headroom region, bytes.
@@ -240,6 +268,12 @@ impl Scenario {
             stored_ratio: 0.506,
             fs_total: 20 * GIB,
             fs_external: 10 * MIB,
+            merge: 1.0,
+            bound_mode: BoundMode::Uncompressed,
+            anchor_disk: false,
+            grace_from_death: false,
+            punch: false,
+            compaction: true,
             cache_max: Some(32 * GIB),
             headroom: 256 * MIB,
             segment: 16 * MIB,
@@ -376,6 +410,19 @@ impl Scenario {
             "stored_ratio" => self.stored_ratio = f()?,
             "fs_total" => self.fs_total = b()?,
             "fs_external" => self.fs_external = b()?,
+            "merge" => self.merge = f()?,
+            "anchor_disk" => self.anchor_disk = parse_bool(val)?,
+            "grace_from_death" => self.grace_from_death = parse_bool(val)?,
+            "punch" => self.punch = parse_bool(val)?,
+            "compaction" => self.compaction = parse_bool(val)?,
+            "bound_mode" => {
+                self.bound_mode = match val {
+                    "uncompressed" => BoundMode::Uncompressed,
+                    "compressed" => BoundMode::Compressed,
+                    "early" => BoundMode::Early,
+                    _ => bail!("bound_mode: uncompressed, compressed or early"),
+                }
+            }
             "cache_max" => self.cache_max = if val == "none" { None } else { Some(b()?) },
             "headroom" => self.headroom = b()?,
             "segment" => self.segment = b()?,

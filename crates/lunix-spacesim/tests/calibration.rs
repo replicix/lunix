@@ -95,3 +95,17 @@ fn the_network_volume_never_engages_the_gate() {
         }
     }
 }
+
+#[test]
+fn every_experiment_candidate_builds() {
+    use lunix_spacesim::calibration::build;
+    use lunix_spacesim::experiments::CANDIDATES;
+    for c in CANDIDATES {
+        let sets: Vec<(String, String)> = c
+            .sets
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        build("ram-64k", c.policy, &sets).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+    }
+}

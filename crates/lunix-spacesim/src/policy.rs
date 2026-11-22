@@ -433,6 +433,7 @@ pub struct TunablePolicy {
     busy_interval_s: f64,
     growth_gib: f64,
     p1: bool,
+    g5: bool,
 }
 
 impl Default for TunablePolicy {
@@ -445,6 +446,7 @@ impl Default for TunablePolicy {
             busy_interval_s: 0.0,
             growth_gib: 0.0,
             p1: false,
+            g5: false,
         }
     }
 }
@@ -462,6 +464,7 @@ impl Policy for TunablePolicy {
             "busy_interval_s" => self.busy_interval_s = val.parse()?,
             "growth_gib" => self.growth_gib = val.parse()?,
             "p1" => self.p1 = matches!(val, "true" | "on" | "1"),
+            "g5" => self.g5 = matches!(val, "true" | "on" | "1"),
             _ => bail!("policy tunable has no parameter {key:?}"),
         }
         Ok(())
@@ -504,6 +507,12 @@ impl Policy for TunablePolicy {
             if self.busy_interval_s > 0.0 {
                 s.busy_interval = Some(Duration::from_secs_f64(self.busy_interval_s));
             }
+        }
+        if self.g5 && t.soft > 0 && t.headroom < t.soft {
+            // G5: the more the band is used up, the more dead a segment may
+            // hold and still be worth copying.
+            let x = t.headroom as f64 / t.soft as f64;
+            s.compact_threshold = Some(0.5 + 0.4 * (1.0 - x));
         }
         if self.growth_gib > 0.0 {
             s.growth_trigger = Some(self.growth_gib * (1u64 << 30) as f64);

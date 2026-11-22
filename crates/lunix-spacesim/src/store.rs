@@ -104,6 +104,11 @@ pub struct Store {
     cut_times: Vec<Duration>,
     /// Dead times of the deleted segments.
     pub dead_times: Vec<DeadTime>,
+    /// G9: a condemned segment's grace counts from its death.
+    pub grace_from_death: bool,
+    punch_list: Vec<(u64, f64, Duration)>,
+    /// Bytes freed by punching dead ranges (G7).
+    pub punched_bytes: f64,
     /// Segments condemned / deleted by the last `mark` / `delete_due`.
     pub last_condemned_segs: u64,
     /// See `last_condemned_segs`.
@@ -132,6 +137,9 @@ impl Store {
             retain_cuts: 3,
             cut_times: vec![Duration::ZERO],
             dead_times: Vec::new(),
+            grace_from_death: false,
+            punch_list: Vec::new(),
+            punched_bytes: 0.0,
             last_condemned_segs: 0,
             last_deleted_segs: 0,
             condemned_whole: 0.0,
@@ -220,6 +228,44 @@ impl Store {
         self.cut_times.push(now);
     }
 
+    /// Pending bytes of punch requests on one segment.
+    fn punch_pending(&self, id: u64) -> f64 {
+        self.punch_list
+            .iter()
+            .filter(|p| p.0 == id)
+            .map(|p| p.1)
+            .sum()
+    }
+
+    /// G7: lists the dead bytes of partly live segments under `threshold`
+    /// live fraction for freeing after the grace. Returns the bytes listed.
+    pub fn mark_punch(&mut self, threshold: f64, now: Duration) -> f64 {
+        let cuts = self.cuts;
+        let cs = self.chunk_stored;
+        let mut add = Vec::new();
+        for s in &self.segs {
+            if !matches!(s.state, SegState::Live)
+                || s.live <= 0.0
+                || s.unnamed
+                || s.born_cut >= cuts
+            {
+                continue;
+            }
+            if s.live / s.chunks.max(1.0) >= threshold {
+                continue;
+            }
+            let dead = (s.chunks - s.live) * cs;
+            let freed_so_far = (s.chunks * cs - s.bytes).max(0.0);
+            let want = dead - freed_so_far - self.punch_pending(s.id);
+            if want > 64.0 * 1024.0 {
+                add.push((s.id, want, now));
+            }
+        }
+        let total: f64 = add.iter().map(|a| a.1).sum();
+        self.punch_list.extend(add);
+        total
+    }
+
     /// Bytes on disk.
     pub fn disk_bytes(&self) -> f64 {
         self.segs.iter().map(|s| s.bytes).sum()
@@ -273,6 +319,7 @@ impl Store {
     pub fn mark(&mut self, now: Duration) -> f64 {
         let cuts = self.cuts;
         let retain = self.retain_cuts;
+        let gfd = self.grace_from_death;
         let mut total = 0.0;
         let (mut n, mut whole, mut moved) = (0u64, 0.0, 0.0);
         for s in &mut self.segs {
@@ -285,7 +332,12 @@ impl Store {
                 SegState::Condemned { .. } => (false, false),
             };
             if dead {
-                s.state = SegState::Condemned { at: now };
+                let at = if gfd {
+                    s.died_at.map_or(now, |d| d.min(now))
+                } else {
+                    now
+                };
+                s.state = SegState::Condemned { at };
                 total += s.bytes;
                 n += 1;
                 if by_move {
@@ -307,6 +359,22 @@ impl Store {
     pub fn delete_due(&mut self, before: Duration, grace: Duration, now: Duration) -> f64 {
         let mut freed = 0.0;
         let mut nseg = 0u64;
+        if !self.punch_list.is_empty() {
+            let mut keep = Vec::new();
+            for (id, b, at) in std::mem::take(&mut self.punch_list) {
+                if at.saturating_add(grace) <= before {
+                    if let Some(s) = self.segs.iter_mut().find(|s| s.id == id) {
+                        let b = b.min(s.bytes);
+                        s.bytes -= b;
+                        freed += b;
+                        self.punched_bytes += b;
+                    }
+                } else {
+                    keep.push((id, b, at));
+                }
+            }
+            self.punch_list = keep;
+        }
         let mut out = Vec::new();
         let cut_times = &self.cut_times;
         let retain = self.retain_cuts;
