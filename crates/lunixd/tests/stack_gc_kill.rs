@@ -719,9 +719,9 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// the kill), recovery under `refuse` against the oracle, writes and a
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    // A delete phase unlinks its segments and records them in the index in
-    // one update at its end (at most `RETIRE_BATCH` segments later), so a
-    // kill anywhere in the phase can leave several unlinked segments whose
+    // A step unlinks its segments and records them in the index in one
+    // update at its end (at most `RETIRE_BATCH` segments later), so a kill
+    // anywhere in the delete phase can leave several unlinked segments whose
     // entries are still there: `index_extra`, completed by the next pass.
     let in_delete_phase = [
         "gc.delete.",

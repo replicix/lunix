@@ -238,7 +238,8 @@ their map roots are not roots, so their data may go.
    `release` of the bytes freed. The index follow-up of the deleted segments
    is queued and made in one durable update (`retire_segments`: the entries
    dropped and the flags cleared by the same manifest swap) at the end of the
-   delete phase, or when 256 are queued: **a segment's flag is never cleared
+   delete phase, at the end of the step that deleted them, or when 256 are
+   queued: **a segment's flag is never cleared
    while index entries may still point into it.** A failed call, an abandoned
    pass or a crash leaves the objects listed or flagged; the next pass finds
    them gone, drops their entries, clears the flags, and releases the listed
@@ -422,7 +423,7 @@ count in `bytes`.
 | `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
 | `gc.delete.before_unlink` | nothing deleted |
-| `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of this segment and of the segments unlinked since the last index update (up to 256): `catch_up` drops them at open, a later pass removes the list entry |
+| `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of this segment and of the segments unlinked since the last index update (those of one step, up to 256): `catch_up` drops them at open, a later pass removes the list entry |
 | `gc.delete.after_dirsync` | the ledger is updated and the object's index follow-up is queued (see `gc.delete.after_unlink`); the list still names the object until the end of the delete phase (an un-condemn is stored at once) |
 | `gc.commit_delete.before_unlink` | the commit object is not deleted yet |
 | `gc.compact.after_segment_seal` | the output is sealed, nothing relocated: above the high-water mark, the open-time sweep removes it |

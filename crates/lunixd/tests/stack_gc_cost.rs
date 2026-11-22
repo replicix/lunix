@@ -74,7 +74,7 @@ fn a_backlog_of_dead_segments_is_condemned_and_deleted() {
             .expect("open without the collector");
         let mut d = Driver::new(&stack).expect("driver");
         for i in 0..n {
-            let seed = i | 3;
+            let seed = (i << 2) | 3;
             assert!(d
                 .write(0, (i % 8) * cs64, &payload(seed, cs as usize), false)
                 .is_ok());

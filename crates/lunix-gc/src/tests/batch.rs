@@ -109,6 +109,37 @@ fn deletes_are_batched_up_to_a_bound() {
     assert_index_consistent(&s, "after 600 deletes");
 }
 
+/// Rule 2b: nothing stays queued between steps (a clean close then leaves no
+/// unlinked segment with entries in the index): after every call that does
+/// one unit of work, no flagged segment is missing its file.
+#[test]
+fn a_step_never_leaves_a_deleted_segment_unrecorded() {
+    for pipeline in [false, true] {
+        let mut s = sim(64, pipeline);
+        let old = make_dead(&mut s, 10);
+        for _ in 0..4 {
+            s.commit().unwrap();
+        }
+        let mut deleted_in_units = false;
+        for _ in 0..400 {
+            s.clock.advance(GRACE * 2);
+            let before = old.iter().filter(|g| segs(&s).contains(g)).count();
+            let p = s.unit().unwrap();
+            assert_eq!(
+                flagged_missing(&s),
+                0,
+                "a unit left unlinked segments flagged (pipeline {pipeline})"
+            );
+            deleted_in_units |= old.iter().filter(|g| segs(&s).contains(g)).count() < before;
+            if p.done && deleted_in_units {
+                break;
+            }
+        }
+        assert!(deleted_in_units, "deletes happened in unit steps");
+        assert_index_consistent(&s, "after the unit steps");
+    }
+}
+
 /// Rule 3 (crash consistency of the delete batch): a stop after the k-th
 /// unlink leaves k segments unlinked and still flagged (their entries are not
 /// reachable for dedup); the reopened volume reads every root, and the next

@@ -560,11 +560,13 @@ pub struct Gc {
     /// bytes released. Released when a later recheck finds it gone.
     uncertain: BTreeMap<ObjectRef, u64>,
     /// Segments whose file is gone and whose index follow-up (drop the
-    /// entries, clear the flag) is still to do: one index update for the
-    /// whole delete phase (`flush_retired`). Until then the flag stays, so
-    /// dedup never reaches them; a crash or an abandoned pass loses nothing
-    /// (`reconcile` and the verdict `Gone` redo it from the list and the
-    /// flags).
+    /// entries, clear the flag) is still to do: one index update for a
+    /// delete phase, flushed at its end, at the end of the step that made
+    /// them (so nothing is pending while the collector is not running: a
+    /// clean close leaves none) and when `RETIRE_BATCH` are queued. Until
+    /// then the flag stays, so dedup never reaches them; a crash or an
+    /// abandoned pass loses nothing (`reconcile` and the verdict `Gone` redo
+    /// it from the list and the flags).
     retired: Vec<SegId>,
     /// Compaction sources with an extent that does not open.
     bad_sources: BTreeSet<SegId>,
@@ -623,7 +625,7 @@ impl std::fmt::Debug for Gc {
 }
 
 /// Segments whose index follow-up one update covers at most (a delete phase
-/// is flushed at its end too).
+/// and a step flush theirs at their end too).
 const RETIRE_BATCH: usize = 256;
 
 impl Gc {
@@ -1840,6 +1842,22 @@ impl Gc {
     }
 
     fn run_units(&mut self, view: &GcView<'_>, budget: &GcBudget, freed: &mut u64) -> Result<bool> {
+        let res = self.run_units_inner(view, budget, freed);
+        // Nothing stays queued between steps. Not after a stop at a crash
+        // point (a killed process does no more), and an error already ends
+        // the pass (`reconcile` finds what is left).
+        if res.is_ok() && self.points.alive().is_ok() {
+            self.flush_retired(view)?;
+        }
+        res
+    }
+
+    fn run_units_inner(
+        &mut self,
+        view: &GcView<'_>,
+        budget: &GcBudget,
+        freed: &mut u64,
+    ) -> Result<bool> {
         let deadline = view.clock.monotonic().saturating_add(budget.max_duration);
         let mut step_bytes = 0u64;
         self.load(view)?;
