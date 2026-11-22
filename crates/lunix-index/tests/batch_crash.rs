@@ -165,3 +165,10 @@ fn a_kill_around_the_retire_swap_never_clears_a_flag_over_live_entries() {
         );
     }
 }
+
+/// Every crash point name is registered once: the kill loops count hits by
+/// name, and a second site with the same name makes the count wrong.
+#[test]
+fn the_index_crash_points_have_unique_names() {
+    lunix_iface::crashpoint::check_registry().expect("unique, well-formed names");
+}

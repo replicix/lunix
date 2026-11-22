@@ -631,16 +631,7 @@ impl ChunkIndex for LsmIndex {
     }
 
     fn mark_condemned(&self, seg: SegId) -> Result<()> {
-        let mut c = self.writer();
-        if c.condemned.contains(&seg) {
-            return Ok(());
-        }
-        let mut next = c.clone();
-        next.condemned.insert(seg);
-        swap_manifest(&self.dir, &mut c, next)?;
-        self.wr().condemned.insert(seg);
-        crashpoint!("index.after_condemn_flag");
-        Ok(())
+        self.mark_condemned_all(&[seg])
     }
 
     fn mark_condemned_all(&self, segs: &[SegId]) -> Result<()> {
