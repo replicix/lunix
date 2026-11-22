@@ -948,6 +948,7 @@ impl Daemon {
         op.max_io_buf_bytes = Some(max_buf);
         op.on_journal_damage = o.on_journal_damage.unwrap_or(self.cfg.on_journal_damage);
         op.lock_memory = self.cfg.harden;
+        op.destage_workers = self.cfg.destage_workers;
         op.journal_resident_max = self.cfg.journal_resident_max;
         op.cut_target = self.cfg.cut_target;
         op.allow_unverifiable_fork = o.allow_unverifiable_fork;
