@@ -668,8 +668,8 @@ struct Tally {
 /// * After a kill: what a crash leaves (temporary files, unnamed or
 ///   unreferenced containers, an index behind the chain, journal residue);
 ///   `index_extra` only after a kill between a segment's unlink and its
-///   `drop_segment` in a GC delete (`store.segment_delete.after_*`, which
-///   the open's sweep does not fire, and `gc.delete.after_unlink`;
+///   index update of a GC delete phase (`store.segment_delete.*`, which
+///   the open's sweep does not fire, and `gc.delete.*`;
 ///   gc.md crash table: the open's catch-up drops the entries, at rest they
 ///   are gone).
 /// * At rest (after recovery and a clean close): notes only (exit 0).
@@ -719,10 +719,19 @@ fn fsck_clean(vol: &TestVolume, when: &str, what: &str, allowed: &[&str], tally:
 /// the kill), recovery under `refuse` against the oracle, writes and a
 /// read-back after recovery, a clean close, a second open, fsck at rest.
 fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
-    let allowed = if what.contains("gc.delete.after_unlink:")
-        || what.contains("store.segment_delete.after_unlink:")
-        || what.contains("store.segment_delete.after_dirsync:")
-    {
+    // A delete phase unlinks its segments and records them in the index in
+    // one update at its end (at most `RETIRE_BATCH` segments later), so a
+    // kill anywhere in the phase can leave several unlinked segments whose
+    // entries are still there: `index_extra`, completed by the next pass.
+    let in_delete_phase = [
+        "gc.delete.",
+        "gc.commit_delete.",
+        "store.delete.",
+        "store.segment_delete.",
+    ]
+    .iter()
+    .any(|p| what.contains(p));
+    let allowed = if in_delete_phase {
         ALLOWED_AFTER_UNLINK
     } else {
         ALLOWED_AFTER_KILL

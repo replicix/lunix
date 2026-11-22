@@ -217,6 +217,7 @@ paths = [
   "crates/lunixd/tests/control.rs",
   "crates/lunixd/tests/control_gc.rs",
   "crates/lunixd/tests/stack_gc_kill.rs",
+  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "crates/lunix-cli/tests/socket.rs",
   "crates/lunix-cli/tests/snapshots/gc-status.txt",
@@ -241,6 +242,7 @@ paths = [
   "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_gc.rs",
   "crates/lunixd/tests/stack_gc_kill.rs",
+  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "crates/lunixd/tests/stack_gc_rate.rs",
   "crates/lunixd/tests/stack_throttle.rs",
@@ -257,6 +259,7 @@ paths = [
 [bstop]
 paths = [
   "crates/lunixd/tests/stack_gc_kill.rs",
+  "docs/reference/gc.md",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "docs/explanation/DECISIONS.md",
   "crates/lunix-format/src/local.rs",
@@ -555,6 +558,9 @@ paths = [
   "crates/lunix-index/tests/batch.rs",
   "crates/lunix-index/tests/batch_crash.rs",
   "crates/lunix-testkit/src/index.rs",
+  "crates/lunixd/tests/stack_gc_cost.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-gcbatch.md",
   "tools/ci.sh",
   "tools/ownership.toml",

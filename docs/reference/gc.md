@@ -220,9 +220,10 @@ their map roots are not roots, so their data may go.
 ## Deleting: condemn, grace, recheck, delete
 
 1. **Condemn.** The dead objects of the mark are added to the condemned list
-   (`state/gc/condemned`, written atomically), then each segment is flagged in
-   the index (`mark_condemned`), after which dedup never returns it. The
-   grace of each object starts when all flags are set.
+   (`state/gc/condemned`, written atomically), then all its segments are
+   flagged in the index in one durable update (`mark_condemned_all`: one
+   manifest swap however many), after which dedup never returns them. The
+   grace of each object starts when the flags are set.
 2. **Grace.** `gc_grace_ms` (default 60 s) on the collector's monotonic clock.
    It covers in-flight cuts, destage and reads; it may not be shorter than
    10 s plus twice `read_timeout_ms` (30 s with the defaults), and a shorter
@@ -234,12 +235,14 @@ their map roots are not roots, so their data may go.
    high-water mark, or an unnamed output) is un-condemned, its index flag
    cleared and the list stored at once.
 4. **Delete.** Unlink and directory `fsync` in the store, the ledger
-   `release` of the bytes freed, then for a segment `drop_segment` and only
-   after it succeeded the flag cleared: **a segment's flag is never cleared
-   while index entries may still point into it.** A failed call leaves the
-   object listed (and flagged); the next pass finds it gone, drops its
-   entries, clears the flag, and releases the listed size if the earlier call
-   may have deleted it. A segment that stale hints point into is deleted only
+   `release` of the bytes freed. The index follow-up of the deleted segments
+   is queued and made in one durable update (`retire_segments`: the entries
+   dropped and the flags cleared by the same manifest swap) at the end of the
+   delete phase, or when 256 are queued: **a segment's flag is never cleared
+   while index entries may still point into it.** A failed call, an abandoned
+   pass or a crash leaves the objects listed or flagged; the next pass finds
+   them gone, drops their entries, clears the flags, and releases the listed
+   size if the earlier call may have deleted it. A segment that stale hints point into is deleted only
    while the live copy of every id they resolve to is in a segment a durable
    FULL has named (the delete-time index invariant): at or below the highest
    id named by a FULL that has a successor FULL (the collector reads each new
@@ -349,7 +352,7 @@ scratch is bounded.
 Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
 daemon's), 30 s between passes and 5 s after a pass that did reclaim work, 1 GiB of
 live bytes compacted per pass (256 MiB for the daemon), a root walked in at most 64 leaf batches of at
-least 16 leaves, 32 decoded footers cached.
+least 16 leaves, 32 MiB of decoded footers cached (`footer_cache_bytes`).
 
 ## `state/gc/condemned`, body version 1
 
@@ -419,8 +422,8 @@ count in `bytes`.
 | `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
 | `gc.delete.before_unlink` | nothing deleted |
-| `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of the segment: `catch_up` drops them at open, a later pass removes the list entry |
-| `gc.delete.after_dirsync` | the index and the ledger are updated; the list still names the object until the end of the delete phase (an un-condemn is stored at once) |
+| `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of this segment and of the segments unlinked since the last index update (up to 256): `catch_up` drops them at open, a later pass removes the list entry |
+| `gc.delete.after_dirsync` | the ledger is updated and the object's index follow-up is queued (see `gc.delete.after_unlink`); the list still names the object until the end of the delete phase (an un-condemn is stored at once) |
 | `gc.commit_delete.before_unlink` | the commit object is not deleted yet |
 | `gc.compact.after_segment_seal` | the output is sealed, nothing relocated: above the high-water mark, the open-time sweep removes it |
 | `gc.compact.after_relocate` | relocations are in the index memtable only, the moves never reached a commit: the sweep removes the output, the old segment stays named and indexed |
