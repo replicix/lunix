@@ -538,7 +538,11 @@ paths = [
 # or whose hint fails authentication looks the block up again.
 [revalidate]
 paths = [
+  "Cargo.lock",
+  "crates/lunix-engine/Cargo.toml",
   "crates/lunix-engine/src/read.rs",
+  "crates/lunix-engine/src/stats.rs",
+  "crates/lunix-iface/src/stats.rs",
   "crates/lunix-engine/tests/common/mod.rs",
   "crates/lunix-engine/tests/revalidate.rs",
   "tools/ownership.toml",
