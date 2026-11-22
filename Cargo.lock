@@ -1062,6 +1062,7 @@ name = "lunix-engine"
 version = "0.1.0"
 dependencies = [
  "lunix-format",
+ "lunix-gc",
  "lunix-iface",
  "lunix-testkit",
  "proptest",
