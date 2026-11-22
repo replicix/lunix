@@ -306,6 +306,13 @@ impl RollbackFloorStore for MemFloor {
 
 // --------------------------------------------------------- wrappers
 
+/// A parked read (`ReadFaults::hold`).
+pub struct ReadHold {
+    pub hint: Hint,
+    pub entered: std::sync::mpsc::Sender<()>,
+    pub release: std::sync::mpsc::Receiver<()>,
+}
+
 /// Read-path tampering for the R1 gate and a slow store.
 #[derive(Default)]
 pub struct ReadFaults {
@@ -316,6 +323,9 @@ pub struct ReadFaults {
     /// A read of these hints returns the bytes with the last byte flipped.
     pub flip: Mutex<HashSet<Hint>>,
     pub reads: AtomicU64,
+    /// The next read of the hint signals `entered` and then blocks until
+    /// `release` gets a message (once: the entry is taken).
+    pub hold: Mutex<Option<ReadHold>>,
     /// Every segment seal moves this manual clock by this much (and sleeps a
     /// few real milliseconds, so a thread that watches sees the steps): a cut
     /// that takes long and keeps sealing.
@@ -381,6 +391,18 @@ impl SegmentStore for GStore {
     fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
         not_on_queue("read_extent");
         self.faults.reads.fetch_add(1, Ordering::SeqCst);
+        let held = {
+            let mut g = lock(&self.faults.hold);
+            if g.as_ref().is_some_and(|h| h.hint == *hint) {
+                g.take()
+            } else {
+                None
+            }
+        };
+        if let Some(h) = held {
+            let _ = h.entered.send(());
+            let _ = h.release.recv();
+        }
         let d = self.faults.delay_us.load(Ordering::SeqCst);
         if d > 0 {
             std::thread::sleep(Duration::from_micros(d));

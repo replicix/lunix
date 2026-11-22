@@ -608,6 +608,25 @@ fn status_without_a_rollback_floor_says_so() {
     assert!(o.stdout.contains("AUTH FAILURES"));
 }
 
+#[test]
+fn status_shows_read_revalidations_only_when_there_were_some() {
+    let env = Env::new();
+    let mut s = status_body("vol1", VolumeMode::Plain);
+    env.ok("VolumeStatus", Response::VolumeStatus(Box::new(s.clone())));
+    let o = env.run(&["status", "vol1"]);
+    assert!(!o.stdout.contains("read revalidations"), "{}", o.stdout);
+    s.stats.read_revalidated = 7;
+    s.stats.read_revalidate_exhausted = 2;
+    env.ok("VolumeStatus", Response::VolumeStatus(Box::new(s)));
+    let o = env.run(&["status", "vol1"]);
+    assert!(
+        o.stdout
+            .contains("7 retried after a stale entry, 2 gave up (EIO)"),
+        "{}",
+        o.stdout
+    );
+}
+
 fn space_body() -> SpaceBody {
     SpaceBody {
         settings: SpaceSettings {
