@@ -125,6 +125,9 @@ pub struct DaemonConfig {
     pub idle_trim: Option<Duration>,
     /// Idle control connections are closed after this.
     pub conn_idle_timeout: Duration,
+    /// Destage pool worker threads per attached volume (`None`: the pool's
+    /// default, `max(2, cpus / 2)`).
+    pub destage_workers: Option<usize>,
     /// The wait at the limit when a volume's `space.full_timeout_ms` is null.
     pub full_timeout: Duration,
     /// `space.cache_max_percent` of new volumes (0: no cap).
@@ -135,6 +138,9 @@ pub struct DaemonConfig {
     /// The compaction rate's multiple while writes are slowed.
     pub gc_pressure_rate_factor: u64,
 }
+
+/// Most destage worker threads the config accepts.
+pub const MAX_DESTAGE_WORKERS: u64 = 64;
 
 impl Default for DaemonConfig {
     fn default() -> Self {
@@ -163,6 +169,7 @@ impl Default for DaemonConfig {
             max_locked_buffers: 4 << 30,
             idle_trim: Some(Duration::from_secs(10)),
             conn_idle_timeout: Duration::from_secs(60),
+            destage_workers: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             store_max_percent: 200,
             throttle: lunix_space::ThrottleConfig::default(),
@@ -422,6 +429,15 @@ impl DaemonConfig {
                     return Err("throttle_min_rate must be at least 65536".into());
                 }
                 self.throttle.min_rate = r;
+            }
+            "destage_workers" => {
+                let w = n(v)?;
+                if !(1..=MAX_DESTAGE_WORKERS).contains(&w) {
+                    return Err(format!(
+                        "destage_workers must be 1 to {MAX_DESTAGE_WORKERS}"
+                    ));
+                }
+                self.destage_workers = usize::try_from(w).ok();
             }
             "throttle_pace_store_bytes" => self.throttle.pace_store_bytes = b(v)?,
             "throttle_pace_store_margin_percent" => {
