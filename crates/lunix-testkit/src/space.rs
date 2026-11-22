@@ -100,6 +100,13 @@ struct State {
     ring_pace: Option<u64>,
     /// How many times the engine changed it.
     ring_pace_sets: u64,
+    /// The store factor (thousandths) and the in-flight journal bytes the
+    /// engine last set (`SpaceGate::set_store_pace`), and the most in flight
+    /// it ever said.
+    store_pace: (u64, u64),
+    store_in_flight_max: u64,
+    /// Every distinct pair the engine pushed, in order.
+    store_pace_log: Vec<(u64, u64)>,
 }
 
 impl State {
@@ -190,6 +197,9 @@ impl MemSpace {
                 pacing: false,
                 ring_pace: None,
                 ring_pace_sets: 0,
+                store_pace: (lunix_iface::space::FACTOR_INITIAL, 0),
+                store_in_flight_max: 0,
+                store_pace_log: Vec::new(),
             }),
             steps: Mutex::new(BTreeMap::new()),
         })
@@ -222,6 +232,22 @@ impl MemSpace {
     /// The fake keeps the figure and paces nothing.
     pub fn ring_pace(&self) -> Option<u64> {
         lock(&self.st).ring_pace
+    }
+
+    /// The store factor (thousandths) and the journal bytes in flight the
+    /// engine set last (`SpaceGate::set_store_pace`); the fake paces nothing.
+    pub fn store_pace(&self) -> (u64, u64) {
+        lock(&self.st).store_pace
+    }
+
+    /// Every pair the engine pushed through `set_store_pace`, in order.
+    pub fn store_pace_log(&self) -> Vec<(u64, u64)> {
+        lock(&self.st).store_pace_log.clone()
+    }
+
+    /// The most journal bytes in flight the engine ever told the gate.
+    pub fn store_in_flight_max(&self) -> u64 {
+        lock(&self.st).store_in_flight_max
     }
 
     /// How many times the engine changed the ring pace.
@@ -261,6 +287,18 @@ impl SpaceEvents for MemSpace {
 }
 
 impl SpaceGate for MemSpace {
+    fn set_store_pace(&self, factor_milli: u64, in_flight: u64) {
+        let mut st = lock(&self.st);
+        st.store_pace = (factor_milli, in_flight);
+        st.store_pace_log.push((factor_milli, in_flight));
+        st.store_in_flight_max = st.store_in_flight_max.max(in_flight);
+    }
+
+    /// The fake takes the pushes (it paces nothing), so the engine's tests see them.
+    fn store_pace_enabled(&self) -> bool {
+        true
+    }
+
     fn set_ring_pace(&self, rate: Option<u64>) {
         let mut st = lock(&self.st);
         if st.ring_pace != rate {

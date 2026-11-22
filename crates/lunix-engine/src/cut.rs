@@ -16,6 +16,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
+use lunix_iface::space::{FACTOR_INITIAL, FACTOR_MAX, FACTOR_ONE};
+
 /// Cuts the drain rate is averaged over.
 pub(crate) const HISTORY: usize = 4;
 
@@ -63,6 +65,95 @@ impl DrainHistory {
         }
         let budget = bytes.saturating_mul(target.as_nanos()) / took;
         Some(u64::try_from(budget).unwrap_or(u64::MAX))
+    }
+}
+
+/// Cuts the store factor is averaged over (P1').
+pub(crate) const FACTOR_HISTORY: usize = 8;
+
+/// A cut enters the window of [`StoreFactor`] only with at least this many
+/// journal bytes (a smaller one is a timer cut of an idle volume).
+pub(crate) const LAST_MIN_BYTES: u64 = 1 << 20;
+
+/// Until the window holds this many journal bytes in all, `A_hat` stays at
+/// the initial factor: a few small cuts say little about the cut a burst
+/// will make.
+pub(crate) const WINDOW_MIN_BYTES: u64 = 16 << 20;
+
+/// The store factor `A_hat` (P1'): how many store bytes (segments, map packs
+/// and the commit) one journal byte becomes at the cut. The space gate
+/// paces journal bytes against headroom, and the headroom falls by this
+/// factor times what was admitted, a cut at a time.
+///
+/// `A_hat = max(byte-weighted mean of the last [`FACTOR_HISTORY`] cuts, the
+/// last cut's own factor)`, clamped to `[FACTOR_ONE, FACTOR_MAX]` (1 to 16),
+/// in thousandths (fixed point: the gate compares and divides it, and no
+/// float crosses the trait); [`FACTOR_INITIAL`] (2.0) before the first
+/// measured cut.
+///
+/// A cut under [`LAST_MIN_BYTES`] of journal is left out of the window
+/// altogether (it neither weighs in the mean nor evicts a big cut), and until
+/// the window holds [`WINDOW_MIN_BYTES`] the factor is the initial one. A
+/// small cut divides the fixed costs of a cut (a segment's footer, the
+/// map's path to the root, the commit) by few journal bytes: a window of
+/// them would give a high mean on an idle volume, just before a burst. The
+/// last cut's own factor counts only when it is at least a quarter of the
+/// mean cut of the window. Only cuts that wrote segments are measured: a cut of hole
+/// records only has no store bytes of its own to divide. Not in the figure:
+/// the index run written at C8 (a few percent of the cut's store bytes) and
+/// the map leaves a compaction re-hint dirtied (they do count, as the map
+/// packs): the two are small and of opposite signs.
+#[derive(Debug, Default)]
+pub(crate) struct StoreFactor {
+    /// Journal bytes and settled store bytes of the last cuts.
+    cuts: VecDeque<(u64, u64)>,
+}
+
+impl StoreFactor {
+    /// Notes a committed cut of `journal` bytes that settled `store` bytes.
+    /// Returns the cut's own factor (unclamped), `None` for a cut without
+    /// journal bytes.
+    pub(crate) fn push(&mut self, journal: u64, store: u64) -> Option<u64> {
+        if journal == 0 {
+            return None;
+        }
+        if journal >= LAST_MIN_BYTES {
+            if self.cuts.len() == FACTOR_HISTORY {
+                self.cuts.pop_front();
+            }
+            self.cuts.push_back((journal, store));
+        }
+        Some(Self::ratio(journal, store))
+    }
+
+    /// `store / journal` in thousandths.
+    fn ratio(journal: u64, store: u64) -> u64 {
+        let r = u128::from(store) * u128::from(FACTOR_ONE) / u128::from(journal.max(1));
+        u64::try_from(r).unwrap_or(u64::MAX)
+    }
+
+    /// `A_hat` in thousandths.
+    pub(crate) fn a_hat(&self) -> u64 {
+        let Some(&(last_j, last_s)) = self.cuts.back() else {
+            return FACTOR_INITIAL;
+        };
+        let journal: u128 = self.cuts.iter().map(|c| u128::from(c.0)).sum();
+        if journal < u128::from(WINDOW_MIN_BYTES) {
+            return FACTOR_INITIAL;
+        }
+        let store: u128 = self.cuts.iter().map(|c| u128::from(c.1)).sum();
+        let mean = Self::ratio(
+            u64::try_from(journal).unwrap_or(u64::MAX),
+            u64::try_from(store).unwrap_or(u64::MAX),
+        );
+        let n = self.cuts.len() as u128;
+        let big = u128::from(last_j) * 4 * n >= journal;
+        let a = if big {
+            mean.max(Self::ratio(last_j, last_s))
+        } else {
+            mean
+        };
+        a.clamp(FACTOR_ONE, FACTOR_MAX)
     }
 }
 
@@ -247,6 +338,10 @@ pub(crate) struct CutCounters {
     pub(crate) yield_until_ms: AtomicU64,
     pub(crate) last_cut_bytes: AtomicU64,
     pub(crate) last_cut_ms: AtomicU64,
+    /// `A_hat` when the last cut began and the cut's measured factor,
+    /// thousandths (0: no cut yet).
+    pub(crate) store_pred_milli: AtomicU64,
+    pub(crate) store_real_milli: AtomicU64,
     /// Segment seals, all cuts (ADR-33 T8).
     pub(crate) seals: AtomicU64,
     /// The most seals in flight at once in any cut since the attach.
@@ -267,6 +362,8 @@ impl CutCounters {
             ring_pace_rate: self.ring_pace_rate.load(Ordering::Relaxed),
             last_cut_bytes: self.last_cut_bytes.load(Ordering::Relaxed),
             last_cut_ms: self.last_cut_ms.load(Ordering::Relaxed),
+            store_pred_milli: self.store_pred_milli.load(Ordering::Relaxed),
+            store_real_milli: self.store_real_milli.load(Ordering::Relaxed),
             seals: self.seals.load(Ordering::Relaxed),
             seal_in_flight_max: self.seal_in_flight_max.load(Ordering::Relaxed),
             seal_busy_ms: self.seal_busy_ns.load(Ordering::Relaxed) / 1_000_000,
@@ -300,6 +397,11 @@ pub struct CutStats {
     pub last_cut_bytes: u64,
     /// Its duration, C1 to C9, milliseconds.
     pub last_cut_ms: u64,
+    /// `A_hat` as it stood when the last cut began, thousandths (0: no cut
+    /// yet).
+    pub store_pred_milli: u64,
+    /// The last cut's measured store bytes per journal byte, thousandths.
+    pub store_real_milli: u64,
     /// Segment seals run since the attach.
     pub seals: u64,
     /// The most seals in flight at once in one cut since the attach.
@@ -329,6 +431,89 @@ mod tests {
 
     fn secs(s: u64) -> Duration {
         Duration::from_secs(s)
+    }
+
+    #[test]
+    fn the_store_factor_is_two_before_a_cut_and_a_cut_without_journal_bytes_says_nothing() {
+        let mut f = StoreFactor::default();
+        assert_eq!(f.a_hat(), 2000);
+        assert_eq!(f.push(0, 5 << 20), None);
+        assert_eq!(f.a_hat(), 2000);
+    }
+
+    #[test]
+    fn the_store_factor_is_the_larger_of_the_weighted_mean_and_the_last_cut() {
+        let mut f = StoreFactor::default();
+        // 100 MiB of journal became 250 MiB, then 10 MiB became 20.
+        assert_eq!(f.push(100 << 20, 250 << 20), Some(2500));
+        assert_eq!(f.a_hat(), 2500);
+        assert_eq!(f.push(10 << 20, 20 << 20), Some(2000));
+        // The mean is 270 / 110 = 2.454; the last cut's 2.0 is below it.
+        assert_eq!(f.a_hat(), 2454);
+        // A last cut above the mean wins: the factor rises at once (50 MiB
+        // is a big cut against a mean of 55 MiB).
+        assert_eq!(f.push(50 << 20, 200 << 20), Some(4000));
+        assert_eq!(f.a_hat(), 4000);
+    }
+
+    #[test]
+    fn a_tiny_cut_after_large_ones_does_not_pin_the_factor() {
+        let mut f = StoreFactor::default();
+        for _ in 0..4 {
+            f.push(200 << 20, 500 << 20);
+        }
+        assert_eq!(f.a_hat(), 2500);
+        // 40 KiB of journal that wrote a 64 KiB chunk and three map nodes:
+        // not in the window at all.
+        assert_eq!(f.push(40 << 10, 300 << 10), Some(7500));
+        assert_eq!(f.a_hat(), 2500);
+        // 4 MiB is in the window but under a quarter of the 200 MiB mean:
+        // it weighs by its bytes only.
+        f.push(4 << 20, 60 << 20);
+        assert!(f.a_hat() < 2600, "{}", f.a_hat());
+        // A light steady load of small cuts is its own mean and last.
+        let mut g = StoreFactor::default();
+        for _ in 0..8 {
+            g.push(2 << 20, 9 << 20);
+        }
+        assert_eq!(g.a_hat(), 4500);
+        g.push(2 << 20, 12 << 20);
+        assert_eq!(g.a_hat(), 6000, "a 2 MiB cut of a 2 MiB mean is big");
+    }
+
+    #[test]
+    fn eight_tiny_timer_cuts_leave_the_initial_factor_for_the_burst() {
+        let mut f = StoreFactor::default();
+        // An idle volume: a timer cut every 30 s of one chunk, 40 KiB of
+        // journal that settled 400 KiB (A = 10).
+        for _ in 0..8 {
+            assert_eq!(f.push(40 << 10, 400 << 10), Some(10_000));
+        }
+        assert_eq!(f.a_hat(), 2000, "tiny cuts say nothing");
+        // Mid-sized cuts below the window threshold in all: still initial.
+        f.push(2 << 20, 20 << 20);
+        assert_eq!(f.a_hat(), 2000, "2 MiB of window");
+        // The burst: a large cut measures, and the window then rules.
+        f.push(200 << 20, 500 << 20);
+        let a = f.a_hat();
+        assert!((2500..2600).contains(&a), "{a}");
+    }
+
+    #[test]
+    fn the_store_factor_forgets_cuts_older_than_eight_and_stays_within_one_and_sixteen() {
+        let mut f = StoreFactor::default();
+        f.push(8 << 20, 56 << 20);
+        for _ in 0..FACTOR_HISTORY {
+            f.push(8 << 20, 16 << 20);
+        }
+        assert_eq!(f.a_hat(), 2000, "the first cut left the window");
+        // Below one (a cut that deduplicated or compressed): one.
+        let mut f = StoreFactor::default();
+        f.push(20 << 20, 3 << 20);
+        assert_eq!(f.a_hat(), 1000);
+        // Above sixteen: sixteen.
+        f.push(100 << 20, 5000 << 20);
+        assert_eq!(f.a_hat(), 16_000);
     }
 
     #[test]

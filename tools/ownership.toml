@@ -540,10 +540,38 @@ paths = [
 paths = [
   "Cargo.lock",
   "crates/lunix-engine/Cargo.toml",
+  "crates/lunix-engine/src/lib.rs",
   "crates/lunix-engine/src/read.rs",
   "crates/lunix-engine/src/stats.rs",
   "crates/lunix-iface/src/stats.rs",
   "crates/lunix-engine/tests/common/mod.rs",
   "crates/lunix-engine/tests/revalidate.rs",
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-cli/tests/socket.rs",
+  "tools/ownership.toml",
+]
+
+# pacea: P1', the space gate paces in store bytes (store factor A_hat per
+# cut, projected headroom), behind `throttle_pace_store_bytes`.
+[pacea]
+paths = [
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/src/space.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/cut.rs",
+  "crates/lunix-engine/src/full.rs",
+  "crates/lunix-engine/src/pressure.rs",
+  "crates/lunix-engine/tests/jstall.rs",
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-cli/tests/socket.rs",
+  "crates/lunix-space/src/gate.rs",
+  "crates/lunix-space/src/ledger.rs",
+  "crates/lunix-space/src/throttle.rs",
+  "crates/lunix-space/tests/pace.rs",
+  "crates/lunix-testkit/src/space.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "docs/explanation/DESIGN.md",
   "tools/ownership.toml",
 ]
