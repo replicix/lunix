@@ -1106,8 +1106,13 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
         let want = if all_hits { c.min(3) } else { 1 };
         // The recheck-only point's hit count moves with the timing (2 to 5):
         // a run that finds fewer hits is retried at its own last, so the
-        // first, a middle and the last of a count that varies collapse.
-        let want = if fast { want.min(2) } else { want };
+        // first, a middle and the last of a count that varies collapse. The
+        // delete points keep the full requirement.
+        let want = if fast && point.starts_with("gc.recheck.") {
+            want.min(2)
+        } else {
+            want
+        };
         assert!(
             hits.len() as u64 >= want.min(c),
             "{point}: killed at {hits:?} of {c} hits"

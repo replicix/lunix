@@ -22,6 +22,7 @@
 //! | `quiesce_timeout_ms` | 30000 | `QUIESCE_DEV` wait per device |
 //! | `detach_busy_retry_ms` | 3000 | how long a detach retries `TRY_STOP_DEV` (udev's probe) |
 //! | `journal_max` | `volume.json` default | `journal_max` of new volumes |
+//! | `destage_workers` | the pool's default, `max(2, cpus / 2)` | destage pool worker threads per attached volume; 1 ..= 64 |
 //! | `journal_resident_max` | the volume's `journal_max` | cap on the resident journal window per attached volume (ADR-33): the bytes the journal keeps in memory of what it wrote until the ring file is reclaimed; plaintext, not locked memory; at least 2097152, a larger value than the volume's `journal_max` counts as `journal_max` |
 //! | `cut_target_ms` | 1000 | the longest a commit's cut should take (ADR-33): the coordinator cuts at most this long at the drain rate of its last cuts, in journal bytes, never less than one ring file of journal bytes and than what frees a ring file of the fullest lane, never more than half the ring; 10 ..= 60000 |
 //! | `commit_interval_ms` | `volume.json` default | commit interval `T` of new volumes |
@@ -663,6 +664,20 @@ volume_roots = "/a, /b"
         assert!(
             DaemonConfig::parse("throttle_max_delay_ms = 61000\nfull_timeout_ms = 120000").is_ok()
         );
+    }
+
+    #[test]
+    fn the_destage_workers_key_parses_and_is_validated() {
+        assert_eq!(DaemonConfig::default().destage_workers, None);
+        assert_eq!(
+            DaemonConfig::parse("destage_workers = 8\n")
+                .unwrap()
+                .destage_workers,
+            Some(8)
+        );
+        for bad in ["destage_workers = 0", "destage_workers = 65"] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

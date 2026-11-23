@@ -308,6 +308,9 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         recheck_lag_ms_sum: s[4],
                         recheck_lag_ms_max: s[5],
                         recheck_lag_count: s[6],
+                        fast_lag_ms_sum: s[7],
+                        fast_lag_ms_max: s[0],
+                        fast_lag_count: s[1],
                     }),
                 }
             },

@@ -69,19 +69,33 @@ collector's default (`GcConfig::default`, which the tests and the offline
 While the engine reports pressure (the gate paces or holds writes; the engine
 tells the collector before every call, `Collector::set_pressure`) and a listed
 object's grace has ended, a third kind of pass does not wait for the regular
-schedule: after `gc_fast_recheck_delay_ms` (1 s) from the end of the previous pass
-(and three times that pass's mark) it runs mark, condemn, delete and ends. The
-delete rule is the pipelined pass's, unchanged: only objects whose grace ended
-before this pass's mark began are deleted (`recheck_verdict`), and it still
-condemns what its mark finds dead. It does no compaction. It does not move the
-regular schedule: the regular triggers (new tip, changed pins, grace end) are
-measured from the end of the last regular pass, a recheck-only pass leaves the
-"new tip" and "changed" triggers alone, and it never starts a regular pass
+schedule: `gc_fast_recheck_delay_ms` (1 s) after the end of that grace, and
+not before three times the previous pass's mark time has passed since the end
+of the previous pass (the duty cap), it runs mark, condemn, delete and ends.
+**This counts the delay from the end of the grace only, not from the end of the
+previous pass; the design note (c5-recheck-design 1.2) and the simulator count
+it from the end of the previous pass too.** Where the delay's job, batching
+grace ends, was done by a pass that was running, a second delay would only add
+to the wait (a regular pass under pressure compacts for seconds). The delete
+rule is the pipelined pass's, unchanged: only objects whose grace ended before
+this pass's mark began are deleted (`recheck_verdict`), and it still condemns
+what its mark finds dead. It does no compaction. It does not move the regular
+schedule: the regular triggers (new tip, changed pins, grace end) are measured
+from the end of the last regular pass and from the last regular mark, a
+recheck-only pass leaves them alone, and a regular pass never follows any pass
 closer than three times its mark. A regular pass that is due wins over a
-recheck-only one. After an abandoned pass recheck-only passes wait for a regular
-one. A requested pass is always the whole sequence. `lunix gc --status` shows
-`recheck-only` passes, the segments and bytes they freed, and the recheck lag
-(time from the end of a grace to the delete, every pass kind).
+recheck-only one. When pressure shortens the grace (the floor), the objects
+whose shorter grace has ended count at once, whatever the time of the last mark
+(which judged them with the longer one). After an abandoned pass recheck-only
+passes wait for a regular one. A requested pass is always the whole sequence.
+With a mark of 1.67 s or more, `3 x mark` is at least the regular gap
+(`min(busy_interval, pass_interval)`, 5 s), so the regular pass is always due
+first and no recheck-only pass runs: the lag floor is then `3 x mark`. `lunix gc
+--status` shows the pass kinds, the segments and bytes the recheck-only passes
+freed, and the recheck lag (time from the end of the grace the verdict used,
+and not before the grace last changed, to the delete), for all passes and for
+the recheck-only ones. The `gc pass done` line carries `kind`, `mark_ms` and the
+pass's own `lag_count`, `lag_mean_ms` and `lag_max_ms`.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -144,12 +158,14 @@ calling thread runs the collector under the coordinator mutex):
 
 The engine reads the space gate's state at every coordinator tick and hands
 the collector more while writes are slowed or held. No collector interface
-changes: `GcBudget` and `GcParams` are built per step.
+changes: `GcBudget` and `GcParams` are built per step; the collector is also
+told the level (`Collector::set_pressure`, a defaulted method): raised or urgent
+lets it run recheck-only passes (above).
 
 | gate state | step budget | compaction rate | grace | passes |
 |---|---|---|---|---|
 | `open` | `gc_step_budget_ms` (50 ms), `gc_rate` bytes | `gc_rate` | `gc_grace_ms` (60 s) | the pipelined schedule |
-| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms` | the same, always busy |
+| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms` | the same, always busy; recheck-only passes with `gc_fast_recheck` |
 | `stop`, `full` | as `slowdown` | uncapped | the floor | and the ladder's urgent pass, with its back-off |
 
 - The pressure rises at once and ends with a hold: the engine returns to the
@@ -407,7 +423,8 @@ none, and its number is used by the
 next. **Local bound:** the volume keeps the newest 1 024 objects; writing a
 new one deletes the oldest beyond that, at most 16 per pass
 (`GcStateStore::delete_evidence`). Under the daemon's pipelined schedule a
-busy volume writes one object every few seconds, so the newest 1 024 cover
+busy volume writes one object every few seconds (with `gc_fast_recheck`, one
+for each recheck-only pass that did something too), so the newest 1 024 cover
 about one to two hours of a sustained overwrite (a day or more when the
 volume is quiet), and an object's `condemn` lines and the `delete` lines of
 the same objects are in different evidence objects (a grace apart).

@@ -466,15 +466,83 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    if r.fast_passes + r.regular_passes > 0 {
+        kv(
+            out,
+            "pass kinds",
+            &format!(
+                "{} regular, {} recheck-only",
+                r.regular_passes, r.fast_passes
+            ),
+        )?;
+    }
     if let Some(mean) = r.recheck_lag_ms_sum.checked_div(r.recheck_lag_count) {
         kv(
             out,
             "recheck lag",
             &format!(
-                "mean {mean} ms, max {} ms over {} deletes ({} regular passes)",
-                r.recheck_lag_ms_max, r.recheck_lag_count, r.regular_passes
+                "mean {mean} ms, max {} ms over {} deletes",
+                r.recheck_lag_ms_max, r.recheck_lag_count
+            ),
+        )?;
+    }
+    if let Some(mean) = r.fast_lag_ms_sum.checked_div(r.fast_lag_count) {
+        kv(
+            out,
+            "recheck-only lag",
+            &format!(
+                "mean {mean} ms, max {} ms over {} deletes",
+                r.fast_lag_ms_max, r.fast_lag_count
             ),
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod reclaim_tests {
+    use super::*;
+    use lunix_iface::gc::GcReclaimStats;
+
+    fn render(g: &GcStatusSnapshot) -> String {
+        let mut out = Vec::new();
+        gc_status(&mut out, "vol1", g).expect("render");
+        String::from_utf8(out).expect("utf8")
+    }
+
+    #[test]
+    fn the_default_reclaim_figures_print_nothing() {
+        let t = render(&GcStatusSnapshot::default());
+        assert!(!t.contains("recheck") && !t.contains("pass kinds"), "{t}");
+    }
+
+    #[test]
+    fn the_reclaim_figures_print_their_own_lines() {
+        let g = GcStatusSnapshot {
+            reclaim: Box::new(GcReclaimStats {
+                fast_passes: 4,
+                regular_passes: 9,
+                fast_segments_deleted: 11,
+                fast_bytes_freed: 3 << 20,
+                recheck_lag_ms_sum: 10_000,
+                recheck_lag_ms_max: 2_500,
+                recheck_lag_count: 5,
+                fast_lag_ms_sum: 3_000,
+                fast_lag_ms_max: 1_500,
+                fast_lag_count: 3,
+            }),
+            ..GcStatusSnapshot::default()
+        };
+        let t = render(&g);
+        assert!(t.contains("9 regular, 4 recheck-only"), "{t}");
+        assert!(t.contains("4 passes, 11 segments deleted"), "{t}");
+        assert!(
+            t.contains("mean 2000 ms, max 2500 ms over 5 deletes"),
+            "{t}"
+        );
+        assert!(
+            t.contains("mean 1000 ms, max 1500 ms over 3 deletes"),
+            "{t}"
+        );
+    }
 }

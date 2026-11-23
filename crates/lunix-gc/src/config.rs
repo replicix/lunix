@@ -103,6 +103,7 @@ pub struct GcConfig {
     /// turns it on).
     pub fast_recheck: Option<Duration>,
     /// Tests only: recheck-only passes without pressure too.
+    #[doc(hidden)]
     pub fast_recheck_always: bool,
 }
 

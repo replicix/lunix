@@ -646,6 +646,22 @@ pub struct Gc {
     /// When the last mark of a scheduled pass began: a listed object whose
     /// grace ends after it waits for the next mark.
     last_mark_start: Option<Duration>,
+    /// As `last_mark_start`, for marks of passes that were not recheck-only:
+    /// the regular grace trigger reads it, so a recheck-only pass does not
+    /// consume that trigger.
+    last_full_mark_start: Option<Duration>,
+    /// The grace the last mark judged with: a grace that shrank since (the
+    /// engine's pressure floor) makes objects deletable that the last mark
+    /// deferred, whatever the time of that mark.
+    last_mark_grace: Duration,
+    /// The grace of the verdict being applied (lag figures).
+    used_grace: Duration,
+    /// The grace `params.grace` had at the last call, and since when.
+    seen_grace: Option<Duration>,
+    grace_changed: Duration,
+    /// The lag figures of the pass in progress: sum, max and count of
+    /// milliseconds, and the same total of the recheck-only passes.
+    pass_lag: (u64, u64, u64),
 }
 
 impl std::fmt::Debug for Gc {
@@ -730,6 +746,12 @@ impl Gc {
             last_mark: Duration::ZERO,
             last_aborted: false,
             last_mark_start: None,
+            last_full_mark_start: None,
+            last_mark_grace: Duration::ZERO,
+            used_grace: Duration::ZERO,
+            seen_grace: None,
+            grace_changed: Duration::ZERO,
+            pass_lag: (0, 0, 0),
         }
     }
 
@@ -991,12 +1013,18 @@ impl Gc {
 
     /// A listed object's grace ended at or before `now` and after the last
     /// mark began: the next mark can delete it.
+    ///
+    /// Measured against the last mark of a pass that was not recheck-only
+    /// (a recheck-only pass does not consume this trigger). A grace that
+    /// shrank since that mark judged (pressure) counts every object whose
+    /// shorter grace ended.
     fn grace_ended_since_mark(&self, grace: Duration, now: Duration) -> bool {
+        let shrunk = grace < self.last_mark_grace;
         self.grace
             .values()
             .filter(|&&t| t != Duration::MAX)
             .map(|t| t.saturating_add(grace))
-            .any(|end| end <= now && self.last_mark_start.is_none_or(|m| m < end))
+            .any(|end| end <= now && (shrunk || self.last_full_mark_start.is_none_or(|m| m < end)))
     }
 
     /// The kind of pass to start now, if one is due.
@@ -1083,17 +1111,23 @@ impl Gc {
         {
             return false;
         }
-        let wait = delay.max(self.last_mark.saturating_mul(DUTY_FACTOR));
-        if !self.last_end.is_none_or(|e| now >= e.saturating_add(wait)) {
+        // The duty cap counts from the end of the last pass; the delay only
+        // from the end of the grace (it batches grace ends, which a pass in
+        // progress has done already). This departs from the design text and
+        // the simulator, which count the delay from the end of the pass too.
+        let duty = self.last_mark.saturating_mul(DUTY_FACTOR);
+        if !self.last_end.is_none_or(|e| now >= e.saturating_add(duty)) {
             return false;
         }
         let grace = view.params.grace;
+        let shrunk = grace < self.last_mark_grace;
         self.grace
             .values()
             .filter(|&&t| t != Duration::MAX)
             .map(|t| t.saturating_add(grace))
             .any(|end| {
-                end.saturating_add(delay) <= now && self.last_mark_start.is_none_or(|m| m < end)
+                end.saturating_add(delay) <= now
+                    && (shrunk || self.last_mark_start.is_none_or(|m| m < end))
             })
     }
 
@@ -1287,6 +1321,10 @@ impl Gc {
                     how,
                     kind = ?self.kind,
                     pass = p.pass,
+                    mark_ms = PassProfile::ms(self.prof.mark_view),
+                    lag_count = self.pass_lag.2,
+                    lag_mean_ms = self.pass_lag.0.checked_div(self.pass_lag.2).unwrap_or(0),
+                    lag_max_ms = self.pass_lag.1,
                     wall_ms = PassProfile::ms(wall),
                     steps = self.prof.steps,
                     phases = %self.prof.phases(),
@@ -1324,6 +1362,7 @@ impl Gc {
                     return Ok(Flow::Yield);
                 };
                 self.kind = kind;
+                self.pass_lag = (0, 0, 0);
                 self.forced = false;
                 self.reconcile(view)?;
                 self.ctx = Some(PassCtx::default());
@@ -1373,6 +1412,10 @@ impl Gc {
                         // this mark is the recheck of the objects listed
                         // before it whose grace ended before it began.
                         self.last_mark_start = Some(started);
+                        self.last_mark_grace = view.params.grace;
+                        if self.kind != PassKind::Recheck {
+                            self.last_full_mark_start = Some(started);
+                        }
                         let queue: VecDeque<ObjectRef> =
                             self.list.entries.keys().copied().collect();
                         if !todo.is_empty() {
@@ -1447,6 +1490,8 @@ impl Gc {
                     let l = m.into_liveness();
                     self.after_mark(&l);
                     self.last_mark_start = Some(l.started);
+                    self.last_full_mark_start = Some(l.started);
+                    self.last_mark_grace = view.params.grace;
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
@@ -1500,6 +1545,9 @@ impl Gc {
             }
             Phase::Compacting(c) => self.compact_unit(view, budget, c, step_bytes),
             Phase::Finishing => {
+                // Nothing is queued unless an earlier abort left the list
+                // unstored: no-op then.
+                self.flush_index(view)?;
                 self.finish_pass(view)?;
                 Flow::PassDone
             }
@@ -1604,6 +1652,7 @@ impl Gc {
         grace: Duration,
     ) -> Result<Verdict> {
         self.facts(view)?;
+        self.used_grace = grace;
         let (Some(f), Some(l)) = (
             self.facts.as_ref(),
             self.ctx.as_ref().and_then(|c| c.liveness.as_ref()),
@@ -1685,7 +1734,6 @@ impl Gc {
         }
         if self.list_dirty {
             self.store_list(view)?;
-            self.list_dirty = false;
         }
         Ok(())
     }
@@ -1709,20 +1757,42 @@ impl Gc {
         Ok(freed)
     }
 
-    /// Records how long `obj` waited after its grace ended until its delete.
+    /// Records how long `obj` waited after its grace ended until its delete:
+    /// from the end of the grace the verdict used, but not before the grace
+    /// last changed (a shrunk grace makes the backlog deletable at once; that
+    /// wait is not recheck lag).
     fn note_lag(&mut self, view: &GcView<'_>, obj: ObjectRef) {
         let Some(&start) = self.grace.get(&obj).filter(|&&t| t != Duration::MAX) else {
             return;
         };
-        let lag = view
-            .clock
-            .monotonic()
-            .saturating_sub(start.saturating_add(view.params.grace));
+        let from = start
+            .saturating_add(self.used_grace)
+            .max(self.grace_changed);
+        let lag = view.clock.monotonic().saturating_sub(from);
         let ms = u64::try_from(lag.as_millis()).unwrap_or(u64::MAX);
         let r = &mut self.reclaim;
         r.recheck_lag_ms_sum = r.recheck_lag_ms_sum.saturating_add(ms);
         r.recheck_lag_ms_max = r.recheck_lag_ms_max.max(ms);
         r.recheck_lag_count += 1;
+        if self.kind == PassKind::Recheck {
+            r.fast_lag_ms_sum = r.fast_lag_ms_sum.saturating_add(ms);
+            r.fast_lag_ms_max = r.fast_lag_ms_max.max(ms);
+            r.fast_lag_count += 1;
+        }
+        let p = &mut self.pass_lag;
+        p.0 = p.0.saturating_add(ms);
+        p.1 = p.1.max(ms);
+        p.2 += 1;
+    }
+
+    /// Notes when `params.grace` changed (the lag figures start there).
+    fn note_grace(&mut self, view: &GcView<'_>) {
+        if self.seen_grace != Some(view.params.grace) {
+            if self.seen_grace.is_some() {
+                self.grace_changed = view.clock.monotonic();
+            }
+            self.seen_grace = Some(view.params.grace);
+        }
     }
 
     fn count_delete(&mut self, obj: ObjectRef, freed: u64) {
@@ -2037,6 +2107,7 @@ impl Gc {
         let mut step_bytes = 0u64;
         self.load(view)?;
         self.observe_named(view)?;
+        self.note_grace(view);
         self.prof.step_counted = false;
         loop {
             match self.unit(view, budget, freed, &mut step_bytes)? {
@@ -2071,7 +2142,9 @@ impl Gc {
             ..PassProfile::default()
         };
         self.kind = PassKind::Whole;
+        self.pass_lag = (0, 0, 0);
         self.load(view)?;
+        self.note_grace(view);
         self.observe_named(view)?;
         self.reconcile(view)?;
         self.ctx = Some(PassCtx::default());
@@ -2084,6 +2157,8 @@ impl Gc {
         let l = m.into_liveness();
         self.after_mark(&l);
         self.last_mark_start = Some(l.started);
+        self.last_full_mark_start = Some(l.started);
+        self.last_mark_grace = config::grace_floor(&view.params);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
         self.facts(view)?;
         let todo = match &self.facts {

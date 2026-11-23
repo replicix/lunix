@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use lunix_format::{ExtentKind, IdLen, SegId};
 use lunix_iface::crypto::ExtentCodec;
-use lunix_iface::gc::GcState;
+use lunix_iface::gc::{Collector, GcState};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::store::{GcStateStore, SegmentStore};
 
@@ -396,6 +396,19 @@ fn uncondemn_with_a_failing_list_write(reopen: bool) {
         }
         if reopen {
             s.crash_reopen(nth).unwrap();
+        }
+        if !reopen {
+            // S7: a pass requested now runs without a yield in its way to
+            // `Finishing`; the list the failed flush left unstored is stored
+            // before the pass ends (the R4 assert holds).
+            assert!(s.gc.request_pass());
+            for _ in 0..100_000 {
+                let p = s.unit().unwrap();
+                if p.done {
+                    break;
+                }
+                assert_ne!(p.state, GcState::Idle);
+            }
         }
         // The next pass re-flags (reopen) or rewrites the list (no reopen),
         // and the segments survive every recheck.

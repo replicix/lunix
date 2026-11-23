@@ -353,24 +353,44 @@ fn a_request_during_a_recheck_pass_runs_the_whole_sequence_next() {
 }
 
 /// Sustained pressure with graces ending all the time: recheck passes run
-/// between the regular ones but do not starve them, and the compaction of a
-/// low-live segment still happens.
+/// between the regular ones but do not starve them. The low-live segment `L`
+/// is made at second 130, after recheck passes exist (the grace is 60 s), and
+/// is compacted by a regular pass within a busy interval and a few passes.
 #[test]
 fn compaction_still_runs_on_schedule_under_sustained_pressure() {
-    let mut s = Sim::new(cfg(Some(Duration::from_secs(1)), false));
+    // A regular pass every 25 s: its condemn batches end their 60 s grace
+    // between two regular passes (with 20 s the grace ends would fall on the
+    // regular passes, and nothing would be left for the recheck-only ones).
+    let mut c = cfg(Some(Duration::from_secs(1)), false);
+    c.gc.busy_interval = Duration::from_secs(25);
+    let mut s = Sim::new(c);
     s.gc.set_pressure(true);
-    // L: a low-live segment that stays a candidate.
-    for i in 0..4 {
-        s.write(40 + i, 3_000 + i);
-    }
-    s.commit().unwrap();
-    for i in 1..4 {
-        s.write(40 + i, 4_000 + i);
-    }
-    s.commit().unwrap();
     let mut seed = 10_000;
-    let mut compacted_at = None;
-    for sec in 0..180u64 {
+    let mut l_seg = None;
+    let (mut regular_at_60, mut compacted_at) = (0, None);
+    for sec in 0..260u64 {
+        if sec == 130 {
+            assert!(
+                reclaim(&s).fast_passes > 0,
+                "recheck passes exist: {:?}",
+                reclaim(&s)
+            );
+            let before = segs(&s);
+            for i in 0..4 {
+                s.write(40 + i, 3_000 + i);
+            }
+            s.commit().unwrap();
+            let made: Vec<SegId> = segs(&s).difference(&before).copied().collect();
+            for i in 1..4 {
+                s.write(40 + i, 4_000 + i);
+            }
+            s.commit().unwrap();
+            assert_eq!(made.len(), 1, "L is one segment");
+            l_seg = made.first().copied();
+        }
+        if sec == 100 {
+            regular_at_60 = reclaim(&s).regular_passes;
+        }
         // Garbage every second: dead segments, so graces end all the time.
         for i in 0..3 {
             seed += 1;
@@ -384,20 +404,140 @@ fn compaction_still_runs_on_schedule_under_sustained_pressure() {
                 break;
             }
         }
-        if compacted_at.is_none() && s.gc.stats().segments_compacted > 0 {
+        if compacted_at.is_none()
+            && l_seg.is_some_and(|l| s.gc.last_compacted().iter().any(|c| c.seg == l))
+        {
             compacted_at = Some(sec);
         }
     }
     let r = reclaim(&s);
-    assert!(r.fast_passes >= 1, "recheck passes ran: {r:?}");
-    // 180 s at one regular pass per 20 s of busy interval (plus its time):
-    // at least five, despite the recheck passes.
-    assert!(r.regular_passes >= 5, "regular passes kept going: {r:?}");
-    let at = compacted_at.expect("the low-live segment was compacted");
-    assert!(at <= 60, "compaction ran early enough: second {at}");
+    eprintln!("sustained pressure: {r:?}, L compacted at {compacted_at:?}");
+    assert!(r.fast_passes >= 5, "recheck passes kept running: {r:?}");
+    assert!(
+        r.regular_passes - regular_at_60 >= 5,
+        "regular passes kept going between 100 s and 260 s (every 25 s: at least 5): {r:?}"
+    );
+    let at = compacted_at.expect("L was compacted");
+    assert!(
+        at <= 130 + 40,
+        "compaction followed L's creation: second {at}"
+    );
     assert!(r.recheck_lag_count > 0);
     s.check_roots().unwrap();
     s.check_ledger().unwrap();
+}
+
+/// S1: when the engine's pressure shortens the grace (60 s to the 30 s
+/// floor), the objects condemned 30 to 60 s ago are deletable at that
+/// instant; the recheck-only trigger must see them although the last mark
+/// (which deferred them under the long grace) began after their new end. The
+/// lag figures do not count the shrink as lag.
+#[test]
+fn a_grace_that_shrinks_under_pressure_makes_the_backlog_deletable_at_once() {
+    let mut s = Sim::new(cfg(Some(Duration::from_secs(1)), false));
+    let base = s.clock.monotonic();
+    make_dead(&mut s, 0, 6, 1_000);
+    at(&mut s, base, 1_000);
+    pass_now(&mut s);
+    let x = listed_segments(&s);
+    assert!(!x.is_empty());
+    // A regular pass at 40 s defers X (grace 60 s ends at 61).
+    at(&mut s, base, 40_000);
+    s.write(50, 7_000);
+    s.commit().unwrap();
+    pass_now(&mut s);
+    assert_eq!(s.gc.stats().passes, 2);
+    assert!(s.gc.condemned().contains(&x[0]));
+    // Pressure: the grace is the floor (30 s): X ended at 31.
+    s.grace = Duration::from_secs(30);
+    s.gc.set_pressure(true);
+    at(&mut s, base, 42_000);
+    pass_now(&mut s);
+    assert_eq!(s.gc.stats().passes, 3, "a recheck pass ran at the onset");
+    assert_eq!(reclaim(&s).fast_passes, 1);
+    for o in &x {
+        assert!(!s.gc.condemned().contains(o), "{o} was deleted");
+    }
+    let r = reclaim(&s);
+    assert!(r.recheck_lag_count > 0);
+    assert_eq!(r.recheck_lag_ms_max, 0, "the shrink is not lag: {r:?}");
+    assert_eq!(r.fast_lag_ms_max, 0);
+    s.check_roots().unwrap();
+    s.check_ledger().unwrap();
+}
+
+/// S2: the delay counts from the end of the grace, not from the end of the
+/// previous pass: a regular pass that ends after the grace did (here at
+/// 115.5 s, a grace that ended at 115 s) delays the recheck pass by its duty
+/// cap (3 x its mark, 0 here) only.
+#[test]
+fn the_delay_counts_from_the_grace_end_not_from_the_end_of_the_last_pass() {
+    let mut sc = scene(Some(Duration::from_secs(1)), false, 0);
+    sc.s.gc.set_pressure(true);
+    // A regular pass at 100 s: condemns two segments, and its list write
+    // takes 15.5 s of the view's clock (not a mark: the duty cap stays 0).
+    at(&mut sc.s, sc.base, 99_900);
+    make_dead(&mut sc.s, 30, 2, 9_000);
+    at(&mut sc.s, sc.base, 100_000);
+    sc.s.hooks
+        .advance_at("gc.condemn.after_list_write", Duration::from_millis(15_500));
+    pass_now(&mut sc.s);
+    sc.s.hooks
+        .advance_at("gc.condemn.after_list_write", Duration::ZERO);
+    assert_eq!(reclaim(&sc.s).fast_passes, 0);
+    assert_eq!(sc.s.gc.stats().passes, 3);
+    assert_eq!(
+        sc.s.clock.monotonic() - sc.base,
+        Duration::from_millis(115_500)
+    );
+    // Z's grace ended at 115 s, during that pass: 115 + 1 s delay.
+    assert!(sc.s.gc.condemned().contains(&sc.z[0]));
+    at(&mut sc.s, sc.base, 115_900);
+    pass_now(&mut sc.s);
+    assert_eq!(sc.s.gc.stats().passes, 3, "the delay is not over");
+    at(&mut sc.s, sc.base, 116_000);
+    pass_now(&mut sc.s);
+    assert_eq!(sc.s.gc.stats().passes, 4, "116 s, not 116.5 s");
+    assert_eq!(reclaim(&sc.s).fast_passes, 1);
+    assert!(!sc.s.gc.condemned().contains(&sc.z[0]));
+    sc.s.check_roots().unwrap();
+    sc.s.check_ledger().unwrap();
+}
+
+/// S5: a kill inside a recheck-only pass (its own point and its delete
+/// points): the volume reopens, every root reads, the next passes finish.
+#[test]
+fn a_kill_inside_a_recheck_pass_is_recovered() {
+    for point in [
+        "gc.recheck.before_delete",
+        "gc.delete.before_unlink",
+        "gc.delete.after_unlink",
+        "gc.delete.after_dirsync",
+    ] {
+        let mut sc = scene(Some(Duration::from_secs(1)), false, 0);
+        sc.s.gc.set_pressure(true);
+        at(&mut sc.s, sc.base, 62_000);
+        sc.s.hooks.arm(point, 1);
+        let crashed = (0..100_000).any(|_| sc.s.step().is_err());
+        assert!(crashed, "{point}: the recheck pass was stopped");
+        assert_eq!(sc.s.hooks.crashed(), Some(point));
+        assert_eq!(
+            reclaim(&sc.s).regular_passes,
+            2,
+            "{point}: inside a recheck pass"
+        );
+        sc.s.crash_reopen(7).unwrap();
+        sc.s.check_roots()
+            .unwrap_or_else(|e| panic!("{point}: {e}"));
+        sc.s.hooks.arm("none", 1);
+        sc.s.clock.advance(Duration::from_secs(120));
+        sc.s.commit().unwrap();
+        sc.s.pass().unwrap();
+        sc.s.check_roots().unwrap();
+        sc.s.check_ledger().unwrap();
+        super::oracle::check_quiescent(&mut sc.s)
+            .unwrap_or_else(|e| panic!("{point}: convergence {e:?}"));
+    }
 }
 
 /// A recheck pass deletes the same objects a pipelined pass would at that

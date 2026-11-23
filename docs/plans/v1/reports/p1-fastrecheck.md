@@ -80,9 +80,13 @@ FREEZE item). The T6 performance measurement was not run.
 
 ## Deviations from the design
 
-* The fast trigger needs "a grace ended at least `delay` ago" and the **duty guard from `last_end`**; the design's
-  `delay.max(last_mark * DUTY_FACTOR)` is used as written for the fast pass; the regular pass uses the guard
-  `last_end + last_mark * DUTY_FACTOR` and its old `min_gap` from `last_full_end`.
+* **The delay counts from the end of the grace only; the duty floor (3 x last mark) counts from `last_end`** (review S2,
+  lead decision). This **departs from the design text (1.2 step 3) and from the simulator rule**, which count
+  `delay.max(3 x mark)` from the end of the previous pass. Reason: a pass in progress already batches grace ends;
+  a second full delay after its tail only adds wait. The regular pass uses the guard `last_end + 3 x last mark` and
+  its `min_gap` from `last_full_end`. Boundary tests: `the_delay_counts_from_the_grace_end_not_from_the_end_of_the_last_pass`
+  (a regular pass ending at 115.5 s, a grace that ended at 115 s: the recheck pass runs at 116 s, not 116.5 s) and
+  the existing delay/duty test.
 * `next_kind` is not a field: `due` returns the kind.
 * `GcStatusSnapshot::reclaim` is boxed: the field made `ctl::Response` 240 bytes and tripped
   `clippy::large_enum_variant` in `lunix-iface`.
@@ -101,3 +105,26 @@ FREEZE item). The T6 performance measurement was not run.
 * The regular grace trigger (`busy_interval`, 5 s) still wins whenever a regular pass is due, so the advantage of the
   recheck pass is exactly the time between its delay (1 s) and the end of the regular gap (5 s); the T6 measurement
   decides whether that is worth it.
+
+## Review follow-up (review of 2a618c6)
+
+| item | state |
+|---|---|
+| S1 grace drop at pressure onset | done: `last_mark_grace`; `shrunk` in `fast_due` and `grace_ended_since_mark`; test `a_grace_that_shrinks_under_pressure_makes_the_backlog_deletable_at_once` (fails without it, checked) |
+| S2 delay from the grace end | done, see Deviations; test fails with the old rule (checked) |
+| S3 lag metrics | done: the grace the verdict used (`used_grace`), clamp from `grace_changed`, `fast_lag_*` split next to the all-kinds figures, and `kind`, `mark_ms`, `lag_count`, `lag_mean_ms`, `lag_max_ms` on the `gc pass done` line (medians per kind from the log) |
+| S4 sustained-pressure test | done: 25 s regular spacing (so grace ends fall between regular passes; with 20 s they phase-lock onto the regular passes and the recheck pass has nothing to do), `L` made at 130 s after recheck passes ran, compaction of that very segment asserted within 40 s, 14 recheck passes and 11 regular ones over 260 s, regular passes 100-260 s >= 5 |
+| S5 | oracle: the fast oracles assert recheck passes and the segments they deleted (66/48 and 63/45 in the run); crash: `a_kill_inside_a_recheck_pass_is_recovered` (kills at the recheck point and the three delete points inside a recheck pass, asserted by `regular_passes` unchanged). The sweep arm itself is unchanged; the child of the kill loop does not dump `fast_segments_deleted` (not done) |
+| S6 | done: the two-hit relaxation applies to `gc.recheck.*` only |
+| S7 | done: `flush_index` in the `Finishing` arm. The test added (a requested pass after the failed flush) passes with and without the line, so it does not drive the path (not driven) |
+| N1 | done: `last_full_mark_start` for the regular grace trigger |
+| N2 | gc.md done (pressure table, "no collector interface changes", evidence history, the reversed sentence). **ADR-32 amendment and DESIGN section 11: not done, those files are not in this milestone's ownership; open for the lead** |
+| N3 | done: render tests (default prints nothing; non-default lines), `pass kinds` has its own line |
+| N4 | done |
+| N5 | `fast_recheck_always` is `#[doc(hidden)]`; the `#[serde(default)]` on `reclaim` is kept (the design asked for it) |
+| N6 | not done (grace ending during the recheck pass's own mark; fast passes resume after an abort; urgent in the middle of a recheck pass; file-set comparison) |
+| N7 | done: key table row and parse test for `destage_workers` (in the follow-up commit) |
+| N8 | as designed, no change; T6 should count `last_aborted` after urgent passes |
+
+The inherent case (mark >= 1.67 s: the regular pass always wins at an equal wait, `fast_passes` stays 0) is unchanged
+and documented in gc.md; `mark_ms` is on the pass-done line.

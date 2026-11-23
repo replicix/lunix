@@ -295,12 +295,20 @@ pub struct GcReclaimStats {
     /// Bytes recheck-only passes freed.
     pub fast_bytes_freed: u64,
     /// Sum, over the objects deleted by any pass kind, of the time between
-    /// the end of their grace and their delete, milliseconds.
+    /// the end of their grace (the grace their verdict used, and not before
+    /// the grace last changed) and their delete, milliseconds.
     pub recheck_lag_ms_sum: u64,
     /// The largest such time, milliseconds.
     pub recheck_lag_ms_max: u64,
     /// Objects the lag figures cover.
     pub recheck_lag_count: u64,
+    /// The same three figures for the objects recheck-only passes deleted
+    /// (the regular ones are the difference).
+    pub fast_lag_ms_sum: u64,
+    /// See `fast_lag_ms_sum`.
+    pub fast_lag_ms_max: u64,
+    /// See `fast_lag_ms_sum`.
+    pub fast_lag_count: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by

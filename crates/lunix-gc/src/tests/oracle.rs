@@ -155,6 +155,7 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                 after_pass(s, &format!("op {i} interleaved pass"))?;
             }
             Op::Crash(seed) => {
+                note_fast(s);
                 s.crash_reopen(seed).map_err(err)?;
                 s.check_roots()
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
@@ -229,6 +230,21 @@ pub(crate) fn check_quiescent(s: &mut Sim) -> Result<(), TestCaseError> {
     Ok(())
 }
 
+thread_local! {
+    /// Recheck-only passes and the segments they deleted, over the cases of
+    /// the test on this thread (a crash replaces the collector, so the
+    /// counters are taken before it).
+    static FAST: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+fn note_fast(s: &Sim) {
+    let r = s.gc.status().reclaim;
+    FAST.with(|f| {
+        let (p, d) = f.get();
+        f.set((p + r.fast_passes, d + r.fast_segments_deleted));
+    });
+}
+
 fn oracle(chunk_size: u32, id_len: IdLen, salt: u64) {
     oracle_with(chunk_size, id_len, salt, false);
 }
@@ -271,6 +287,7 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
             let mut s = Sim::new(cfg);
             total_passes.set(total_passes.get() + run_ops(&mut s, &ops)?);
             check_quiescent(&mut s)?;
+            note_fast(&s);
             let x = s.gc.totals();
             let mut t = totals.borrow_mut();
             t.segments_deleted += x.segments_deleted;
@@ -282,6 +299,14 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
             Ok(())
         })
         .unwrap();
+    let (fast_passes, fast_deleted) = FAST.with(std::cell::Cell::get);
+    eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
+    if fast {
+        assert!(
+            fast_passes > 0 && fast_deleted > 0,
+            "the fast oracle ran no recheck pass that deleted"
+        );
+    }
     eprintln!(
         "gc oracle: chunk {chunk_size}, id_len {id_len:?}: {cases} cases x {ops} ops, {} passes checked; deleted {} segments, {} packs, {} runs, {} commits; {} segments compacted",
         total_passes.get(),
