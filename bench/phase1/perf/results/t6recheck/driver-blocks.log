@@ -1,0 +1,20 @@
+== b1-off-65536-main arm=off gc_fast_recheck=false chunk=65536 cells=w4k,seqw load=0.01/1.96/6.89 at 2026-11-23T15:14:48Z
+== b1-off-65536-main done rc=0
+== b2-on-65536-main arm=on gc_fast_recheck=true chunk=65536 cells=w4k,seqw load=0.95/88.37/101.10 at 2026-11-23T15:27:32Z
+== b2-on-65536-main done rc=0
+== b3-on-65536-main arm=on gc_fast_recheck=true chunk=65536 cells=w4k,seqw load=0.93/95.80/142.87 at 2026-11-23T15:40:12Z
+== b3-on-65536-main done rc=0
+== b4-off-65536-main arm=off gc_fast_recheck=false chunk=65536 cells=w4k,seqw load=0.92/96.69/161.37 at 2026-11-23T15:52:53Z
+== b4-off-65536-main done rc=0
+== b5-off-16384-ctl arm=off gc_fast_recheck=false chunk=16384 cells=w4k load=0.94/96.93/169.52 at 2026-11-23T16:05:33Z
+== b5-off-16384-ctl done rc=0
+b6-on-16384-ctl: 1-minute load did not fall below 1 within 5 min; proceeding, recorded
+== b6-on-16384-ctl arm=on gc_fast_recheck=true chunk=16384 cells=w4k load=1.93/116.13/183.54 at 2026-11-23T16:17:18Z
+== b6-on-16384-ctl done rc=0
+b7-on-65536-zipf: 1-minute load did not fall below 1 within 5 min; proceeding, recorded
+== b7-on-65536-zipf arm=on gc_fast_recheck=true chunk=65536 cells=w4kz load=2.11/121.18/192.66 at 2026-11-23T16:29:02Z
+== b7-on-65536-zipf done rc=0
+b8-off-65536-zipf: 1-minute load did not fall below 1 within 5 min; proceeding, recorded
+== b8-off-65536-zipf arm=off gc_fast_recheck=false chunk=65536 cells=w4kz load=2.54/130.85/203.14 at 2026-11-23T16:39:53Z
+== b8-off-65536-zipf done rc=0
+== all blocks done 2026-11-23T16:45:42Z
