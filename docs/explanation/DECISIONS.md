@@ -2564,6 +2564,27 @@ Counting from `max(arrival, the gate's last exit from stop)` is a separate
 decision. Sizing GC to the ingest rate was tried, showed no gain in the M15
 cell, and is parked on `p1/gate-gc`.
 
+**Amendment (2026-11-23, `p1/pacea` and `p1/fastrecheck`; both keys off by
+default, the maintainer: "as you see fit").** Two additions, neither a
+format change. *Store-byte pacing* (`throttle_pace_store_bytes`): the gate
+projects the headroom a cut will use, `h_proj = headroom - (A - 1) × J`,
+with `J` the journal bytes not yet cut and `A` the store bytes per journal
+byte, estimated per cut (the byte-weighted mean of the last 8 cuts or the
+last cut, whichever is higher, clamped to 1-16, times
+`throttle_pace_store_margin_percent`, 115). The pace applies whenever
+`h_proj` is below the soft mark, also while the raw headroom is above it;
+the state and GC pressure still follow the raw headroom (DESIGN §4.3). The
+T6 A/B (`p1/pacea-t6`) cut 64 KiB stops from 41 to 6 in 10 repetitions,
+at 21 % lower IOPS; the first repetition after a fill still stalls, and
+that stall is GC's cold start, not the estimate. *A recheck-only GC pass*
+(`gc_fast_recheck`): while GC pressure is raised, a pass that marks,
+condemns and deletes, without compaction, runs `gc_fast_recheck_delay_ms`
+(1 s) after a condemned segment's grace ends, and when the grace shrinks
+to the floor at pressure onset. This changes the `Collector` trait by one
+defaulted method, `set_pressure`, which the GC duty bullet above said would
+not be needed. The delete rule is unchanged. Its T6 measurement is
+`p1/fastrecheck-t6`.
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |

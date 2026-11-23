@@ -1345,6 +1345,12 @@ mirrors (phase 5).
   its grace covers only in-flight cuts, destage and reads. It is never
   shorter than that. The same condemn, grace, recheck, delete order
   applies, and `epoch` is 0.
+- **Passes under pressure.** While GC pressure is raised (ADR-32), the
+  grace drops to the floor and, with `gc_fast_recheck` on, a recheck-only
+  pass (mark, condemn, delete, no compaction) runs about 1 s after a
+  condemned segment's grace ends, or at once when the grace shrinks.
+  Regular passes keep their own schedule, so compaction is not starved.
+  The delete rule is the same for every pass kind.
 - **Mark:** walk the maps of all GC roots (§8.7: retained commits, the
   tip's FULL plus DELTAs, snapshot, reader and clone-hold pins) and
   mark the trained dictionaries (ADR-30) that live extents reference, and
