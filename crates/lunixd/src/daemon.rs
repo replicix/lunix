@@ -955,6 +955,10 @@ impl Daemon {
         op.full_timeout = self.cfg.full_timeout;
         op.throttle = self.cfg.throttle;
         op.gc_pressure_rate_factor = self.cfg.gc_pressure_rate_factor;
+        op.gc_fast_recheck = self
+            .cfg
+            .gc_fast_recheck
+            .then_some(self.cfg.gc_fast_recheck_delay);
         if o.allow_unverifiable_fork {
             tracing::warn!(
                 volume = name,

@@ -38,6 +38,10 @@ pub mod mark;
 mod points;
 
 pub use collector::Gc;
+/// The most segments one index follow-up update covers (tests size their
+/// expectations by it).
+#[doc(hidden)]
+pub use collector::RETIRE_BATCH;
 pub use condemned::{CondemnedEntry, CondemnedList, ObjectRef};
 pub use config::{grace_floor, FloorSource, GcConfig, GcHooks, NoHooks};
 pub use evidence::Action;

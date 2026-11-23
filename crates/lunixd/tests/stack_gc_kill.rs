@@ -258,6 +258,8 @@ struct Spec {
     seed: u64,
     phase: String,
     progress: PathBuf,
+    /// The recheck-only arm (`GcConfig::fast_recheck`).
+    fast: bool,
 }
 
 impl Spec {
@@ -273,12 +275,13 @@ impl Spec {
             .map(|k| k.display().to_string())
             .unwrap_or_default();
         let s = format!(
-            "voldir={}\nmode={mode}\ncs={}\nkey_file={key}\nseed={}\nphase={}\nprogress={}\n",
+            "voldir={}\nmode={mode}\ncs={}\nkey_file={key}\nseed={}\nphase={}\nprogress={}\nfast={}\n",
             self.voldir.display(),
             self.cs,
             self.seed,
             self.phase,
-            self.progress.display()
+            self.progress.display(),
+            u8::from(self.fast)
         );
         std::fs::write(path, s).expect("write spec");
     }
@@ -301,6 +304,7 @@ impl Spec {
             seed: get("seed").parse().expect("seed"),
             phase: get("phase").to_owned(),
             progress: PathBuf::from(get("progress")),
+            fast: get("fast") == "1",
         }
     }
 }
@@ -316,16 +320,31 @@ fn gc_tune(c: &mut EngineConfig) {
 /// A pass every second, on the daemon's pipelined schedule
 /// (`GcConfig::daemon`, gcrate review M-2); `LUNIX_GC_PIPELINE=0` runs the
 /// whole sequence for every pass instead.
-fn fast_gc(o: &mut lunixd::stack::OpenParams) {
+///
+/// `recheck`: the recheck-only arm (milestone fastrecheck): recheck-only
+/// passes without waiting for pressure, between regular passes that come at
+/// most every 5 s, so the new point `gc.recheck.before_delete` and the
+/// deletes of such a pass are reached.
+fn fast_gc(o: &mut lunixd::stack::OpenParams, recheck: bool) {
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
     } else {
         GcConfig::daemon()
     };
-    o.gc = Some(GcConfig {
-        pass_interval: Duration::from_secs(1),
-        busy_interval: Duration::from_secs(1),
-        ..base
+    o.gc = Some(if recheck {
+        GcConfig {
+            pass_interval: Duration::from_secs(10),
+            busy_interval: Duration::from_secs(5),
+            fast_recheck: Some(Duration::from_secs(1)),
+            fast_recheck_always: true,
+            ..base
+        }
+    } else {
+        GcConfig {
+            pass_interval: Duration::from_secs(1),
+            busy_interval: Duration::from_secs(1),
+            ..base
+        }
     });
 }
 
@@ -353,8 +372,10 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
-fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File) {
-    let mut stack = vol.open_with(fast_gc).expect("child open");
+fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, recheck: bool) {
+    let mut stack = vol
+        .open_with(move |o| fast_gc(o, recheck))
+        .expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
     progress(prog, base, &d);
@@ -440,7 +461,9 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             Step::Reopen => {
                 drop(d);
                 drop(stack);
-                stack = vol.open_with(fast_gc).expect("child reopen");
+                stack = vol
+                    .open_with(move |o| fast_gc(o, recheck))
+                    .expect("child reopen");
                 d = Driver::new(&stack).expect("driver");
                 // Every request so far was recovered and synced.
                 bounds.fill(0);
@@ -516,8 +539,14 @@ fn gc_kill_child() {
         .open(&spec.progress)
         .expect("progress file");
     match spec.phase.as_str() {
-        "prep" => execute(&vol, &p.prep, 0, &mut prog),
-        _ => execute(&vol, &p.run, p.prep.iter().filter(is_op).count(), &mut prog),
+        "prep" => execute(&vol, &p.prep, 0, &mut prog, spec.fast),
+        _ => execute(
+            &vol,
+            &p.run,
+            p.prep.iter().filter(is_op).count(),
+            &mut prog,
+            spec.fast,
+        ),
     }
     lunix_iface::crashpoint::dump_counts().expect("dump counts");
 }
@@ -599,6 +628,7 @@ struct Config {
     mode: CryptoMode,
     cs: u32,
     seed: u64,
+    fast: bool,
 }
 
 struct Prepared {
@@ -620,6 +650,7 @@ fn prepare(cfg: &Config, dir: &Path) -> Prepared {
         seed: cfg.seed,
         phase: "prep".into(),
         progress: progress.clone(),
+        fast: cfg.fast,
     };
     match spawn_child(&spec, dir, Some(PREP_KILL)) {
         ChildEnd::Killed => {}
@@ -643,6 +674,7 @@ fn run_child(cfg: &Config, p: &Prepared, crash_at: Option<&str>) -> ChildEnd {
         seed: cfg.seed,
         phase: "run".into(),
         progress: p.progress.clone(),
+        fast: cfg.fast,
     };
     spawn_child(&spec, &p.dir, crash_at)
 }
@@ -685,7 +717,7 @@ const ALLOWED_IN_THE_WINDOW: &[&str] = &[
 ];
 /// Segments one delete step may leave recorded late: the collector's
 /// `RETIRE_BATCH`.
-const RETIRE_BATCH: usize = 256;
+use lunix_gc::RETIRE_BATCH;
 
 /// An id allocator for opening a copy of the index (the allocator is only
 /// asked to observe ids).
@@ -838,7 +870,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let stack = p
         .vol
         .open_with(|o| {
-            fast_gc(o);
+            fast_gc(o, cfg.fast);
             o.on_journal_damage = OnJournalDamage::Refuse;
         })
         .unwrap_or_else(|e| panic!("{what}: open after the kill (refuse): {e}"));
@@ -882,7 +914,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let stack = p
         .vol
         .open_with(|o| {
-            fast_gc(o);
+            fast_gc(o, cfg.fast);
             o.on_journal_damage = OnJournalDamage::Refuse;
         })
         .unwrap_or_else(|e| panic!("{what}: second open: {e}"));
@@ -946,25 +978,45 @@ fn settle_gc(stack: &lunixd::stack::VolumeStack, d: &mut Driver, actual: &[u8], 
 
 /// Registered GC points the workload does not reach. The urgent pass's own
 /// (`gc.urgent.after_mark`) is reached through the space ladder
-/// (`Step::Ladder`, M12c). Any unreached point fails the loop.
-const EXPECTED_UNREACHED: &[&str] = &[];
+/// (`Step::Ladder`, M12c). Any unreached point fails the loop. The recheck-only
+/// point is reached by the recheck arm only.
+const EXPECTED_UNREACHED: &[&str] = &["gc.recheck.before_delete"];
+/// What the recheck-only arm kills at: its own point and the deletes (which a
+/// recheck-only pass runs too).
+const RECHECK_ARM_POINTS: [&str; 3] = ["gc.recheck.", "gc.delete.", "gc.commit_delete."];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
+    kill_loop_with(mode, cs, false);
+}
+
+fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
     // fsck is part of every recovery check: a missing binary fails the loop.
     assert!(
         fsck_binary().is_some(),
         "lunix-fsck is not built: cargo build --release -p lunix-fsck"
     );
-    let all_hits = std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
-    let only: Vec<String> = std::env::var("LUNIX_KILL_POINTS")
-        .map(|v| v.split(',').map(str::to_owned).collect())
-        .unwrap_or_default();
+    // The recheck arm kills at the first, a middle and the last hit of its
+    // points, whatever `LUNIX_KILL_HITS` says.
+    let all_hits = fast || std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
+    let only: Vec<String> = if fast {
+        RECHECK_ARM_POINTS.iter().map(|p| (*p).to_owned()).collect()
+    } else {
+        std::env::var("LUNIX_KILL_POINTS")
+            .map(|v| v.split(',').map(str::to_owned).collect())
+            .unwrap_or_default()
+    };
     let cfg = Config {
         mode,
         cs,
-        seed: 0x6c17_0000 ^ u64::from(cs) ^ ((mode as u64) << 40),
+        seed: 0x6c17_0000 ^ u64::from(cs) ^ ((mode as u64) << 40) ^ (u64::from(fast) << 48),
+        fast,
     };
-    let tag = format!("m17b-gckill-{mode:?}-{}k", cs >> 10).to_lowercase();
+    let tag = format!(
+        "m17b-gckill-{}{mode:?}-{}k",
+        if fast { "recheck-" } else { "" },
+        cs >> 10
+    )
+    .to_lowercase();
     let t = Scratch::new(&tag);
     let started = Instant::now();
     let mut tally = Tally::default();
@@ -1052,6 +1104,10 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
     for (point, hits) in &killed {
         let c = counts[*point];
         let want = if all_hits { c.min(3) } else { 1 };
+        // The recheck-only point's hit count moves with the timing (2 to 5):
+        // a run that finds fewer hits is retried at its own last, so the
+        // first, a middle and the last of a count that varies collapse.
+        let want = if fast { want.min(2) } else { want };
         assert!(
             hits.len() as u64 >= want.min(c),
             "{point}: killed at {hits:?} of {c} hits"
@@ -1062,6 +1118,12 @@ fn kill_loop(mode: CryptoMode, cs: u32) {
         .filter(|p| counts.get(**p).copied().unwrap_or(0) > 0 && !killed.contains_key(**p))
         .collect();
     assert!(missing.is_empty(), "reached but never killed: {missing:?}");
+    if fast {
+        assert!(
+            reached.contains_key("gc.recheck.before_delete"),
+            "the recheck-only pass was never run: {reached:?}"
+        );
+    }
     if only.is_empty() {
         let unexpected: Vec<&&str> = unreached
             .iter()
@@ -1102,4 +1164,22 @@ fn gc_kill_loop_encrypted_16k() {
 #[test]
 fn gc_kill_loop_encrypted_64k() {
     kill_loop(CryptoMode::Encrypted, 64 << 10);
+}
+
+/// The recheck-only arm: `GcConfig::fast_recheck` with
+/// `fast_recheck_always`, killed at `gc.recheck.before_delete` and the
+/// delete points (milestone fastrecheck).
+#[test]
+fn gc_kill_loop_recheck_plain_16k() {
+    kill_loop_with(CryptoMode::Plain, 16 << 10, true);
+}
+
+#[test]
+fn gc_kill_loop_recheck_plain_64k() {
+    kill_loop_with(CryptoMode::Plain, 64 << 10, true);
+}
+
+#[test]
+fn gc_kill_loop_recheck_integrity_16k() {
+    kill_loop_with(CryptoMode::Integrity, 16 << 10, true);
 }

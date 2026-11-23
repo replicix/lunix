@@ -10,7 +10,7 @@ use lunix_format::{ExtentKind, IdLen, SegId};
 use lunix_iface::crypto::ExtentCodec;
 use lunix_iface::gc::GcState;
 use lunix_iface::index::ChunkIndex;
-use lunix_iface::store::SegmentStore;
+use lunix_iface::store::{GcStateStore, SegmentStore};
 
 use super::oracle::check_quiescent;
 use super::sim::{data_of, Sim, SimCfg, GRACE};
@@ -323,4 +323,112 @@ fn rechecks_uncondemn_their_segments_in_one_update() {
     assert_eq!(s.index.single_calls(), 0);
     s.check_roots().unwrap();
     s.check_ledger().unwrap();
+}
+
+/// R1 (crash order of the batched un-condemn): the flags are cleared first,
+/// the list stored second. A failure of the list write (here with its retry
+/// at the abort) leaves the live segments **listed and unflagged**; a
+/// reopened volume re-flags them with a fresh grace in the next pass's
+/// `reconcile`, and the next recheck un-condemns them again. Swapping the two
+/// steps leaves them listed *and flagged* at the failure (no flag update was
+/// made), which this test rejects.
+fn uncondemn_with_a_failing_list_write(reopen: bool) {
+    let mut hit = 0;
+    for nth in 1..=8u64 {
+        let mut s = sim(64, true);
+        s.cfg.gc.pass_interval = Duration::from_secs(1);
+        let old = make_dead(&mut s, 5);
+        for _ in 0..4 {
+            s.commit().unwrap();
+        }
+        s.clock.advance(Duration::from_secs(5));
+        let listed = |s: &Sim| {
+            old.iter()
+                .all(|g| s.gc.condemned().contains(&ObjectRef::Segment(*g)))
+        };
+        for _ in 0..100_000 {
+            let p = s.unit().unwrap();
+            if p.state == GcState::Condemning && listed(&s) {
+                break;
+            }
+            assert!(!p.done);
+        }
+        // A dedup hit on the five listed segments, between mark and flags.
+        for i in 0..5 {
+            s.write(20 + i, 1_000 + i);
+        }
+        s.commit().unwrap();
+        for _ in 0..100_000 {
+            let p = s.unit().unwrap();
+            if p.done || p.state == GcState::Idle {
+                break;
+            }
+        }
+        assert_eq!(s.index.condemned().unwrap().len(), 5);
+        s.clock.advance(GRACE + Duration::from_secs(1));
+        for i in 0..5 {
+            s.write(40 + i, 9_000 + i);
+        }
+        s.commit().unwrap();
+        // The list write fails from its `nth` call on, twice: the flush and
+        // the abort's retry.
+        s.arm_fault("condemned.store.before", nth, false);
+        s.arm_fault("condemned.store.before", nth + 1, false);
+        let failed = s.pass().is_err();
+        s.disarm_faults();
+        if !failed || s.index.uncondemn_calls() != 1 {
+            continue;
+        }
+        hit += 1;
+        // The flags were cleared; the list on disk still names the segments.
+        assert!(
+            s.index.condemned().unwrap().is_empty(),
+            "flags cleared first"
+        );
+        let stored = s.store.load_condemned().unwrap().expect("a list");
+        let on_disk = crate::condemned::CondemnedList::from_file(&stored).unwrap();
+        for g in &old {
+            assert!(
+                on_disk.entries.contains_key(&ObjectRef::Segment(*g)),
+                "{g:?} is still listed on disk: listed and unflagged"
+            );
+            assert!(segs(&s).contains(g), "the live segment exists");
+        }
+        if reopen {
+            s.crash_reopen(nth).unwrap();
+        }
+        // The next pass re-flags (reopen) or rewrites the list (no reopen),
+        // and the segments survive every recheck.
+        for _ in 0..4 {
+            s.clock.advance(GRACE * 2);
+            s.commit().unwrap();
+            s.pass().unwrap();
+        }
+        assert!(old.iter().all(|g| segs(&s).contains(g)), "all five kept");
+        assert!(s.index.condemned().unwrap().is_empty(), "flags cleared");
+        let stored = s.store.load_condemned().unwrap();
+        let on_disk = stored
+            .as_ref()
+            .and_then(crate::condemned::CondemnedList::from_file)
+            .unwrap_or_default();
+        for g in &old {
+            assert!(
+                !on_disk.entries.contains_key(&ObjectRef::Segment(*g)),
+                "{g:?} left the stored list"
+            );
+        }
+        s.check_roots().unwrap();
+        s.check_ledger().unwrap();
+        assert_index_consistent(&s, "after the un-condemn recovered");
+    }
+    assert!(
+        hit >= 1,
+        "no run failed the list write after the flag update"
+    );
+}
+
+#[test]
+fn a_failed_list_write_after_the_uncondemn_flags_leaves_them_listed_and_unflagged() {
+    uncondemn_with_a_failing_list_write(true);
+    uncondemn_with_a_failing_list_write(false);
 }

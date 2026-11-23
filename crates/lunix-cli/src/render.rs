@@ -452,5 +452,29 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             format_bytes(g.stats.live_bytes),
             format_bytes(g.stats.dead_bytes)
         ),
-    )
+    )?;
+    let r = &g.reclaim;
+    if r.fast_passes > 0 {
+        kv(
+            out,
+            "recheck-only",
+            &format!(
+                "{} passes, {} segments deleted, {} freed",
+                r.fast_passes,
+                r.fast_segments_deleted,
+                format_bytes(r.fast_bytes_freed)
+            ),
+        )?;
+    }
+    if let Some(mean) = r.recheck_lag_ms_sum.checked_div(r.recheck_lag_count) {
+        kv(
+            out,
+            "recheck lag",
+            &format!(
+                "mean {mean} ms, max {} ms over {} deletes ({} regular passes)",
+                r.recheck_lag_ms_max, r.recheck_lag_count, r.regular_passes
+            ),
+        )?;
+    }
+    Ok(())
 }

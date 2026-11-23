@@ -82,6 +82,7 @@ fn sweep(
     id_len: IdLen,
     workloads: u64,
     pipeline: bool,
+    fast: bool,
 ) -> BTreeMap<&'static str, u64> {
     let mut hits: BTreeMap<&'static str, u64> = BTreeMap::new();
     for (pi, &point) in CRASH_POINTS.iter().enumerate() {
@@ -89,6 +90,15 @@ fn sweep(
             let mut z = (pi as u64) << 32 | w;
             let mut cfg = SimCfg::new(chunk_size, id_len);
             cfg.gc.pipeline = pipeline;
+            if fast {
+                // Recheck-only passes between the regular ones: the regular
+                // schedule is slow enough (20 s) for the sweep's 9 s steps
+                // to find a grace that ended before it.
+                cfg.gc.pass_interval = Duration::from_secs(30);
+                cfg.gc.busy_interval = Duration::from_secs(20);
+                cfg.gc.fast_recheck = Some(Duration::from_secs(1));
+                cfg.gc.fast_recheck_always = true;
+            }
             let mut s = Sim::new(cfg);
             s.hooks.arm(point, 1 + w % 3);
             let mut crashed = None;
@@ -131,21 +141,24 @@ fn sweep(
 }
 
 fn check(chunk_size: u32, id_len: IdLen) {
-    check_with(chunk_size, id_len, false);
+    check_with(chunk_size, id_len, false, false);
 }
 
-fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool) {
+fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool, fast: bool) {
     let workloads = std::env::var("LUNIX_GC_CRASH_WORKLOADS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let hits = sweep(chunk_size, id_len, workloads, pipeline);
+    let hits = sweep(chunk_size, id_len, workloads, pipeline, fast);
     eprintln!(
-        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}: {hits:?}"
+        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}, fast {fast}: {hits:?}"
     );
     for p in CRASH_POINTS {
         let needed = if id_len == IdLen::Zero && p.starts_with("gc.compact.") {
             // Lean volumes never compact.
+            0
+        } else if p.starts_with("gc.recheck.") && !fast {
+            // Only a recheck-only pass reaches it.
             0
         } else {
             5
@@ -177,15 +190,32 @@ fn every_crash_point_lean() {
 /// delete with their condemn mark as the recheck.
 #[test]
 fn every_crash_point_pipelined_16k() {
-    check_with(16 << 10, IdLen::Sixteen, true);
+    check_with(16 << 10, IdLen::Sixteen, true, false);
 }
 
 #[test]
 fn every_crash_point_pipelined_64k() {
-    check_with(64 << 10, IdLen::ThirtyTwo, true);
+    check_with(64 << 10, IdLen::ThirtyTwo, true, false);
 }
 
 #[test]
 fn every_crash_point_pipelined_lean() {
-    check_with(16 << 10, IdLen::Zero, true);
+    check_with(16 << 10, IdLen::Zero, true, false);
+}
+
+/// The recheck-only passes (milestone fastrecheck): the point
+/// `gc.recheck.before_delete` and every delete point inside such a pass.
+#[test]
+fn every_crash_point_with_recheck_passes_16k() {
+    check_with(16 << 10, IdLen::Sixteen, true, true);
+}
+
+#[test]
+fn every_crash_point_with_recheck_passes_64k() {
+    check_with(64 << 10, IdLen::ThirtyTwo, true, true);
+}
+
+#[test]
+fn every_crash_point_with_recheck_passes_lean() {
+    check_with(16 << 10, IdLen::Zero, true, true);
 }

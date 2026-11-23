@@ -27,6 +27,7 @@ use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::coord::Coord;
 use crate::engine::{lock, stopped, Inner};
+use crate::pressure::Pressure;
 use crate::recover::high_water;
 
 /// The pause of a requested pass between two steps that did work: the other
@@ -128,6 +129,9 @@ impl Inner {
             clock: &*self.clock,
             params,
         };
+        // The level of the last tick (it already carries the 5 s hold, so the
+        // flag does not flap): the collector may run recheck-only passes.
+        collector.set_pressure(self.pressure_now() != Pressure::Normal);
         let r = f(&mut **collector, &view);
         if r.is_err() {
             // Moves a failed call sealed before it failed reach the next cut

@@ -41,6 +41,8 @@
 //! | `throttle_max_delay_ms` | 10000 | the longest one request is delayed by pacing; 10 ..= `full_timeout_ms` |
 //! | `throttle_pace_store_bytes` | `false` | P1': pace the band in store bytes. The engine measures, per cut, the store bytes (segments, map packs, commit) each journal byte became (`A_hat`, 1 to 16, 2.0 before the first cut); the pace is then the curve at the projected headroom `headroom - (A_hat - 1) * J` (`J`: journal bytes not yet cut, the cut in flight left out) divided by `A_hat`, never below `throttle_min_rate`, through the same bucket and delay cap. It applies whenever the projected headroom is below the soft mark, so it starts above the raw soft mark too; the throttle state (`open` there), the pressure level and the soft mark stay on the raw headroom. `delay_capped` can rise on large-block loads (the floor is reached early). `false`: the plain curve, unchanged and without extra work; nothing is sent to the gate |
 //! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent (too low an `A_hat` costs far more than too high a one); 100 ..= 300. The status (`write_path.store_*`, `throttle.rate`) reports both and, above the soft mark, `store_paced_above_soft`, `store_above_soft_ms` and `store_delayed_*` |
+//! | `gc_fast_recheck` | `false` | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
+//! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -137,6 +139,10 @@ pub struct DaemonConfig {
     pub throttle: lunix_space::ThrottleConfig,
     /// The compaction rate's multiple while writes are slowed.
     pub gc_pressure_rate_factor: u64,
+    /// Recheck-only GC passes under pressure (`gc_fast_recheck`).
+    pub gc_fast_recheck: bool,
+    /// The delay of those passes (`gc_fast_recheck_delay_ms`).
+    pub gc_fast_recheck_delay: Duration,
 }
 
 /// Most destage worker threads the config accepts.
@@ -174,6 +180,8 @@ impl Default for DaemonConfig {
             store_max_percent: 200,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
+            gc_fast_recheck: false,
+            gc_fast_recheck_delay: Duration::from_secs(1),
         }
     }
 }
@@ -461,6 +469,14 @@ impl DaemonConfig {
                 }
                 self.gc_pressure_rate_factor = f;
             }
+            "gc_fast_recheck" => self.gc_fast_recheck = b(v)?,
+            "gc_fast_recheck_delay_ms" => {
+                let t = n(v)?;
+                if !(100..=10_000).contains(&t) {
+                    return Err("gc_fast_recheck_delay_ms must be 100 to 10000".into());
+                }
+                self.gc_fast_recheck_delay = Duration::from_millis(t);
+            }
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())
@@ -647,6 +663,24 @@ volume_roots = "/a, /b"
         assert!(
             DaemonConfig::parse("throttle_max_delay_ms = 61000\nfull_timeout_ms = 120000").is_ok()
         );
+    }
+
+    #[test]
+    fn the_fast_recheck_keys_parse_and_are_validated() {
+        let d = DaemonConfig::default();
+        assert!(!d.gc_fast_recheck, "off by default");
+        assert_eq!(d.gc_fast_recheck_delay, Duration::from_secs(1));
+        let c = DaemonConfig::parse("gc_fast_recheck = true\ngc_fast_recheck_delay_ms = 250\n")
+            .unwrap();
+        assert!(c.gc_fast_recheck);
+        assert_eq!(c.gc_fast_recheck_delay, Duration::from_millis(250));
+        for bad in [
+            "gc_fast_recheck = 1",
+            "gc_fast_recheck_delay_ms = 99",
+            "gc_fast_recheck_delay_ms = 10001",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

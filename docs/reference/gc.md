@@ -65,6 +65,24 @@ still runs the whole sequence: condemn, grace, recheck, delete. The
 collector's default (`GcConfig::default`, which the tests and the offline
 `fsck --repair --gc` use) is the whole sequence for every pass.
 
+**Recheck-only passes** (`gc_fast_recheck`, off by default; `GcConfig::fast_recheck`).
+While the engine reports pressure (the gate paces or holds writes; the engine
+tells the collector before every call, `Collector::set_pressure`) and a listed
+object's grace has ended, a third kind of pass does not wait for the regular
+schedule: after `gc_fast_recheck_delay_ms` (1 s) from the end of the previous pass
+(and three times that pass's mark) it runs mark, condemn, delete and ends. The
+delete rule is the pipelined pass's, unchanged: only objects whose grace ended
+before this pass's mark began are deleted (`recheck_verdict`), and it still
+condemns what its mark finds dead. It does no compaction. It does not move the
+regular schedule: the regular triggers (new tip, changed pins, grace end) are
+measured from the end of the last regular pass, a recheck-only pass leaves the
+"new tip" and "changed" triggers alone, and it never starts a regular pass
+closer than three times its mark. A regular pass that is due wins over a
+recheck-only one. After an abandoned pass recheck-only passes wait for a regular
+one. A requested pass is always the whole sequence. `lunix gc --status` shows
+`recheck-only` passes, the segments and bytes they freed, and the recheck lag
+(time from the end of a grace to the delete, every pass kind).
+
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
 
@@ -235,8 +253,9 @@ their map roots are not roots, so their data may go.
    high-water mark, or an unnamed output) is un-condemned: it leaves the list in
    memory, and at the end of the step the flags of all the segments so
    un-condemned are cleared in one index update and the list is stored once (the
-   flags first: a crash in between leaves a live segment flagged and listed,
-   which the next recheck un-condemns again).
+   flags first: a crash in between leaves a live segment listed and unflagged,
+   which the next pass's `reconcile` flags again with a fresh grace and the next
+   recheck un-condemns again).
 4. **Delete.** Unlink and directory `fsync` in the store, the ledger
    `release` of the bytes freed. The index follow-up of the deleted segments
    is queued and made in one durable update (`retire_segments`: the entries
@@ -425,6 +444,7 @@ count in `bytes`.
 | `gc.mark.end` | the mark is complete (nothing durable yet) |
 | `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
+| `gc.recheck.before_delete` | a recheck-only pass: its condemn units are done, nothing deleted by this pass yet (the deletes hit the `gc.delete.*` points) |
 | `gc.delete.before_unlink` | nothing deleted |
 | `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of this segment and of the segments unlinked since the last index update (those of one step, up to 256): `catch_up` drops them at open, a later pass removes the list entry |
 | `gc.delete.after_dirsync` | the ledger is updated and the object's index follow-up is queued (see `gc.delete.after_unlink`); the list still names the object until the end of the delete phase (an un-condemn is stored at once) |

@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use lunix_format::IdLen;
+use lunix_iface::gc::Collector;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
@@ -33,6 +34,7 @@ enum Op {
     InterleavedPass(u64),
     Urgent(u32),
     Crash(u64),
+    Pressure(bool),
     Faulty(u8, u8, bool, u8),
 }
 
@@ -96,6 +98,7 @@ fn op() -> impl Strategy<Value = Op> {
         4 => any::<u64>().prop_map(Op::InterleavedPass),
         2 => (1u32..64).prop_map(Op::Urgent),
         1 => any::<u64>().prop_map(Op::Crash),
+        3 => any::<bool>().prop_map(Op::Pressure),
         4 => (any::<u8>(), 1u8..6, any::<bool>(), 1u8..16)
             .prop_map(|(p, n, ns, k)| Op::Faulty(p, n, ns, k)),
     ]
@@ -156,6 +159,7 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                 s.check_roots()
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
             }
+            Op::Pressure(raised) => s.gc.set_pressure(raised),
             Op::Faulty(p, nth, nospace, steps) => {
                 faulty_steps(s, usize::from(p), u64::from(nth), nospace, steps)
                     .map_err(|e| fail(format!("op {i}: {e}")))?;
@@ -226,6 +230,12 @@ pub(crate) fn check_quiescent(s: &mut Sim) -> Result<(), TestCaseError> {
 }
 
 fn oracle(chunk_size: u32, id_len: IdLen, salt: u64) {
+    oracle_with(chunk_size, id_len, salt, false);
+}
+
+/// `fast`: the daemon's pipelined schedule with recheck-only passes
+/// (`fast_recheck`), the pressure toggled by the workload.
+fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
     let cases = env("LUNIX_GC_CASES", 48);
     let ops = env("LUNIX_GC_OPS", 300) as usize;
     let mut runner = TestRunner::new(Config {
@@ -250,6 +260,14 @@ fn oracle(chunk_size: u32, id_len: IdLen, salt: u64) {
                 MapKind::Flat
             };
             cfg.encrypted = encrypted && variant == 1;
+            if fast {
+                cfg.gc = crate::config::GcConfig {
+                    pass_interval: Duration::from_secs(30),
+                    busy_interval: Duration::from_secs(20),
+                    fast_recheck: Some(Duration::from_secs(1)),
+                    ..crate::config::GcConfig::daemon()
+                };
+            }
             let mut s = Sim::new(cfg);
             total_passes.set(total_passes.get() + run_ops(&mut s, &ops)?);
             check_quiescent(&mut s)?;
@@ -298,4 +316,16 @@ fn oracle_64k_id16() {
 #[test]
 fn oracle_lean_id0() {
     oracle(16 << 10, IdLen::Zero, 5);
+}
+
+/// Recheck-only passes under random pressure: every root reads, the ledger
+/// equals the files, and the volume converges to the quiescent state.
+#[test]
+fn oracle_fast_recheck_16k_id16() {
+    oracle_with(16 << 10, IdLen::Sixteen, 6, true);
+}
+
+#[test]
+fn oracle_fast_recheck_64k_id32() {
+    oracle_with(64 << 10, IdLen::ThirtyTwo, 7, true);
 }

@@ -24,8 +24,11 @@ const MIB: u64 = 1 << 20;
 
 type Seen = Arc<Mutex<Vec<(GcBudget, GcParams)>>>;
 
+/// What `Collector::set_pressure` was told before each collector call.
+type Flags = Arc<Mutex<Vec<bool>>>;
+
 /// Records the budget and the params of every step; never has work.
-struct Recorder(Seen);
+struct Recorder(Seen, Flags);
 
 impl Collector for Recorder {
     fn step(&mut self, view: &GcView<'_>, b: GcBudget) -> Result<GcProgress> {
@@ -63,6 +66,10 @@ impl Collector for Recorder {
     fn stats(&self) -> GcStats {
         GcStats::default()
     }
+
+    fn set_pressure(&mut self, raised: bool) {
+        self.1.lock().unwrap().push(raised);
+    }
 }
 
 fn gc_on(cfg: &mut lunix_engine::EngineConfig) {
@@ -94,12 +101,18 @@ fn short_grace(cfg: &mut lunix_engine::EngineConfig) {
     }
 }
 
-fn setup_with(tweak: fn(&mut lunix_engine::EngineConfig)) -> (Vol, Running, Seen) {
+fn setup_flags(tweak: fn(&mut lunix_engine::EngineConfig)) -> (Vol, Running, Seen, Flags) {
     let mut v = Vol::create(CS, 64, 1, JournalMode::Mixed(5));
     v.tweak = tweak;
     let seen: Seen = Arc::default();
-    *lock(&v.collector) = Some(Box::new(Recorder(Arc::clone(&seen))));
+    let flags: Flags = Arc::default();
+    *lock(&v.collector) = Some(Box::new(Recorder(Arc::clone(&seen), Arc::clone(&flags))));
     let r = v.open().map_err(|e| e.0).expect("open");
+    (v, r, seen, flags)
+}
+
+fn setup_with(tweak: fn(&mut lunix_engine::EngineConfig)) -> (Vol, Running, Seen) {
+    let (v, r, seen, _) = setup_flags(tweak);
     (v, r, seen)
 }
 
@@ -258,4 +271,28 @@ fn a_volume_resting_in_the_band_with_no_writer_loses_its_pressure() {
     r.space.set_throttle_idle(false);
     step(&r, &seen);
     assert_eq!(r.engine.gc_pressure(), Pressure::Raised);
+}
+
+/// The engine tells the collector, before each of its calls, whether the
+/// pressure level is raised or urgent: the level of the step's own params,
+/// with the 5 s hold (fastrecheck).
+#[test]
+fn the_collector_is_told_the_pressure_before_every_step() {
+    let (v, r, seen, flags) = setup_flags(gc_on);
+    let told = |n: usize| flags.lock().unwrap().get(n).copied();
+    step(&r, &seen);
+    assert_eq!(told(0), Some(false));
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    step(&r, &seen);
+    assert_eq!(told(1), Some(true), "raised");
+    r.space.set_throttle_state(ThrottleState::Stop);
+    step(&r, &seen);
+    assert_eq!(told(2), Some(true), "urgent");
+    r.space.set_throttle_state(ThrottleState::Open);
+    step(&r, &seen);
+    assert_eq!(told(3), Some(true), "held after the stop");
+    v.clock.advance(Duration::from_secs(5));
+    step(&r, &seen);
+    assert_eq!(told(4), Some(false), "5 s after it opened");
+    assert_eq!(flags.lock().unwrap().len(), 5, "one call per step");
 }
