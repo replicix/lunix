@@ -325,7 +325,14 @@ fn gc_tune(c: &mut EngineConfig) {
 /// passes without waiting for pressure, between regular passes that come at
 /// most every 5 s, so the new point `gc.recheck.before_delete` and the
 /// deletes of such a pass are reached.
+///
+/// Every arm runs with `gc_condemn_on_cut = shadow` and `gc_fast_recheck` on
+/// (milestone refs: the configuration the condemn-on-cut stage will ship
+/// with); the plain arms see no pressure, so their recheck-only passes only
+/// run in the recheck arm, which forces them.
 fn fast_gc(o: &mut lunixd::stack::OpenParams, recheck: bool) {
+    o.gc_condemn_on_cut = lunix_engine::CondemnOnCut::Shadow;
+    o.gc_fast_recheck = Some(Duration::from_secs(1));
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
     } else {
@@ -372,6 +379,16 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
+/// The reference table of the shadow mode matched every mark so far.
+fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
+    let t = *stack.engine.gc_status_handle().get().refs;
+    assert_eq!(t.drift_segments, 0, "{what}: refs_drift_segments: {t:?}");
+    assert_eq!(
+        t.report_mismatches, 0,
+        "{what}: refs report mismatches: {t:?}"
+    );
+}
+
 fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, recheck: bool) {
     let mut stack = vol
         .open_with(move |o| fast_gc(o, recheck))
@@ -459,6 +476,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             }
             Step::Ladder => run_ladder(&stack),
             Step::Reopen => {
+                assert_refs_clean(&stack, "child before a reopen");
                 drop(d);
                 drop(stack);
                 stack = vol
@@ -472,6 +490,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
         }
     }
     progress(prog, n, &d);
+    assert_refs_clean(&stack, "child at the end");
     drop(d);
     close(stack).expect("child close");
     writeln!(prog, "{n} 0").expect("progress");
@@ -909,6 +928,15 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
     assert!(back == actual, "{what}: read-back after recovery differs");
     settle_gc(&stack, &mut d, &actual, what);
+    // Recovery: the table was rebuilt from the first mark and matched every
+    // later one.
+    let t = *stack.engine.gc_status_handle().get().refs;
+    assert_eq!(
+        t.state,
+        lunix_iface::gc::RefsState::Ready,
+        "{what}: no mark rebased the table after recovery: {t:?}"
+    );
+    assert_refs_clean(&stack, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let stack = p
@@ -928,6 +956,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     );
     // GC finishes what the close's commit left, then the close cuts nothing.
     settle_gc(&stack, &mut d, &actual, what);
+    assert_refs_clean(&stack, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let r = p.vol.check().expect("store self-check runs");

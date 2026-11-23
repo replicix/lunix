@@ -44,6 +44,7 @@
 //! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent (too low an `A_hat` costs far more than too high a one); 100 ..= 300. The status (`write_path.store_*`, `throttle.rate`) reports both and, above the soft mark, `store_paced_above_soft`, `store_above_soft_ms` and `store_delayed_*` |
 //! | `gc_fast_recheck` | `false` | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
 //! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
+//! | `gc_condemn_on_cut` | `off` | `off` or `shadow`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `off`: no table, no extra work |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -53,7 +54,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use lunix_engine::OnJournalDamage;
+use lunix_engine::{CondemnOnCut, OnJournalDamage};
 
 /// Smallest `journal_resident_max`: two maximal journal batches.
 pub const MIN_RESIDENT_MAX: u64 = 2 << 20;
@@ -144,6 +145,8 @@ pub struct DaemonConfig {
     pub gc_fast_recheck: bool,
     /// The delay of those passes (`gc_fast_recheck_delay_ms`).
     pub gc_fast_recheck_delay: Duration,
+    /// The engine's per-segment reference table (`gc_condemn_on_cut`).
+    pub gc_condemn_on_cut: CondemnOnCut,
 }
 
 /// Most destage worker threads the config accepts.
@@ -183,6 +186,7 @@ impl Default for DaemonConfig {
             gc_pressure_rate_factor: 4,
             gc_fast_recheck: false,
             gc_fast_recheck_delay: Duration::from_secs(1),
+            gc_condemn_on_cut: CondemnOnCut::Off,
         }
     }
 }
@@ -478,6 +482,13 @@ impl DaemonConfig {
                 }
                 self.gc_fast_recheck_delay = Duration::from_millis(t);
             }
+            "gc_condemn_on_cut" => {
+                self.gc_condemn_on_cut = match s(v)?.as_str() {
+                    "off" => CondemnOnCut::Off,
+                    "shadow" => CondemnOnCut::Shadow,
+                    other => return Err(format!("unknown gc_condemn_on_cut {other:?}")),
+                };
+            }
             other => return Err(format!("unknown key {other:?}")),
         }
         Ok(())
@@ -693,6 +704,26 @@ volume_roots = "/a, /b"
             "gc_fast_recheck = 1",
             "gc_fast_recheck_delay_ms = 99",
             "gc_fast_recheck_delay_ms = 10001",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn gc_condemn_on_cut_parses_off_and_shadow_only() {
+        assert_eq!(
+            DaemonConfig::default().gc_condemn_on_cut,
+            CondemnOnCut::Off,
+            "off by default"
+        );
+        let c = DaemonConfig::parse("gc_condemn_on_cut = \"shadow\"\n").unwrap();
+        assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::Shadow);
+        let c = DaemonConfig::parse("gc_condemn_on_cut = \"off\"\n").unwrap();
+        assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::Off);
+        for bad in [
+            "gc_condemn_on_cut = \"on\"",
+            "gc_condemn_on_cut = true",
+            "gc_condemn_on_cut = shadow",
         ] {
             assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
         }

@@ -66,7 +66,7 @@ use lunix_format::local::RollbackFloor;
 use lunix_format::{CommitSeq, ObjId, SegId};
 use lunix_iface::gc::{
     Collector, GcBudget, GcPassSummary, GcProgress, GcReclaimStats, GcState, GcStats,
-    GcStatusSnapshot, GcView, Moved,
+    GcStatusSnapshot, GcView, MarkCondemned, Moved, TipRefs,
 };
 use lunix_iface::space::SpaceKind;
 use lunix_iface::{Error, ErrorKind, Result};
@@ -635,6 +635,15 @@ pub struct Gc {
     last_full_end: Option<Duration>,
     /// Reclaim counters ([`GcReclaimStats`]).
     reclaim: GcReclaimStats,
+    /// The tip a mark pinned its roots at, until the engine takes it
+    /// ([`Collector::take_mark_started`]).
+    mark_started: Option<CommitSeq>,
+    /// The tip root's entry counts of a finished mark, until the engine takes
+    /// them ([`Collector::take_tip_refs`]).
+    tip_refs: Option<TipRefs>,
+    /// The segments a mark found dead, until the engine takes them
+    /// ([`Collector::take_mark_condemned`]).
+    mark_condemned: Option<MarkCondemned>,
     /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
     /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
@@ -742,6 +751,9 @@ impl Gc {
             pressure: false,
             last_full_end: None,
             reclaim: GcReclaimStats::default(),
+            mark_started: None,
+            tip_refs: None,
+            mark_condemned: None,
             last_pass_busy: false,
             last_mark: Duration::ZERO,
             last_aborted: false,
@@ -769,6 +781,7 @@ impl Gc {
             last_finished_ms: self.last_finished_ms,
             requests: 0,
             reclaim: Box::new(self.reclaim),
+            refs: Box::default(),
         }
     }
 
@@ -808,6 +821,16 @@ impl Gc {
     /// Units of work done so far (tests).
     pub fn units(&self) -> u64 {
         self.unit_count
+    }
+
+    /// The kind of the pass in progress, or of the last one (tests).
+    #[cfg(test)]
+    pub(crate) fn pass_kind(&self) -> &'static str {
+        match self.kind {
+            PassKind::Whole => "whole",
+            PassKind::Pipelined => "pipelined",
+            PassKind::Recheck => "recheck",
+        }
     }
 
     /// Where the pass is (the evidence write at the end reports as
@@ -1098,9 +1121,12 @@ impl Gc {
     }
 
     /// A recheck-only pass is due: under pressure (or `fast_recheck_always`),
-    /// the delay since the end of the last pass (and three times its mark)
-    /// has passed, and a listed object's grace ended, plus the delay, after
-    /// the last mark began (so its delete is waiting for a mark).
+    /// at least three times the last mark (the duty cap) has passed since the
+    /// end of the last pass, and a listed object's grace ended at least the
+    /// delay ago, after the last mark began (so its delete is waiting for a
+    /// mark; a grace that shrank at the onset of pressure counts at once).
+    /// The delay is counted from the end of the grace, not from the end of
+    /// the last pass.
     fn fast_due(&self, view: &GcView<'_>, now: Duration) -> bool {
         let Some(delay) = self.cfg.fast_recheck else {
             return false;
@@ -1376,9 +1402,12 @@ impl Gc {
                 Flow::Continue
             }
             Phase::Marking(mut m) => {
-                if m.unit(view)? {
+                let done = m.unit(view)?;
+                self.mark_started = m.take_init_tip().or(self.mark_started);
+                if done {
                     point!(self.points, "gc.mark.end");
                     let l = m.into_liveness();
+                    self.note_mark(&l);
                     self.after_mark(&l);
                     let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
                     self.facts(view)?;
@@ -1391,6 +1420,7 @@ impl Gc {
                         .dead(&self.list, room),
                         None => Vec::new(),
                     };
+                    self.note_dead(&l, &todo);
                     let started = l.started;
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
@@ -1486,8 +1516,11 @@ impl Gc {
                 }
             }
             Phase::Rechecking(mut m) => {
-                if m.unit(view)? {
+                let done = m.unit(view)?;
+                self.mark_started = m.take_init_tip().or(self.mark_started);
+                if done {
                     let l = m.into_liveness();
+                    self.note_mark(&l);
                     self.after_mark(&l);
                     self.last_mark_start = Some(l.started);
                     self.last_full_mark_start = Some(l.started);
@@ -1584,6 +1617,36 @@ impl Gc {
                 start_len: self.list.entries.len(),
             }
         }
+    }
+
+    /// Keeps the tip root's entry counts of a finished mark for the engine
+    /// (`GcConfig::tip_refs`).
+    fn note_mark(&mut self, l: &Liveness) {
+        if !self.cfg.tip_refs {
+            return;
+        }
+        self.tip_refs = l.roots.first().map(|r| TipRefs {
+            tip: r.seq,
+            refs: l.tip_refs.iter().map(|(&s, &n)| (s, n)).collect(),
+        });
+    }
+
+    /// Keeps the segments a mark found newly dead for the engine's shadow
+    /// check (`GcConfig::tip_refs`).
+    fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
+        if !self.cfg.tip_refs {
+            return;
+        }
+        self.mark_condemned = l.roots.first().map(|r| MarkCondemned {
+            tip: r.seq,
+            segs: todo
+                .iter()
+                .filter_map(|(o, _)| match o {
+                    ObjectRef::Segment(s) => Some(*s),
+                    _ => None,
+                })
+                .collect(),
+        });
     }
 
     fn after_mark(&mut self, l: &Liveness) {
@@ -2152,9 +2215,11 @@ impl Gc {
         let mut m = Mark::new(self.cfg);
         let m0 = view.clock.monotonic();
         m.run(view)?;
+        self.mark_started = m.take_init_tip().or(self.mark_started);
         let mark_time = view.clock.monotonic().saturating_sub(m0);
         point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
+        self.note_mark(&l);
         self.after_mark(&l);
         self.last_mark_start = Some(l.started);
         self.last_full_mark_start = Some(l.started);
@@ -2170,6 +2235,7 @@ impl Gc {
             .dead(&self.list, room),
             None => Vec::new(),
         };
+        self.note_dead(&l, &todo);
         if let Some(ctx) = &mut self.ctx {
             ctx.liveness = Some(l);
         }
@@ -2356,5 +2422,17 @@ impl Collector for Gc {
 
     fn set_pressure(&mut self, raised: bool) {
         self.pressure = raised;
+    }
+
+    fn take_mark_started(&mut self) -> Option<CommitSeq> {
+        self.mark_started.take()
+    }
+
+    fn take_tip_refs(&mut self) -> Option<TipRefs> {
+        self.tip_refs.take()
+    }
+
+    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
+        self.mark_condemned.take()
     }
 }

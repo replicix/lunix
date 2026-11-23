@@ -312,6 +312,80 @@ fn an_abandoned_pass_switches_recheck_passes_off() {
     }
     sc.s.check_roots().unwrap();
     sc.s.check_ledger().unwrap();
+    // N6: once a regular pass succeeded, recheck-only passes are back. Z's
+    // grace ends at 115; the next regular pass is due at 120 (20 s after the
+    // one at 100), so only a recheck-only pass can delete Z at 116.
+    assert!(sc.s.gc.condemned().contains(&sc.z[0]));
+    let passes = sc.s.gc.stats().passes;
+    at(&mut sc.s, sc.base, 115_900);
+    pass_now(&mut sc.s);
+    assert_eq!(sc.s.gc.stats().passes, passes, "the delay is not over");
+    at(&mut sc.s, sc.base, 116_000);
+    pass_now(&mut sc.s);
+    assert_eq!(sc.s.gc.stats().passes, passes + 1);
+    assert_eq!(sc.s.gc.pass_kind(), "recheck");
+    assert_eq!(reclaim(&sc.s).fast_passes, 1, "fast passes resumed");
+    assert!(!sc.s.gc.condemned().contains(&sc.z[0]), "Z was deleted");
+    sc.s.check_roots().unwrap();
+    sc.s.check_ledger().unwrap();
+}
+
+/// N6, the S2 rule: a grace that ends during a recheck-only pass's own mark
+/// is judged by the mark's start, not by the time of the delete unit: the
+/// object stays for the next mark. (The pipelined twin is in `pipeline.rs`.)
+#[test]
+fn a_grace_that_ends_during_the_recheck_passs_own_mark_is_kept() {
+    let mut sc = scene(Some(Duration::from_secs(1)), false, 0);
+    sc.s.gc.set_pressure(true);
+    // X's grace ended at 61; the recheck pass starts at 62 and its mark
+    // pins its roots then (the first unit).
+    at(&mut sc.s, sc.base, 62_000);
+    let st = {
+        let mut st = GcState::Idle;
+        for _ in 0..1_000 {
+            st = sc.s.unit().unwrap().state;
+            if st == GcState::Marking {
+                break;
+            }
+        }
+        st
+    };
+    assert_eq!(st, GcState::Marking);
+    sc.s.unit().unwrap(); // roots, listings, the mark's start time
+                          // Z's grace (ends at 115) ends in the middle of the mark.
+    at(&mut sc.s, sc.base, 116_000);
+    for _ in 0..100_000 {
+        let p = sc.s.unit().unwrap();
+        if p.done || p.state == GcState::Idle {
+            break;
+        }
+    }
+    assert_eq!(sc.s.gc.pass_kind(), "recheck");
+    assert_eq!(reclaim(&sc.s).fast_passes, 1);
+    for o in &sc.x {
+        assert!(!sc.s.gc.condemned().contains(o), "{o}: X was deleted");
+    }
+    for o in &sc.z {
+        assert!(
+            sc.s.gc.condemned().contains(o),
+            "{o} went although its grace ended after the mark began"
+        );
+        if let ObjectRef::Segment(g) = o {
+            assert!(segs(&sc.s).contains(g));
+        }
+    }
+    sc.s.check_roots().unwrap();
+    // The next pass (its mark began after the grace; the regular schedule is
+    // due too, and the regular pass wins) deletes it.
+    let passes = sc.s.gc.stats().passes;
+    at(&mut sc.s, sc.base, 118_000);
+    pass_now(&mut sc.s);
+    assert_eq!(sc.s.gc.stats().passes, passes + 1);
+    for o in &sc.z {
+        assert!(!sc.s.gc.condemned().contains(o), "{o} is still listed");
+    }
+    sc.s.check_roots().unwrap();
+    sc.s.check_ledger().unwrap();
 }
 
 /// A request that finds a recheck pass in progress is answered by a whole
@@ -352,29 +426,25 @@ fn a_request_during_a_recheck_pass_runs_the_whole_sequence_next() {
     assert!(grace, "the requested pass runs condemn, grace, recheck");
 }
 
-/// Sustained pressure with graces ending all the time: recheck passes run
-/// between the regular ones but do not starve them. The low-live segment `L`
-/// is made at second 130, after recheck passes exist (the grace is 60 s), and
-/// is compacted by a regular pass within a busy interval and a few passes.
-#[test]
-fn compaction_still_runs_on_schedule_under_sustained_pressure() {
-    // A regular pass every 25 s: its condemn batches end their 60 s grace
-    // between two regular passes (with 20 s the grace ends would fall on the
-    // regular passes, and nothing would be left for the recheck-only ones).
+/// What the sustained-pressure run measured.
+struct Sustained {
+    s: Sim,
+    regular_at_100: u64,
+    compacted_at: Option<u64>,
+}
+
+/// Graces ending all the time under pressure, a regular pass every `busy`
+/// seconds. The low-live segment `L` is made at second 130.
+fn sustained(busy: u64) -> Sustained {
     let mut c = cfg(Some(Duration::from_secs(1)), false);
-    c.gc.busy_interval = Duration::from_secs(25);
+    c.gc.busy_interval = Duration::from_secs(busy);
     let mut s = Sim::new(c);
     s.gc.set_pressure(true);
     let mut seed = 10_000;
     let mut l_seg = None;
-    let (mut regular_at_60, mut compacted_at) = (0, None);
+    let (mut regular_at_100, mut compacted_at) = (0, None);
     for sec in 0..260u64 {
         if sec == 130 {
-            assert!(
-                reclaim(&s).fast_passes > 0,
-                "recheck passes exist: {:?}",
-                reclaim(&s)
-            );
             let before = segs(&s);
             for i in 0..4 {
                 s.write(40 + i, 3_000 + i);
@@ -389,7 +459,7 @@ fn compaction_still_runs_on_schedule_under_sustained_pressure() {
             l_seg = made.first().copied();
         }
         if sec == 100 {
-            regular_at_60 = reclaim(&s).regular_passes;
+            regular_at_100 = reclaim(&s).regular_passes;
         }
         // Garbage every second: dead segments, so graces end all the time.
         for i in 0..3 {
@@ -410,11 +480,32 @@ fn compaction_still_runs_on_schedule_under_sustained_pressure() {
             compacted_at = Some(sec);
         }
     }
+    Sustained {
+        s,
+        regular_at_100,
+        compacted_at,
+    }
+}
+
+/// Sustained pressure with graces ending all the time: recheck passes run
+/// between the regular ones but do not starve them. `L` is made at second
+/// 130, after recheck passes exist (the grace is 60 s), and is compacted by a
+/// regular pass within a busy interval and a few passes.
+#[test]
+fn compaction_still_runs_on_schedule_under_sustained_pressure() {
+    // A regular pass every 25 s: its condemn batches end their 60 s grace
+    // between two regular passes (with 20 s the grace ends would fall on the
+    // regular passes, and nothing would be left for the recheck-only ones).
+    let Sustained {
+        s,
+        regular_at_100,
+        compacted_at,
+    } = sustained(25);
     let r = reclaim(&s);
     eprintln!("sustained pressure: {r:?}, L compacted at {compacted_at:?}");
     assert!(r.fast_passes >= 5, "recheck passes kept running: {r:?}");
     assert!(
-        r.regular_passes - regular_at_60 >= 5,
+        r.regular_passes - regular_at_100 >= 5,
         "regular passes kept going between 100 s and 260 s (every 25 s: at least 5): {r:?}"
     );
     let at = compacted_at.expect("L was compacted");
@@ -423,6 +514,33 @@ fn compaction_still_runs_on_schedule_under_sustained_pressure() {
         "compaction followed L's creation: second {at}"
     );
     assert!(r.recheck_lag_count > 0);
+    s.check_roots().unwrap();
+    s.check_ledger().unwrap();
+}
+
+/// R2-3: the locked regime, a regular pass every 20 s with the 60 s grace:
+/// the regular pass lands on every grace end, so recheck-only passes may
+/// never run (`fast_passes` is whatever it is). What must hold is the lag:
+/// no object waits more than about a second after its grace ended, and
+/// compaction still follows `L`.
+#[test]
+fn the_recheck_lag_stays_about_a_second_when_the_regular_passes_take_every_grace_end() {
+    let Sustained {
+        s,
+        regular_at_100,
+        compacted_at,
+    } = sustained(20);
+    let r = reclaim(&s);
+    eprintln!("locked regime: {r:?}, L compacted at {compacted_at:?}");
+    assert!(r.recheck_lag_count > 0, "objects were deleted: {r:?}");
+    assert!(
+        r.recheck_lag_ms_max <= 1_500,
+        "an object waited {} ms after its grace: {r:?}",
+        r.recheck_lag_ms_max
+    );
+    assert!(r.regular_passes - regular_at_100 >= 6, "{r:?}");
+    let at = compacted_at.expect("L was compacted");
+    assert!(at <= 130 + 40, "compaction followed L: second {at}");
     s.check_roots().unwrap();
     s.check_ledger().unwrap();
 }
@@ -521,11 +639,11 @@ fn a_kill_inside_a_recheck_pass_is_recovered() {
         let crashed = (0..100_000).any(|_| sc.s.step().is_err());
         assert!(crashed, "{point}: the recheck pass was stopped");
         assert_eq!(sc.s.hooks.crashed(), Some(point));
-        assert_eq!(
-            reclaim(&sc.s).regular_passes,
-            2,
-            "{point}: inside a recheck pass"
-        );
+        // The pass in progress is a recheck-only pass: asserted from the
+        // collector, not inferred from a pass count (a kill inside a third
+        // regular pass would leave `regular_passes` at 2 as well).
+        assert_eq!(sc.s.gc.pass_kind(), "recheck", "{point}");
+        assert_eq!(reclaim(&sc.s).regular_passes, 2, "{point}");
         sc.s.crash_reopen(7).unwrap();
         sc.s.check_roots()
             .unwrap_or_else(|e| panic!("{point}: {e}"));

@@ -47,7 +47,7 @@ use lunix_iface::store::{ExtentLocation, SealedSegment, SegmentInfo, SegmentStor
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::destage::{DestageCtx, Retry};
-use crate::engine::{CommitOutcome, Inner};
+use crate::engine::{lock, CommitOutcome, Inner};
 use crate::recover::Recovered;
 use crate::stats::add;
 
@@ -867,7 +867,7 @@ impl Inner {
         };
         let ctx = DestageCtx {
             journal: &*self.journal,
-            map: &*self.map,
+            map: &*self.cut_map,
             index: &*self.index,
             segments: &stamped,
             codec: &*self.extents,
@@ -1036,6 +1036,9 @@ impl Inner {
             sealed.bytes.len() as u64,
         );
         co.tip = full;
+        if let Some(refs) = &self.refs {
+            lock(refs).seal_cut(commit_seq, self.clock.monotonic());
+        }
         co.tip_hash = sealed.hash;
         self.full.note_cut(prev, c, commit_seq.0);
         self.publish_tip(co);
@@ -1306,7 +1309,7 @@ impl Inner {
         if hits.is_empty() {
             return Ok(());
         }
-        let mut txn = self.map.begin_update()?;
+        let mut txn = self.cut_map.begin_update()?;
         for &(ci, old, new) in hits {
             txn.rehint(ci, old, new)?;
         }
@@ -1350,10 +1353,34 @@ impl Inner {
         }
     }
 
+    /// Shadow mode of the reference table: the segments it would offer for
+    /// condemnation now are counted and remembered for the next mark's
+    /// judgement; nothing is offered to the collector.
+    fn shadow_offer(&self, co: &Coord) {
+        let Some(refs) = &self.refs else {
+            return;
+        };
+        let lag = 2 * (u64::from(self.cfg.retain_last.max(1)) - 1);
+        // A segment a pending re-hint will name must never be offered.
+        let skip: HashSet<SegId> = co
+            .pending_named
+            .iter()
+            .copied()
+            .chain(co.moved.iter().map(|m| m.new.seg))
+            .collect();
+        let tip = co.tip.common.commit_seq;
+        // A proposal is only taken between passes.
+        let idle = lock(&self.gc_status).state.is_none();
+        let mut t = lock(refs);
+        let ready = t.ready(tip, lag, &skip, crate::refs::OFFER_MAX);
+        t.shadow_offer(&ready, tip, self.clock.monotonic(), idle);
+    }
+
     fn gc_step(&self, co: &mut Coord) {
         let Some(budget) = self.gc_budget_now() else {
             return;
         };
+        self.shadow_offer(co);
         // No collector call starts once a quiesce began (the engine is
         // about to be dropped; moves made now would be lost with it).
         if self.closing.load(Ordering::Acquire) {

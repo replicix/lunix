@@ -144,6 +144,12 @@ pub(crate) struct Inner {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) destager: Arc<dyn Destager>,
     pub(crate) map: Arc<dyn BlockMap>,
+    /// The map as the cut's transactions see it: `map` itself, or a wrapper
+    /// that feeds the reference table (`gc_condemn_on_cut`).
+    pub(crate) cut_map: Arc<dyn BlockMap>,
+    /// The reference table; `None` when the mode is off or there is no
+    /// collector.
+    pub(crate) refs: Option<Arc<Mutex<crate::refs::SegRefs>>>,
     pub(crate) size: AtomicU64,
     pub(crate) stats: Arc<Counters>,
     pub(crate) points: Points,
@@ -395,9 +401,25 @@ impl Engine {
         let lanes = usize::from(deps.journal.lanes());
         let gc_status = collector.as_ref().map(|c| c.status()).unwrap_or_default();
         let coord = Coord::new(&rec, collector, deps.clock.monotonic());
+        let refs = (cfg.gc_condemn_on_cut != crate::config::CondemnOnCut::Off
+            && coord.collector.is_some())
+        .then(|| {
+            Arc::new(Mutex::new(crate::refs::SegRefs::new(
+                deps.clock.monotonic(),
+            )))
+        });
+        let cut_map: Arc<dyn BlockMap> = match &refs {
+            Some(r) => Arc::new(crate::refs::RefMap::new(
+                Arc::clone(&rec.map),
+                Arc::clone(r),
+            )),
+            None => Arc::clone(&rec.map),
+        };
         let inner = Arc::new(Inner {
             size: AtomicU64::new(rec.tip.size),
             map: rec.map,
+            cut_map,
+            refs,
             dir: deps.dir,
             segments: deps.segments,
             packs: deps.packs,

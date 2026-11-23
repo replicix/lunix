@@ -5,7 +5,9 @@ use std::io::Cursor;
 
 use lunix_format::local::{FreeFloor, OnFull, SpaceSettings};
 use lunix_iface::ctl::*;
-use lunix_iface::gc::{GcPassSummary, GcReclaimStats, GcState, GcStats, GcStatusSnapshot};
+use lunix_iface::gc::{
+    GcPassSummary, GcReclaimStats, GcState, GcStats, GcStatusSnapshot, RefsState, RefsStats,
+};
 use lunix_iface::stats::EngineStats;
 use proptest::prelude::*;
 use serde_json::{json, Value};
@@ -311,6 +313,28 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         fast_lag_ms_sum: s[7],
                         fast_lag_ms_max: s[0],
                         fast_lag_count: s[1],
+                    }),
+                    refs: Box::new(RefsStats {
+                        state: RefsState::Drifted,
+                        segments: s[0],
+                        zero_waiting: s[1],
+                        ready: s[2],
+                        drift_segments: s[3],
+                        rebases: s[4],
+                        report_mismatches: s[5],
+                        shadow_would_propose: s[6],
+                        shadow_confirmed: s[7],
+                        shadow_unconfirmed: s[0],
+                        shadow_revived: s[1],
+                        shadow_missed: s[2],
+                        condemn_lag_ms_sum: s[3],
+                        condemn_lag_ms_max: s[4],
+                        condemn_lag_count: s[5],
+                        idle_wait_ms_sum: s[6],
+                        idle_wait_ms_max: s[7],
+                        idle_wait_count: s[0],
+                        idle_waiting: s[1],
+                        first_ready_ms: Some(s[2]),
                     }),
                 }
             },

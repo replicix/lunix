@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use lunix_format::commit::{Commit, MapRoot};
-use lunix_format::{ChunkId, CommitSeq, Hint, IdLen};
+use lunix_format::{ChunkId, CommitSeq, Hint, IdLen, SegId};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::Clock;
@@ -255,6 +255,124 @@ pub trait Collector: Send {
     fn set_pressure(&mut self, raised: bool) {
         let _ = raised;
     }
+
+    /// `Some(tip)` once after a call in which a mark pinned its roots: the
+    /// commit sequence of the tip the mark walks (the map was at that tip
+    /// when the roots were pinned). The engine's reference table snapshots
+    /// its counts at that moment. The default reports nothing.
+    fn take_mark_started(&mut self) -> Option<CommitSeq> {
+        None
+    }
+
+    /// `Some` once after a call in which a mark finished: the number of map
+    /// entries per segment (by hint) of the mark's tip root. The engine
+    /// compares it with its reference table. The default reports nothing.
+    fn take_tip_refs(&mut self) -> Option<TipRefs> {
+        None
+    }
+
+    /// `Some` once after a call in which a mark chose segments to condemn:
+    /// the segments the mark found dead and not yet listed. The engine's
+    /// shadow check compares them with what its reference table would have
+    /// offered. The default reports nothing.
+    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
+        None
+    }
+}
+
+/// Map entries per segment of one tip root, counted by hint (the segment a
+/// map entry names, not where the chunk's id currently lives).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TipRefs {
+    /// The commit sequence of the root that was counted (the mark's first
+    /// root, the tip).
+    pub tip: CommitSeq,
+    /// Segments with at least one entry and their counts, ascending by
+    /// segment.
+    pub refs: Vec<(SegId, u64)>,
+}
+
+/// The segments one mark found dead and condemned (or would have, when the
+/// list was full).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MarkCondemned {
+    /// The tip the mark walked (as [`TipRefs::tip`]).
+    pub tip: CommitSeq,
+    /// The newly dead segments, ascending.
+    pub segs: Vec<SegId>,
+}
+
+/// The state of the engine's reference table (`gc_condemn_on_cut`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefsState {
+    /// The mode is `off`: no table.
+    #[default]
+    Off,
+    /// Recording deltas; no mark has given it a base yet.
+    Rebuilding,
+    /// Rebased on a mark and consistent with it.
+    Ready,
+    /// A map transaction did not do what the table predicted; the next mark
+    /// repairs the table.
+    Drifted,
+}
+
+/// The engine's reference table and its shadow check (since the process
+/// started). Memory only; nothing here is persisted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct RefsStats {
+    /// Where the table is.
+    pub state: RefsState,
+    /// Segments with at least one map entry.
+    pub segments: u64,
+    /// Segments with no entry since a cut, whose lag (`2 x (retain_last - 1)`
+    /// cuts) is not over.
+    pub zero_waiting: u64,
+    /// Segments offered at the last collector call (shadow: counted, never
+    /// condemned).
+    pub ready: u64,
+    /// Segments that differed between the table and a mark, summed over the
+    /// marks (0 when the table is right).
+    pub drift_segments: u64,
+    /// Marks that rebased the table.
+    pub rebases: u64,
+    /// Map transactions whose report differed from the prediction.
+    pub report_mismatches: u64,
+    /// Segments the shadow check would have offered for condemnation.
+    pub shadow_would_propose: u64,
+    /// Offered segments a later mark (that began at or after the offer)
+    /// found dead as well.
+    pub shadow_confirmed: u64,
+    /// Offered segments such a mark did not condemn (already listed, kept
+    /// for another reason, or still live by id).
+    pub shadow_unconfirmed: u64,
+    /// Offered segments a new map entry pointed into again before a mark
+    /// judged them (condemn-on-cut would have flagged them first).
+    pub shadow_revived: u64,
+    /// Segments the marks condemned that the table had not offered earlier.
+    pub shadow_missed: u64,
+    /// Sum of the time between a segment's count reaching zero and its offer,
+    /// milliseconds.
+    pub condemn_lag_ms_sum: u64,
+    /// The largest such time.
+    pub condemn_lag_ms_max: u64,
+    /// Offers the lag figures cover.
+    pub condemn_lag_count: u64,
+    /// For each offered segment, the time between its offer and the first
+    /// moment the collector was idle (a proposal is only taken then):
+    /// the sum, milliseconds. 0 for a segment offered while idle.
+    pub idle_wait_ms_sum: u64,
+    /// The largest such wait.
+    pub idle_wait_ms_max: u64,
+    /// Offered segments that have met an idle collector (the figures'
+    /// count); the ones still waiting are `idle_waiting`.
+    pub idle_wait_count: u64,
+    /// Offered segments no idle collector has been seen for yet.
+    pub idle_waiting: u64,
+    /// Milliseconds from the table's creation (attach) to the first call
+    /// that found a segment ready, if one has.
+    pub first_ready_ms: Option<u64>,
 }
 
 /// A snapshot of the collector for `GcStatus`.
@@ -278,6 +396,10 @@ pub struct GcStatusSnapshot {
     /// Reclaim latency and pass-kind counters of this process.
     #[serde(default)]
     pub reclaim: Box<GcReclaimStats>,
+    /// The engine's reference table (set by the engine wiring, default from a
+    /// collector).
+    #[serde(default)]
+    pub refs: Box<RefsStats>,
 }
 
 /// How fast reclaim is and which passes did it (since the process started).
@@ -288,7 +410,7 @@ pub struct GcReclaimStats {
     /// Recheck-only passes completed (`GcConfig::fast_recheck`).
     pub fast_passes: u64,
     /// Passes completed that were not recheck-only (whole, pipelined,
-    /// urgent).
+    /// urgent): all passes minus `fast_passes`.
     pub regular_passes: u64,
     /// Segments recheck-only passes deleted.
     pub fast_segments_deleted: u64,
@@ -302,8 +424,11 @@ pub struct GcReclaimStats {
     pub recheck_lag_ms_max: u64,
     /// Objects the lag figures cover.
     pub recheck_lag_count: u64,
-    /// The same three figures for the objects recheck-only passes deleted
-    /// (the regular ones are the difference).
+    /// The same three figures for the objects recheck-only passes deleted.
+    /// The difference to the figures above is every other pass kind,
+    /// urgent passes included (an urgent pass in the `open` state judges
+    /// with the grace floor, which can be below the grace in force, so its
+    /// lag is measured from the floor).
     pub fast_lag_ms_sum: u64,
     /// See `fast_lag_ms_sum`.
     pub fast_lag_ms_max: u64,

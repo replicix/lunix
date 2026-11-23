@@ -8,7 +8,7 @@ use lunix_iface::ctl::{
     Attached, GcPressure, SpaceBody, SpaceFigures, ThrottleStatus, VolumeCreated, VolumeMode,
     VolumeState, VolumeStatusBody, VolumeSummary,
 };
-use lunix_iface::gc::{GcPassSummary, GcState, GcStatusSnapshot};
+use lunix_iface::gc::{GcPassSummary, GcState, GcStatusSnapshot, RefsState};
 use lunix_iface::space::ThrottleState;
 
 use crate::error::sanitize;
@@ -496,6 +496,45 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    let t = &g.refs;
+    if t.state != RefsState::Off {
+        kv(
+            out,
+            "refs table",
+            &format!(
+                "{:?}: {} segments, {} waiting, drift {} over {} rebases, {} report mismatches",
+                t.state,
+                t.segments,
+                t.zero_waiting,
+                t.drift_segments,
+                t.rebases,
+                t.report_mismatches
+            )
+            .to_lowercase(),
+        )?;
+        kv(
+            out,
+            "refs shadow",
+            &format!(
+                "{} offered, {} confirmed, {} unconfirmed, {} revived, {} condemned by marks only",
+                t.shadow_would_propose,
+                t.shadow_confirmed,
+                t.shadow_unconfirmed,
+                t.shadow_revived,
+                t.shadow_missed
+            ),
+        )?;
+        if let Some(ms) = t.first_ready_ms {
+            kv(
+                out,
+                "refs first ready",
+                &format!(
+                    "{ms} ms after attach; idle wait max {} ms ({} waiting)",
+                    t.idle_wait_ms_max, t.idle_waiting
+                ),
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -514,6 +553,28 @@ mod reclaim_tests {
     fn the_default_reclaim_figures_print_nothing() {
         let t = render(&GcStatusSnapshot::default());
         assert!(!t.contains("recheck") && !t.contains("pass kinds"), "{t}");
+    }
+
+    #[test]
+    fn the_refs_table_prints_only_when_it_exists() {
+        use lunix_iface::gc::RefsStats;
+        assert!(!render(&GcStatusSnapshot::default()).contains("refs"));
+        let g = GcStatusSnapshot {
+            refs: Box::new(RefsStats {
+                state: RefsState::Ready,
+                segments: 12,
+                drift_segments: 3,
+                rebases: 4,
+                shadow_would_propose: 7,
+                shadow_confirmed: 6,
+                ..RefsStats::default()
+            }),
+            ..GcStatusSnapshot::default()
+        };
+        let t = render(&g);
+        assert!(t.contains("ready: 12 segments"), "{t}");
+        assert!(t.contains("drift 3 over 4 rebases"), "{t}");
+        assert!(t.contains("7 offered, 6 confirmed"), "{t}");
     }
 
     #[test]
