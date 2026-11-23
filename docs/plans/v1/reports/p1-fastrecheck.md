@@ -128,3 +128,27 @@ FREEZE item). The T6 performance measurement was not run.
 
 The inherent case (mark >= 1.67 s: the regular pass always wins at an equal wait, `fast_passes` stays 0) is unchanged
 and documented in gc.md; `mark_ms` is on the pass-done line.
+
+## Gate after review follow-up (0f1f810)
+
+The GC kill loops were re-run at 0f1f810 after the review follow-up, release, `LUNIX_KILL_HITS=all`, `lunix-fsck` built
+with crashpoints, one process per test, all concurrently on the full host (16 CPUs), then the remaining `stack_gc_kill`
+loops in a second concurrent run. Every loop passed (recovery equals the oracle, fsck clean at rest).
+
+| Loop | Points (reached) | Runs = kills | Duration | Result |
+| --- | --- | --- | --- | --- |
+| `gc_kill_loop_plain_16k` | 24 (23) | 68 | 4 901 s | pass |
+| `gc_kill_loop_integrity_16k` | 24 (23) | 68 | 4 822 s | pass |
+| `gc_kill_loop_plain_64k` | 24 (23) | 68 | 5 161 s | pass |
+| `gc_kill_loop_recheck_plain_16k` | 5 (5) | 14 | 1 331 s | pass |
+| `gc_kill_loop_recheck_integrity_16k` | 5 (5) | 15 | 1 534 s | pass |
+| `gc_kill_loop_recheck_plain_64k` | 5 (5) | 14 | 1 272 s | pass |
+| `gc_kill_loop_integrity_64k` | 24 (23) | 68 | 4 811 s | pass |
+| `gc_kill_loop_encrypted_16k` | 24 (23) | 68 | 4 752 s | pass |
+| `gc_kill_loop_encrypted_64k` | 24 (23) | 68 | 4 822 s | pass |
+
+* The one unreached point in the plain, integrity and encrypted arms is `gc.recheck.before_delete`, as expected (those
+  arms run the regular pass only); the recheck arms reach all five of their points, with kills at the first and a later
+  hit of `gc.recheck.before_delete` (hit counts 2 to 5 in the counting run) and at the first, middle and last hit of every
+  `gc.delete.*` and `gc.commit_delete.*` point.
+* `gc_kill_child` is the loops' child helper, not a test of its own.
