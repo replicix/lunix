@@ -513,6 +513,10 @@ pub struct OpenParams {
     /// The compaction rate's multiple while writes are slowed (the daemon's
     /// `gc_pressure_rate_factor`).
     pub gc_pressure_rate_factor: u64,
+    /// Recheck-only GC passes under pressure, with their delay (the daemon's
+    /// `gc_fast_recheck` and `gc_fast_recheck_delay_ms`; `None`: whatever
+    /// `gc` says).
+    pub gc_fast_recheck: Option<std::time::Duration>,
     /// The band's middle rate in bytes per second, instead of
     /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
     /// small volume hold writes for seconds; the daemon never sets it.
@@ -541,6 +545,7 @@ impl OpenParams {
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
+            gc_fast_recheck: None,
             throttle_mid_rate: None,
         }
     }
@@ -884,6 +889,10 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         t(&mut cfg);
     }
     let dir: Arc<dyn VolumeDir> = Arc::new(store.clone());
+    let mut gc_config = p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon);
+    if p.gc_fast_recheck.is_some() {
+        gc_config.fast_recheck = p.gc_fast_recheck;
+    }
     let deps = EngineDeps {
         dir: Arc::clone(&dir),
         segments: Arc::new(store.clone()),
@@ -912,7 +921,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
         // directory.
         collector: Some(Box::new(lunix_gc::Gc::new(
             Arc::new(store.clone()) as Arc<dyn lunix_gc::FloorSource>,
-            p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon),
+            gc_config,
         ))),
         hooks: Arc::new(NoHooks),
     };

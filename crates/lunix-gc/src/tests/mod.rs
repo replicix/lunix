@@ -7,6 +7,7 @@ mod equivalence;
 mod liveness;
 mod oracle;
 mod pipeline;
+mod recheck;
 mod review;
 mod scale;
 mod scenarios;

@@ -92,6 +92,19 @@ pub struct GcConfig {
     /// `pass_interval` (default 5 s), so passes follow each other while
     /// garbage keeps coming.
     pub busy_interval: Duration,
+    /// With `pipeline`, while the engine reports pressure (writes paced or
+    /// held, [`Collector::set_pressure`](lunix_iface::gc::Collector::set_pressure)):
+    /// recheck-only passes. Once the grace of a listed object has ended (and
+    /// this delay with it), and this delay has passed since the end of the
+    /// previous pass, a pass marks, condemns what its mark finds dead, deletes
+    /// what its mark rechecks and ends without compaction. Regular passes
+    /// (with compaction) keep their own schedule, measured from the end of
+    /// the last one. `None`: off (default; the daemon's key `gc_fast_recheck`
+    /// turns it on).
+    pub fast_recheck: Option<Duration>,
+    /// Tests only: recheck-only passes without pressure too.
+    #[doc(hidden)]
+    pub fast_recheck_always: bool,
 }
 
 impl Default for GcConfig {
@@ -104,6 +117,8 @@ impl Default for GcConfig {
             footer_cache_bytes: 32 << 20,
             pipeline: false,
             busy_interval: Duration::from_secs(5),
+            fast_recheck: None,
+            fast_recheck_always: false,
         }
     }
 }

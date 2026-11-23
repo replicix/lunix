@@ -246,6 +246,15 @@ pub trait Collector: Send {
     fn take_moved(&mut self) -> Vec<Moved> {
         Vec::new()
     }
+
+    /// The engine's pressure level is `Raised` or `Urgent` (ADR-32; the
+    /// space gate paces or holds writes): the collector may run recheck-only
+    /// passes. Called before every call into the collector (steps, requested
+    /// and urgent passes, dry runs), with the level of the last tick. The
+    /// default ignores it.
+    fn set_pressure(&mut self, raised: bool) {
+        let _ = raised;
+    }
 }
 
 /// A snapshot of the collector for `GcStatus`.
@@ -266,6 +275,40 @@ pub struct GcStatusSnapshot {
     /// Control calls waiting for a pass on request (`GcControl::run_pass`);
     /// set by the engine wiring, 0 from a collector.
     pub requests: u64,
+    /// Reclaim latency and pass-kind counters of this process.
+    #[serde(default)]
+    pub reclaim: Box<GcReclaimStats>,
+}
+
+/// How fast reclaim is and which passes did it (since the process started).
+/// The recheck lag is the time an object waited after its grace ended until
+/// it was deleted: the figure the recheck-only pass shortens.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct GcReclaimStats {
+    /// Recheck-only passes completed (`GcConfig::fast_recheck`).
+    pub fast_passes: u64,
+    /// Passes completed that were not recheck-only (whole, pipelined,
+    /// urgent).
+    pub regular_passes: u64,
+    /// Segments recheck-only passes deleted.
+    pub fast_segments_deleted: u64,
+    /// Bytes recheck-only passes freed.
+    pub fast_bytes_freed: u64,
+    /// Sum, over the objects deleted by any pass kind, of the time between
+    /// the end of their grace (the grace their verdict used, and not before
+    /// the grace last changed) and their delete, milliseconds.
+    pub recheck_lag_ms_sum: u64,
+    /// The largest such time, milliseconds.
+    pub recheck_lag_ms_max: u64,
+    /// Objects the lag figures cover.
+    pub recheck_lag_count: u64,
+    /// The same three figures for the objects recheck-only passes deleted
+    /// (the regular ones are the difference).
+    pub fast_lag_ms_sum: u64,
+    /// See `fast_lag_ms_sum`.
+    pub fast_lag_ms_max: u64,
+    /// See `fast_lag_ms_sum`.
+    pub fast_lag_count: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by

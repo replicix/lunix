@@ -183,6 +183,22 @@ pub fn batch_updates_equal_the_single_calls<F: IndexFixture>(f: &mut F) {
         assert!(ix.get_for_dedup(&id(3)).expect("dedup").is_some());
         assert!(ix.get(&id(2)).expect("get").expect("entry").condemned);
     }
+    // `unmark_condemned_all`: an empty set, an unflagged segment and a
+    // duplicate are harmless; the entries stay and dedup sees them again.
+    f.index().unmark_condemned_all(&[]).expect("empty unmark");
+    f.index()
+        .unmark_condemned_all(&[seg(1), seg(3), seg(1)])
+        .expect("unmark");
+    for reopen in [false, true] {
+        if reopen {
+            f.reopen();
+        }
+        let ix = f.index();
+        assert_eq!(ix.condemned().expect("list"), vec![seg(2)]);
+        assert!(ix.get_for_dedup(&id(1)).expect("dedup").is_some());
+        assert_eq!(ix.get_for_dedup(&id(2)).expect("dedup"), None);
+    }
+    f.index().mark_condemned_all(&[seg(1)]).expect("flag again");
     f.index().retire_segments(&[seg(1)]).expect("retire one");
     assert_eq!(f.index().get(&id(1)).expect("get"), None);
     assert_eq!(f.index().condemned().expect("list"), vec![seg(2)]);

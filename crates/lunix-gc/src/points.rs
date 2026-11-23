@@ -13,6 +13,10 @@ use crate::config::GcHooks;
 pub const CRASH_POINTS: &[&str] = &[
     "gc.mark.end",
     "gc.condemn.after_list_write",
+    // A recheck-only pass, after its condemn units and before its deletes
+    // (its deletes hit the `gc.delete.*` sites too; this name proves the
+    // fast path was reached).
+    "gc.recheck.before_delete",
     "gc.delete.before_unlink",
     "gc.delete.after_unlink",
     "gc.delete.after_dirsync",

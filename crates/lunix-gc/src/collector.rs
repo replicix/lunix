@@ -12,6 +12,14 @@
 //!   the newly dead and is the recheck of the objects listed before it whose
 //!   grace ended before it began; the others stay listed for a later pass.
 //!
+//! * **Recheck-only** (`GcConfig::fast_recheck`, under engine pressure, once
+//!   a grace has ended): `Marking → Condemning → Deleting`, then the pass
+//!   finishes without compaction. The deletes are the pipelined pass's, under
+//!   the same rule (`recheck_verdict`), so the pass is only a shorter way to
+//!   the point where a mark began after a grace ended. It moves
+//!   `last_end` but not `last_full_end`, so regular passes (and their
+//!   compaction) keep their schedule.
+//!
 //! Compaction is skipped on a lean volume and when nothing qualifies.
 //!
 //! # Safety argument (plan M17 rules 5, 6, 7 and 12)
@@ -57,8 +65,8 @@ use lunix_format::commit::Commit;
 use lunix_format::local::RollbackFloor;
 use lunix_format::{CommitSeq, ObjId, SegId};
 use lunix_iface::gc::{
-    Collector, GcBudget, GcPassSummary, GcProgress, GcState, GcStats, GcStatusSnapshot, GcView,
-    Moved,
+    Collector, GcBudget, GcPassSummary, GcProgress, GcReclaimStats, GcState, GcStats,
+    GcStatusSnapshot, GcView, Moved,
 };
 use lunix_iface::space::SpaceKind;
 use lunix_iface::{Error, ErrorKind, Result};
@@ -123,6 +131,17 @@ enum Verdict {
     Gone,
     /// Keep condemned, decide in a later pass.
     Defer(&'static str, Deferral),
+}
+
+/// The kind of the pass in progress (`GcConfig::pipeline`, `fast_recheck`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PassKind {
+    /// A request, an urgent pass, or `pipeline` off: the whole sequence.
+    Whole,
+    /// A scheduled pass with `pipeline`: condemn, delete, compact.
+    Pipelined,
+    /// Under pressure, a grace ended: condemn, delete, no compaction.
+    Recheck,
 }
 
 #[derive(Debug)]
@@ -583,6 +602,8 @@ pub struct Gc {
     forced: bool,
     phase: Phase,
     ctx: Option<PassCtx>,
+    /// When the last pass of any kind ended (the duty cap and the
+    /// recheck-only delay are measured from it).
     last_end: Option<Duration>,
     last_tip: Option<CommitSeq>,
     last_pins: Option<BTreeSet<CommitSeq>>,
@@ -604,9 +625,16 @@ pub struct Gc {
     last_compacted: Vec<compact::Candidate>,
     /// Where the current pass spends its time.
     prof: PassProfile,
-    /// The current pass runs the whole sequence (a request, or `pipeline`
-    /// off).
-    whole: bool,
+    /// The kind of the current (or last) pass.
+    kind: PassKind,
+    /// The engine reports pressure ([`Collector::set_pressure`]).
+    pressure: bool,
+    /// When the last pass that was not recheck-only ended: the regular
+    /// schedule is measured from it, so recheck-only passes cannot starve
+    /// compaction.
+    last_full_end: Option<Duration>,
+    /// Reclaim counters ([`GcReclaimStats`]).
+    reclaim: GcReclaimStats,
     /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
     /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
@@ -618,6 +646,22 @@ pub struct Gc {
     /// When the last mark of a scheduled pass began: a listed object whose
     /// grace ends after it waits for the next mark.
     last_mark_start: Option<Duration>,
+    /// As `last_mark_start`, for marks of passes that were not recheck-only:
+    /// the regular grace trigger reads it, so a recheck-only pass does not
+    /// consume that trigger.
+    last_full_mark_start: Option<Duration>,
+    /// The grace the last mark judged with: a grace that shrank since (the
+    /// engine's pressure floor) makes objects deletable that the last mark
+    /// deferred, whatever the time of that mark.
+    last_mark_grace: Duration,
+    /// The grace of the verdict being applied (lag figures).
+    used_grace: Duration,
+    /// The grace `params.grace` had at the last call, and since when.
+    seen_grace: Option<Duration>,
+    grace_changed: Duration,
+    /// The lag figures of the pass in progress: sum, max and count of
+    /// milliseconds, and the same total of the recheck-only passes.
+    pass_lag: (u64, u64, u64),
 }
 
 impl std::fmt::Debug for Gc {
@@ -648,7 +692,7 @@ fn flag_segments(view: &GcView<'_>, todo: &[(ObjectRef, u64)]) -> Result<()> {
 
 /// Segments whose index follow-up one update covers at most (a delete phase
 /// and a step flush theirs at their end too).
-const RETIRE_BATCH: usize = 256;
+pub const RETIRE_BATCH: usize = 256;
 
 impl Gc {
     /// A collector. `floor` is where the rollback floor is read (the volume
@@ -694,11 +738,20 @@ impl Gc {
             unit_count: 0,
             last_compacted: Vec::new(),
             prof: PassProfile::default(),
-            whole: true,
+            kind: PassKind::Whole,
+            pressure: false,
+            last_full_end: None,
+            reclaim: GcReclaimStats::default(),
             last_pass_busy: false,
             last_mark: Duration::ZERO,
             last_aborted: false,
             last_mark_start: None,
+            last_full_mark_start: None,
+            last_mark_grace: Duration::ZERO,
+            used_grace: Duration::ZERO,
+            seen_grace: None,
+            grace_changed: Duration::ZERO,
+            pass_lag: (0, 0, 0),
         }
     }
 
@@ -715,6 +768,7 @@ impl Gc {
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
             requests: 0,
+            reclaim: Box::new(self.reclaim),
         }
     }
 
@@ -901,8 +955,12 @@ impl Gc {
         Ok(())
     }
 
-    fn store_list(&self, view: &GcView<'_>) -> Result<()> {
-        view.state.store_condemned(&self.list.to_file()?)
+    /// Stores the list; what a queued un-condemn still had to store is
+    /// stored with it.
+    fn store_list(&mut self, view: &GcView<'_>) -> Result<()> {
+        view.state.store_condemned(&self.list.to_file()?)?;
+        self.list_dirty = false;
+        Ok(())
     }
 
     /// Reads the FULLs committed since the last call that have a successor
@@ -955,21 +1013,52 @@ impl Gc {
 
     /// A listed object's grace ended at or before `now` and after the last
     /// mark began: the next mark can delete it.
+    ///
+    /// Measured against the last mark of a pass that was not recheck-only
+    /// (a recheck-only pass does not consume this trigger). A grace that
+    /// shrank since that mark judged (pressure) counts every object whose
+    /// shorter grace ended.
     fn grace_ended_since_mark(&self, grace: Duration, now: Duration) -> bool {
+        let shrunk = grace < self.last_mark_grace;
         self.grace
             .values()
             .filter(|&&t| t != Duration::MAX)
             .map(|t| t.saturating_add(grace))
-            .any(|end| end <= now && self.last_mark_start.is_none_or(|m| m < end))
+            .any(|end| end <= now && (shrunk || self.last_full_mark_start.is_none_or(|m| m < end)))
     }
 
-    fn due(&mut self, view: &GcView<'_>) -> Result<bool> {
+    /// The kind of pass to start now, if one is due.
+    fn due(&mut self, view: &GcView<'_>) -> Result<Option<PassKind>> {
         if self.forced {
-            return Ok(true);
+            return Ok(Some(PassKind::Whole));
         }
         let now = view.clock.monotonic();
-        let waited = |d: Duration| self.last_end.is_none_or(|end| now >= end.saturating_add(d));
+        // The regular pass wins when both are due: it contains the recheck.
+        if self.regular_due(view, now)? {
+            return Ok(Some(if self.cfg.pipeline {
+                PassKind::Pipelined
+            } else {
+                PassKind::Whole
+            }));
+        }
+        Ok(self.fast_due(view, now).then_some(PassKind::Recheck))
+    }
+
+    /// A regular pass (with compaction) is due. Measured from the end of the
+    /// last regular pass; a regular pass never follows any pass closer than
+    /// the duty cap.
+    fn regular_due(&mut self, view: &GcView<'_>, now: Duration) -> Result<bool> {
+        let waited = |d: Duration| {
+            self.last_full_end
+                .is_none_or(|end| now >= end.saturating_add(d))
+        };
         let gap = self.min_gap();
+        if !self
+            .last_end
+            .is_none_or(|e| now >= e.saturating_add(self.last_mark.saturating_mul(DUTY_FACTOR)))
+        {
+            return Ok(false);
+        }
         // Pipelined: a grace that ended since the last mark began makes its
         // object deletable by the next mark; it does not wait for
         // `pass_interval` (after an abandoned pass it does).
@@ -1003,9 +1092,43 @@ impl Gc {
         }
         // Nothing changed: look again (the pins too) one interval from now,
         // not at every idle tick; the volume is idle now.
-        self.last_end = Some(now);
+        self.last_full_end = Some(now);
         self.last_pass_busy = false;
         Ok(false)
+    }
+
+    /// A recheck-only pass is due: under pressure (or `fast_recheck_always`),
+    /// the delay since the end of the last pass (and three times its mark)
+    /// has passed, and a listed object's grace ended, plus the delay, after
+    /// the last mark began (so its delete is waiting for a mark).
+    fn fast_due(&self, view: &GcView<'_>, now: Duration) -> bool {
+        let Some(delay) = self.cfg.fast_recheck else {
+            return false;
+        };
+        if !self.cfg.pipeline
+            || !(self.pressure || self.cfg.fast_recheck_always)
+            || self.last_aborted
+        {
+            return false;
+        }
+        // The duty cap counts from the end of the last pass; the delay only
+        // from the end of the grace (it batches grace ends, which a pass in
+        // progress has done already). This departs from the design text and
+        // the simulator, which count the delay from the end of the pass too.
+        let duty = self.last_mark.saturating_mul(DUTY_FACTOR);
+        if !self.last_end.is_none_or(|e| now >= e.saturating_add(duty)) {
+            return false;
+        }
+        let grace = view.params.grace;
+        let shrunk = grace < self.last_mark_grace;
+        self.grace
+            .values()
+            .filter(|&&t| t != Duration::MAX)
+            .map(|t| t.saturating_add(grace))
+            .any(|end| {
+                end.saturating_add(delay) <= now
+                    && (shrunk || self.last_mark_start.is_none_or(|m| m < end))
+            })
     }
 
     /// The shortest time between two pipelined passes: `busy_interval`, and
@@ -1073,7 +1196,9 @@ impl Gc {
         self.retired.clear();
         self.uncondemned.clear();
         self.phase = Phase::Idle;
-        self.last_end = Some(view.clock.monotonic());
+        let now = view.clock.monotonic();
+        self.last_end = Some(now);
+        self.last_full_end = Some(now);
         // An abandoned pass may have done part of its work (a delete whose
         // call failed) or none (an error in its first mark): the next one
         // runs even if nothing else changed (re-review M-2).
@@ -1194,7 +1319,12 @@ impl Gc {
             ($level:ident) => {
                 tracing::$level!(
                     how,
+                    kind = ?self.kind,
                     pass = p.pass,
+                    mark_ms = PassProfile::ms(self.prof.mark_view),
+                    lag_count = self.pass_lag.2,
+                    lag_mean_ms = self.pass_lag.0.checked_div(self.pass_lag.2).unwrap_or(0),
+                    lag_max_ms = self.pass_lag.1,
                     wall_ms = PassProfile::ms(wall),
                     steps = self.prof.steps,
                     phases = %self.prof.phases(),
@@ -1228,15 +1358,20 @@ impl Gc {
         self.unit_count += 1;
         let flow = match std::mem::replace(&mut self.phase, Phase::Idle) {
             Phase::Idle => {
-                if !self.due(view)? {
+                let Some(kind) = self.due(view)? else {
                     return Ok(Flow::Yield);
-                }
-                self.whole = !self.cfg.pipeline || self.forced;
+                };
+                self.kind = kind;
+                self.pass_lag = (0, 0, 0);
                 self.forced = false;
                 self.reconcile(view)?;
                 self.ctx = Some(PassCtx::default());
                 self.last_compacted.clear();
-                self.last_tip = Some(view.tip.commit_seq);
+                // A recheck-only pass leaves the regular triggers alone: the
+                // new-tip trigger must still fire for the regular pass.
+                if kind != PassKind::Recheck {
+                    self.last_tip = Some(view.tip.commit_seq);
+                }
                 self.phase = Phase::Marking(Box::new(Mark::new(self.cfg)));
                 Flow::Continue
             }
@@ -1260,7 +1395,7 @@ impl Gc {
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
-                    self.phase = if self.whole {
+                    self.phase = if self.kind == PassKind::Whole {
                         if todo.is_empty() && self.list.entries.is_empty() {
                             Phase::Compacting(None)
                         } else {
@@ -1277,6 +1412,10 @@ impl Gc {
                         // this mark is the recheck of the objects listed
                         // before it whose grace ended before it began.
                         self.last_mark_start = Some(started);
+                        self.last_mark_grace = view.params.grace;
+                        if self.kind != PassKind::Recheck {
+                            self.last_full_mark_start = Some(started);
+                        }
                         let queue: VecDeque<ObjectRef> =
                             self.list.entries.keys().copied().collect();
                         if !todo.is_empty() {
@@ -1287,7 +1426,7 @@ impl Gc {
                                 then: AfterCondemn::Delete(queue),
                             }
                         } else {
-                            self.deleting_or_compacting(queue)
+                            self.start_deletes(queue)?
                         }
                     };
                 } else {
@@ -1332,7 +1471,7 @@ impl Gc {
                         }
                         // Pipelined: the new graces run into the next
                         // passes; the deletes and compaction use this mark.
-                        AfterCondemn::Delete(queue) => self.deleting_or_compacting(queue),
+                        AfterCondemn::Delete(queue) => self.start_deletes(queue)?,
                     };
                 }
                 Flow::Continue
@@ -1351,6 +1490,8 @@ impl Gc {
                     let l = m.into_liveness();
                     self.after_mark(&l);
                     self.last_mark_start = Some(l.started);
+                    self.last_full_mark_start = Some(l.started);
+                    self.last_mark_grace = view.params.grace;
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
@@ -1387,19 +1528,26 @@ impl Gc {
                         };
                     }
                     None => {
+                        // A queued un-condemn makes the flush store the list
+                        // (it holds every delete of the phase too).
+                        let stored_by_flush = self.list_dirty;
                         self.flush_index(view)?;
                         // Deletes only remove entries: an unchanged length
-                        // is an unchanged list (un-condemns stored theirs).
-                        if !pipelined || self.list.entries.len() != start_len {
+                        // is an unchanged list.
+                        if !stored_by_flush && (!pipelined || self.list.entries.len() != start_len)
+                        {
                             self.store_list(view)?;
                         }
-                        self.phase = Phase::Compacting(None);
+                        self.phase = self.after_deletes();
                     }
                 }
                 Flow::Continue
             }
             Phase::Compacting(c) => self.compact_unit(view, budget, c, step_bytes),
             Phase::Finishing => {
+                // Nothing is queued unless an earlier abort left the list
+                // unstored: no-op then.
+                self.flush_index(view)?;
                 self.finish_pass(view)?;
                 Flow::PassDone
             }
@@ -1408,11 +1556,27 @@ impl Gc {
         Ok(flow)
     }
 
-    /// A pipelined pass's deletes over `queue`, or compaction when it is
-    /// empty.
-    fn deleting_or_compacting(&self, queue: VecDeque<ObjectRef>) -> Phase {
-        if queue.is_empty() {
+    /// What follows the deletes: compaction, except in a recheck-only pass.
+    fn after_deletes(&self) -> Phase {
+        if self.kind == PassKind::Recheck {
+            Phase::Finishing
+        } else {
             Phase::Compacting(None)
+        }
+    }
+
+    /// A pipelined or recheck-only pass's deletes over `queue`, or what
+    /// follows them when it is empty.
+    fn start_deletes(&self, queue: VecDeque<ObjectRef>) -> Result<Phase> {
+        if self.kind == PassKind::Recheck {
+            point!(self.points, "gc.recheck.before_delete");
+        }
+        Ok(self.deleting_or_after(queue))
+    }
+
+    fn deleting_or_after(&self, queue: VecDeque<ObjectRef>) -> Phase {
+        if queue.is_empty() {
+            self.after_deletes()
         } else {
             Phase::Deleting {
                 queue,
@@ -1429,7 +1593,9 @@ impl Gc {
             .iter()
             .map(|s| s.size_bytes.saturating_sub(l.live_bytes(s.seg)))
             .sum();
-        self.last_pins = Some(l.pinned.clone());
+        if self.kind != PassKind::Recheck {
+            self.last_pins = Some(l.pinned.clone());
+        }
     }
 
     /// Adds `todo` to the list (grace not started: the flags come next) and
@@ -1486,6 +1652,7 @@ impl Gc {
         grace: Duration,
     ) -> Result<Verdict> {
         self.facts(view)?;
+        self.used_grace = grace;
         let (Some(f), Some(l)) = (
             self.facts.as_ref(),
             self.ctx.as_ref().and_then(|c| c.liveness.as_ref()),
@@ -1567,7 +1734,6 @@ impl Gc {
         }
         if self.list_dirty {
             self.store_list(view)?;
-            self.list_dirty = false;
         }
         Ok(())
     }
@@ -1589,6 +1755,44 @@ impl Gc {
         }
         self.evidence(view, Action::Delete, obj, freed, "already gone");
         Ok(freed)
+    }
+
+    /// Records how long `obj` waited after its grace ended until its delete:
+    /// from the end of the grace the verdict used, but not before the grace
+    /// last changed (a shrunk grace makes the backlog deletable at once; that
+    /// wait is not recheck lag).
+    fn note_lag(&mut self, view: &GcView<'_>, obj: ObjectRef) {
+        let Some(&start) = self.grace.get(&obj).filter(|&&t| t != Duration::MAX) else {
+            return;
+        };
+        let from = start
+            .saturating_add(self.used_grace)
+            .max(self.grace_changed);
+        let lag = view.clock.monotonic().saturating_sub(from);
+        let ms = u64::try_from(lag.as_millis()).unwrap_or(u64::MAX);
+        let r = &mut self.reclaim;
+        r.recheck_lag_ms_sum = r.recheck_lag_ms_sum.saturating_add(ms);
+        r.recheck_lag_ms_max = r.recheck_lag_ms_max.max(ms);
+        r.recheck_lag_count += 1;
+        if self.kind == PassKind::Recheck {
+            r.fast_lag_ms_sum = r.fast_lag_ms_sum.saturating_add(ms);
+            r.fast_lag_ms_max = r.fast_lag_ms_max.max(ms);
+            r.fast_lag_count += 1;
+        }
+        let p = &mut self.pass_lag;
+        p.0 = p.0.saturating_add(ms);
+        p.1 = p.1.max(ms);
+        p.2 += 1;
+    }
+
+    /// Notes when `params.grace` changed (the lag figures start there).
+    fn note_grace(&mut self, view: &GcView<'_>) {
+        if self.seen_grace != Some(view.params.grace) {
+            if self.seen_grace.is_some() {
+                self.grace_changed = view.clock.monotonic();
+            }
+            self.seen_grace = Some(view.params.grace);
+        }
     }
 
     fn count_delete(&mut self, obj: ObjectRef, freed: u64) {
@@ -1652,6 +1856,7 @@ impl Gc {
         if n > 0 {
             view.space.release(space_kind(obj), n);
         }
+        self.note_lag(view, obj);
         if !matches!(obj, ObjectRef::Commit(_)) {
             point!(self.points, "gc.delete.after_unlink");
         }
@@ -1855,15 +2060,34 @@ impl Gc {
         if pass != 0 {
             point!(self.points, "gc.evidence.after_put");
         }
+        // Nothing is queued when a pass ends: the delete phase (or the urgent
+        // pass) flushed, and a recheck-only pass ends right after its deletes.
+        debug_assert!(
+            self.retired.is_empty() && self.uncondemned.is_empty() && !self.list_dirty,
+            "index work is still queued at the end of a pass"
+        );
+        let now = view.clock.monotonic();
         ctx.summary.pass = pass;
-        self.last_pass_changed = ctx.evidence.wants_retry();
-        self.last_pass_busy = reclaim_busy(&ctx.summary);
+        if self.kind == PassKind::Recheck {
+            // The regular triggers (a new tip, changes, the pins, the full
+            // end) are left to the regular pass; only a busy pass hurries it.
+            self.last_pass_busy |= reclaim_busy(&ctx.summary);
+            let r = &mut self.reclaim;
+            r.fast_passes += 1;
+            r.fast_segments_deleted += ctx.summary.segments_deleted;
+            r.fast_bytes_freed += ctx.summary.bytes_freed;
+        } else {
+            self.last_pass_changed = ctx.evidence.wants_retry();
+            self.last_pass_busy = reclaim_busy(&ctx.summary);
+            self.last_full_end = Some(now);
+            self.reclaim.regular_passes += 1;
+        }
         self.last_aborted = false;
         self.stats.passes += 1;
         self.add_totals(&ctx.summary);
         self.last_pass = Some(ctx.summary);
         self.last_finished_ms = Some(view.clock.now().0);
-        self.last_end = Some(view.clock.monotonic());
+        self.last_end = Some(now);
         self.phase = Phase::Idle;
         Ok(())
     }
@@ -1883,6 +2107,7 @@ impl Gc {
         let mut step_bytes = 0u64;
         self.load(view)?;
         self.observe_named(view)?;
+        self.note_grace(view);
         self.prof.step_counted = false;
         loop {
             match self.unit(view, budget, freed, &mut step_bytes)? {
@@ -1916,7 +2141,10 @@ impl Gc {
             steps: 1,
             ..PassProfile::default()
         };
+        self.kind = PassKind::Whole;
+        self.pass_lag = (0, 0, 0);
         self.load(view)?;
+        self.note_grace(view);
         self.observe_named(view)?;
         self.reconcile(view)?;
         self.ctx = Some(PassCtx::default());
@@ -1929,6 +2157,8 @@ impl Gc {
         let l = m.into_liveness();
         self.after_mark(&l);
         self.last_mark_start = Some(l.started);
+        self.last_full_mark_start = Some(l.started);
+        self.last_mark_grace = config::grace_floor(&view.params);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
         self.facts(view)?;
         let todo = match &self.facts {
@@ -2122,5 +2352,9 @@ impl Collector for Gc {
 
     fn take_moved(&mut self) -> Vec<Moved> {
         std::mem::take(&mut self.outbox)
+    }
+
+    fn set_pressure(&mut self, raised: bool) {
+        self.pressure = raised;
     }
 }

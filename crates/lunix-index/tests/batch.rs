@@ -1,4 +1,5 @@
-//! The batch updates of the GC (`mark_condemned_all`, `retire_segments`) are
+//! The batch updates of the GC (`mark_condemned_all`, `unmark_condemned_all`,
+//! `retire_segments`) are
 //! the single-segment calls, only cheaper: after any sequence of operations
 //! the condemned set, the dropped entries and every lookup are what the
 //! per-segment calls leave, also after a reopen.
@@ -24,6 +25,7 @@ enum Op {
     Persist(u64),
     Condemn(Vec<u64>),
     Retire(Vec<u64>),
+    Uncondemn(Vec<u64>),
     Reopen,
 }
 
@@ -38,6 +40,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (1..=SEGS).prop_map(Op::Persist),
         2 => set().prop_map(Op::Condemn),
         2 => set().prop_map(Op::Retire),
+        2 => set().prop_map(Op::Uncondemn),
         1 => Just(Op::Reopen),
     ]
 }
@@ -80,6 +83,12 @@ fn apply(ix: LsmIndex, dir: &Path, ids: &std::sync::Arc<Ids>, o: &Op, batch: boo
                 ix.mark_condemned(s).expect("condemn");
             }
         }
+        Op::Uncondemn(v) if batch => ix.unmark_condemned_all(&segs_of(v)).expect("uncondemn all"),
+        Op::Uncondemn(v) => {
+            for s in segs_of(v) {
+                ix.unmark_condemned(s).expect("unmark");
+            }
+        }
         Op::Retire(v) if batch => ix.retire_segments(&segs_of(v)).expect("retire all"),
         Op::Retire(v) => {
             for s in segs_of(v) {
@@ -115,6 +124,49 @@ proptest! {
         drop((a, b));
         prop_assert_eq!(observe(&open(da.path(), &ia)), observe(&open(db.path(), &ib)));
     }
+}
+
+/// `unmark_condemned_all` clears the flags of the segments that have one, in
+/// one update: duplicates, segments that are not flagged and an empty set are
+/// harmless, the entries stay where they are (they are reachable for dedup
+/// again), and the result survives a reopen. (Review R1.)
+#[test]
+fn unmarking_clears_exactly_the_flagged_segments_in_one_update() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let ids = Ids::new();
+    let mut ix = open(dir.path(), &ids);
+    for c in 0..30u64 {
+        ix.insert(cid(c), hint(1 + c % 3, c as u32 * 8))
+            .expect("insert");
+    }
+    ix.persist(seg(3)).expect("persist");
+    ix.mark_condemned_all(&[seg(1), seg(2), seg(3)])
+        .expect("condemn");
+    ix.unmark_condemned_all(&[]).expect("empty");
+    // Segment 4 was never flagged; segment 1 is named twice.
+    ix.unmark_condemned_all(&[seg(1), seg(4), seg(3), seg(1)])
+        .expect("unmark");
+    for reopen in [false, true] {
+        if reopen {
+            drop(ix);
+            ix = open(dir.path(), &ids);
+        }
+        let (flags, entries, dedup, _) = observe(&ix);
+        assert_eq!(flags, vec![seg(2)], "only segment 2 stays flagged");
+        assert_eq!(entries.len(), 30, "no entry was touched");
+        for c in 0..30u64 {
+            let flagged = 1 + c % 3 == 2;
+            assert_eq!(
+                dedup.contains(&cid(c)),
+                !flagged,
+                "chunk {c}: dedup follows the flag"
+            );
+        }
+    }
+    // Nothing flagged any more: a second call changes nothing.
+    ix.unmark_condemned_all(&[seg(2)]).expect("unmark last");
+    ix.unmark_condemned_all(&[seg(2)]).expect("unmark again");
+    assert!(ix.condemned().expect("flags").is_empty());
 }
 
 /// After `retire_segments` no entry of the segment is reachable and its flag

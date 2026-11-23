@@ -22,6 +22,7 @@
 //! | `quiesce_timeout_ms` | 30000 | `QUIESCE_DEV` wait per device |
 //! | `detach_busy_retry_ms` | 3000 | how long a detach retries `TRY_STOP_DEV` (udev's probe) |
 //! | `journal_max` | `volume.json` default | `journal_max` of new volumes |
+//! | `destage_workers` | the pool's default, `max(2, cpus / 2)` | destage pool worker threads per attached volume; 1 ..= 64 |
 //! | `journal_resident_max` | the volume's `journal_max` | cap on the resident journal window per attached volume (ADR-33): the bytes the journal keeps in memory of what it wrote until the ring file is reclaimed; plaintext, not locked memory; at least 2097152, a larger value than the volume's `journal_max` counts as `journal_max` |
 //! | `cut_target_ms` | 1000 | the longest a commit's cut should take (ADR-33): the coordinator cuts at most this long at the drain rate of its last cuts, in journal bytes, never less than one ring file of journal bytes and than what frees a ring file of the fullest lane, never more than half the ring; 10 ..= 60000 |
 //! | `commit_interval_ms` | `volume.json` default | commit interval `T` of new volumes |
@@ -41,6 +42,8 @@
 //! | `throttle_max_delay_ms` | 10000 | the longest one request is delayed by pacing; 10 ..= `full_timeout_ms` |
 //! | `throttle_pace_store_bytes` | `false` | P1': pace the band in store bytes. The engine measures, per cut, the store bytes (segments, map packs, commit) each journal byte became (`A_hat`, 1 to 16, 2.0 before the first cut); the pace is then the curve at the projected headroom `headroom - (A_hat - 1) * J` (`J`: journal bytes not yet cut, the cut in flight left out) divided by `A_hat`, never below `throttle_min_rate`, through the same bucket and delay cap. It applies whenever the projected headroom is below the soft mark, so it starts above the raw soft mark too; the throttle state (`open` there), the pressure level and the soft mark stay on the raw headroom. `delay_capped` can rise on large-block loads (the floor is reached early). `false`: the plain curve, unchanged and without extra work; nothing is sent to the gate |
 //! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent (too low an `A_hat` costs far more than too high a one); 100 ..= 300. The status (`write_path.store_*`, `throttle.rate`) reports both and, above the soft mark, `store_paced_above_soft`, `store_above_soft_ms` and `store_delayed_*` |
+//! | `gc_fast_recheck` | `false` | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
+//! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -125,6 +128,9 @@ pub struct DaemonConfig {
     pub idle_trim: Option<Duration>,
     /// Idle control connections are closed after this.
     pub conn_idle_timeout: Duration,
+    /// Destage pool worker threads per attached volume (`None`: the pool's
+    /// default, `max(2, cpus / 2)`).
+    pub destage_workers: Option<usize>,
     /// The wait at the limit when a volume's `space.full_timeout_ms` is null.
     pub full_timeout: Duration,
     /// `space.cache_max_percent` of new volumes (0: no cap).
@@ -134,7 +140,14 @@ pub struct DaemonConfig {
     pub throttle: lunix_space::ThrottleConfig,
     /// The compaction rate's multiple while writes are slowed.
     pub gc_pressure_rate_factor: u64,
+    /// Recheck-only GC passes under pressure (`gc_fast_recheck`).
+    pub gc_fast_recheck: bool,
+    /// The delay of those passes (`gc_fast_recheck_delay_ms`).
+    pub gc_fast_recheck_delay: Duration,
 }
+
+/// Most destage worker threads the config accepts.
+pub const MAX_DESTAGE_WORKERS: u64 = 64;
 
 impl Default for DaemonConfig {
     fn default() -> Self {
@@ -163,10 +176,13 @@ impl Default for DaemonConfig {
             max_locked_buffers: 4 << 30,
             idle_trim: Some(Duration::from_secs(10)),
             conn_idle_timeout: Duration::from_secs(60),
+            destage_workers: None,
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             store_max_percent: 200,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
+            gc_fast_recheck: false,
+            gc_fast_recheck_delay: Duration::from_secs(1),
         }
     }
 }
@@ -423,6 +439,15 @@ impl DaemonConfig {
                 }
                 self.throttle.min_rate = r;
             }
+            "destage_workers" => {
+                let w = n(v)?;
+                if !(1..=MAX_DESTAGE_WORKERS).contains(&w) {
+                    return Err(format!(
+                        "destage_workers must be 1 to {MAX_DESTAGE_WORKERS}"
+                    ));
+                }
+                self.destage_workers = usize::try_from(w).ok();
+            }
             "throttle_pace_store_bytes" => self.throttle.pace_store_bytes = b(v)?,
             "throttle_pace_store_margin_percent" => {
                 let p = n(v)?;
@@ -444,6 +469,14 @@ impl DaemonConfig {
                     return Err("gc_pressure_rate_factor must be 1 to 64".into());
                 }
                 self.gc_pressure_rate_factor = f;
+            }
+            "gc_fast_recheck" => self.gc_fast_recheck = b(v)?,
+            "gc_fast_recheck_delay_ms" => {
+                let t = n(v)?;
+                if !(100..=10_000).contains(&t) {
+                    return Err("gc_fast_recheck_delay_ms must be 100 to 10000".into());
+                }
+                self.gc_fast_recheck_delay = Duration::from_millis(t);
             }
             other => return Err(format!("unknown key {other:?}")),
         }
@@ -631,6 +664,38 @@ volume_roots = "/a, /b"
         assert!(
             DaemonConfig::parse("throttle_max_delay_ms = 61000\nfull_timeout_ms = 120000").is_ok()
         );
+    }
+
+    #[test]
+    fn the_destage_workers_key_parses_and_is_validated() {
+        assert_eq!(DaemonConfig::default().destage_workers, None);
+        assert_eq!(
+            DaemonConfig::parse("destage_workers = 8\n")
+                .unwrap()
+                .destage_workers,
+            Some(8)
+        );
+        for bad in ["destage_workers = 0", "destage_workers = 65"] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_fast_recheck_keys_parse_and_are_validated() {
+        let d = DaemonConfig::default();
+        assert!(!d.gc_fast_recheck, "off by default");
+        assert_eq!(d.gc_fast_recheck_delay, Duration::from_secs(1));
+        let c = DaemonConfig::parse("gc_fast_recheck = true\ngc_fast_recheck_delay_ms = 250\n")
+            .unwrap();
+        assert!(c.gc_fast_recheck);
+        assert_eq!(c.gc_fast_recheck_delay, Duration::from_millis(250));
+        for bad in [
+            "gc_fast_recheck = 1",
+            "gc_fast_recheck_delay_ms = 99",
+            "gc_fast_recheck_delay_ms = 10001",
+        ] {
+            assert!(DaemonConfig::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

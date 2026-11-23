@@ -5,7 +5,7 @@ use std::io::Cursor;
 
 use lunix_format::local::{FreeFloor, OnFull, SpaceSettings};
 use lunix_iface::ctl::*;
-use lunix_iface::gc::{GcPassSummary, GcState, GcStats, GcStatusSnapshot};
+use lunix_iface::gc::{GcPassSummary, GcReclaimStats, GcState, GcStats, GcStatusSnapshot};
 use lunix_iface::stats::EngineStats;
 use proptest::prelude::*;
 use serde_json::{json, Value};
@@ -300,6 +300,18 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                     },
                     last_finished_ms,
                     requests: s[7],
+                    reclaim: Box::new(GcReclaimStats {
+                        fast_passes: s[0],
+                        regular_passes: s[1],
+                        fast_segments_deleted: s[2],
+                        fast_bytes_freed: s[3],
+                        recheck_lag_ms_sum: s[4],
+                        recheck_lag_ms_max: s[5],
+                        recheck_lag_count: s[6],
+                        fast_lag_ms_sum: s[7],
+                        fast_lag_ms_max: s[0],
+                        fast_lag_count: s[1],
+                    }),
                 }
             },
         )
