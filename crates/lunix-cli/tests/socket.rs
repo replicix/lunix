@@ -788,7 +788,7 @@ fn gc_pass_dry_run_and_status() {
         last_finished_ms: Some(1_767_225_600_000),
         requests: 1,
         reclaim: Box::default(),
-        refs: Box::default(),
+        refs: None,
     };
     env.ok("GcStatus", Response::GcStatus(status.clone()));
     let o = env.run(&["gc", "vol1", "--status"]);

@@ -175,7 +175,12 @@ impl Liveness {
 
     /// Heap beyond the live-extent set.
     pub(crate) fn heap_bytes(&self) -> usize {
-        (self.live.len() + self.seg_live.len() + self.deps.len() + self.unindexed.len()) * 48
+        (self.live.len()
+            + self.seg_live.len()
+            + self.deps.len()
+            + self.unindexed.len()
+            + self.tip_refs.len())
+            * 48
             + self.live_packs.len() * 32
             + self.segments.capacity() * std::mem::size_of::<SegmentInfo>()
             + self.packs.capacity() * std::mem::size_of::<PackInfo>()

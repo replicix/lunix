@@ -400,7 +400,7 @@ impl Engine {
         );
         let lanes = usize::from(deps.journal.lanes());
         let gc_status = collector.as_ref().map(|c| c.status()).unwrap_or_default();
-        let coord = Coord::new(&rec, collector, deps.clock.monotonic());
+        let mut coord = Coord::new(&rec, collector, deps.clock.monotonic());
         let refs = (cfg.gc_condemn_on_cut != crate::config::CondemnOnCut::Off
             && coord.collector.is_some())
         .then(|| {
@@ -408,6 +408,12 @@ impl Engine {
                 deps.clock.monotonic(),
             )))
         });
+        if refs.is_some() {
+            // One switch: the table needs the marks' counts and reports.
+            if let Some(c) = coord.collector.as_mut() {
+                c.set_tip_refs(true);
+            }
+        }
         let cut_map: Arc<dyn BlockMap> = match &refs {
             Some(r) => Arc::new(crate::refs::RefMap::new(
                 Arc::clone(&rec.map),

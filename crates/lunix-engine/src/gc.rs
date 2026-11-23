@@ -155,9 +155,9 @@ impl Inner {
                 t.rebase(&r);
             }
             if let Some(c) = condemned {
-                t.judge(&c);
+                t.judge(&c, self.clock.monotonic());
             }
-            *st.refs = t.stats();
+            st.refs = Some(Box::new(t.stats()));
         }
         *lock(&self.gc_status) = st;
         r

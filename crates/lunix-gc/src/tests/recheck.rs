@@ -518,7 +518,8 @@ fn compaction_still_runs_on_schedule_under_sustained_pressure() {
     s.check_ledger().unwrap();
 }
 
-/// R2-3: the locked regime, a regular pass every 20 s with the 60 s grace:
+/// R2-3 (a limit: the simulator's passes take no time, so the lag observed here is
+/// exactly 0 and the bound only fails for a broken schedule): the locked regime, a regular pass every 20 s with the 60 s grace:
 /// the regular pass lands on every grace end, so recheck-only passes may
 /// never run (`fast_passes` is whatever it is). What must hold is the lag:
 /// no object waits more than about a second after its grace ended, and

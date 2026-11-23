@@ -1,5 +1,5 @@
 //! Milestone refs: what the mark reports to the engine's reference table
-//! (`GcConfig::tip_refs`, `take_mark_started`, `take_tip_refs`,
+//! (`set_tip_refs`, `take_mark_started`, `take_tip_refs`,
 //! `take_mark_condemned`).
 
 use std::collections::BTreeMap;
@@ -76,6 +76,8 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
     assert_eq!(c.tip, started);
     assert!(!c.segs.is_empty(), "the overwritten segments are dead");
     assert!(c.segs.windows(2).all(|w| w[0] < w[1]));
+    assert!(c.listed.is_empty(), "nothing was listed before this mark");
+    assert!(c.live.is_empty(), "every live segment has an entry hinting at it");
     for seg in &c.segs {
         assert!(!counted(&s).contains_key(seg), "{seg:?} is referenced");
     }
@@ -90,10 +92,29 @@ fn nothing_is_counted_or_reported_without_the_option() {
     s.commit().unwrap();
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    assert!(
-        s.gc.take_mark_started().is_some(),
-        "the tip is always noted"
-    );
+    assert_eq!(s.gc.take_mark_started(), None);
     assert_eq!(s.gc.take_tip_refs(), None);
     assert_eq!(s.gc.take_mark_condemned(), None);
+}
+
+/// The engine's one switch: `set_tip_refs` turns the reports on and off.
+#[test]
+fn set_tip_refs_switches_the_reports_on_and_off() {
+    let mut s = sim(false);
+    s.gc.set_tip_refs(true);
+    for c in 0..10u64 {
+        s.write(c, c);
+    }
+    s.commit().unwrap();
+    s.clock.advance(Duration::from_secs(1));
+    s.pass().unwrap();
+    assert!(s.gc.take_mark_started().is_some());
+    assert!(s.gc.take_tip_refs().is_some());
+    assert!(s.gc.take_mark_condemned().is_some());
+    s.gc.set_tip_refs(false);
+    s.write(1, 99);
+    s.commit().unwrap();
+    s.clock.advance(Duration::from_secs(1));
+    s.pass().unwrap();
+    assert_eq!(s.gc.take_tip_refs(), None);
 }

@@ -98,33 +98,51 @@ the recheck-only ones. The `gc pass done` line carries `kind`, `mark_ms` and the
 pass's own `lag_count`, `lag_mean_ms` and `lag_max_ms`.
 
 **Reference table, shadow mode** (`gc_condemn_on_cut = "shadow"`, off by default;
-`EngineConfig::gc_condemn_on_cut`, `GcConfig::tip_refs`). The engine keeps a
-memory-only count of the map entries per segment, by hint: every map
-transaction of a cut (the destage, and the compaction re-hints) goes through a
-wrapper (`RefMap`) that predicts the count changes, checks the prediction
-against the transaction's report and feeds the table (`SegRefs`). A count that
-reaches zero in a cut `k` makes the segment *ready* when the tip is at least
-`k + 2 x (retain_last - 1)` (the collector's `keep_floor` rule: no retained
-FULL names it any more). The table is never persisted and is not a judge.
-Every mark counts the entries of its tip root by hint (`Liveness::tip_refs`)
-and the engine compares that with the table as it stood when the mark pinned
-its roots (`Collector::take_mark_started`, `take_tip_refs`); a difference is
-counted in `drift_segments`, logged and repaired (`counts - snapshot + mark`:
-what changed since the mark began is kept). A table starts `rebuilding`
-(deltas from an unknown base) and the first mark is its base, so a restart
-needs no walk; a prediction that disagrees with a transaction's report marks
-it `drifted` until the next mark. In shadow mode nothing is condemned, listed
-or deleted because of the table: at each collector step the segments it would
-offer (at most 64, not named by a pending compaction re-hint) are only
-counted and remembered, and each mark that began at or after the offer judges
-them against its own newly dead segments (`take_mark_condemned`): confirmed,
-not condemned by the mark, revived by a new entry first, or condemned by the
-mark although never offered (`shadow_missed`; recall is `confirmed /
-(confirmed + missed)`). Also recorded: the wait of an offered segment for an
-idle collector (a proposal is only taken between passes), and the time from
-attach to the first ready segment. `lunix gc --status` prints them (`refs
-table`, `refs shadow`, `refs first ready`). The table costs one map read per
-chunk of a cut (on the leaves the commit loads anyway).
+`EngineConfig::gc_condemn_on_cut`). The engine keeps a memory-only count of
+the map entries per segment, by hint: every map transaction of a cut (the
+destage, and the compaction re-hints) goes through a wrapper (`RefMap`) that
+predicts the count changes, checks the prediction against the transaction's
+report and feeds the table (`SegRefs`). A count that reaches zero in a cut `k`
+makes the segment *ready* when the tip is at least `k + 2 x (retain_last - 1)`
+(the collector's `keep_floor` rule: no retained FULL names it any more). The
+table is never persisted and is not a judge. One switch: opening the engine
+with the mode on makes the collector count (`Collector::set_tip_refs`). Every
+mark counts the entries of its tip root by hint (`Liveness::tip_refs`) and the
+engine compares that with the table as it stood when the mark pinned its roots
+(`take_mark_started`, `take_tip_refs`); a difference is counted in
+`drift_segments`, logged and repaired (`counts - snapshot + mark`: what changed
+since the mark began is kept). A table starts `rebuilding` (deltas from an
+unknown base) and the first mark is its base, so a restart needs no walk. A
+map transaction whose report differs from the prediction, or that could not be
+predicted, makes the table `drifted` (zeros dropped, nothing offered); a mark
+that began before the failure does **not** repair it (its snapshot is older):
+the table becomes `ready` again only by a mark that began after it. The same
+holds while `rebuilding`.
+
+In shadow mode nothing is condemned, listed or deleted because of the table.
+At each collector step the segments it would offer (at most 64, not named by a
+pending compaction re-hint; **pins are ignored**: the active stage rejects
+every proposal while a pin exists, so a pinned volume shows offers that would
+not be made) are counted and remembered, with whether the collector was between
+passes at the offer (a proposal is only taken then). Each mark that began at
+or after the offer judges them against its own newly dead segments
+(`take_mark_condemned`): *confirmed* (with the **lead**: the time between the
+offer meeting an idle collector and the mark's condemn, i.e. how much earlier
+the grace would have started; without a lead when a pass was running until the
+mark condemned it), or not condemned because the segment is *live by id* (a
+chunk id in it lives there although no entry hints at it: the only class that
+becomes a wrong proposal, saved by the recheck), *kept* for another reason, or
+*listed* already; or *revived* by a new entry before any mark judged it.
+Segments a mark condemns that the table did not offer are *early by the mark*
+(the table knew the zero, the lag, the cap or a mark in a call without an
+offer came first) or *missed* (not known to the table: never had an entry,
+compaction with stale hints). Recall is `confirmed / (confirmed + early +
+missed)` over marks that began with a `ready` table, by segment count.
+Also recorded: the wait of an offer made during a pass for the first idle
+moment, the time from attach to the first ready segment (`first_ready_ms`) and
+to the first mark that condemned (`first_mark_condemn_ms`). `lunix gc --status`
+prints them (`refs table`, `refs shadow`, `refs lead`, `refs timing`). The
+table costs one map read per chunk of a cut; the figures are in the report.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):

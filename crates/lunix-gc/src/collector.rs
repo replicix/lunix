@@ -781,7 +781,7 @@ impl Gc {
             last_finished_ms: self.last_finished_ms,
             requests: 0,
             reclaim: Box::new(self.reclaim),
-            refs: Box::default(),
+            refs: None,
         }
     }
 
@@ -1403,7 +1403,8 @@ impl Gc {
             }
             Phase::Marking(mut m) => {
                 let done = m.unit(view)?;
-                self.mark_started = m.take_init_tip().or(self.mark_started);
+                let t = m.take_init_tip();
+                self.note_started(t);
                 if done {
                     point!(self.points, "gc.mark.end");
                     let l = m.into_liveness();
@@ -1517,7 +1518,8 @@ impl Gc {
             }
             Phase::Rechecking(mut m) => {
                 let done = m.unit(view)?;
-                self.mark_started = m.take_init_tip().or(self.mark_started);
+                let t = m.take_init_tip();
+                self.note_started(t);
                 if done {
                     let l = m.into_liveness();
                     self.note_mark(&l);
@@ -1631,21 +1633,47 @@ impl Gc {
         });
     }
 
-    /// Keeps the segments a mark found newly dead for the engine's shadow
-    /// check (`GcConfig::tip_refs`).
+    /// Notes the tip a mark pinned its roots at, for the engine's table.
+    fn note_started(&mut self, tip: Option<CommitSeq>) {
+        if self.cfg.tip_refs {
+            self.mark_started = tip.or(self.mark_started);
+        }
+    }
+
+    /// Keeps what a mark decided about segments for the engine's shadow check
+    /// (`GcConfig::tip_refs`): the newly dead ones it condemns, the ones live
+    /// by id that no entry hints at, and the dead ones already listed.
     fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
         if !self.cfg.tip_refs {
             return;
         }
+        let segs = todo
+            .iter()
+            .filter_map(|(o, _)| match o {
+                ObjectRef::Segment(s) => Some(*s),
+                _ => None,
+            })
+            .collect();
+        let live = l
+            .seg_live
+            .keys()
+            .filter(|s| !l.tip_refs.contains_key(*s))
+            .copied()
+            .collect();
+        let listed = self
+            .list
+            .entries
+            .keys()
+            .filter_map(|o| match o {
+                ObjectRef::Segment(s) if l.live_bytes(*s) == 0 => Some(*s),
+                _ => None,
+            })
+            .collect();
         self.mark_condemned = l.roots.first().map(|r| MarkCondemned {
             tip: r.seq,
-            segs: todo
-                .iter()
-                .filter_map(|(o, _)| match o {
-                    ObjectRef::Segment(s) => Some(*s),
-                    _ => None,
-                })
-                .collect(),
+            segs,
+            live,
+            listed,
         });
     }
 
@@ -2215,7 +2243,8 @@ impl Gc {
         let mut m = Mark::new(self.cfg);
         let m0 = view.clock.monotonic();
         m.run(view)?;
-        self.mark_started = m.take_init_tip().or(self.mark_started);
+        let t = m.take_init_tip();
+                self.note_started(t);
         let mark_time = view.clock.monotonic().saturating_sub(m0);
         point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();
@@ -2422,6 +2451,10 @@ impl Collector for Gc {
 
     fn set_pressure(&mut self, raised: bool) {
         self.pressure = raised;
+    }
+
+    fn set_tip_refs(&mut self, on: bool) {
+        self.cfg.tip_refs = on;
     }
 
     fn take_mark_started(&mut self) -> Option<CommitSeq> {

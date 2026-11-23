@@ -19,7 +19,7 @@
 //!
 //! In `shadow` mode the table is maintained and compared, and the segments it
 //! would offer for condemnation are counted and compared with what the marks
-//! condemn (`recall` and `precision`); no segment is condemned, listed or
+//! condemn (recall, and why an offer was not confirmed); no segment is condemned, listed or
 //! deleted because of it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -61,9 +61,18 @@ struct Counters {
     rebases: u64,
     report_mismatches: u64,
     would_propose: u64,
+    offered_idle: u64,
+    offered_busy: u64,
     confirmed: u64,
-    unconfirmed: u64,
+    confirmed_lead: u64,
+    lead_sum_ms: u64,
+    lead_max_ms: u64,
+    confirmed_no_lead: u64,
+    unconfirmed_live: u64,
+    unconfirmed_kept: u64,
+    unconfirmed_listed: u64,
     revived: u64,
+    early_by_mark: u64,
     missed: u64,
     lag_sum_ms: u64,
     lag_max_ms: u64,
@@ -73,10 +82,30 @@ struct Counters {
     idle_wait_count: u64,
 }
 
+fn ms(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// An offer the shadow check made and no mark has judged yet.
+#[derive(Clone, Copy, Debug)]
+struct Offer {
+    /// The tip at the offer: only a mark that began at or after it judges it.
+    tip: CommitSeq,
+    /// When the offer was made (the engine's monotonic clock).
+    at: Duration,
+    /// The first moment the collector was between passes at or after the
+    /// offer (a proposal is only taken then); `None` while it was not.
+    idle_at: Option<Duration>,
+}
+
 /// The reference table.
 #[derive(Debug)]
 pub(crate) struct SegRefs {
     state: RefsState,
+    /// A map transaction since the last snapshot was not applied as
+    /// predicted: the mark that began before it must not make the table
+    /// `Ready` (its snapshot is older than the failure).
+    tainted: bool,
     /// Entries of the in-memory map per segment, by hint. Signed: while
     /// `Rebuilding` they are deltas from an unknown base.
     counts: HashMap<SegId, i64>,
@@ -88,21 +117,19 @@ pub(crate) struct SegRefs {
     /// whether the table was `Ready` then.
     snapshot: Option<Snapshot>,
     /// The tip of the last mark that rebased the table, and whether the
-    /// table was `Ready` when it began: what a judgement of that mark's
-    /// condemns needs.
+    /// table was `Ready` (and untainted) when it began: what a judgement of
+    /// that mark's condemns needs.
     judged: Option<(CommitSeq, bool)>,
-    /// Segments offered in shadow mode and not yet judged by a mark that
-    /// began at or after the offer: the tip at the offer.
-    offered: BTreeMap<SegId, CommitSeq>,
+    /// Segments offered in shadow mode and not yet judged.
+    offered: BTreeMap<SegId, Offer>,
     /// Segments ready at the last offer.
     ready_last: u64,
     /// When the table was created (the engine's monotonic clock).
     born: Duration,
     /// Time from `born` to the first call that found a segment ready.
     first_ready: Option<Duration>,
-    /// Offered segments no idle collector has been seen for, with the offer
-    /// time.
-    waiting_idle: BTreeMap<SegId, Duration>,
+    /// Time from `born` to the first mark that condemned a segment.
+    first_mark_condemn: Option<Duration>,
     c: Counters,
 }
 
@@ -118,8 +145,9 @@ impl SegRefs {
         Self {
             born: now,
             first_ready: None,
-            waiting_idle: BTreeMap::new(),
+            first_mark_condemn: None,
             state: RefsState::Rebuilding,
+            tainted: false,
             counts: HashMap::new(),
             went_zero: BTreeSet::new(),
             zero_since: BTreeMap::new(),
@@ -173,7 +201,7 @@ impl SegRefs {
         skip: &HashSet<SegId>,
         max: usize,
     ) -> Vec<Ready> {
-        if self.state != RefsState::Ready {
+        if self.state != RefsState::Ready || self.zero_since.is_empty() {
             return Vec::new();
         }
         let mut v: Vec<Ready> = self
@@ -205,34 +233,48 @@ impl SegRefs {
             self.first_ready = Some(now.saturating_sub(self.born));
         }
         if idle {
-            for (_, t) in std::mem::take(&mut self.waiting_idle) {
-                let ms = u64::try_from(now.saturating_sub(t).as_millis()).unwrap_or(u64::MAX);
-                self.c.idle_wait_sum_ms = self.c.idle_wait_sum_ms.saturating_add(ms);
-                self.c.idle_wait_max_ms = self.c.idle_wait_max_ms.max(ms);
-                self.c.idle_wait_count += 1;
+            // Offers that were made during a pass meet the idle collector
+            // now: their wait is the time since the offer.
+            for o in self.offered.values_mut() {
+                if o.idle_at.is_none() {
+                    o.idle_at = Some(now);
+                    let w = ms(now.saturating_sub(o.at));
+                    self.c.idle_wait_sum_ms = self.c.idle_wait_sum_ms.saturating_add(w);
+                    self.c.idle_wait_max_ms = self.c.idle_wait_max_ms.max(w);
+                    self.c.idle_wait_count += 1;
+                }
             }
         }
         for r in ready {
             if self.zero_since.remove(&r.seg).is_none() {
                 continue;
             }
-            self.offered.insert(r.seg, tip);
+            self.offered.insert(
+                r.seg,
+                Offer {
+                    tip,
+                    at: now,
+                    idle_at: idle.then_some(now),
+                },
+            );
             self.c.would_propose += 1;
             if idle {
-                self.c.idle_wait_count += 1;
+                self.c.offered_idle += 1;
             } else {
-                self.waiting_idle.insert(r.seg, now);
+                self.c.offered_busy += 1;
             }
-            let ms = u64::try_from(now.saturating_sub(r.at).as_millis()).unwrap_or(u64::MAX);
-            self.c.lag_sum_ms = self.c.lag_sum_ms.saturating_add(ms);
-            self.c.lag_max_ms = self.c.lag_max_ms.max(ms);
+            let lag = ms(now.saturating_sub(r.at));
+            self.c.lag_sum_ms = self.c.lag_sum_ms.saturating_add(lag);
+            self.c.lag_max_ms = self.c.lag_max_ms.max(lag);
             self.c.lag_count += 1;
         }
     }
 
     /// A mark pinned its roots at `tip` (the map is at the tip): keep the
-    /// counts as they are now.
+    /// counts as they are now. Whatever failed before this moment is in the
+    /// snapshot and cancels in `counts - snapshot + mark`.
     pub(crate) fn mark_started(&mut self, tip: CommitSeq) {
+        self.tainted = false;
         self.snapshot = Some(Snapshot {
             tip,
             ready: self.state == RefsState::Ready,
@@ -242,9 +284,11 @@ impl SegRefs {
 
     /// The mark finished with the entry counts of its tip root. Compares
     /// them with the snapshot, repairs the counts and makes the table
-    /// `Ready`. Returns the number of segments that differed (0 for the
-    /// first base: a `Rebuilding` table has nothing to compare). Ignored
-    /// when no snapshot of that tip exists.
+    /// `Ready`, unless a map transaction failed since the snapshot (the
+    /// table then stays `Drifted` or `Rebuilding`: the next mark repairs
+    /// it). Returns the number of segments that differed (0 for the first
+    /// base: a `Rebuilding` table has nothing to compare). Ignored when no
+    /// snapshot of that tip exists.
     pub(crate) fn rebase(&mut self, r: &TipRefs) -> u64 {
         let Some(snap) = self.snapshot.take() else {
             return 0;
@@ -296,44 +340,84 @@ impl SegRefs {
             self.zero_since.clear();
             self.went_zero.clear();
         }
-        self.judged = Some((r.tip, snap.ready));
-        self.state = RefsState::Ready;
+        self.judged = Some((r.tip, snap.ready && !self.tainted));
+        if !self.tainted {
+            self.state = RefsState::Ready;
+        }
         self.c.rebases += 1;
         diff
     }
 
-    /// The mark whose tip root was just rebased chose `c.segs` to condemn:
-    /// the offers that began at or before its tip are judged against them,
-    /// and the condemns the table had not offered are counted.
-    pub(crate) fn judge(&mut self, c: &MarkCondemned) {
+    /// The mark whose tip root was just rebased decided about segments
+    /// (`c`) at `now`: the offers that began at or before its tip are judged
+    /// against them, and the condemns the table had not offered are counted.
+    pub(crate) fn judge(&mut self, c: &MarkCondemned, now: Duration) {
         let dead: BTreeSet<SegId> = c.segs.iter().copied().collect();
+        let live: BTreeSet<SegId> = c.live.iter().copied().collect();
+        let listed: BTreeSet<SegId> = c.listed.iter().copied().collect();
         let mut confirmed = BTreeSet::new();
         let judged: Vec<SegId> = self
             .offered
             .iter()
-            .filter(|&(_, &t)| t <= c.tip)
+            .filter(|&(_, o)| o.tip <= c.tip)
             .map(|(&s, _)| s)
             .collect();
         for s in judged {
-            self.offered.remove(&s);
+            let Some(o) = self.offered.remove(&s) else {
+                continue;
+            };
             if dead.contains(&s) {
                 self.c.confirmed += 1;
                 confirmed.insert(s);
+                match o.idle_at {
+                    Some(t) => {
+                        let lead = ms(now.saturating_sub(t));
+                        self.c.confirmed_lead += 1;
+                        self.c.lead_sum_ms = self.c.lead_sum_ms.saturating_add(lead);
+                        self.c.lead_max_ms = self.c.lead_max_ms.max(lead);
+                    }
+                    None => self.c.confirmed_no_lead += 1,
+                }
+            } else if live.contains(&s) {
+                self.c.unconfirmed_live += 1;
+            } else if listed.contains(&s) {
+                self.c.unconfirmed_listed += 1;
             } else {
-                self.c.unconfirmed += 1;
+                self.c.unconfirmed_kept += 1;
             }
         }
-        if self.judged.is_some_and(|(t, ready)| t == c.tip && ready) {
-            self.c.missed += dead.difference(&confirmed).count() as u64;
+        // The mark condemns these now: the table's own zeros for them are
+        // done with (not offered later and then called unconfirmed).
+        let was_ready = self.judged.is_some_and(|(t, ready)| t == c.tip && ready);
+        for s in &dead {
+            let known = self.zero_since.remove(s).is_some();
+            self.went_zero.remove(s);
+            if confirmed.contains(s) {
+                continue;
+            }
+            if known {
+                self.c.early_by_mark += 1;
+            } else if was_ready {
+                self.c.missed += 1;
+            }
+        }
+        if !dead.is_empty() && self.first_mark_condemn.is_none() {
+            // Wall time from attach: the monotonic clock of the engine.
+            self.first_mark_condemn = Some(now.saturating_sub(self.born));
         }
     }
 
     /// A map transaction did not do what the table predicted, or could not
-    /// be predicted: the next mark repairs the table.
+    /// be predicted: the table offers nothing and keeps no zero until a
+    /// mark that began after this moment repairs it. A failure while the
+    /// table is `Rebuilding` keeps it so.
     fn drifted(&mut self, mismatch: bool) {
         if mismatch {
             self.c.report_mismatches += 1;
         }
+        self.tainted = true;
+        self.zero_since.clear();
+        self.went_zero.clear();
         if self.state == RefsState::Ready {
             self.state = RefsState::Drifted;
         }
@@ -350,20 +434,32 @@ impl SegRefs {
             rebases: self.c.rebases,
             report_mismatches: self.c.report_mismatches,
             shadow_would_propose: self.c.would_propose,
+            shadow_offered_idle: self.c.offered_idle,
+            shadow_offered_busy: self.c.offered_busy,
             shadow_confirmed: self.c.confirmed,
-            shadow_unconfirmed: self.c.unconfirmed,
+            shadow_confirmed_lead: self.c.confirmed_lead,
+            shadow_lead_ms_sum: self.c.lead_sum_ms,
+            shadow_lead_ms_max: self.c.lead_max_ms,
+            shadow_confirmed_no_lead: self.c.confirmed_no_lead,
+            shadow_unconfirmed_live: self.c.unconfirmed_live,
+            shadow_unconfirmed_kept: self.c.unconfirmed_kept,
+            shadow_unconfirmed_listed: self.c.unconfirmed_listed,
             shadow_revived: self.c.revived,
+            shadow_early_by_mark: self.c.early_by_mark,
             shadow_missed: self.c.missed,
+            first_mark_condemn_ms: self.first_mark_condemn.map(ms),
             condemn_lag_ms_sum: self.c.lag_sum_ms,
             condemn_lag_ms_max: self.c.lag_max_ms,
             condemn_lag_count: self.c.lag_count,
             idle_wait_ms_sum: self.c.idle_wait_sum_ms,
             idle_wait_ms_max: self.c.idle_wait_max_ms,
             idle_wait_count: self.c.idle_wait_count,
-            idle_waiting: self.waiting_idle.len() as u64,
-            first_ready_ms: self
-                .first_ready
-                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            idle_waiting: self
+                .offered
+                .values()
+                .filter(|o| o.idle_at.is_none())
+                .count() as u64,
+            first_ready_ms: self.first_ready.map(ms),
         }
     }
 
@@ -494,8 +590,18 @@ impl MapTxn for RefTxn<'_> {
         match predicted {
             Ok(p) => {
                 if p.sets != report.sets || p.rehints_applied != report.rehints_applied {
+                    tracing::warn!(
+                        predicted_sets = p.sets,
+                        sets = report.sets,
+                        predicted_rehints = p.rehints_applied,
+                        rehints = report.rehints_applied,
+                        "reference table: a map transaction report differed from the prediction"
+                    );
                     t.drifted(true);
                 }
+                // Applied although it is known to be wrong when the report
+                // differed: the table is `Drifted` and offers nothing, and
+                // the next mark repairs the counts either way.
                 t.apply(&p.deltas);
             }
             Err(e) => {
@@ -565,6 +671,53 @@ impl BlockMap for RefMap {
     ) -> Result<()> {
         self.inner.walk_nodes_skipping(root, skip, f)
     }
+}
+
+/// Measurement support (feature `testsupport`): the cut's table wrapper over
+/// an empty `map`, already `Ready` (rebased on the empty map).
+#[cfg(feature = "testsupport")]
+pub(crate) fn bench_ref_map(map: Arc<dyn BlockMap>) -> Arc<dyn BlockMap> {
+    let mut t = SegRefs::new(Duration::ZERO);
+    t.mark_started(CommitSeq(0));
+    t.rebase(&TipRefs {
+        tip: CommitSeq(0),
+        refs: Vec::new(),
+    });
+    Arc::new(RefMap::new(map, Arc::new(Mutex::new(t))))
+}
+
+/// What the table's mark-start snapshot and `ready()` cost for a table of
+/// `segments` segments of which `zeros` wait in `zero_since`: nanoseconds per
+/// call, averaged over `reps` calls.
+#[cfg(feature = "testsupport")]
+pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64) {
+    let mut t = SegRefs::new(Duration::ZERO);
+    t.mark_started(CommitSeq(0));
+    t.rebase(&TipRefs {
+        tip: CommitSeq(0),
+        refs: Vec::new(),
+    });
+    let ids: Vec<SegId> = (1..=segments as u64)
+        .filter_map(|n| SegId::new(0, n).ok())
+        .collect();
+    let all: HashMap<SegId, i64> = ids.iter().map(|&s| (s, 1)).collect();
+    t.apply(&all);
+    let gone: HashMap<SegId, i64> = ids.iter().take(zeros).map(|&s| (s, -1)).collect();
+    t.apply(&gone);
+    t.seal_cut(CommitSeq(1), Duration::ZERO);
+    let reps = reps.max(1);
+    let t0 = std::time::Instant::now();
+    for i in 0..reps {
+        t.mark_started(CommitSeq(u64::from(i) + 2));
+    }
+    let clone_ns = u64::try_from(t0.elapsed().as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
+    let t0 = std::time::Instant::now();
+    let skip = HashSet::new();
+    for _ in 0..reps {
+        std::hint::black_box(t.ready(CommitSeq(u64::MAX / 2), 0, &skip, OFFER_MAX));
+    }
+    let ready_ns = u64::try_from(t0.elapsed().as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
+    (clone_ns, ready_ns)
 }
 
 #[cfg(test)]
@@ -809,6 +962,117 @@ mod tests {
         assert_eq!(t.state(), RefsState::Ready);
     }
 
+    fn mc(tip: u64, segs: &[u64], live: &[u64], listed: &[u64]) -> MarkCondemned {
+        let v = |x: &[u64]| x.iter().map(|&n| seg(n)).collect::<Vec<_>>();
+        MarkCondemned {
+            tip: seq(tip),
+            segs: v(segs),
+            live: v(live),
+            listed: v(listed),
+        }
+    }
+
+    /// B1: a failure after the mark pinned its roots is not repaired by that
+    /// mark (its snapshot is older): the table stays `Drifted`, keeps no
+    /// zero and offers nothing; the next mark makes it `Ready`.
+    #[test]
+    fn a_failure_during_a_mark_is_not_erased_by_that_marks_rebase() {
+        for report_mismatch in [true, false] {
+            let mut t = ready_table();
+            t.apply(&deltas(&[(1, 1), (2, 1)]));
+            t.seal_cut(seq(1), at(0));
+            t.mark_started(seq(1));
+            // A cut after the snapshot whose prediction failed: segment 2
+            // lost its entry, the table never heard of it (or heard wrong).
+            t.apply(&deltas(&[(1, -1)]));
+            t.seal_cut(seq(2), at(1));
+            t.drifted(report_mismatch);
+            assert!(t.zero_since.is_empty(), "a zero is not trusted any more");
+            // The mark saw the tip as it was at the snapshot: no difference.
+            assert_eq!(t.rebase(&tip_refs(1, &[(1, 1), (2, 1)])), 0);
+            assert_eq!(t.state(), RefsState::Drifted, "{report_mismatch}");
+            assert!(t.ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+            assert_eq!(t.judged, Some((seq(1), false)));
+            // The next mark began after the failure: its snapshot holds the
+            // bad count, the mark finds the difference and repairs it.
+            t.mark_started(seq(2));
+            assert_eq!(t.rebase(&tip_refs(2, &[])), 1);
+            assert_eq!(t.state(), RefsState::Ready);
+            assert_eq!(t.count(seg(2)), 0);
+        }
+    }
+
+    #[test]
+    fn a_failure_while_rebuilding_keeps_the_table_rebuilding() {
+        let mut t = SegRefs::new(Duration::ZERO);
+        t.apply(&deltas(&[(1, 2)]));
+        t.mark_started(seq(1));
+        t.drifted(false);
+        assert_eq!(t.rebase(&tip_refs(1, &[(1, 3)])), 0);
+        assert_eq!(t.state(), RefsState::Rebuilding, "not a base");
+        t.mark_started(seq(1));
+        t.rebase(&tip_refs(1, &[(1, 3)]));
+        assert_eq!(t.state(), RefsState::Ready);
+    }
+
+    /// S2: why an offer was not confirmed, and what the mark condemned
+    /// while the table already knew the zero.
+    #[test]
+    fn an_unconfirmed_offer_is_live_by_id_listed_or_kept_and_an_early_mark_is_not_a_miss() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&[(1, -1), (2, -1), (3, -1), (4, -1), (5, -1), (6, -1)]));
+        t.seal_cut(seq(2), at(10));
+        // 1..4 are offered (idle), 5 and 6 stay in `zero_since` (cap).
+        let r: Vec<Ready> = t
+            .ready(seq(4), 2, &HashSet::new(), 9)
+            .into_iter()
+            .take(4)
+            .collect();
+        t.shadow_offer(&r, seq(4), at(100), true);
+        t.mark_started(seq(4));
+        t.rebase(&tip_refs(4, &[]));
+        // The mark: condemns 1 and 5; 2 is live by id; 3 is listed; 4 kept.
+        t.judge(&mc(4, &[1, 5], &[2], &[3]), at(450));
+        let s = t.stats();
+        assert_eq!(s.shadow_confirmed, 1);
+        assert_eq!((s.shadow_confirmed_lead, s.shadow_lead_ms_sum), (1, 350));
+        assert_eq!(s.shadow_lead_ms_max, 350);
+        assert_eq!(s.shadow_unconfirmed_live, 1);
+        assert_eq!(s.shadow_unconfirmed_listed, 1);
+        assert_eq!(s.shadow_unconfirmed_kept, 1);
+        assert_eq!(s.shadow_early_by_mark, 1, "5 was known, not yet offered");
+        assert_eq!(s.shadow_missed, 0, "a zero the table knew is not a miss");
+        assert_eq!(s.shadow_offered_idle, 4);
+        assert_eq!(s.first_mark_condemn_ms, Some(450));
+        // 5 is listed now: it is not offered later; 6 still is.
+        let r = t.ready(seq(9), 2, &HashSet::new(), 9);
+        assert_eq!(r.iter().map(|x| x.seg).collect::<Vec<_>>(), vec![seg(6)]);
+    }
+
+    /// S1: a revival and a judgement remove the idle-wait entry.
+    #[test]
+    fn a_revived_or_judged_offer_is_no_longer_waiting_for_idle() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&[(1, -1), (2, -1)]));
+        t.seal_cut(seq(2), at(10));
+        let r = t.ready(seq(4), 2, &HashSet::new(), 9);
+        t.shadow_offer(&r, seq(4), at(100), false);
+        assert_eq!(t.stats().idle_waiting, 2);
+        assert_eq!(t.stats().shadow_offered_busy, 2);
+        t.apply(&deltas(&[(1, 1)]));
+        assert_eq!(t.stats().idle_waiting, 1, "revived");
+        t.mark_started(seq(4));
+        t.rebase(&tip_refs(4, &[(1, 1)]));
+        t.judge(&mc(4, &[2], &[], &[]), at(200));
+        let s = t.stats();
+        assert_eq!(s.idle_waiting, 0, "judged");
+        assert_eq!((s.idle_wait_count, s.shadow_confirmed_no_lead), (0, 1));
+    }
+
     #[test]
     fn the_shadow_offer_is_judged_by_a_mark_that_began_at_or_after_it() {
         let mut t = ready_table();
@@ -829,20 +1093,15 @@ mod tests {
         // A mark that began before the offer judges nothing.
         t.mark_started(seq(3));
         t.rebase(&tip_refs(3, &[(4, 1), (3, 1)]));
-        t.judge(&MarkCondemned {
-            tip: seq(3),
-            segs: vec![],
-        });
+        t.judge(&mc(3, &[], &[], &[]), at(400));
         assert_eq!(t.offered.len(), 2);
         // One at the offer's tip: 1 condemned, 2 not; 9 is the mark's own.
         t.mark_started(seq(4));
         t.rebase(&tip_refs(4, &[(4, 1), (3, 1)]));
-        t.judge(&MarkCondemned {
-            tip: seq(4),
-            segs: vec![seg(1), seg(9)],
-        });
+        t.judge(&mc(4, &[1, 9], &[], &[]), at(500));
         let s = t.stats();
-        assert_eq!((s.shadow_confirmed, s.shadow_unconfirmed), (1, 1));
+        assert_eq!((s.shadow_confirmed, s.shadow_unconfirmed_kept), (1, 1));
+        assert_eq!(s.shadow_confirmed_no_lead, 1, "offered during a pass");
         assert_eq!(s.shadow_missed, 1, "segment 9 was the mark's alone");
         assert!(t.offered.is_empty());
     }
@@ -1049,5 +1308,152 @@ mod tests {
             }
             prop_assert_eq!(lock(&refs).stats().report_mismatches, 0);
         }
+    }
+
+    // ---------------------------------------- negative controls (S3)
+
+    /// A map that misbehaves under the wrapper: it drops every re-hint
+    /// silently (the real map never sees it) or reports one `set` too many.
+    /// The table must notice and the next mark must repair it.
+    struct Lying {
+        inner: Arc<dyn BlockMap>,
+        drop_rehints: bool,
+        extra_sets: u64,
+    }
+
+    struct LyingTxn<'a> {
+        inner: Box<dyn MapTxn + 'a>,
+        drop_rehints: bool,
+        extra_sets: u64,
+    }
+
+    impl MapTxn for LyingTxn<'_> {
+        fn set(&mut self, ci: ChunkNo, entry: DataEntry) -> Result<()> {
+            self.inner.set(ci, entry)
+        }
+        fn set_hole(&mut self, ci: ChunkNo) -> Result<()> {
+            self.inner.set_hole(ci)
+        }
+        fn rehint(&mut self, ci: ChunkNo, old: Hint, new: Hint) -> Result<()> {
+            if self.drop_rehints {
+                return Ok(());
+            }
+            self.inner.rehint(ci, old, new)
+        }
+        fn commit(self: Box<Self>) -> Result<TxnReport> {
+            let extra = self.extra_sets;
+            let mut r = self.inner.commit()?;
+            r.sets += extra;
+            Ok(r)
+        }
+    }
+
+    impl BlockMap for Lying {
+        fn chunk_count(&self) -> u64 {
+            self.inner.chunk_count()
+        }
+        fn get(&self, ci: ChunkNo) -> Result<Option<DataEntry>> {
+            self.inner.get(ci)
+        }
+        fn try_get_cached(&self, ci: ChunkNo) -> Cached {
+            self.inner.try_get_cached(ci)
+        }
+        fn begin_update(&self) -> Result<Box<dyn MapTxn + '_>> {
+            Ok(Box::new(LyingTxn {
+                inner: self.inner.begin_update()?,
+                drop_rehints: self.drop_rehints,
+                extra_sets: self.extra_sets,
+            }))
+        }
+        fn seal(&self, packs: &mut dyn PackWrite) -> Result<SealResult> {
+            self.inner.seal(packs)
+        }
+        fn grow(&self, n: u64) -> Result<()> {
+            self.inner.grow(n)
+        }
+        fn root(&self) -> MapRoot {
+            self.inner.root()
+        }
+        fn dirty_leaf_count(&self) -> u64 {
+            self.inner.dirty_leaf_count()
+        }
+        fn walk_leaves_skipping(
+            &self,
+            root: &MapRoot,
+            skip: &HashSet<NodeHash>,
+            f: &mut dyn FnMut(ChunkNo, &DataEntry),
+        ) -> Result<()> {
+            self.inner.walk_leaves_skipping(root, skip, f)
+        }
+        fn walk_nodes(&self, root: &MapRoot, f: &mut dyn FnMut(&NodeRef)) -> Result<()> {
+            self.inner.walk_nodes(root, f)
+        }
+        fn walk_nodes_skipping(
+            &self,
+            root: &MapRoot,
+            skip: &HashSet<NodeHash>,
+            f: &mut dyn FnMut(&NodeRef),
+        ) -> Result<()> {
+            self.inner.walk_nodes_skipping(root, skip, f)
+        }
+    }
+
+    fn lying(drop_rehints: bool, extra_sets: u64) -> (Arc<dyn BlockMap>, RefMap, Arc<Mutex<SegRefs>>) {
+        let real = flat(64, None);
+        let liar: Arc<dyn BlockMap> = Arc::new(Lying {
+            inner: Arc::clone(&real),
+            drop_rehints,
+            extra_sets,
+        });
+        let refs = Arc::new(Mutex::new(SegRefs::new(Duration::ZERO)));
+        // The table has a base: it was rebased on an empty map.
+        {
+            let mut t = lock(&refs);
+            t.mark_started(seq(0));
+            t.rebase(&tip_refs(0, &[]));
+            assert_eq!(t.state(), RefsState::Ready);
+        }
+        (real, RefMap::new(liar, Arc::clone(&refs)), refs)
+    }
+
+    /// The real map misses a re-hint the table counted as applied: the
+    /// report differs at once (`Drifted`, nothing offered), and the next
+    /// mark finds exactly the two segments the re-hint touched and repairs
+    /// the table.
+    #[test]
+    fn a_dropped_rehint_is_found_at_the_commit_and_repaired_by_the_next_mark() {
+        let (real, m, refs) = lying(true, 0);
+        commit(&m, &[Op::Set(ChunkNo(1), hint(1, 0))]).expect("commit");
+        assert_eq!(lock(&refs).stats().report_mismatches, 0);
+        commit(&m, &[Op::Rehint(ChunkNo(1), hint(1, 0), hint(2, 0))]).expect("commit");
+        let t = lock(&refs).stats();
+        assert_eq!((t.report_mismatches, t.state), (1, RefsState::Drifted));
+        assert_ne!(table(&refs), counted(&*real), "the table is wrong now");
+        assert!(lock(&refs).ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+        // The next mark: the real counts.
+        let truth: Vec<(SegId, u64)> = counted(&*real)
+            .into_iter()
+            .map(|(s, n)| (s, n as u64))
+            .collect();
+        lock(&refs).mark_started(seq(1));
+        let diff = lock(&refs).rebase(&TipRefs {
+            tip: seq(1),
+            refs: truth,
+        });
+        assert_eq!(diff, 2, "exactly the two segments of the re-hint");
+        assert_eq!(table(&refs), counted(&*real));
+        assert_eq!(lock(&refs).state(), RefsState::Ready);
+        assert_eq!(lock(&refs).stats().drift_segments, 2);
+    }
+
+    /// A wrong report (one `sets` too many) is a mismatch and offers nothing
+    /// until a mark began after it.
+    #[test]
+    fn a_wrong_report_makes_the_table_drifted_and_silent() {
+        let (_real, m, refs) = lying(false, 1);
+        commit(&m, &[Op::Set(ChunkNo(1), hint(1, 0)), Op::Hole(ChunkNo(1))]).expect("commit");
+        let t = lock(&refs).stats();
+        assert_eq!((t.report_mismatches, t.state), (1, RefsState::Drifted));
+        assert!(lock(&refs).ready(seq(99), 0, &HashSet::new(), 9).is_empty());
     }
 }

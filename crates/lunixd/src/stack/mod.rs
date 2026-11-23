@@ -518,8 +518,8 @@ pub struct OpenParams {
     /// `gc` says).
     pub gc_fast_recheck: Option<std::time::Duration>,
     /// The engine's per-segment reference table (the daemon's
-    /// `gc_condemn_on_cut`); `Shadow` also makes the collector count the
-    /// tip root's entries in every mark.
+    /// `gc_condemn_on_cut`); `Shadow` also makes the engine switch the
+    /// collector's counting of the tip root's entries on.
     pub gc_condemn_on_cut: lunix_engine::CondemnOnCut,
     /// The band's middle rate in bytes per second, instead of
     /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
@@ -898,9 +898,6 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     let mut gc_config = p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon);
     if p.gc_fast_recheck.is_some() {
         gc_config.fast_recheck = p.gc_fast_recheck;
-    }
-    if p.gc_condemn_on_cut != lunix_engine::CondemnOnCut::Off {
-        gc_config.tip_refs = true;
     }
     let deps = EngineDeps {
         dir: Arc::clone(&dir),

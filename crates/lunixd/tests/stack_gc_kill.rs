@@ -381,12 +381,36 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 /// Runs `steps` on the volume, `base` requests already logged before them.
 /// The reference table of the shadow mode matched every mark so far.
 fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
-    let t = *stack.engine.gc_status_handle().get().refs;
+    let t = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| *b)
+        .expect("the table exists");
     assert_eq!(t.drift_segments, 0, "{what}: refs_drift_segments: {t:?}");
     assert_eq!(
         t.report_mismatches, 0,
         "{what}: refs report mismatches: {t:?}"
     );
+}
+
+/// Ticks the engine until the table is `Ready` (a pass is due at once after
+/// an attach, and its mark is the table's base).
+fn wait_refs_ready(stack: &lunixd::stack::VolumeStack, what: &str) {
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick after recovery");
+        let t = *stack.engine.gc_status_handle().get().refs.expect("table");
+        if t.state == lunix_iface::gc::RefsState::Ready {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "{what}: the table is not Ready after 120 s: {t:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, recheck: bool) {
@@ -543,6 +567,9 @@ fn gc_kill_child() {
     let Some(spec_path) = std::env::var_os(CHILD_ENV) else {
         return;
     };
+    // Warnings go to the child's log: the parent fails on a reference-table
+    // warning even when the child was killed before it could assert.
+    lunixd::log::StderrLog::install(tracing::Level::WARN);
     let spec = Spec::read(Path::new(&spec_path));
     let parent = spec.voldir.parent().expect("parent").to_path_buf();
     let vol = TestVolume::at(
@@ -623,6 +650,7 @@ fn spawn_child(spec: &Spec, dir: &Path, crash_at: Option<&str>) -> ChildEnd {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
+    assert_no_refs_warning(&log, &spec.phase, crash_at);
     if status.signal() == Some(libc::SIGKILL) {
         return ChildEnd::Killed;
     }
@@ -641,6 +669,21 @@ fn spawn_child(spec: &Spec, dir: &Path, crash_at: Option<&str>) -> ChildEnd {
             })
             .collect(),
     )
+}
+
+/// The table of the shadow mode logs a warning when a mark or a map
+/// transaction contradicts it; a killed child cannot assert, so its log is
+/// read by the parent.
+fn assert_no_refs_warning(log: &Path, phase: &str, crash_at: Option<&str>) {
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("reference table"))
+        .collect();
+    assert!(
+        lines.is_empty(),
+        "the {phase} child ({crash_at:?}) logged reference-table warnings: {lines:?}"
+    );
 }
 
 struct Config {
@@ -910,6 +953,9 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         );
     };
     tally.lost_requests += (model.len() - n) as u64;
+    // The table is rebuilt from the first mark after the open; once it is
+    // `Ready` the writes below change the map, so a later mark compares.
+    wait_refs_ready(&stack, what);
     // The recovered volume takes writes and reads them back, across a clean
     // close and a second open.
     let cs = u64::from(cfg.cs);
@@ -930,11 +976,24 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     settle_gc(&stack, &mut d, &actual, what);
     // Recovery: the table was rebuilt from the first mark and matched every
     // later one.
-    let t = *stack.engine.gc_status_handle().get().refs;
+    let t = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| *b)
+        .expect("the table exists");
     assert_eq!(
         t.state,
         lunix_iface::gc::RefsState::Ready,
         "{what}: no mark rebased the table after recovery: {t:?}"
+    );
+    // The base mark and at least one later mark that compared (the writes
+    // before `settle_gc` changed the map): drift 0 is not vacuous.
+    assert!(
+        t.rebases >= 2,
+        "{what}: only {} mark(s) rebased the table after recovery: {t:?}",
+        t.rebases
     );
     assert_refs_clean(&stack, what);
     drop(d);

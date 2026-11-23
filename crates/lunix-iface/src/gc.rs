@@ -256,6 +256,15 @@ pub trait Collector: Send {
         let _ = raised;
     }
 
+    /// The engine keeps a reference table (`gc_condemn_on_cut`): count the
+    /// entries of the tip root per segment in every mark and report what the
+    /// marks pin and condemn (`take_mark_started`, `take_tip_refs`,
+    /// `take_mark_condemned`). Called once when the engine opens. The default
+    /// ignores it.
+    fn set_tip_refs(&mut self, on: bool) {
+        let _ = on;
+    }
+
     /// `Some(tip)` once after a call in which a mark pinned its roots: the
     /// commit sequence of the tip the mark walks (the map was at that tip
     /// when the roots were pinned). The engine's reference table snapshots
@@ -292,14 +301,20 @@ pub struct TipRefs {
     pub refs: Vec<(SegId, u64)>,
 }
 
-/// The segments one mark found dead and condemned (or would have, when the
-/// list was full).
+/// What one mark decided about segments, for the engine's shadow check.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MarkCondemned {
     /// The tip the mark walked (as [`TipRefs::tip`]).
     pub tip: CommitSeq,
-    /// The newly dead segments, ascending.
+    /// The newly dead segments the mark condemns (at most what the list has
+    /// room for), ascending.
     pub segs: Vec<SegId>,
+    /// Segments with no map entry hinting at them in the tip root that the
+    /// mark nevertheless found live by chunk id (the index's copy of an id
+    /// is there): what hint counts cannot see.
+    pub live: Vec<SegId>,
+    /// Segments the mark found dead that are on the condemned list already.
+    pub listed: Vec<SegId>,
 }
 
 /// The state of the engine's reference table (`gc_condemn_on_cut`).
@@ -313,8 +328,9 @@ pub enum RefsState {
     Rebuilding,
     /// Rebased on a mark and consistent with it.
     Ready,
-    /// A map transaction did not do what the table predicted; the next mark
-    /// repairs the table.
+    /// A map transaction did not do what the table predicted (or could not
+    /// be predicted); it offers nothing until a mark that began after the
+    /// failure repairs it.
     Drifted,
 }
 
@@ -326,11 +342,13 @@ pub struct RefsStats {
     pub state: RefsState,
     /// Segments with at least one map entry.
     pub segments: u64,
-    /// Segments with no entry since a cut, whose lag (`2 x (retain_last - 1)`
-    /// cuts) is not over.
+    /// Segments with no entry since a cut that have not been offered yet:
+    /// the lag (`2 x (retain_last - 1)` cuts) is not over, or they were left
+    /// by the 64-per-step cap, a pending re-hint, or a table that is not
+    /// `Ready`.
     pub zero_waiting: u64,
-    /// Segments offered at the last collector call (shadow: counted, never
-    /// condemned).
+    /// Segments offered at the last collector step (at most 64; shadow:
+    /// counted, never condemned).
     pub ready: u64,
     /// Segments that differed between the table and a mark, summed over the
     /// marks (0 when the table is right).
@@ -339,19 +357,53 @@ pub struct RefsStats {
     pub rebases: u64,
     /// Map transactions whose report differed from the prediction.
     pub report_mismatches: u64,
-    /// Segments the shadow check would have offered for condemnation.
+    /// Segments the shadow check would have offered for condemnation (an
+    /// upper bound of what the active stage proposes: it only takes offers
+    /// that meet an idle collector).
     pub shadow_would_propose: u64,
+    /// Offers made while the collector was between passes.
+    pub shadow_offered_idle: u64,
+    /// Offers made while a pass was running.
+    pub shadow_offered_busy: u64,
     /// Offered segments a later mark (that began at or after the offer)
     /// found dead as well.
     pub shadow_confirmed: u64,
-    /// Offered segments such a mark did not condemn (already listed, kept
-    /// for another reason, or still live by id).
-    pub shadow_unconfirmed: u64,
+    /// Of those, the ones whose offer met an idle collector before the mark:
+    /// the offer would have started the grace earlier (`shadow_lead_ms_*`).
+    pub shadow_confirmed_lead: u64,
+    /// Sum, over those, of the time between the offer meeting an idle
+    /// collector and the mark's condemn, milliseconds: how much earlier the
+    /// grace would have started.
+    pub shadow_lead_ms_sum: u64,
+    /// The largest such lead.
+    pub shadow_lead_ms_max: u64,
+    /// Confirmed offers that never met an idle collector before the mark
+    /// condemned the segment itself: no gain.
+    pub shadow_confirmed_no_lead: u64,
+    /// Offers such a mark did not condemn because a chunk id in the segment
+    /// is live elsewhere than the entries hint: the only class that becomes a
+    /// wrong proposal (the recheck stops it).
+    pub shadow_unconfirmed_live: u64,
+    /// Offers such a mark did not condemn because it was kept for another
+    /// reason (a pin, named by a retained FULL, above the high-water mark,
+    /// an unnamed output, already gone).
+    pub shadow_unconfirmed_kept: u64,
+    /// Offers such a mark did not condemn because the segment was on the
+    /// list already.
+    pub shadow_unconfirmed_listed: u64,
     /// Offered segments a new map entry pointed into again before a mark
     /// judged them (condemn-on-cut would have flagged them first).
     pub shadow_revived: u64,
-    /// Segments the marks condemned that the table had not offered earlier.
+    /// Segments a mark condemned while the table knew them as zero but had
+    /// not offered them yet (the lag was not over, the 64-per-step cap, a
+    /// pending re-hint, or the mark ran in a call without an offer).
+    pub shadow_early_by_mark: u64,
+    /// Segments the marks condemned that the table did not know (never had
+    /// an entry, died by compaction with stale hints, ...).
     pub shadow_missed: u64,
+    /// Milliseconds from the table's creation to the first mark that
+    /// condemned a segment, if one has.
+    pub first_mark_condemn_ms: Option<u64>,
     /// Sum of the time between a segment's count reaching zero and its offer,
     /// milliseconds.
     pub condemn_lag_ms_sum: u64,
@@ -359,16 +411,16 @@ pub struct RefsStats {
     pub condemn_lag_ms_max: u64,
     /// Offers the lag figures cover.
     pub condemn_lag_count: u64,
-    /// For each offered segment, the time between its offer and the first
-    /// moment the collector was idle (a proposal is only taken then):
-    /// the sum, milliseconds. 0 for a segment offered while idle.
+    /// For each segment offered while a pass was running, the time between
+    /// its offer and the first moment the collector was idle (a proposal is
+    /// only taken then): the sum, milliseconds.
     pub idle_wait_ms_sum: u64,
     /// The largest such wait.
     pub idle_wait_ms_max: u64,
-    /// Offered segments that have met an idle collector (the figures'
-    /// count); the ones still waiting are `idle_waiting`.
+    /// Offers that waited and met an idle collector (the figures' count).
     pub idle_wait_count: u64,
-    /// Offered segments no idle collector has been seen for yet.
+    /// Offers made while a pass ran that no idle collector has met yet (and
+    /// no mark has judged, no new entry revived).
     pub idle_waiting: u64,
     /// Milliseconds from the table's creation (attach) to the first call
     /// that found a segment ready, if one has.
@@ -394,12 +446,10 @@ pub struct GcStatusSnapshot {
     /// set by the engine wiring, 0 from a collector.
     pub requests: u64,
     /// Reclaim latency and pass-kind counters of this process.
-    #[serde(default)]
     pub reclaim: Box<GcReclaimStats>,
-    /// The engine's reference table (set by the engine wiring, default from a
-    /// collector).
-    #[serde(default)]
-    pub refs: Box<RefsStats>,
+    /// The engine's reference table (set by the engine wiring; `None` from a
+    /// collector and when the mode is off).
+    pub refs: Option<Box<RefsStats>>,
 }
 
 /// How fast reclaim is and which passes did it (since the process started).

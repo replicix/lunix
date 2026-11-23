@@ -33,9 +33,8 @@ pub enum CondemnOnCut {
     /// The table is maintained and compared with every mark, and what it
     /// would offer for condemnation is counted and compared with what the
     /// marks condemn. Nothing is condemned, listed or deleted because of it.
-    /// The collector must count the tip root's entries
-    /// (`lunix_gc::GcConfig::tip_refs`) or the table never leaves
-    /// `Rebuilding`.
+    /// Opening the engine switches the collector's counting of the tip
+    /// root on (`Collector::set_tip_refs`); there is no second switch.
     Shadow,
 }
 
