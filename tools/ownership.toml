@@ -625,6 +625,7 @@ paths = [
   "crates/lunix-gc/src/tests/mod.rs",
   "crates/lunix-gc/src/tests/oracle.rs",
   "crates/lunix-gc/src/tests/recheck.rs",
+  "crates/lunix-gc/src/tests/sim.rs",
   "crates/lunix-iface/src/contract/index.rs",
   "crates/lunix-iface/src/gc.rs",
   "crates/lunix-iface/tests/ctl.rs",
@@ -635,6 +636,7 @@ paths = [
   "crates/lunixd/tests/stack_gc_kill.rs",
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-fastrecheck.md",
+  "docs/plans/v1/reports/p1-recheckoracle.md",
   "tools/ownership.toml",
 ]
 
