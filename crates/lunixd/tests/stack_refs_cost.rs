@@ -90,7 +90,9 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
     for _ in 0..2 {
         for c in 0..chunks {
             seed += 1;
-            assert!(d.write(0, c * csz, &payload(seed, cs as usize), false).is_ok());
+            assert!(d
+                .write(0, c * csz, &payload(seed, cs as usize), false)
+                .is_ok());
             if c % 2048 == 2047 {
                 stack.engine.commit_now(true).expect("cut");
             }
@@ -128,7 +130,9 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
             x ^= x << 17;
             seed += 1;
             let c = x % chunks;
-            assert!(d.write(0, c * csz, &payload(seed, cs as usize), false).is_ok());
+            assert!(d
+                .write(0, c * csz, &payload(seed, cs as usize), false)
+                .is_ok());
         }
         let t0 = Instant::now();
         stack.engine.commit_now(true).expect("cut");
@@ -269,7 +273,8 @@ fn the_map_transaction_costs_per_chunk() {
             for r in 0..(step.min(16)) {
                 let mut t = m.begin_update().expect("begin");
                 for i in 0..per_txn {
-                    t.set(ChunkNo(i * step + r), entry(1 + i % 64, 0)).expect("set");
+                    t.set(ChunkNo(i * step + r), entry(1 + i % 64, 0))
+                        .expect("set");
                 }
                 t.commit().expect("commit");
             }

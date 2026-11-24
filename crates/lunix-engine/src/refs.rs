@@ -1022,7 +1022,14 @@ mod tests {
         let mut t = ready_table();
         t.apply(&deltas(&[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1)]));
         t.seal_cut(seq(1), at(0));
-        t.apply(&deltas(&[(1, -1), (2, -1), (3, -1), (4, -1), (5, -1), (6, -1)]));
+        t.apply(&deltas(&[
+            (1, -1),
+            (2, -1),
+            (3, -1),
+            (4, -1),
+            (5, -1),
+            (6, -1),
+        ]));
         t.seal_cut(seq(2), at(10));
         // 1..4 are offered (idle), 5 and 6 stay in `zero_since` (cap).
         let r: Vec<Ready> = t
@@ -1398,7 +1405,10 @@ mod tests {
         }
     }
 
-    fn lying(drop_rehints: bool, extra_sets: u64) -> (Arc<dyn BlockMap>, RefMap, Arc<Mutex<SegRefs>>) {
+    fn lying(
+        drop_rehints: bool,
+        extra_sets: u64,
+    ) -> (Arc<dyn BlockMap>, RefMap, Arc<Mutex<SegRefs>>) {
         let real = flat(64, None);
         let liar: Arc<dyn BlockMap> = Arc::new(Lying {
             inner: Arc::clone(&real),

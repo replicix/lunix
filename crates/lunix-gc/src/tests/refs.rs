@@ -77,7 +77,10 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
     assert!(!c.segs.is_empty(), "the overwritten segments are dead");
     assert!(c.segs.windows(2).all(|w| w[0] < w[1]));
     assert!(c.listed.is_empty(), "nothing was listed before this mark");
-    assert!(c.live.is_empty(), "every live segment has an entry hinting at it");
+    assert!(
+        c.live.is_empty(),
+        "every live segment has an entry hinting at it"
+    );
     for seg in &c.segs {
         assert!(!counted(&s).contains_key(seg), "{seg:?} is referenced");
     }

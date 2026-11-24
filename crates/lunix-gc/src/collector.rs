@@ -2244,7 +2244,7 @@ impl Gc {
         let m0 = view.clock.monotonic();
         m.run(view)?;
         let t = m.take_init_tip();
-                self.note_started(t);
+        self.note_started(t);
         let mark_time = view.clock.monotonic().saturating_sub(m0);
         point!(self.points, "gc.urgent.after_mark");
         let l = m.into_liveness();

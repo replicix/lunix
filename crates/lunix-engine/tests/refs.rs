@@ -20,10 +20,10 @@ use common::*;
 use lunix_engine::{CondemnOnCut, EngineConfig};
 use lunix_format::{IdLen, SegId};
 use lunix_gc::{FloorSource, Gc, GcConfig};
-use lunix_iface::block::IoOp;
+use lunix_iface::block::{BlockEngine, IoOp};
 use lunix_iface::gc::{
-    Collector, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcStats,
-    GcStatusSnapshot, GcView, MarkCondemned, Moved, RefsState, RefsStats, TipRefs,
+    Collector, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcStats, GcStatusSnapshot,
+    GcView, MarkCondemned, Moved, RefsState, RefsStats, TipRefs,
 };
 use lunix_iface::store::SegmentStore;
 use lunix_iface::Result;
@@ -230,9 +230,7 @@ fn run(
                 prop_assert!(r.write(usize::from(c) % 2, off, &d, false).is_ok());
             }
             Op::Zero(c) => {
-                prop_assert!(r
-                    .hole(0, IoOp::WriteZeroes, u64::from(c) * cs, CS)
-                    .is_ok());
+                prop_assert!(r.hole(0, IoOp::WriteZeroes, u64::from(c) * cs, CS).is_ok());
             }
             Op::Cut => {
                 r.engine
@@ -496,7 +494,11 @@ fn the_shadow_check_offers_what_the_marks_condemn() {
     assert_eq!(t.state, RefsState::Ready);
     assert_eq!(t.drift_segments, 0);
     assert!(on.cov.offered > 0 && on.cov.confirmed > 0, "{:?}", on.cov);
-    assert!(on.cov.dedup_hits > 0 && on.cov.compacted > 0, "{:?}", on.cov);
+    assert!(
+        on.cov.dedup_hits > 0 && on.cov.compacted > 0,
+        "{:?}",
+        on.cov
+    );
     assert_eq!((on.cov.reopens, on.cov.urgent), (1, 1), "{:?}", on.cov);
     let last = on.obs.last().expect("obs");
     assert!(last.stats.bytes_freed > 0, "the collector deleted nothing");

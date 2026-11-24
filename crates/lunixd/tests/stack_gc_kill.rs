@@ -969,6 +969,13 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         actual[off as usize..off as usize + data.len()].copy_from_slice(&data);
     }
     assert!(d.flush(0).is_ok(), "{what}: flush after recovery");
+    // A cut now: the map changes, so the marks of `settle_gc` compare the
+    // table with a different tip than the one the base mark saw (without it
+    // the commit interval can outlast `settle_gc`, and no mark compares).
+    stack
+        .engine
+        .commit_now(true)
+        .unwrap_or_else(|e| panic!("{what}: cut after recovery: {e}"));
     let back = d
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
