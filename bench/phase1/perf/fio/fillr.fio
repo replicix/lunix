@@ -1,0 +1,14 @@
+; refsoak: sequential 1M write of the range OFF .. OFF+LEN (bytes) of DEV (cell 6 refills the range it discards in every repetition)
+[fillr]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=write
+bs=1m
+iodepth=32
+numjobs=1
+offset=${OFF}
+size=${LEN}
+refill_buffers=1
+buffer_compress_percentage=50
+end_fsync=1

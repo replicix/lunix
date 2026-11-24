@@ -1,0 +1,4 @@
+created volume refsoak (integrity, uuid ef6d9c77-6bec-4630-b2b8-65ad95155c3f)
+directory        <spike-dir>/refsoak-c2-vols/ef6d9c77-6bec-4630-b2b8-65ad95155c3f
+key file         <spike-dir>/refsoak-c2-vols/ef6d9c77-6bec-4630-b2b8-65ad95155c3f/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

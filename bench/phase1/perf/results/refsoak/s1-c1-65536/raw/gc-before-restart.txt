@@ -1,0 +1,15 @@
+volume           refsoak
+state            idle
+condemned        694 waiting out the grace period
+moved pending    0 segments
+last pass        47 at 2026-11-24 10:49:12 UTC, freed 1.3 GiB
+totals           48 passes, 43.2 GiB freed, 2365 compacted, live 1.6 GiB, dead 13.5 GiB
+recheck-only     20 passes, 2413 segments deleted, 37.2 GiB freed
+pass kinds       28 regular, 20 recheck-only
+recheck lag      mean 993 ms, max 1557 ms over 3032 deletes
+recheck-only lag mean 1096 ms, max 1557 ms over 2629 deletes
+refs table       ready: 235 segments, 62 zero not offered, drift 0 over 48 rebases, 0 report mismatches
+refs shadow      2064 offered (1652 idle, 412 busy), 2053 confirmed, 0 live by id, 0 kept, 0 listed, 0 revived, 0 named by a retained root (must be 0); 1377 early by the mark, 18 not known to the table; recall 59 %
+refs bytes       confirmed 31.4 GiB (33737918052 bytes), early by the mark 21.3 GiB (22958554042 bytes), not known to the table 230 MiB (241187975 bytes); recall 59 %; lead 167381620408199 byte-ms
+refs lead        mean 5120 ms, max 21083 ms over 2000 offers (53 without a lead)
+refs timing      first ready 9243 ms, first mark condemn 30327 ms after attach; zero to offer mean 2219 ms; idle wait mean 888 ms, max 1944 ms (0 waiting)

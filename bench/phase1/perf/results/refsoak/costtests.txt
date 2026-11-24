@@ -1,0 +1,17 @@
+The cut-cost test of the same file (the_shadow_table_cut_cost_is_reported, in-process real stack) was started first and stopped by hand after 55 min without output (its default knobs are too long for the slot); the real-daemon comparison above replaces it. Cold-leaf map_ns (leaves above the leaf cache) is not covered by these tests.
+Host run, release, --features testsupport, --ignored, quiet host:
+test the_map_transaction_costs_per_chunk ... refs cost: 16 KiB chunks, 8192 chunks per transaction: map_ns per chunk raw 59 ns, wrapped 178 ns (+202.1 %; the table's `get` and counting)
+refs cost: 64 KiB chunks, 2048 chunks per transaction: map_ns per chunk raw 49 ns, wrapped 148 ns (+198.7 %; the table's `get` and counting)
+test the_table_snapshot_ready_and_rebase_cost_per_call ... refs cost: table of 1000 segments, 0 waiting: mark-start snapshot 0.00 ms, ready() 0.000 ms, rebase 0.09 ms per call
+refs cost: table of 1000 segments, 10 waiting: mark-start snapshot 0.00 ms, ready() 0.000 ms, rebase 0.08 ms per call
+refs cost: table of 1000 segments, 500 waiting: mark-start snapshot 0.00 ms, ready() 0.002 ms, rebase 0.04 ms per call
+refs cost: table of 16000 segments, 0 waiting: mark-start snapshot 0.02 ms, ready() 0.000 ms, rebase 1.71 ms per call
+refs cost: table of 16000 segments, 160 waiting: mark-start snapshot 0.02 ms, ready() 0.001 ms, rebase 1.68 ms per call
+refs cost: table of 16000 segments, 8000 waiting: mark-start snapshot 0.02 ms, ready() 0.024 ms, rebase 0.85 ms per call
+refs cost: table of 128000 segments, 0 waiting: mark-start snapshot 0.22 ms, ready() 0.000 ms, rebase 15.86 ms per call
+refs cost: table of 128000 segments, 1280 waiting: mark-start snapshot 0.15 ms, ready() 0.005 ms, rebase 15.88 ms per call
+refs cost: table of 128000 segments, 64000 waiting: mark-start snapshot 0.16 ms, ready() 0.225 ms, rebase 7.76 ms per call
+refs cost: table of 1000000 segments, 0 waiting: mark-start snapshot 10.60 ms, ready() 0.000 ms, rebase 360.42 ms per call
+refs cost: table of 1000000 segments, 10000 waiting: mark-start snapshot 10.90 ms, ready() 0.047 ms, rebase 342.10 ms per call
+refs cost: table of 1000000 segments, 500000 waiting: mark-start snapshot 9.70 ms, ready() 8.082 ms, rebase 165.83 ms per call
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 20.56s

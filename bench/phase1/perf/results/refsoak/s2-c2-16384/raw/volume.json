@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "name": "refsoak",
+  "directory": "<spike-dir>/refsoak-c2-vols/ef6d9c77-6bec-4630-b2b8-65ad95155c3f",
+  "space": {
+    "free_floor": "10%",
+    "on_full": "wait",
+    "full_timeout_ms": null,
+    "cache_max": null,
+    "cache_max_percent": 200,
+    "headroom": 268435456
+  },
+  "commit": {
+    "interval_ms": 5000,
+    "dirty_bytes": 1073741824
+  },
+  "retain_last": 2,
+  "gc_grace_ms": 60000,
+  "read_timeout_ms": 10000,
+  "gc_rate": 67108864,
+  "gc_live_threshold": 0.5,
+  "gc_step_budget_ms": 50,
+  "journal_max": 1073741824,
+  "index_ram_per_chunk": 16,
+  "map_dirty_leaves_max": 20000,
+  "map_cache_max": 268435456,
+  "read_cache_max": 134217728,
+  "verify_reads": false,
+  "max_io_buf_bytes": 1048576
+}
