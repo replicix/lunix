@@ -1,0 +1,4 @@
+created volume pa16k (integrity, uuid 3ade0586-f4cf-4d80-935b-7e46410e96a1)
+directory        <spike-dir>/m16-parta-vols/3ade0586-f4cf-4d80-935b-7e46410e96a1
+key file         <spike-dir>/m16-parta-vols/3ade0586-f4cf-4d80-935b-7e46410e96a1/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

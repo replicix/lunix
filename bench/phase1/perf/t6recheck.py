@@ -607,7 +607,7 @@ def main():
 
     # ---- load -------------------------------------------------------------------------------------------------------
     A("## Host load at each block start\n")
-    A("The driver waits for the 1-minute load to fall below 1 before a block (and, before the first block, the 5-minute load below 2). "
+    A("The driver waits before every block for the 1-minute load to fall below 1 and the 5-minute load below 2 (on a run of the older driver only before the first block). "
       "A block is flagged `NOT QUIET` when the 5-minute load at its start was above 2 (the harness rule). The 5-minute load after a "
       "block, and at every repetition start after the first, is high by itself: the daemon's blocked writer threads and the fio jobs of the "
       "measurement count in the load average (hundreds), so only the block-start figure says whether the host was quiet before the block.\n")
