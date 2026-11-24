@@ -681,3 +681,44 @@ fn a_recheck_pass_and_a_regular_pass_delete_the_same_objects() {
         assert!(b.s.gc.condemned().contains(o));
     }
 }
+
+/// A pack delete that fails after its unlink leaves the pack's bytes in the
+/// ledger until a later pass rechecks the object (the bytes wait in the
+/// collector's uncertain set), and a call that finds no pass due settles
+/// nothing. The oracles therefore check ledger == files only after a pass
+/// that ran (`run_pass_with` says so); the next pass that runs settles it.
+#[test]
+fn a_pack_delete_that_failed_after_its_unlink_is_settled_by_the_next_pass_that_runs() {
+    let mut s = Sim::new(cfg(Some(Duration::from_secs(1)), false));
+    s.gc.set_pressure(true);
+    for r in 0..8 {
+        for i in 0..12 {
+            s.write(i, r * 100 + i);
+        }
+        s.commit().unwrap();
+    }
+    s.arm_fault("pack.delete.after", 1, false);
+    let mut mismatch = false;
+    for _ in 0..40 {
+        s.clock.advance(Duration::from_secs(61));
+        s.commit().unwrap();
+        // Errors are the fault's own; the pass is abandoned.
+        let _ = s.run_pass_with(false, &mut |_| Ok(()));
+        if s.check_ledger().is_err() {
+            mismatch = true;
+            break;
+        }
+    }
+    s.disarm_faults();
+    assert!(
+        mismatch,
+        "the fault never failed a pack delete after its unlink"
+    );
+    // No pass is due right away: nothing is settled, and the call says so.
+    assert!(!s.run_pass_with(false, &mut |_| Ok(())).unwrap());
+    assert!(s.check_ledger().is_err());
+    // A later pass that runs settles the ledger.
+    s.clock.advance(Duration::from_secs(120));
+    assert!(s.run_pass_with(false, &mut |_| Ok(())).unwrap());
+    s.check_ledger().unwrap();
+}

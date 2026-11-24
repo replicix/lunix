@@ -65,6 +65,7 @@ fn actions(s: &mut Sim, z: &mut u64, n: usize) -> Result<(), &'static str> {
                     s.write(k % 64, (k >> 8) % 30);
                     s.commit()
                 })
+                .map(|_| ())
             }
         };
         if let Err(e) = res {

@@ -145,14 +145,24 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
             Op::FloorStall(stall) => s.raise_floor = !stall,
             Op::InterleavedPass(seed) => {
                 let mut k = seed;
-                s.run_pass_with(seed % 2 == 1, &mut |s| {
-                    k = k.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                    s.write(k >> 40, (k >> 20) % 40);
-                    s.commit()
-                })
-                .map_err(err)?;
-                passes += 1;
-                after_pass(s, &format!("op {i} interleaved pass"))?;
+                let ran = s
+                    .run_pass_with(seed % 2 == 1, &mut |s| {
+                        k = k.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                        s.write(k >> 40, (k >> 20) % 40);
+                        s.commit()
+                    })
+                    .map_err(err)?;
+                // A pass the schedule did not start (idle, nothing due)
+                // settles nothing: a delete that failed after its unlink
+                // keeps its bytes in the ledger until the next pass rechecks
+                // the object, so only a pass that ran owes ledger == files.
+                if ran {
+                    passes += 1;
+                    after_pass(s, &format!("op {i} interleaved pass"))?;
+                } else {
+                    s.check_roots()
+                        .map_err(|e| fail(format!("op {i} idle pass: {e}")))?;
+                }
             }
             Op::Crash(seed) => {
                 note_fast(s);
