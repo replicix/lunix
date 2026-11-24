@@ -4,6 +4,7 @@
 mod batch;
 mod crash;
 mod equivalence;
+mod footercache;
 mod liveness;
 mod oracle;
 mod pipeline;

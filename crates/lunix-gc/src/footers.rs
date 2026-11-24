@@ -14,6 +14,17 @@ use lunix_format::{ChunkId, Hint, SegId};
 use lunix_iface::store::SegmentStore;
 use lunix_iface::{ErrorKind, Result};
 
+/// A byte count for the footer cache. A newtype so that a bare literal (a
+/// segment count in the old API) cannot silently mean bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CacheBytes(usize);
+
+impl CacheBytes {
+    pub(crate) const fn new(bytes: usize) -> Self {
+        Self(bytes)
+    }
+}
+
 /// One footer: `(off, clen, chunk_id)` sorted by `off`.
 #[derive(Debug)]
 pub(crate) struct FooterIndex {
@@ -54,11 +65,11 @@ pub(crate) struct FooterCache {
 }
 
 impl FooterCache {
-    /// A cache that holds at most `cap_bytes` of footers (the newest footer
-    /// is kept even when it alone is larger).
-    pub(crate) fn new(cap_bytes: usize) -> Self {
+    /// A cache that holds at most `cap` of footers (the newest footer is kept
+    /// even when it alone is larger).
+    pub(crate) fn new(cap: CacheBytes) -> Self {
         Self {
-            cap_bytes,
+            cap_bytes: cap.0,
             bytes: 0,
             map: HashMap::new(),
             order: VecDeque::new(),
@@ -158,7 +169,7 @@ mod tests {
         let get = |c: &mut FooterCache, seg| c.get(&s.store, seg).expect("footer").expect("exists");
 
         // Room for all: every second get is a hit.
-        let mut big = FooterCache::new(1 << 20);
+        let mut big = FooterCache::new(CacheBytes::new(1 << 20));
         let first: Vec<_> = segs.iter().map(|&g| get(&mut big, g)).collect();
         for (g, f) in segs.iter().zip(&first) {
             assert!(Arc::ptr_eq(f, &get(&mut big, *g)), "{g:?} stays cached");
@@ -166,7 +177,7 @@ mod tests {
 
         // Room for exactly two footers of this size.
         let one = cost_of(Some(&first[0]));
-        let mut small = FooterCache::new(2 * one);
+        let mut small = FooterCache::new(CacheBytes::new(2 * one));
         let a = get(&mut small, segs[0]);
         let b = get(&mut small, segs[1]);
         let c = get(&mut small, segs[2]);
@@ -184,7 +195,7 @@ mod tests {
         let _ = c;
 
         // A bound below one footer still serves it (the newest is kept).
-        let mut tiny = FooterCache::new(1);
+        let mut tiny = FooterCache::new(CacheBytes::new(1));
         let t = get(&mut tiny, segs[0]);
         assert!(Arc::ptr_eq(&t, &get(&mut tiny, segs[0])));
         let _ = get(&mut tiny, segs[1]);

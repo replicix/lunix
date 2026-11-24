@@ -26,7 +26,7 @@ use lunix_iface::space::SpaceKind;
 use lunix_iface::store::SegmentWriter;
 use lunix_iface::{ErrorKind, Result};
 
-use crate::footers::FooterCache;
+use crate::footers::{CacheBytes, FooterCache};
 use crate::mark::{LiveExtent, Liveness};
 use crate::points::{point, Points};
 
@@ -184,8 +184,14 @@ impl Compactor {
     /// A compaction of `sources`. Their live extents are queued a group of
     /// sources at a time (about `queue_cap` extents, plus at most one
     /// segment's), each group ordered by chunk number (LBA locality, map
-    /// order).
-    pub(crate) fn new(sources: Vec<Candidate>, started: Duration, queue_cap: usize) -> Self {
+    /// order). `footer_cache` must hold the footers of all sources of one
+    /// group (the queue interleaves their extents).
+    pub(crate) fn new(
+        sources: Vec<Candidate>,
+        started: Duration,
+        queue_cap: usize,
+        footer_cache: CacheBytes,
+    ) -> Self {
         Self {
             queue: VecDeque::new(),
             sources,
@@ -194,7 +200,7 @@ impl Compactor {
             writer: None,
             reserved: 0,
             pending: Vec::new(),
-            footers: FooterCache::new(8),
+            footers: FooterCache::new(footer_cache),
             started,
             bytes_read: 0,
             window: None,

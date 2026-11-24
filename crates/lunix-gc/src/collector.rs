@@ -75,6 +75,7 @@ use crate::compact::{self, Compactor};
 use crate::condemned::{CondemnedEntry, CondemnedList, GraceStarts, ObjectRef, MAX_ENTRIES};
 use crate::config::{self, FloorSource, GcConfig, GcHooks, NoHooks};
 use crate::evidence::{Action, Deferral, Evidence};
+use crate::footers::CacheBytes;
 use crate::mark::{Liveness, Mark};
 use crate::points::{point, Points};
 
@@ -2029,8 +2030,14 @@ impl Gc {
                 let sources = match self.ctx.as_ref().and_then(|x| x.liveness.as_ref()) {
                     Some(l) => {
                         let s = self.compaction_sources(view, l, self.cfg.compact_per_pass);
-                        (!s.is_empty())
-                            .then(|| Compactor::new(s, view.clock.monotonic(), COMPACT_QUEUE))
+                        (!s.is_empty()).then(|| {
+                            Compactor::new(
+                                s,
+                                view.clock.monotonic(),
+                                COMPACT_QUEUE,
+                                CacheBytes::new(self.cfg.footer_cache_bytes),
+                            )
+                        })
                     }
                     None => None,
                 };
@@ -2294,7 +2301,14 @@ impl Gc {
                     .and_then(|c| c.liveness.as_ref())
                     .ok_or(Error::invalid("urgent pass without a mark"))?;
                 let s = self.compaction_sources(view, l, want - *freed);
-                (!s.is_empty()).then(|| Compactor::new(s, view.clock.monotonic(), COMPACT_QUEUE))
+                (!s.is_empty()).then(|| {
+                    Compactor::new(
+                        s,
+                        view.clock.monotonic(),
+                        COMPACT_QUEUE,
+                        CacheBytes::new(self.cfg.footer_cache_bytes),
+                    )
+                })
             };
             if let Some(mut c) = sources {
                 while !c.is_done() {
