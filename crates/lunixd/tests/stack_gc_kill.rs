@@ -325,7 +325,14 @@ fn gc_tune(c: &mut EngineConfig) {
 /// passes without waiting for pressure, between regular passes that come at
 /// most every 5 s, so the new point `gc.recheck.before_delete` and the
 /// deletes of such a pass are reached.
+///
+/// Every arm runs with `gc_condemn_on_cut = shadow` and `gc_fast_recheck` on
+/// (milestone refs: the configuration the condemn-on-cut stage will ship
+/// with); the plain arms see no pressure, so their recheck-only passes only
+/// run in the recheck arm, which forces them.
 fn fast_gc(o: &mut lunixd::stack::OpenParams, recheck: bool) {
+    o.gc_condemn_on_cut = lunix_engine::CondemnOnCut::Shadow;
+    o.gc_fast_recheck = Some(Duration::from_secs(1));
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
     } else {
@@ -372,6 +379,40 @@ fn progress(f: &mut std::fs::File, n: usize, d: &Driver) {
 }
 
 /// Runs `steps` on the volume, `base` requests already logged before them.
+/// The reference table of the shadow mode matched every mark so far.
+fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
+    let t = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| *b)
+        .expect("the table exists");
+    assert_eq!(t.drift_segments, 0, "{what}: refs_drift_segments: {t:?}");
+    assert_eq!(
+        t.report_mismatches, 0,
+        "{what}: refs report mismatches: {t:?}"
+    );
+}
+
+/// Ticks the engine until the table is `Ready` (a pass is due at once after
+/// an attach, and its mark is the table's base).
+fn wait_refs_ready(stack: &lunixd::stack::VolumeStack, what: &str) {
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick after recovery");
+        let t = *stack.engine.gc_status_handle().get().refs.expect("table");
+        if t.state == lunix_iface::gc::RefsState::Ready {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "{what}: the table is not Ready after 120 s: {t:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, recheck: bool) {
     let mut stack = vol
         .open_with(move |o| fast_gc(o, recheck))
@@ -459,6 +500,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             }
             Step::Ladder => run_ladder(&stack),
             Step::Reopen => {
+                assert_refs_clean(&stack, "child before a reopen");
                 drop(d);
                 drop(stack);
                 stack = vol
@@ -472,6 +514,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
         }
     }
     progress(prog, n, &d);
+    assert_refs_clean(&stack, "child at the end");
     drop(d);
     close(stack).expect("child close");
     writeln!(prog, "{n} 0").expect("progress");
@@ -524,6 +567,9 @@ fn gc_kill_child() {
     let Some(spec_path) = std::env::var_os(CHILD_ENV) else {
         return;
     };
+    // Warnings go to the child's log: the parent fails on a reference-table
+    // warning even when the child was killed before it could assert.
+    lunixd::log::StderrLog::install(tracing::Level::WARN);
     let spec = Spec::read(Path::new(&spec_path));
     let parent = spec.voldir.parent().expect("parent").to_path_buf();
     let vol = TestVolume::at(
@@ -604,6 +650,7 @@ fn spawn_child(spec: &Spec, dir: &Path, crash_at: Option<&str>) -> ChildEnd {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
+    assert_no_refs_warning(&log, &spec.phase, crash_at);
     if status.signal() == Some(libc::SIGKILL) {
         return ChildEnd::Killed;
     }
@@ -622,6 +669,21 @@ fn spawn_child(spec: &Spec, dir: &Path, crash_at: Option<&str>) -> ChildEnd {
             })
             .collect(),
     )
+}
+
+/// The table of the shadow mode logs a warning when a mark or a map
+/// transaction contradicts it; a killed child cannot assert, so its log is
+/// read by the parent.
+fn assert_no_refs_warning(log: &Path, phase: &str, crash_at: Option<&str>) {
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("reference table"))
+        .collect();
+    assert!(
+        lines.is_empty(),
+        "the {phase} child ({crash_at:?}) logged reference-table warnings: {lines:?}"
+    );
 }
 
 struct Config {
@@ -891,6 +953,9 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         );
     };
     tally.lost_requests += (model.len() - n) as u64;
+    // The table is rebuilt from the first mark after the open; once it is
+    // `Ready` the writes below change the map, so a later mark compares.
+    wait_refs_ready(&stack, what);
     // The recovered volume takes writes and reads them back, across a clean
     // close and a second open.
     let cs = u64::from(cfg.cs);
@@ -904,11 +969,40 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         actual[off as usize..off as usize + data.len()].copy_from_slice(&data);
     }
     assert!(d.flush(0).is_ok(), "{what}: flush after recovery");
+    // A cut now: the map changes, so the marks of `settle_gc` compare the
+    // table with a different tip than the one the base mark saw (without it
+    // the commit interval can outlast `settle_gc`, and no mark compares).
+    stack
+        .engine
+        .commit_now(true)
+        .unwrap_or_else(|e| panic!("{what}: cut after recovery: {e}"));
     let back = d
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
     assert!(back == actual, "{what}: read-back after recovery differs");
     settle_gc(&stack, &mut d, &actual, what);
+    // Recovery: the table was rebuilt from the first mark and matched every
+    // later one.
+    let t = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| *b)
+        .expect("the table exists");
+    assert_eq!(
+        t.state,
+        lunix_iface::gc::RefsState::Ready,
+        "{what}: no mark rebased the table after recovery: {t:?}"
+    );
+    // The base mark and at least one later mark that compared (the writes
+    // before `settle_gc` changed the map): drift 0 is not vacuous.
+    assert!(
+        t.rebases >= 2,
+        "{what}: only {} mark(s) rebased the table after recovery: {t:?}",
+        t.rebases
+    );
+    assert_refs_clean(&stack, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let stack = p
@@ -928,6 +1022,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     );
     // GC finishes what the close's commit left, then the close cuts nothing.
     settle_gc(&stack, &mut d, &actual, what);
+    assert_refs_clean(&stack, what);
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let r = p.vol.check().expect("store self-check runs");

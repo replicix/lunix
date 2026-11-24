@@ -52,9 +52,10 @@ mod pressure;
 mod queue;
 mod read;
 mod recover;
+mod refs;
 mod stats;
 
-pub use config::{EngineConfig, OnJournalDamage};
+pub use config::{CondemnOnCut, EngineConfig, OnJournalDamage};
 pub use cut::{CutStats, WriteStats, LATENCY_BUCKETS};
 pub use deps::{EngineDeps, EngineHooks, MapOpener, NoHooks, RollbackFloorStore};
 pub use destage::{DestageCtx, DestageFailure, DestageOutcome, Destager, Retry, SimpleDestager};
@@ -86,3 +87,22 @@ pub const CRASH_POINTS: &[&str] = &[
     "engine.recover.journal",
     "engine.recover.floor",
 ];
+
+/// Measurement support (feature `testsupport`): the reference-table wrapper
+/// the cut uses, over an empty map, in the `Ready` state.
+#[cfg(feature = "testsupport")]
+#[doc(hidden)]
+pub fn ref_map_for_bench(
+    map: std::sync::Arc<dyn lunix_iface::map::BlockMap>,
+) -> std::sync::Arc<dyn lunix_iface::map::BlockMap> {
+    refs::bench_ref_map(map)
+}
+
+/// Measurement support (feature `testsupport`): nanoseconds per mark-start
+/// snapshot (a clone of the table's counts) and per `ready()` call of a table
+/// with `segments` segments of which `zeros` wait to be offered.
+#[cfg(feature = "testsupport")]
+#[doc(hidden)]
+pub fn table_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64) {
+    refs::bench_costs(segments, zeros, reps)
+}

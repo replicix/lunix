@@ -120,6 +120,10 @@ pub struct Liveness {
     pub commits: Vec<CommitInfo>,
     /// When the mark started, on the view's monotonic clock.
     pub started: Duration,
+    /// Map entries per segment, by hint, of the first root (the tip): what
+    /// the engine's reference table is checked against. One count per
+    /// segment with an entry; the other roots are not counted.
+    pub tip_refs: BTreeMap<SegId, u64>,
 }
 
 impl Liveness {
@@ -171,7 +175,12 @@ impl Liveness {
 
     /// Heap beyond the live-extent set.
     pub(crate) fn heap_bytes(&self) -> usize {
-        (self.live.len() + self.seg_live.len() + self.deps.len() + self.unindexed.len()) * 48
+        (self.live.len()
+            + self.seg_live.len()
+            + self.deps.len()
+            + self.unindexed.len()
+            + self.tip_refs.len())
+            * 48
             + self.live_packs.len() * 32
             + self.segments.capacity() * std::mem::size_of::<SegmentInfo>()
             + self.packs.capacity() * std::mem::size_of::<PackInfo>()
@@ -314,6 +323,8 @@ pub(crate) struct Mark {
     footers: FooterCache,
     existing: BTreeSet<SegId>,
     out: Liveness,
+    /// The tip the roots were pinned at, until the collector takes it.
+    init_tip: Option<CommitSeq>,
 }
 
 impl Mark {
@@ -328,7 +339,13 @@ impl Mark {
             refs: Vec::new(),
             existing: BTreeSet::new(),
             out: Liveness::default(),
+            init_tip: None,
         }
+    }
+
+    /// The tip the mark pinned its roots at, once, after the unit that did it.
+    pub(crate) fn take_init_tip(&mut self) -> Option<CommitSeq> {
+        self.init_tip.take()
     }
 
     /// The result, once the mark is done.
@@ -354,6 +371,26 @@ impl Mark {
             + self.out.heap_bytes()
     }
 
+    /// Adds the walked batch of the tip root to `out.tip_refs`, by hint. No
+    /// root was walked before the tip, so every leaf of it is reported here.
+    /// Neighbouring chunks mostly name one segment: runs are summed first.
+    fn count_tip_refs(&mut self) {
+        let mut run: Option<(SegId, u64)> = None;
+        for (_, e) in &self.refs {
+            run = match run {
+                Some((seg, n)) if seg == e.seg => Some((seg, n + 1)),
+                Some((seg, n)) => {
+                    *self.out.tip_refs.entry(seg).or_default() += n;
+                    Some((e.seg, 1))
+                }
+                None => Some((e.seg, 1)),
+            };
+        }
+        if let Some((seg, n)) = run {
+            *self.out.tip_refs.entry(seg).or_default() += n;
+        }
+    }
+
     /// Does one unit of work. Returns `true` when the mark is complete.
     pub(crate) fn unit(&mut self, view: &GcView<'_>) -> Result<bool> {
         match std::mem::replace(&mut self.stage, Stage::Done) {
@@ -371,6 +408,7 @@ impl Mark {
                 self.out.commits = view.commits.list()?;
                 self.out.commits.sort_unstable_by_key(|x| x.seq);
                 self.existing = self.out.segments.iter().map(|s| s.seg).collect();
+                self.init_tip = Some(view.tip.commit_seq);
                 self.stage = Stage::Nodes;
             }
             Stage::Nodes => {
@@ -428,6 +466,9 @@ impl Mark {
                             });
                     self.skip.extend(batch.iter().copied());
                     walked?;
+                    if self.root_idx == 0 && self.cfg.tip_refs {
+                        self.count_tip_refs();
+                    }
                     self.resolve(view)?;
                     let n = batch.len();
                     self.stage = Stage::Leaves {

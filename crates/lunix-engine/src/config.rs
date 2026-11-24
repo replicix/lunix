@@ -23,6 +23,21 @@ pub enum OnJournalDamage {
     Refuse,
 }
 
+/// What the engine's per-segment reference table is for (the daemon's
+/// `gc_condemn_on_cut`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CondemnOnCut {
+    /// No table: nothing is counted or compared.
+    #[default]
+    Off,
+    /// The table is maintained and compared with every mark, and what it
+    /// would offer for condemnation is counted and compared with what the
+    /// marks condemn. Nothing is condemned, listed or deleted because of it.
+    /// Opening the engine switches the collector's counting of the tip
+    /// root on (`Collector::set_tip_refs`); there is no second switch.
+    Shadow,
+}
+
 /// The settings of one engine.
 #[derive(Clone, Debug)]
 pub struct EngineConfig {
@@ -91,6 +106,8 @@ pub struct EngineConfig {
     /// resolved `full_timeout` (`lunixd`'s `open_volume` copies it); a
     /// ring-full wait is at least 60 s while commits succeed.
     pub full_timeout: Duration,
+    /// The per-segment reference table of the cut (default off).
+    pub gc_condemn_on_cut: CondemnOnCut,
 }
 
 impl EngineConfig {
@@ -126,6 +143,7 @@ impl EngineConfig {
             gc_pressure_rate_factor: 4,
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
+            gc_condemn_on_cut: CondemnOnCut::Off,
         }
     }
 

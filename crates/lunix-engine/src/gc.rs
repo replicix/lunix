@@ -140,6 +140,25 @@ impl Inner {
         }
         let mut st = collector.status();
         st.requests = self.gc_requests.load(Ordering::Acquire);
+        if let Some(refs) = &self.refs {
+            // Order matters: the snapshot of the counts at the mark's tip,
+            // then its entry counts (the comparison), then what it condemned
+            // (the shadow judgement). The tip cannot change inside one call.
+            let started = collector.take_mark_started();
+            let counted = collector.take_tip_refs();
+            let condemned = collector.take_mark_condemned();
+            let mut t = lock(refs);
+            if let Some(seq) = started {
+                t.mark_started(seq);
+            }
+            if let Some(r) = counted {
+                t.rebase(&r);
+            }
+            if let Some(c) = condemned {
+                t.judge(&c, self.clock.monotonic());
+            }
+            st.refs = Some(Box::new(t.stats()));
+        }
         *lock(&self.gc_status) = st;
         r
     }

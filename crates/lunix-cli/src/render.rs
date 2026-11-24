@@ -8,7 +8,7 @@ use lunix_iface::ctl::{
     Attached, GcPressure, SpaceBody, SpaceFigures, ThrottleStatus, VolumeCreated, VolumeMode,
     VolumeState, VolumeStatusBody, VolumeSummary,
 };
-use lunix_iface::gc::{GcPassSummary, GcState, GcStatusSnapshot};
+use lunix_iface::gc::{GcPassSummary, GcState, GcStatusSnapshot, RefsState};
 use lunix_iface::space::ThrottleState;
 
 use crate::error::sanitize;
@@ -496,6 +496,70 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    if let Some(t) = g.refs.as_deref().filter(|t| t.state != RefsState::Off) {
+        kv(
+            out,
+            "refs table",
+            &format!(
+                "{:?}: {} segments, {} zero not offered, drift {} over {} rebases, {} report mismatches",
+                t.state,
+                t.segments,
+                t.zero_waiting,
+                t.drift_segments,
+                t.rebases,
+                t.report_mismatches
+            )
+            .to_lowercase(),
+        )?;
+        let judged = t.shadow_confirmed + t.shadow_missed + t.shadow_early_by_mark;
+        let recall = (t.shadow_confirmed * 100).checked_div(judged);
+        kv(
+            out,
+            "refs shadow",
+            &format!(
+                "{} offered ({} idle, {} busy), {} confirmed, {} live by id, {} kept, {} listed, {} revived; \
+                 {} early by the mark, {} not known to the table; recall {}",
+                t.shadow_would_propose,
+                t.shadow_offered_idle,
+                t.shadow_offered_busy,
+                t.shadow_confirmed,
+                t.shadow_unconfirmed_live,
+                t.shadow_unconfirmed_kept,
+                t.shadow_unconfirmed_listed,
+                t.shadow_revived,
+                t.shadow_early_by_mark,
+                t.shadow_missed,
+                recall.map_or_else(|| "n/a".to_owned(), |r| format!("{r} %")),
+            ),
+        )?;
+        if let Some(mean) = t.shadow_lead_ms_sum.checked_div(t.shadow_confirmed_lead) {
+            kv(
+                out,
+                "refs lead",
+                &format!(
+                    "mean {mean} ms, max {} ms over {} offers ({} without a lead)",
+                    t.shadow_lead_ms_max, t.shadow_confirmed_lead, t.shadow_confirmed_no_lead
+                ),
+            )?;
+        }
+        let lag = t.condemn_lag_ms_sum.checked_div(t.condemn_lag_count);
+        let wait = t.idle_wait_ms_sum.checked_div(t.idle_wait_count);
+        kv(
+            out,
+            "refs timing",
+            &format!(
+                "first ready {} ms, first mark condemn {} ms after attach; zero to offer mean {} ms; \
+                 idle wait mean {} ms, max {} ms ({} waiting)",
+                t.first_ready_ms.map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                t.first_mark_condemn_ms
+                    .map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                lag.map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                wait.map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                t.idle_wait_ms_max,
+                t.idle_waiting
+            ),
+        )?;
+    }
     Ok(())
 }
 
@@ -514,6 +578,36 @@ mod reclaim_tests {
     fn the_default_reclaim_figures_print_nothing() {
         let t = render(&GcStatusSnapshot::default());
         assert!(!t.contains("recheck") && !t.contains("pass kinds"), "{t}");
+    }
+
+    #[test]
+    fn the_refs_table_prints_only_when_it_exists() {
+        use lunix_iface::gc::RefsStats;
+        assert!(!render(&GcStatusSnapshot::default()).contains("refs"));
+        let g = GcStatusSnapshot {
+            refs: Some(Box::new(RefsStats {
+                state: RefsState::Ready,
+                segments: 12,
+                drift_segments: 3,
+                rebases: 4,
+                shadow_would_propose: 7,
+                shadow_confirmed: 6,
+                shadow_missed: 2,
+                shadow_lead_ms_sum: 900,
+                shadow_lead_ms_max: 500,
+                shadow_confirmed_lead: 3,
+                first_ready_ms: Some(5_500),
+                ..RefsStats::default()
+            })),
+            ..GcStatusSnapshot::default()
+        };
+        let t = render(&g);
+        assert!(t.contains("ready: 12 segments"), "{t}");
+        assert!(t.contains("drift 3 over 4 rebases"), "{t}");
+        assert!(t.contains("7 offered"), "{t}");
+        assert!(t.contains("recall 75 %"), "{t}");
+        assert!(t.contains("mean 300 ms, max 500 ms over 3 offers"), "{t}");
+        assert!(t.contains("first ready 5500 ms"), "{t}");
     }
 
     #[test]

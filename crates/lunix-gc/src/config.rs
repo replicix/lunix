@@ -105,6 +105,14 @@ pub struct GcConfig {
     /// Tests only: recheck-only passes without pressure too.
     #[doc(hidden)]
     pub fast_recheck_always: bool,
+    /// Count the map entries per segment (by hint) of the tip root during
+    /// every mark and hand the counts, the tip and the mark's condemns to the
+    /// engine ([`Collector::take_tip_refs`](lunix_iface::gc::Collector::take_tip_refs)):
+    /// the check of the engine's reference table. The engine switches it on
+    /// itself ([`Collector::set_tip_refs`](lunix_iface::gc::Collector::set_tip_refs))
+    /// when `gc_condemn_on_cut` is not off; tests may set it directly.
+    /// Default off: no extra work in the mark.
+    pub tip_refs: bool,
 }
 
 impl Default for GcConfig {
@@ -119,6 +127,7 @@ impl Default for GcConfig {
             busy_interval: Duration::from_secs(5),
             fast_recheck: None,
             fast_recheck_always: false,
+            tip_refs: false,
         }
     }
 }
