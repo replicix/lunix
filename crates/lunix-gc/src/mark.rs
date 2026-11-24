@@ -66,7 +66,7 @@ use lunix_iface::store::{CommitInfo, PackInfo, SegmentInfo};
 use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::config::GcConfig;
-use crate::footers::FooterCache;
+use crate::footers::{CacheBytes, FooterCache};
 
 /// One root of a mark.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -319,7 +319,7 @@ pub(crate) struct Mark {
 impl Mark {
     pub(crate) fn new(cfg: GcConfig) -> Self {
         Self {
-            footers: FooterCache::new(cfg.footer_cache_bytes),
+            footers: FooterCache::new(CacheBytes::new(cfg.footer_cache_bytes)),
             cfg,
             stage: Stage::Init,
             root_idx: 0,
