@@ -75,6 +75,8 @@ workload as a smoke test (the counters move; it says nothing about a real volume
 The first run of the eight loops (before the explicit cut in `verify`) failed the new `rebases >= 2` assertion in five of them at the
 first kill (only the base mark had run): a harness defect, not a table defect; the three recheck loops had passed.
 
+After the gates, `origin/main` had moved (p1/footerfix); it was merged (one conflict, `tools/ownership.toml`, both entries kept). On the merged tree `ci.sh` is green again (2400 tests) and the three recheck loops and `gc_kill_loop_plain_16k` pass again; the other loops were not re-run after the merge.
+
 ### Cost
 
 The host was **not quiet**: another milestone's CI ran on CPUs 12-15 and this one on 0-11. The figures compare shadow with off inside
