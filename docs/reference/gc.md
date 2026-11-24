@@ -391,7 +391,7 @@ scratch is bounded.
 Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
 daemon's), 30 s between passes and 5 s after a pass that did reclaim work, 1 GiB of
 live bytes compacted per pass (256 MiB for the daemon), a root walked in at most 64 leaf batches of at
-least 16 leaves, 32 MiB of decoded footers cached (`footer_cache_bytes`).
+least 16 leaves, 32 MiB of decoded footers cached (`footer_cache_bytes`; the mark and the compactor each hold a cache of that size, so a compaction loads each source's footer about once).
 
 ## `state/gc/condemned`, body version 1
 

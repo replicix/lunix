@@ -637,3 +637,18 @@ paths = [
   "docs/plans/v1/reports/p1-fastrecheck.md",
   "tools/ownership.toml",
 ]
+
+# footerfix: the compactor's footer cache gets the configured byte cap
+# (`FooterCache::new` takes a typed `CacheBytes`), with a load-count test.
+[footerfix]
+paths = [
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/compact.rs",
+  "crates/lunix-gc/src/footers.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/footercache.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "docs/plans/v1/reports/p1-footerfix.md",
+  "docs/reference/gc.md",
+  "tools/ownership.toml",
+]
