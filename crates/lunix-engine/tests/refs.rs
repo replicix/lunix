@@ -156,7 +156,10 @@ impl Oracle {
                 .fetch_add(segs.len() as u64, Ordering::Relaxed);
             for s in segs {
                 if named.contains(&s) {
-                    bad.push(format!("{s:?} offered at tip {} but a retained root names it", tip.0));
+                    bad.push(format!(
+                        "{s:?} offered at tip {} but a retained root names it",
+                        tip.0
+                    ));
                 }
             }
         }
@@ -323,9 +326,11 @@ fn run(
             let t = refs_of(r);
             prop_assert_eq!(t.drift_segments, 0, "the table differed from a mark");
             prop_assert_eq!(t.report_mismatches, 0);
+            {
+                let bad = lock(&log.violations);
+                prop_assert!(bad.is_empty(), "the oracle: {bad:?}");
+            }
             prop_assert_eq!(t.shadow_unconfirmed_named, 0, "a mark found an offer named");
-            let bad = lock(&log.violations);
-            prop_assert!(bad.is_empty(), "the oracle: {bad:?}");
         }
         obs.push(observe(r));
         Ok(())
@@ -633,7 +638,11 @@ fn the_shadow_check_offers_what_the_marks_condemn() {
         on.cov
     );
     assert_eq!((on.cov.reopens, on.cov.urgent), (1, 1), "{:?}", on.cov);
-    assert!(on.cov.checked > 0, "the oracle checked no offer: {:?}", on.cov);
+    assert!(
+        on.cov.checked > 0,
+        "the oracle checked no offer: {:?}",
+        on.cov
+    );
     assert_eq!(t.shadow_unconfirmed_named, 0);
     // Bytes: every confirmed, early or missed segment has a size.
     assert!(t.shadow_confirmed_bytes > 0, "{t:?}");

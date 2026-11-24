@@ -537,7 +537,8 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             .shadow_confirmed_bytes
             .saturating_add(t.shadow_early_bytes)
             .saturating_add(t.shadow_missed_bytes);
-        let recall_bytes = (u128::from(t.shadow_confirmed_bytes) * 100).checked_div(u128::from(judged_bytes));
+        let recall_bytes =
+            (u128::from(t.shadow_confirmed_bytes) * 100).checked_div(u128::from(judged_bytes));
         kv(
             out,
             "refs bytes",

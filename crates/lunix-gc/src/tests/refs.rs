@@ -76,7 +76,10 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
     assert_eq!(c.tip, started);
     assert!(!c.segs.is_empty(), "the overwritten segments are dead");
     assert!(c.segs.windows(2).all(|w| w[0].0 < w[1].0));
-    assert!(c.segs.iter().all(|&(_, bytes)| bytes > 0), "sizes come with the ids");
+    assert!(
+        c.segs.iter().all(|&(_, bytes)| bytes > 0),
+        "sizes come with the ids"
+    );
     assert!(c.listed.is_empty(), "nothing was listed before this mark");
     assert!(
         c.live.is_empty(),
@@ -105,7 +108,10 @@ fn a_mark_names_the_segments_an_older_retained_root_hints_at() {
         .filter(|k| !tip_refs.contains_key(*k))
         .copied()
         .collect();
-    assert!(!old.is_empty(), "the overwrite left a segment only the older root names");
+    assert!(
+        !old.is_empty(),
+        "the overwrite left a segment only the older root names"
+    );
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
     let c = s.gc.take_mark_condemned().expect("the mark chose segments");

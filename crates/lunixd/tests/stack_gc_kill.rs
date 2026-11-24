@@ -1009,6 +1009,30 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         lunix_iface::gc::RefsState::Ready,
         "{what}: no mark rebased the table after recovery: {t:?}"
     );
+    // `settle_gc` runs no pass when nothing is left to do (a kill early in
+    // the run leaves a nearly empty volume), so the marks after the cut may
+    // be fewer than two: ask for passes, each of which marks, until two
+    // marks rebased the table after the cut.
+    let mut asked = 0;
+    while stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .is_some_and(|t| t.rebases < r0 + 2)
+        && asked < 4
+    {
+        lunix_iface::gc::GcControl::run_pass(&*stack.engine, false)
+            .unwrap_or_else(|e| panic!("{what}: a requested pass after the cut: {e}"));
+        asked += 1;
+    }
+    let t = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| *b)
+        .expect("the table exists");
     // A table rebuilt from the first mark, fed the deltas of one real cut,
     // equals the next mark's count. The cut was taken at `r0` rebases; the
     // mark that rebased next may already have pinned its roots (so it saw the
