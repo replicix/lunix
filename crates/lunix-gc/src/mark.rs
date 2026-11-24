@@ -124,6 +124,12 @@ pub struct Liveness {
     /// the engine's reference table is checked against. One count per
     /// segment with an entry; the other roots are not counted.
     pub tip_refs: BTreeMap<SegId, u64>,
+    /// The segments hinted at by the entries of the other roots (retained
+    /// FULLs and pins; `GcConfig::tip_refs` only). Leaves a root shares with
+    /// an earlier root are skipped by the walk, so a segment named only
+    /// through shared leaves is in `tip_refs`, not here. The engine's shadow
+    /// check asserts that no offered segment is in it.
+    pub older_refs: BTreeSet<SegId>,
 }
 
 impl Liveness {
@@ -179,7 +185,8 @@ impl Liveness {
             + self.seg_live.len()
             + self.deps.len()
             + self.unindexed.len()
-            + self.tip_refs.len())
+            + self.tip_refs.len()
+            + self.older_refs.len())
             * 48
             + self.live_packs.len() * 32
             + self.segments.capacity() * std::mem::size_of::<SegmentInfo>()
@@ -391,6 +398,18 @@ impl Mark {
         }
     }
 
+    /// Adds the segments the walked batch of a root after the tip names to
+    /// `out.older_refs`, by hint.
+    fn note_older_refs(&mut self) {
+        let mut last: Option<SegId> = None;
+        for (_, e) in &self.refs {
+            if last != Some(e.seg) {
+                self.out.older_refs.insert(e.seg);
+                last = Some(e.seg);
+            }
+        }
+    }
+
     /// Does one unit of work. Returns `true` when the mark is complete.
     pub(crate) fn unit(&mut self, view: &GcView<'_>) -> Result<bool> {
         match std::mem::replace(&mut self.stage, Stage::Done) {
@@ -466,8 +485,12 @@ impl Mark {
                             });
                     self.skip.extend(batch.iter().copied());
                     walked?;
-                    if self.root_idx == 0 && self.cfg.tip_refs {
-                        self.count_tip_refs();
+                    if self.cfg.tip_refs {
+                        if self.root_idx == 0 {
+                            self.count_tip_refs();
+                        } else {
+                            self.note_older_refs();
+                        }
                     }
                     self.resolve(view)?;
                     let n = batch.len();

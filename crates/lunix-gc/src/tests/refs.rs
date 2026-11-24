@@ -75,15 +75,55 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
     let c = s.gc.take_mark_condemned().expect("the mark chose segments");
     assert_eq!(c.tip, started);
     assert!(!c.segs.is_empty(), "the overwritten segments are dead");
-    assert!(c.segs.windows(2).all(|w| w[0] < w[1]));
+    assert!(c.segs.windows(2).all(|w| w[0].0 < w[1].0));
+    assert!(
+        c.segs.iter().all(|&(_, bytes)| bytes > 0),
+        "sizes come with the ids"
+    );
     assert!(c.listed.is_empty(), "nothing was listed before this mark");
     assert!(
         c.live.is_empty(),
         "every live segment has an entry hinting at it"
     );
-    for seg in &c.segs {
+    for (seg, _) in &c.segs {
         assert!(!counted(&s).contains_key(seg), "{seg:?} is referenced");
     }
+}
+
+/// R2-1: the mark names the segments an older retained root hints at and the
+/// tip does not; such a segment is never condemned.
+#[test]
+fn a_mark_names_the_segments_an_older_retained_root_hints_at() {
+    let mut s = sim(true);
+    // Two retained FULLs (the sim's default). Chunk 50 lives in one segment
+    // at the older commit and in another at the tip.
+    s.write(50, 1_000);
+    s.commit().unwrap();
+    let before = counted(&s);
+    s.write(50, 2_000);
+    s.commit().unwrap();
+    let tip_refs = counted(&s);
+    let old: Vec<SegId> = before
+        .keys()
+        .filter(|k| !tip_refs.contains_key(*k))
+        .copied()
+        .collect();
+    assert!(
+        !old.is_empty(),
+        "the overwrite left a segment only the older root names"
+    );
+    s.clock.advance(Duration::from_secs(1));
+    s.pass().unwrap();
+    let c = s.gc.take_mark_condemned().expect("the mark chose segments");
+    for seg in &old {
+        assert!(c.named.contains(seg), "{seg:?} is named by the older root");
+        assert!(!c.segs.iter().any(|(x, _)| x == seg), "and kept");
+    }
+    assert!(
+        c.named.iter().all(|n| !tip_refs.contains_key(n)),
+        "the tip's own segments are not in it"
+    );
+    assert!(c.named.windows(2).all(|w| w[0] < w[1]));
 }
 
 #[test]

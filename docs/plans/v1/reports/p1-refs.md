@@ -69,7 +69,7 @@ workload as a smoke test (the counters move; it says nothing about a real volume
 |---|---|
 | `tools/ci.sh` (CPUs 0-11, `-j 12`) | green, 2398 tests, fmt, clippy `-D warnings`, crashpoint builds, lunixd stack tests in release with `lunix-fsck`, ownership |
 | GC kill loops, release, `LUNIX_KILL_HITS=all`, `lunix-fsck` with crashpoints, eight processes concurrently on CPUs 0-11, every child with `gc_condemn_on_cut = shadow` and `gc_fast_recheck` on | all eight pass. plain 16K: 68 kills, 5321 s. integrity 16K: 68, 4916 s. plain 64K: 68, 4735 s. integrity 64K: 68, 4695 s. encrypted 16K: 68, 5000 s. recheck plain 16K: 14, 1500 s. recheck plain 64K: 14, 1347 s. recheck integrity 16K: 14, 1381 s. The 23 reachable points of the plain arms and the 5 of the recheck arms were killed at first, middle and last hit |
-| drift 0 at every recovery | after every kill's recovery the table is `Ready` with `rebases >= 2`, `drift_segments == 0`, `report_mismatches == 0`, and no child log has a "reference table" warning |
+| a rebuilt table plus one real cut equals the next mark, at every recovery | after every kill's recovery the table is `Ready` with `rebases >= 2` (strengthened in refs2 to `>= r0 + 2`, `r0` taken after the cut), `drift_segments == 0`, `report_mismatches == 0`, and no child log has a "reference table" warning. It shows that a table rebuilt from the first mark, then fed the deltas of one real cut, equals the next mark's count. It does **not** cover deltas before or during the first mark after a recovery: only the engine proptests (`Op::Reopen`) do |
 | table = mark, shadow changes no decision | engine `tests/refs.rs` |
 
 The first run of the eight loops (before the explicit cut in `verify`) failed the new `rebases >= 2` assertion in five of them at the

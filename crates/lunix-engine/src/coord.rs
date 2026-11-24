@@ -1371,9 +1371,16 @@ impl Inner {
         let tip = co.tip.common.commit_seq;
         // A proposal is only taken between passes.
         let idle = lock(&self.gc_status).state.is_none();
-        let mut t = lock(refs);
-        let ready = t.ready(tip, lag, &skip, crate::refs::OFFER_MAX);
-        t.shadow_offer(&ready, tip, self.clock.monotonic(), idle);
+        let ready = {
+            let mut t = lock(refs);
+            let ready = t.ready(tip, lag, &skip, crate::refs::OFFER_MAX);
+            t.shadow_offer(&ready, tip, self.clock.monotonic(), idle);
+            ready
+        };
+        if !ready.is_empty() {
+            let segs: Vec<SegId> = ready.iter().map(|r| r.seg).collect();
+            self.points.hooks().shadow_offered(tip, &segs);
+        }
     }
 
     fn gc_step(&self, co: &mut Coord) {

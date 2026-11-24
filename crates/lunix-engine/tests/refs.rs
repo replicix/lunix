@@ -7,13 +7,20 @@
 //! urgent passes (marks without a preceding offer), dedup and compaction;
 //! the proptest drivers assert that each of them happened.
 //!
+//! R2-1, the exact oracle: at every offer of the table, a ground-truth walk of
+//! every retained root (the collector's own root set, through the map) must
+//! find no entry hinting at an offered segment. The check runs inside the
+//! collector call that follows the offer (same call, same coordinator mutex,
+//! same roots), see `Oracle`.
+//!
 //! `LUNIX_REFS_CASES` raises the number of cases (default 48).
 
 mod common;
 
 use std::cell::Cell;
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::{BTreeSet, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::*;
@@ -94,6 +101,120 @@ fn collector(pipeline: bool) -> Gc {
     )
 }
 
+/// What the oracle saw, over one run.
+#[derive(Default)]
+struct OracleLog {
+    /// Offered segments checked against the ground truth.
+    checked: AtomicU64,
+    /// Offers whose tip was not the tip of the next collector call (not
+    /// checked: the roots would be newer than at the offer).
+    skipped: AtomicU64,
+    /// Offered segments a retained root named, and failures of the walk.
+    violations: Mutex<Vec<String>>,
+}
+
+/// The collector under test, wrapped: in every call it first checks the offers
+/// the table made right before it (`TestHooks::offers`) against the entries of
+/// every retained root (`mark::root_set`: the retained FULLs and the pins),
+/// walked through the map. No offered segment may be hinted at by any of them
+/// (the lag rule); a table that offers early is caught here even when the
+/// mark would have kept the segment alive anyway.
+struct Oracle {
+    inner: Box<dyn Collector>,
+    hooks: Arc<TestHooks>,
+    log: Arc<OracleLog>,
+}
+
+impl Oracle {
+    fn check(&self, v: &GcView<'_>) {
+        let offers = std::mem::take(&mut *lock(&self.hooks.offers));
+        if offers.is_empty() {
+            return;
+        }
+        let mut named: BTreeSet<SegId> = BTreeSet::new();
+        let walked = lunix_gc::mark::root_set(v).and_then(|(roots, _)| {
+            for r in roots {
+                v.map
+                    .walk_leaves_skipping(&r.root, &HashSet::new(), &mut |_, e| {
+                        named.insert(e.seg);
+                    })?;
+            }
+            Ok(())
+        });
+        let mut bad = lock(&self.log.violations);
+        if let Err(e) = walked {
+            bad.push(format!("the ground-truth walk failed: {e}"));
+            return;
+        }
+        for (tip, segs) in offers {
+            if tip != v.tip.commit_seq {
+                self.log.skipped.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            self.log
+                .checked
+                .fetch_add(segs.len() as u64, Ordering::Relaxed);
+            for s in segs {
+                if named.contains(&s) {
+                    bad.push(format!(
+                        "{s:?} offered at tip {} but a retained root names it",
+                        tip.0
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl Collector for Oracle {
+    fn step(&mut self, v: &GcView<'_>, b: GcBudget) -> Result<GcProgress> {
+        self.check(v);
+        self.inner.step(v, b)
+    }
+    fn urgent(&mut self, v: &GcView<'_>, w: u64) -> Result<GcProgress> {
+        self.check(v);
+        self.inner.urgent(v, w)
+    }
+    fn dry_run(&mut self, v: &GcView<'_>) -> Result<GcPassSummary> {
+        self.inner.dry_run(v)
+    }
+    fn stats(&self) -> GcStats {
+        self.inner.stats()
+    }
+    fn request_pass(&mut self) -> bool {
+        self.inner.request_pass()
+    }
+    fn status(&self) -> GcStatusSnapshot {
+        self.inner.status()
+    }
+    fn take_moved(&mut self) -> Vec<Moved> {
+        self.inner.take_moved()
+    }
+    fn set_pressure(&mut self, raised: bool) {
+        self.inner.set_pressure(raised);
+    }
+    fn set_tip_refs(&mut self, on: bool) {
+        self.inner.set_tip_refs(on);
+    }
+    fn take_mark_started(&mut self) -> Option<lunix_format::CommitSeq> {
+        self.inner.take_mark_started()
+    }
+    fn take_tip_refs(&mut self) -> Option<TipRefs> {
+        self.inner.take_tip_refs()
+    }
+    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
+        self.inner.take_mark_condemned()
+    }
+}
+
+fn oracle(v: &Vol, inner: Box<dyn Collector>, log: &Arc<OracleLog>) -> Box<dyn Collector> {
+    Box::new(Oracle {
+        inner,
+        hooks: Arc::clone(&v.hooks),
+        log: Arc::clone(log),
+    })
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Op {
     /// A whole chunk of one of the pool's patterns.
@@ -144,6 +265,9 @@ struct Cov {
     rebases: u64,
     reopens: u64,
     urgent: u64,
+    /// Offered segments the oracle checked, and offers it could not.
+    checked: u64,
+    skipped: u64,
 }
 
 struct Run {
@@ -183,7 +307,8 @@ fn run(
 ) -> std::result::Result<Run, TestCaseError> {
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
     v.tweak = tweak(retain, shadow);
-    *lock(&v.collector) = Some(mk());
+    let log = Arc::new(OracleLog::default());
+    *lock(&v.collector) = Some(oracle(&v, mk(), &log));
     let mut r = v.open().map_err(|e| e.0).expect("open");
     let mut obs = Vec::new();
     let mut cov = Cov::default();
@@ -201,6 +326,11 @@ fn run(
             let t = refs_of(r);
             prop_assert_eq!(t.drift_segments, 0, "the table differed from a mark");
             prop_assert_eq!(t.report_mismatches, 0);
+            {
+                let bad = lock(&log.violations);
+                prop_assert!(bad.is_empty(), "the oracle: {bad:?}");
+            }
+            prop_assert_eq!(t.shadow_unconfirmed_named, 0, "a mark found an offer named");
         }
         obs.push(observe(r));
         Ok(())
@@ -253,7 +383,7 @@ fn run(
                 cov.reopens += 1;
                 let p = r.stop();
                 v.absorb(p, u64::from(s));
-                *lock(&v.collector) = Some(mk());
+                *lock(&v.collector) = Some(oracle(&v, mk(), &log));
                 r = v.open().map_err(|e| e.0).expect("reopen");
                 obs.push(observe(&r));
             }
@@ -266,6 +396,8 @@ fn run(
     let data = r.read_all();
     let refs = refs_of(&r);
     account(&r, &mut cov, obs.last());
+    cov.checked = log.checked.load(Ordering::Relaxed);
+    cov.skipped = log.skipped.load(Ordering::Relaxed);
     Ok(Run {
         obs,
         refs,
@@ -299,6 +431,8 @@ fn case(
     t.rebases += on.cov.rebases;
     t.reopens += on.cov.reopens;
     t.urgent += on.cov.urgent;
+    t.checked += on.cov.checked;
+    t.skipped += on.cov.skipped;
     total.set(t);
     Ok(())
 }
@@ -335,6 +469,8 @@ fn the_table_matches_every_mark_on_a_dedup_heavy_workload() {
     assert!(c.dedup_hits > 0, "no dedup hit in any case: {c:?}");
     assert!(c.offered > 0 && c.confirmed > 0, "{c:?}");
     assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
+    assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
 
 /// Compaction-heavy: mostly partial overwrites of distinct data, eager
@@ -346,6 +482,8 @@ fn the_table_matches_every_mark_on_a_compaction_heavy_workload() {
     assert!(c.compacted > 0, "no compaction in any case: {c:?}");
     assert!(c.offered > 0 && c.confirmed > 0, "{c:?}");
     assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
+    assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
 
 /// A collector that reports one entry too many in the first segment of
@@ -500,6 +638,15 @@ fn the_shadow_check_offers_what_the_marks_condemn() {
         on.cov
     );
     assert_eq!((on.cov.reopens, on.cov.urgent), (1, 1), "{:?}", on.cov);
+    assert!(
+        on.cov.checked > 0,
+        "the oracle checked no offer: {:?}",
+        on.cov
+    );
+    assert_eq!(t.shadow_unconfirmed_named, 0);
+    // Bytes: every confirmed, early or missed segment has a size.
+    assert!(t.shadow_confirmed_bytes > 0, "{t:?}");
+    assert!(t.shadow_confirmed > 0 && t.shadow_confirmed_bytes >= t.shadow_confirmed);
     let last = on.obs.last().expect("obs");
     assert!(last.stats.bytes_freed > 0, "the collector deleted nothing");
 }

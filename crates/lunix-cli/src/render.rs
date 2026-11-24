@@ -517,8 +517,8 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             out,
             "refs shadow",
             &format!(
-                "{} offered ({} idle, {} busy), {} confirmed, {} live by id, {} kept, {} listed, {} revived; \
-                 {} early by the mark, {} not known to the table; recall {}",
+                "{} offered ({} idle, {} busy), {} confirmed, {} live by id, {} kept, {} listed, {} revived, \
+                 {} named by a retained root (must be 0); {} early by the mark, {} not known to the table; recall {}",
                 t.shadow_would_propose,
                 t.shadow_offered_idle,
                 t.shadow_offered_busy,
@@ -527,9 +527,28 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
                 t.shadow_unconfirmed_kept,
                 t.shadow_unconfirmed_listed,
                 t.shadow_revived,
+                t.shadow_unconfirmed_named,
                 t.shadow_early_by_mark,
                 t.shadow_missed,
                 recall.map_or_else(|| "n/a".to_owned(), |r| format!("{r} %")),
+            ),
+        )?;
+        let judged_bytes = t
+            .shadow_confirmed_bytes
+            .saturating_add(t.shadow_early_bytes)
+            .saturating_add(t.shadow_missed_bytes);
+        let recall_bytes =
+            (u128::from(t.shadow_confirmed_bytes) * 100).checked_div(u128::from(judged_bytes));
+        kv(
+            out,
+            "refs bytes",
+            &format!(
+                "confirmed {}, early by the mark {}, not known to the table {}; recall {}; lead {} byte-ms",
+                size_with_bytes(t.shadow_confirmed_bytes),
+                size_with_bytes(t.shadow_early_bytes),
+                size_with_bytes(t.shadow_missed_bytes),
+                recall_bytes.map_or_else(|| "n/a".to_owned(), |r| format!("{r} %")),
+                t.shadow_lead_byte_ms,
             ),
         )?;
         if let Some(mean) = t.shadow_lead_ms_sum.checked_div(t.shadow_confirmed_lead) {
@@ -596,6 +615,11 @@ mod reclaim_tests {
                 shadow_lead_ms_sum: 900,
                 shadow_lead_ms_max: 500,
                 shadow_confirmed_lead: 3,
+                shadow_unconfirmed_named: 1,
+                shadow_confirmed_bytes: 3 << 20,
+                shadow_early_bytes: 1 << 20,
+                shadow_missed_bytes: 0,
+                shadow_lead_byte_ms: 123_456,
                 first_ready_ms: Some(5_500),
                 ..RefsStats::default()
             })),
@@ -606,6 +630,11 @@ mod reclaim_tests {
         assert!(t.contains("drift 3 over 4 rebases"), "{t}");
         assert!(t.contains("7 offered"), "{t}");
         assert!(t.contains("recall 75 %"), "{t}");
+        assert!(t.contains("1 named by a retained root (must be 0)"), "{t}");
+        assert!(t.contains("confirmed 3 MiB (3145728 bytes)"), "{t}");
+        assert!(t.contains("early by the mark 1 MiB (1048576 bytes)"), "{t}");
+        assert!(t.contains("not known to the table 0 B; recall 75 %"), "{t}");
+        assert!(t.contains("lead 123456 byte-ms"), "{t}");
         assert!(t.contains("mean 300 ms, max 500 ms over 3 offers"), "{t}");
         assert!(t.contains("first ready 5500 ms"), "{t}");
     }

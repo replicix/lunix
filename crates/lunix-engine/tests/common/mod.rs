@@ -77,6 +77,9 @@ pub struct TestHooks {
     pub advance: Mutex<Vec<(&'static str, Duration)>>,
     /// The clock `advance` moves.
     pub clock: Mutex<Option<Arc<ManualClock>>>,
+    /// Offers of the shadow reference table not yet checked: the tip and the
+    /// offered segments (`EngineHooks::shadow_offered`).
+    pub offers: Mutex<Vec<(CommitSeq, Vec<SegId>)>>,
 }
 
 /// The two ends of a parked crash point, the engine side.
@@ -170,6 +173,10 @@ impl EngineHooks for TestHooks {
 
     fn queue_thread(&self, entering: bool) {
         ON_QUEUE.with(|c| c.set(entering));
+    }
+
+    fn shadow_offered(&self, tip: CommitSeq, offered: &[SegId]) {
+        lock(&self.offers).push((tip, offered.to_vec()));
     }
 }
 

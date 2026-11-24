@@ -133,15 +133,30 @@ mark condemned it), or not condemned because the segment is *live by id* (a
 chunk id in it lives there although no entry hints at it: the only class that
 becomes a wrong proposal, saved by the recheck), *kept* for another reason, or
 *listed* already; or *revived* by a new entry before any mark judged it.
+Before any of these, an offered segment that a retained root other than the
+tip still names (an older retained FULL or a pin; the mark collects the
+segments hinted at by the leaves it walks for those roots, `Liveness::older_refs`)
+is counted as *named by a retained root* (`shadow_unconfirmed_named`). That is
+the lag rule broken, not a design limit: **it is always 0** on a volume
+without pins (a pin on an old commit is a root too, and shadow mode ignores
+pins, see above, so a pinned volume can show it non-zero), and anything else
+is a bug in the table that blocks the active stage. It is a lower bound (a root
+retired between the offer and the mark is not seen); the engine proptests check
+it exactly, with a ground-truth walk of every retained root at each offer.
 Segments a mark condemns that the table did not offer are *early by the mark*
 (the table knew the zero, the lag, the cap or a mark in a call without an
 offer came first) or *missed* (not known to the table: never had an entry,
 compaction with stale hints). Recall is `confirmed / (confirmed + early +
-missed)` over marks that began with a `ready` table, by segment count.
+missed)` over marks that began with a `ready` table, by segment count and by
+bytes (the sizes of the segments: `shadow_confirmed_bytes`,
+`shadow_early_bytes`, `shadow_missed_bytes`; compaction outputs and tail
+segments are not full size, and those are the ones the table misses or sees
+late). The gain in bytes is `shadow_lead_byte_ms`: for each confirmed offer
+with a lead, the segment's size times its lead in milliseconds.
 Also recorded: the wait of an offer made during a pass for the first idle
 moment, the time from attach to the first ready segment (`first_ready_ms`) and
 to the first mark that condemned (`first_mark_condemn_ms`). `lunix gc --status`
-prints them (`refs table`, `refs shadow`, `refs lead`, `refs timing`). The
+prints them (`refs table`, `refs shadow`, `refs bytes`, `refs lead`, `refs timing`). The
 table costs one map read per chunk of a cut; the figures are in the report.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
