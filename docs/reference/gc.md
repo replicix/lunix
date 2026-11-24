@@ -97,8 +97,9 @@ and not before the grace last changed, to the delete), for all passes and for
 the recheck-only ones. The `gc pass done` line carries `kind`, `mark_ms` and the
 pass's own `lag_count`, `lag_mean_ms` and `lag_max_ms`.
 
-**Reference table, shadow mode** (`gc_condemn_on_cut = "shadow"`, off by default;
-`EngineConfig::gc_condemn_on_cut`). The engine keeps a memory-only count of
+**Reference table** (`gc_condemn_on_cut = "off" | "shadow" | "on"`, `off` by
+default; `EngineConfig::gc_condemn_on_cut`). `shadow` keeps and checks the
+table and counts what it would offer; `on` also offers it (below). The engine keeps a memory-only count of
 the map entries per segment, by hint: every map transaction of a cut (the
 destage, and the compaction re-hints) goes through a wrapper (`RefMap`) that
 predicts the count changes, checks the prediction against the transaction's
@@ -109,7 +110,9 @@ table is never persisted and is not a judge. One switch: opening the engine
 with the mode on makes the collector count (`Collector::set_tip_refs`). Every
 mark counts the entries of its tip root by hint (`Liveness::tip_refs`) and the
 engine compares that with the table as it stood when the mark pinned its roots
-(`take_mark_started`, `take_tip_refs`); a difference is counted in
+(one `Collector::take_mark_report` per call: the mark that began and still
+runs, and the marks that finished, each with whether it began in the same call); a
+difference is counted in
 `drift_segments`, logged and repaired (`counts - snapshot + mark`: what changed
 since the mark began is kept). A table starts `rebuilding` (deltas from an
 unknown base) and the first mark is its base, so a restart needs no walk. A
@@ -120,13 +123,16 @@ the table becomes `ready` again only by a mark that began after it. The same
 holds while `rebuilding`.
 
 In shadow mode nothing is condemned, listed or deleted because of the table.
-At each collector step the segments it would offer (at most 64, not named by a
-pending compaction re-hint; **pins are ignored**: the active stage rejects
-every proposal while a pin exists, so a pinned volume shows offers that would
-not be made) are counted and remembered, with whether the collector was between
-passes at the offer (a proposal is only taken then). Each mark that began at
+At each collector step, inside the collector call (the map is at the tip), the
+segments it would offer (at most 64, not named by a pending compaction
+re-hint) are counted and remembered, with whether the collector was between
+passes at the offer (a proposal is only taken then). **No segment is offered
+while a pin exists** (`pin_blocked` counts the steps that had something ready):
+the table knows the tip only, and a pin is a root it cannot see; the segments
+keep waiting and are offered when the pins are gone (a pin made after an offer
+is a root of the recheck, which un-condemns what it reaches). Each mark that began at
 or after the offer judges them against its own newly dead segments
-(`take_mark_condemned`): *confirmed* (with the **lead**: the time between the
+(`MarkFinished::condemned`): *confirmed* (with the **lead**: the time between the
 offer meeting an idle collector and the mark's condemn, i.e. how much earlier
 the grace would have started; without a lead when a pass was running until the
 mark condemned it), or not condemned because the segment is *live by id* (a
@@ -137,10 +143,9 @@ Before any of these, an offered segment that a retained root other than the
 tip still names (an older retained FULL or a pin; the mark collects the
 segments hinted at by the leaves it walks for those roots, `Liveness::older_refs`)
 is counted as *named by a retained root* (`shadow_unconfirmed_named`). That is
-the lag rule broken, not a design limit: **it is always 0** on a volume
-without pins (a pin on an old commit is a root too, and shadow mode ignores
-pins, see above, so a pinned volume can show it non-zero), and anything else
-is a bug in the table that blocks the active stage. It is a lower bound (a root
+the lag rule broken, not a design limit: **it is always 0**, pins or not
+(nothing is offered while one exists), and anything else is a bug in the table
+that blocks the active stage. It is a lower bound (a root
 retired between the offer and the mark is not seen); the engine proptests check
 it exactly, with a ground-truth walk of every retained root at each offer.
 Segments a mark condemns that the table did not offer are *early by the mark*
@@ -158,6 +163,56 @@ moment, the time from attach to the first ready segment (`first_ready_ms`) and
 to the first mark that condemned (`first_mark_condemn_ms`). `lunix gc --status`
 prints them (`refs table`, `refs shadow`, `refs bytes`, `refs lead`, `refs timing`). The
 table costs one map read per chunk of a cut; the figures are in the report.
+
+**Condemn on cut, mode `on`** (`Collector::propose_dead`). As `shadow`, and the
+segments the table finds ready are handed to the collector in the same call,
+right before its step. The offer is a hint with no authority. The collector
+takes it only when it is **between passes** (a proposal is never mixed into a
+running pass; otherwise it answers "not now" and the engine offers again at
+the next step, `proposals_deferred`) and has loaded its list. It rejects the
+whole offer while a pin exists (`proposal_rejected_pins`); rejects a segment
+whose `since` is above the lowest `chain_floor` of a retained FULL (the
+authoritative form of the lag rule: `proposal_rejected_early`, **always 0**:
+the engine's arithmetic is only a filter), and one that is gone, named by a
+retained commit, above the high-water mark, an unnamed compaction output or
+listed already (`proposal_rejected_kept`); and takes at most `propose_max`
+(64) and what the list has room for (`proposal_rejected_room`; those are left
+to the marks). What it accepts is condemned in the order of every condemn:
+the list is written and synced (`gc.propose.before_list_write` before it,
+then `gc.condemn.after_list_write`), the index flags are set in one durable
+update (`index.after_condemn_flag`, then `gc.propose.after_flags`), and the
+grace of each starts. Nothing here deletes, nothing is a pass (`passes`,
+the schedules and `last_end` do not move), and **the recheck stays the only
+judge of a delete**: the recheck-only or regular pass whose mark began after
+the grace ended deletes a proposed segment under `recheck_verdict` unchanged,
+or un-condemns it when a root of that mark reaches it (a table that is wrong
+costs one list write and one grace: `proposal_uncondemned`, and a log line
+with the reason). A table can be wrong without a bug: it counts hints, the
+mark counts the index's current copy of each chunk id, and they differ after
+compaction. The consumed offer leaves the table; the table's count of the
+time from a count reaching zero to the consumption is `condemn_lag`.
+`first_proposal_ms` and `first_proposal_delete_ms` (from attach) time the
+first segment condemned by a proposal and the first one deleted.
+
+The condemn lines of proposals (`condemn`, reason `unreferenced`: the same
+vocabulary as a mark's) are **carried** and written first into the evidence
+object of the next pass, whatever its kind: one object per proposal would turn
+the 1 024 kept objects over in minutes. A crash loses the carried lines of a
+grace that was still running; the list file still has `condemned_at` and the
+`delete` line is written by the pass that deletes. `lunix gc --status` prints
+the counters (`proposals`) and `refs timing`.
+
+Instruments for the gate that measures the mode (nothing here changes a
+decision): the collector logs, uncoalesced, every change of the pressure level
+it is told (`gc: the engine's pressure level changed`, field `raised`) and of
+the grace in force (`gc: the grace in force changed`, `from_ms`, `to_ms`) at
+its first call after the change (the engine's own throttle lines are merged
+within 5 s); `first_proposal_ms` and `first_proposal_delete_ms` (above);
+`proposal_rejected_early` (must be 0); and the cumulative cut counters of the
+write path (`write_path.cuts`, `cut_bytes_sum`, `cut_us_sum`: cuts that
+drained journal bytes, their bytes and their time, C1 to C9), from which the
+cut time per journal byte is exact over any window by the difference of two
+status reads.
 
 The daemon reaches the collector in three ways (the engine's `GcControl`; the
 calling thread runs the collector under the coordinator mutex):
@@ -493,7 +548,7 @@ the same objects are in different evidence objects (a grace apart).
 Evidence objects are not in the ledger; the bound keeps them under 1 024 x
 48 MiB at worst, in practice a few KiB each. `pass` is one above the highest
 `gc/` object present. The body is the frozen opaque body with `ver` = 1 and
-`bytes` = the pass's lines, written once at pass end (and once per urgent
+`bytes` = the pass's lines (the carried `condemn` lines of proposals first), written once at pass end (and once per urgent
 pass). A pass abandoned on an error (not a crash) writes what it has, best
 effort, so the record of deletes already made is not lost. A crash before the
 write loses only that pass's evidence. Phase 2 uploads the objects verbatim.
@@ -522,7 +577,9 @@ count in `bytes`.
 |---|---|
 | `gc.mark.end` | the mark is complete (nothing durable yet) |
 | `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
-| `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded |
+| `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded (also reached through a proposal) |
+| `gc.propose.before_list_write` | a proposal, filtered: nothing written yet |
+| `gc.propose.after_flags` | a proposal: the list and the index flags are durable, the graces had not started: they start when the list is loaded |
 | `gc.recheck.before_delete` | a recheck-only pass: its condemn units are done, nothing deleted by this pass yet (the deletes hit the `gc.delete.*` points) |
 | `gc.delete.before_unlink` | nothing deleted |
 | `gc.delete.after_unlink` | the file is gone (the store unlinks and fsyncs the directory in one call); the index may still hold entries of this segment and of the segments unlinked since the last index update (those of one step, up to 256): `catch_up` drops them at open, a later pass removes the list entry |

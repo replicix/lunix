@@ -8,6 +8,7 @@ mod footercache;
 mod liveness;
 mod oracle;
 mod pipeline;
+mod propose;
 mod recheck;
 mod refs;
 mod review;

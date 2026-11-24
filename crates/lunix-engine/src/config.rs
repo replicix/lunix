@@ -36,6 +36,14 @@ pub enum CondemnOnCut {
     /// Opening the engine switches the collector's counting of the tip
     /// root on (`Collector::set_tip_refs`); there is no second switch.
     Shadow,
+    /// As `Shadow`, and a segment the table finds dead is offered to the
+    /// collector (`Collector::propose_dead`) at the first step that finds
+    /// the collector idle, `2 x (retain_last - 1)` cuts after its last entry
+    /// went: the collector lists, flags and starts the grace of what its own
+    /// rules accept, and the recheck mark that began after the grace ended
+    /// is, as ever, the only judge of a delete. Nothing is offered while a
+    /// pin exists.
+    On,
 }
 
 /// The settings of one engine.

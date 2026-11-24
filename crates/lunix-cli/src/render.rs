@@ -496,6 +496,30 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    if r.proposals_offered + r.proposals_deferred + r.mark_condemned_segments > 0 {
+        kv(
+            out,
+            "proposals",
+            &format!(
+                "{} offered, {} condemned ({}), {} deleted ({}), {} un-condemned by a recheck; \
+                 rejected: {} pinned, {} early (must be 0), {} kept, {} no room; {} errors, {} refused while busy; \
+                 the marks condemned {} segments themselves",
+                r.proposals_offered,
+                r.proposal_condemned,
+                size_with_bytes(r.proposal_condemned_bytes),
+                r.proposal_deleted,
+                size_with_bytes(r.proposal_deleted_bytes),
+                r.proposal_uncondemned,
+                r.proposal_rejected_pins,
+                r.proposal_rejected_early,
+                r.proposal_rejected_kept,
+                r.proposal_rejected_room,
+                r.propose_errors,
+                r.proposals_deferred,
+                r.mark_condemned_segments,
+            ),
+        )?;
+    }
     if let Some(t) = g.refs.as_deref().filter(|t| t.state != RefsState::Off) {
         kv(
             out,
@@ -567,15 +591,21 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             out,
             "refs timing",
             &format!(
-                "first ready {} ms, first mark condemn {} ms after attach; zero to offer mean {} ms; \
-                 idle wait mean {} ms, max {} ms ({} waiting)",
+                "first ready {} ms, first proposal {} ms, its first delete {} ms, first mark condemn {} ms after attach; \
+                 zero to offer mean {} ms; idle wait mean {} ms, max {} ms ({} waiting); {} offers taken, {} withheld for a pin",
                 t.first_ready_ms.map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                t.first_proposal_ms
+                    .map_or_else(|| "-".to_owned(), |v| v.to_string()),
+                t.first_proposal_delete_ms
+                    .map_or_else(|| "-".to_owned(), |v| v.to_string()),
                 t.first_mark_condemn_ms
                     .map_or_else(|| "-".to_owned(), |v| v.to_string()),
                 lag.map_or_else(|| "-".to_owned(), |v| v.to_string()),
                 wait.map_or_else(|| "-".to_owned(), |v| v.to_string()),
                 t.idle_wait_ms_max,
-                t.idle_waiting
+                t.idle_waiting,
+                t.proposals_taken,
+                t.pin_blocked
             ),
         )?;
     }
@@ -653,6 +683,7 @@ mod reclaim_tests {
                 fast_lag_ms_sum: 3_000,
                 fast_lag_ms_max: 1_500,
                 fast_lag_count: 3,
+                ..GcReclaimStats::default()
             }),
             ..GcStatusSnapshot::default()
         };

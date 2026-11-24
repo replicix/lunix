@@ -22,7 +22,7 @@
 //! condemn (recall, and why an offer was not confirmed); no segment is condemned, listed or
 //! deleted because of it.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -79,6 +79,8 @@ struct Counters {
     early_bytes: u64,
     missed_bytes: u64,
     lead_byte_ms: u64,
+    taken: u64,
+    pin_blocked: u64,
     lag_sum_ms: u64,
     lag_max_ms: u64,
     lag_count: u64,
@@ -103,6 +105,16 @@ struct Offer {
     idle_at: Option<Duration>,
 }
 
+/// The segments whose count reached zero in one cut.
+#[derive(Debug)]
+struct CutZeros {
+    seq: CommitSeq,
+    segs: Vec<SegId>,
+    /// Everything before this index is gone from `zero_since` (or was
+    /// replaced by a later zero): skipped without a look.
+    head: usize,
+}
+
 /// The reference table.
 #[derive(Debug)]
 pub(crate) struct SegRefs {
@@ -118,6 +130,11 @@ pub(crate) struct SegRefs {
     went_zero: BTreeSet<SegId>,
     /// Zero since the cut committed as this sequence, and when.
     zero_since: BTreeMap<SegId, (CommitSeq, Duration)>,
+    /// The segments of `zero_since` per cut, ascending by the cut: the
+    /// ready ones are a prefix, so a call looks at the front only. A segment
+    /// that left `zero_since` (revived, offered, condemned by a mark) stays
+    /// here until the front reaches it (`CutZeros::live`).
+    queue: VecDeque<CutZeros>,
     /// `counts` as they stood when the current mark pinned its roots, with
     /// whether the table was `Ready` then.
     snapshot: Option<Snapshot>,
@@ -133,6 +150,10 @@ pub(crate) struct SegRefs {
     born: Duration,
     /// Time from `born` to the first call that found a segment ready.
     first_ready: Option<Duration>,
+    /// Time from `born` to the first segment a proposal condemned and to the
+    /// first delete of one.
+    first_proposal: Option<Duration>,
+    first_proposal_delete: Option<Duration>,
     /// Time from `born` to the first mark that condemned a segment.
     first_mark_condemn: Option<Duration>,
     c: Counters,
@@ -150,12 +171,15 @@ impl SegRefs {
         Self {
             born: now,
             first_ready: None,
+            first_proposal: None,
+            first_proposal_delete: None,
             first_mark_condemn: None,
             state: RefsState::Rebuilding,
             tainted: false,
             counts: HashMap::new(),
             went_zero: BTreeSet::new(),
             zero_since: BTreeMap::new(),
+            queue: VecDeque::new(),
             snapshot: None,
             judged: None,
             offered: BTreeMap::new(),
@@ -190,34 +214,123 @@ impl SegRefs {
     /// The cut committed as `seq`: the segments whose count reached zero in
     /// it (and stayed there) are zero since `seq`.
     pub(crate) fn seal_cut(&mut self, seq: CommitSeq, now: Duration) {
+        let mut fresh = Vec::new();
         for seg in std::mem::take(&mut self.went_zero) {
             if !self.counts.contains_key(&seg) {
-                self.zero_since.entry(seg).or_insert((seq, now));
+                if let std::collections::btree_map::Entry::Vacant(e) = self.zero_since.entry(seg) {
+                    e.insert((seq, now));
+                    fresh.push(seg);
+                }
             }
+        }
+        if !fresh.is_empty() {
+            self.queue.push_back(CutZeros {
+                seq,
+                segs: fresh,
+                head: 0,
+            });
         }
     }
 
     /// Segments zero for at least `lag` cuts at `tip`, not in `skip`, oldest
-    /// first, at most `max`. Nothing unless the table is `Ready`.
+    /// first, at most `max`. Nothing unless the table is `Ready`. Looks at
+    /// the front of the per-cut queue only: its cost does not grow with the
+    /// number of segments waiting (a large discard leaves hundreds of
+    /// thousands).
     pub(crate) fn ready(
-        &self,
+        &mut self,
         tip: CommitSeq,
         lag: u64,
         skip: &HashSet<SegId>,
         max: usize,
     ) -> Vec<Ready> {
-        if self.state != RefsState::Ready || self.zero_since.is_empty() {
-            return Vec::new();
+        let mut out = Vec::new();
+        if self.state != RefsState::Ready || max == 0 {
+            return out;
         }
-        let mut v: Vec<Ready> = self
-            .zero_since
-            .iter()
-            .filter(|(s, (k, _))| k.0.saturating_add(lag) <= tip.0 && !skip.contains(s))
-            .map(|(&seg, &(since, at))| Ready { seg, since, at })
-            .collect();
-        v.sort_unstable_by_key(|r| (r.since, r.seg));
-        v.truncate(max);
-        v
+        let Self {
+            zero_since, queue, ..
+        } = self;
+        let mut i = 0;
+        while i < queue.len() && out.len() < max {
+            let Some(cut) = queue.get_mut(i) else {
+                break;
+            };
+            if cut.seq.0.saturating_add(lag) > tip.0 {
+                break;
+            }
+            let live = |s: &SegId| zero_since.get(s).filter(|(k, _)| *k == cut.seq).copied();
+            while cut.head < cut.segs.len()
+                && cut.segs.get(cut.head).is_none_or(|s| live(s).is_none())
+            {
+                cut.head += 1;
+            }
+            if cut.head >= cut.segs.len() {
+                // Nothing of this cut is waiting any more.
+                if i == 0 {
+                    queue.pop_front();
+                } else {
+                    queue.remove(i);
+                }
+                continue;
+            }
+            for &seg in cut.segs.iter().skip(cut.head) {
+                if out.len() >= max {
+                    break;
+                }
+                if skip.contains(&seg) {
+                    continue;
+                }
+                if let Some((since, at)) = live(&seg) {
+                    out.push(Ready { seg, since, at });
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Notes what a call found ready (the status shows it, the first one is
+    /// timed).
+    pub(crate) fn note_ready(&mut self, ready: &[Ready], now: Duration) {
+        self.ready_last = ready.len() as u64;
+        if !ready.is_empty() && self.first_ready.is_none() {
+            self.first_ready = Some(now.saturating_sub(self.born));
+        }
+    }
+
+    /// A pin exists: nothing is offered (the table knows the tip only), the
+    /// segments stay waiting.
+    pub(crate) fn note_pin_blocked(&mut self) {
+        self.c.pin_blocked += 1;
+    }
+
+    /// Mode `on`: the collector consumed an offer (every segment condemned or
+    /// rejected for good). The segments are done with here; the time since
+    /// each count reached zero is the condemn lag.
+    pub(crate) fn consume(&mut self, ready: &[Ready], now: Duration) {
+        self.c.taken += 1;
+        for r in ready {
+            if self.zero_since.remove(&r.seg).is_none() {
+                continue;
+            }
+            let lag = ms(now.saturating_sub(r.at));
+            self.c.lag_sum_ms = self.c.lag_sum_ms.saturating_add(lag);
+            self.c.lag_max_ms = self.c.lag_max_ms.max(lag);
+            self.c.lag_count += 1;
+        }
+    }
+
+    /// The collector's own counters after a call: times the first proposal
+    /// that condemned a segment and the first delete of one.
+    pub(crate) fn note_collector(&mut self, r: &lunix_iface::gc::GcReclaimStats, now: Duration) {
+        let since = now.saturating_sub(self.born);
+        if r.proposal_condemned > 0 && self.first_proposal.is_none() {
+            self.first_proposal = Some(since);
+        }
+        if r.proposal_deleted > 0 && self.first_proposal_delete.is_none() {
+            self.first_proposal_delete = Some(since);
+        }
     }
 
     /// Shadow mode: the offer is counted and remembered for the judgement of
@@ -233,10 +346,6 @@ impl SegRefs {
         now: Duration,
         idle: bool,
     ) {
-        self.ready_last = ready.len() as u64;
-        if !ready.is_empty() && self.first_ready.is_none() {
-            self.first_ready = Some(now.saturating_sub(self.born));
-        }
         if idle {
             // Offers that were made during a pass meet the idle collector
             // now: their wait is the time since the offer.
@@ -299,6 +408,8 @@ impl SegRefs {
             return 0;
         };
         if snap.tip != r.tip {
+            // Another mark's report: its own snapshot is still to come.
+            self.snapshot = Some(snap);
             return 0;
         }
         let refs: HashMap<SegId, i64> = r
@@ -343,6 +454,7 @@ impl SegRefs {
         if diff > 0 {
             self.c.drift_segments += diff;
             self.zero_since.clear();
+            self.queue.clear();
             self.went_zero.clear();
         }
         self.judged = Some((r.tip, snap.ready && !self.tainted));
@@ -433,6 +545,7 @@ impl SegRefs {
         }
         self.tainted = true;
         self.zero_since.clear();
+        self.queue.clear();
         self.went_zero.clear();
         if self.state == RefsState::Ready {
             self.state = RefsState::Drifted;
@@ -481,6 +594,10 @@ impl SegRefs {
                 .filter(|o| o.idle_at.is_none())
                 .count() as u64,
             first_ready_ms: self.first_ready.map(ms),
+            first_proposal_ms: self.first_proposal.map(ms),
+            first_proposal_delete_ms: self.first_proposal_delete.map(ms),
+            proposals_taken: self.c.taken,
+            pin_blocked: self.c.pin_blocked,
         }
     }
 
@@ -503,6 +620,14 @@ enum Op {
     Set(ChunkNo, Hint),
     Hole(ChunkNo),
     Rehint(ChunkNo, Hint, Hint),
+}
+
+impl Op {
+    fn chunk(self) -> u64 {
+        match self {
+            Self::Set(ci, _) | Self::Hole(ci) | Self::Rehint(ci, _, _) => ci.0,
+        }
+    }
 }
 
 /// The map as the cut sees it: every transaction is forwarded to the real
@@ -537,12 +662,19 @@ impl RefTxn<'_> {
     /// transaction (the pending operations of the transaction on top), in
     /// order, the way the map applies them at commit.
     fn predict(&self) -> Result<Predicted> {
-        let mut pending: HashMap<u64, Option<Hint>> = HashMap::new();
         let mut p = Predicted {
             deltas: HashMap::new(),
             sets: 0,
             rehints_applied: 0,
         };
+        // The destage transaction is ascending: no chunk is touched twice, so
+        // the operations of the transaction cannot see each other and the
+        // `pending` map (one insert and lookup per chunk) is not needed.
+        let ascending = self
+            .ops
+            .windows(2)
+            .all(|w| matches!((w[0].chunk(), w[1].chunk()), (a, b) if a < b));
+        let mut pending: HashMap<u64, Option<Hint>> = HashMap::new();
         let current = |pending: &HashMap<u64, Option<Hint>>, ci: ChunkNo| -> Result<Option<Hint>> {
             match pending.get(&ci.0) {
                 Some(h) => Ok(*h),
@@ -556,21 +688,27 @@ impl RefTxn<'_> {
                         *p.deltas.entry(old.seg).or_insert(0) -= 1;
                     }
                     *p.deltas.entry(new.seg).or_insert(0) += 1;
-                    pending.insert(ci.0, Some(new));
+                    if !ascending {
+                        pending.insert(ci.0, Some(new));
+                    }
                     p.sets += 1;
                 }
                 Op::Hole(ci) => {
                     if let Some(old) = current(&pending, ci)? {
                         *p.deltas.entry(old.seg).or_insert(0) -= 1;
                     }
-                    pending.insert(ci.0, None);
+                    if !ascending {
+                        pending.insert(ci.0, None);
+                    }
                     p.sets += 1;
                 }
                 Op::Rehint(ci, old, new) => {
                     if current(&pending, ci)? == Some(old) {
                         *p.deltas.entry(old.seg).or_insert(0) -= 1;
                         *p.deltas.entry(new.seg).or_insert(0) += 1;
-                        pending.insert(ci.0, Some(new));
+                        if !ascending {
+                            pending.insert(ci.0, Some(new));
+                        }
                         p.rehints_applied += 1;
                     }
                 }
@@ -705,6 +843,35 @@ pub(crate) fn bench_ref_map(map: Arc<dyn BlockMap>) -> Arc<dyn BlockMap> {
         refs: Vec::new(),
     });
     Arc::new(RefMap::new(map, Arc::new(Mutex::new(t))))
+}
+
+/// The table's counts and the number of map transactions whose report
+/// differed from the prediction.
+#[cfg(feature = "testsupport")]
+use crate::TableReader;
+
+/// As [`bench_ref_map`], and a reader of the table: its counts per segment and
+/// its report mismatches (for the test of the wrapper over the real map).
+#[cfg(feature = "testsupport")]
+pub(crate) fn counted_ref_map(map: Arc<dyn BlockMap>) -> (Arc<dyn BlockMap>, TableReader) {
+    let mut t = SegRefs::new(Duration::ZERO);
+    t.mark_started(CommitSeq(0));
+    t.rebase(&TipRefs {
+        tip: CommitSeq(0),
+        refs: Vec::new(),
+    });
+    let table = Arc::new(Mutex::new(t));
+    let reader = Arc::clone(&table);
+    (
+        Arc::new(RefMap::new(map, table)),
+        Box::new(move || {
+            let t = lock(&reader);
+            (
+                t.counts.iter().map(|(&s, &n)| (s, n)).collect(),
+                t.c.report_mismatches,
+            )
+        }),
+    )
 }
 
 /// What the table's mark-start snapshot, `ready()` and `rebase` (a mark that
@@ -843,6 +1010,113 @@ mod tests {
     }
 
     // ------------------------------------------------------------ SegRefs
+
+    #[test]
+    fn ready_looks_at_the_front_of_the_per_cut_queue_and_offers_each_segment_once() {
+        // A large discard: ten thousand segments reach zero in one cut, a few
+        // more in the next ones. Drained 64 at a time, oldest cut first.
+        let mut t = ready_table();
+        let n = 10_000u64;
+        let all: Vec<(u64, i64)> = (1..=n + 20).map(|s| (s, 1)).collect();
+        t.apply(&deltas(&all));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&(1..=n).map(|s| (s, -1)).collect::<Vec<_>>()));
+        t.seal_cut(seq(2), at(10));
+        t.apply(&deltas(
+            &(n + 1..=n + 10).map(|s| (s, -1)).collect::<Vec<_>>(),
+        ));
+        t.seal_cut(seq(3), at(20));
+        t.apply(&deltas(
+            &(n + 11..=n + 20).map(|s| (s, -1)).collect::<Vec<_>>(),
+        ));
+        t.seal_cut(seq(4), at(30));
+        assert_eq!(t.queue.len(), 3);
+        let mut seen = Vec::new();
+        let mut calls = 0;
+        loop {
+            let r = t.ready(seq(6), 2, &HashSet::new(), OFFER_MAX);
+            if r.is_empty() {
+                break;
+            }
+            calls += 1;
+            assert!(r.len() <= OFFER_MAX);
+            t.consume(&r, at(1_000));
+            seen.extend(r.iter().map(|x| (x.since, x.seg)));
+        }
+        // Lag 2 at tip 6: the cuts 2 and 3 and 4 are ready (2 + 2 <= 6, ...).
+        assert_eq!(seen.len(), n as usize + 20);
+        assert_eq!(calls, (n as usize + 20).div_ceil(OFFER_MAX));
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted, seen, "ascending, none twice");
+        assert!(t.zero_since.is_empty());
+        assert!(t.queue.is_empty(), "the front was dropped as it drained");
+        let s = t.stats();
+        assert_eq!(s.condemn_lag_count, n + 20);
+        assert_eq!(s.proposals_taken, calls as u64);
+    }
+
+    #[test]
+    fn a_segment_in_skip_does_not_hold_back_the_ones_behind_it_and_is_offered_later() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1), (3, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&[(1, -1), (2, -1), (3, -1)]));
+        t.seal_cut(seq(2), at(5));
+        let skip: HashSet<SegId> = [seg(1)].into_iter().collect();
+        let r = t.ready(seq(4), 2, &skip, 9);
+        assert_eq!(
+            r.iter().map(|x| x.seg).collect::<Vec<_>>(),
+            vec![seg(2), seg(3)]
+        );
+        t.consume(&r, at(9));
+        // The re-hint landed: the segment is offered at the next call.
+        let r = t.ready(seq(4), 2, &HashSet::new(), 9);
+        assert_eq!(r.iter().map(|x| x.seg).collect::<Vec<_>>(), vec![seg(1)]);
+        // A revival of a queued segment drops it from the offer, whichever
+        // way it left `zero_since`.
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&[(1, -1), (2, -1)]));
+        t.seal_cut(seq(2), at(5));
+        t.apply(&deltas(&[(1, 1)]));
+        let r = t.ready(seq(4), 2, &HashSet::new(), 9);
+        assert_eq!(r.iter().map(|x| x.seg).collect::<Vec<_>>(), vec![seg(2)]);
+        // A zero after the revival is a new transition, in its own cut.
+        t.apply(&deltas(&[(1, -1)]));
+        t.seal_cut(seq(3), at(9));
+        let r = t.ready(seq(6), 2, &HashSet::new(), 9);
+        assert_eq!(
+            r.iter().map(|x| (x.seg, x.since)).collect::<Vec<_>>(),
+            vec![(seg(2), seq(2)), (seg(1), seq(3))]
+        );
+    }
+
+    #[test]
+    fn the_first_proposal_and_its_first_delete_are_timed_from_the_attach() {
+        let mut t = SegRefs::new(at(1_000));
+        let mut r = lunix_iface::gc::GcReclaimStats::default();
+        t.note_collector(&r, at(2_000));
+        assert_eq!(t.stats().first_proposal_ms, None);
+        r.proposal_condemned = 3;
+        t.note_collector(&r, at(3_500));
+        r.proposal_deleted = 1;
+        t.note_collector(&r, at(9_000));
+        t.note_collector(&r, at(12_000));
+        let s = t.stats();
+        assert_eq!(s.first_proposal_ms, Some(2_500));
+        assert_eq!(s.first_proposal_delete_ms, Some(8_000));
+    }
+
+    #[test]
+    fn a_pin_holds_the_offer_back_and_is_counted() {
+        let mut t = ready_table();
+        t.note_pin_blocked();
+        t.note_pin_blocked();
+        assert_eq!(t.stats().pin_blocked, 2);
+    }
 
     #[test]
     fn a_zero_is_ready_after_two_cuts_for_two_retained_fulls() {
@@ -995,9 +1269,9 @@ mod tests {
         assert_eq!(t.rebase(&tip_refs(4, &[(1, 5)])), 0, "another tip: ignored");
         assert_eq!(t.count(seg(1)), 1);
         assert_eq!(t.state(), RefsState::Drifted);
+        // R2-6: the snapshot of the mark that is still to report stays.
+        assert_eq!(t.rebase(&tip_refs(3, &[(1, 5)])), 1, "its own report");
         assert_eq!(t.rebase(&tip_refs(3, &[(1, 5)])), 0, "snapshot is gone");
-        t.mark_started(seq(3));
-        assert_eq!(t.rebase(&tip_refs(3, &[(1, 5)])), 1);
         assert_eq!(t.count(seg(1)), 5);
         assert_eq!(t.state(), RefsState::Ready);
     }
@@ -1274,6 +1548,7 @@ mod tests {
         t.seal_cut(seq(2), at(1_300));
         let r = t.ready(seq(4), 2, &HashSet::new(), 9);
         // The collector is mid-pass at the offer, idle 700 ms later.
+        t.note_ready(&r, at(2_000));
         t.shadow_offer(&r, seq(4), at(2_000), false);
         assert_eq!(t.stats().first_ready_ms, Some(1_000));
         assert_eq!(t.stats().idle_waiting, 2);
@@ -1460,6 +1735,44 @@ mod tests {
                 } else {
                     txn.commit().expect("commit");
                 }
+                prop_assert_eq!(table(&refs), counted(&*inner));
+            }
+            prop_assert_eq!(lock(&refs).stats().report_mismatches, 0);
+        }
+    }
+
+    // The destager's transactions are ascending (no chunk twice): the
+    // prediction takes the shortcut that keeps no `pending` map. It must
+    // predict what the map does, with re-hints among the sets and holes.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn an_ascending_transaction_is_predicted_as_exactly_as_any_other(
+            txns in proptest::collection::vec(
+                proptest::collection::btree_map(0u8..40, (0u8..4, 1u8..7, any::<u8>()), 0..30),
+                1..12,
+            )
+        ) {
+            let (inner, m, refs) = wrapped(40, None);
+            for chunks in txns {
+                let mut txn = m.begin_update().expect("begin");
+                for (c, (kind, s, o)) in chunks {
+                    let ci = ChunkNo(u64::from(c));
+                    match kind {
+                        0 | 1 => txn.set(ci, entry(u64::from(s), u32::from(o))).expect("set"),
+                        2 => txn.set_hole(ci).expect("hole"),
+                        _ => {
+                            let old = inner
+                                .get(ci)
+                                .expect("get")
+                                .map(|e| entry_hint(&e))
+                                .unwrap_or(hint(1, 0));
+                            txn.rehint(ci, old, hint(u64::from(s), 4242)).expect("rehint");
+                        }
+                    }
+                }
+                txn.commit().expect("commit");
                 prop_assert_eq!(table(&refs), counted(&*inner));
             }
             prop_assert_eq!(lock(&refs).stats().report_mismatches, 0);

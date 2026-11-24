@@ -712,3 +712,46 @@ paths = [
   "docs/plans/v1/reports/p1-refs2.md",
   "tools/ownership.toml",
 ]
+
+# condemncut: C5 condemn-on-cut made active (`gc_condemn_on_cut = off | shadow
+# | on`, `Collector::propose_dead`, carried evidence lines, two crash points,
+# the "any proposal is safe" property test, the kill-loop arm, gate
+# instruments, and the diagnosis of the hung cost test).
+[condemncut]
+paths = [
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/cut.rs",
+  "crates/lunix-engine/src/deps.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/gc.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/src/refs.rs",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/refs.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/evidence.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/points.rs",
+  "crates/lunix-gc/src/tests/crash.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/oracle.rs",
+  "crates/lunix-gc/src/tests/propose.rs",
+  "crates/lunix-gc/src/tests/refs.rs",
+  "crates/lunix-gc/src/tests/sim.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_refs_cost.rs",
+  "crates/lunixd/tests/stack_refs_pin.rs",
+  "crates/lunixd/tests/stack_refs_radix.rs",
+  "docs/reference/gc.md",
+  "docs/plans/v1/reports/p1-condemncut.md",
+  "tools/ownership.toml",
+]

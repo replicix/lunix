@@ -113,6 +113,10 @@ pub struct GcConfig {
     /// when `gc_condemn_on_cut` is not off; tests may set it directly.
     /// Default off: no extra work in the mark.
     pub tip_refs: bool,
+    /// Segments one call of [`Collector::propose_dead`](lunix_iface::gc::Collector::propose_dead)
+    /// condemns at most (default 64; 0: the collector takes no proposals).
+    /// The rest of an offer is left to the marks.
+    pub propose_max: usize,
 }
 
 impl Default for GcConfig {
@@ -128,6 +132,7 @@ impl Default for GcConfig {
             fast_recheck: None,
             fast_recheck_always: false,
             tip_refs: false,
+            propose_max: 64,
         }
     }
 }

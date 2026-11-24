@@ -258,35 +258,77 @@ pub trait Collector: Send {
 
     /// The engine keeps a reference table (`gc_condemn_on_cut`): count the
     /// entries of the tip root per segment in every mark and report what the
-    /// marks pin and condemn (`take_mark_started`, `take_tip_refs`,
-    /// `take_mark_condemned`). Called once when the engine opens. The default
-    /// ignores it.
+    /// marks pin and condemn (`take_mark_report`). Called once when the
+    /// engine opens. The default ignores it.
     fn set_tip_refs(&mut self, on: bool) {
         let _ = on;
     }
 
-    /// `Some(tip)` once after a call in which a mark pinned its roots: the
-    /// commit sequence of the tip the mark walks (the map was at that tip
-    /// when the roots were pinned). The engine's reference table snapshots
-    /// its counts at that moment. The default reports nothing.
-    fn take_mark_started(&mut self) -> Option<CommitSeq> {
+    /// What the marks did in the last call, once: the mark that began in it
+    /// and is still running, and the mark that finished in it. The engine's
+    /// reference table snapshots its counts at a mark's start, compares them
+    /// with the counts of the finished mark and judges what it condemned. The
+    /// default reports nothing.
+    fn take_mark_report(&mut self) -> Option<MarkReport> {
         None
     }
 
-    /// `Some` once after a call in which a mark finished: the number of map
-    /// entries per segment (by hint) of the mark's tip root. The engine
-    /// compares it with its reference table. The default reports nothing.
-    fn take_tip_refs(&mut self) -> Option<TipRefs> {
-        None
+    /// Offers segments the engine's reference table found dead (no tip entry
+    /// has named them since the cut `since`, and the lag rule holds) for
+    /// condemnation without a mark (`gc_condemn_on_cut = on`). An offer is a
+    /// hint with no authority: the collector checks it against its own rules
+    /// (no pin, nothing a retained FULL names, nothing above the high-water
+    /// mark, no compaction output), lists, flags and starts the grace of what
+    /// it accepts, and the recheck of a later mark is the only judge of a
+    /// delete, exactly as for a segment its own mark condemned. Called under
+    /// the coordinator mutex with the map at the tip, right before a step.
+    ///
+    /// Returns true when the offer was consumed (every segment condemned or
+    /// rejected for good: the engine forgets it), false when the collector
+    /// cannot take it now (a pass is running, nothing is loaded yet, or the
+    /// crash hook stopped it): the engine offers again later. The default
+    /// takes nothing and consumes everything.
+    fn propose_dead(&mut self, view: &GcView<'_>, dead: &[DeadSince]) -> bool {
+        let _ = (view, dead);
+        true
     }
+}
 
-    /// `Some` once after a call in which a mark chose segments to condemn:
-    /// the segments the mark found dead and not yet listed. The engine's
-    /// shadow check compares them with what its reference table would have
-    /// offered. The default reports nothing.
-    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
-        None
-    }
+/// A segment no tip map entry has pointed into since the cut that committed
+/// as `since` (the engine's reference table).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeadSince {
+    /// The segment.
+    pub seg: SegId,
+    /// The commit sequence of the cut in which its entry count reached zero.
+    pub since: CommitSeq,
+}
+
+/// What the marks of one collector call did, for the engine's reference table
+/// ([`Collector::take_mark_report`]).
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct MarkReport {
+    /// The tip a mark pinned its roots at in this call, when that mark is
+    /// still running at the end of the call.
+    pub started: Option<CommitSeq>,
+    /// The marks that finished in this call, in the order they finished
+    /// (several when the pass schedule starts one right after another inside
+    /// a call).
+    pub finished: Vec<MarkFinished>,
+}
+
+/// A mark that finished.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MarkFinished {
+    /// The entry counts of its tip root.
+    pub refs: TipRefs,
+    /// The mark pinned its roots in the same call (the engine takes its
+    /// snapshot of the counts now: the map cannot change inside a call).
+    /// Otherwise the snapshot of its start is already taken.
+    pub began_in_call: bool,
+    /// What it chose to condemn (`None` for a recheck mark that condemns
+    /// nothing).
+    pub condemned: Option<MarkCondemned>,
 }
 
 /// Map entries per segment of one tip root, counted by hint (the segment a
@@ -449,6 +491,18 @@ pub struct RefsStats {
     /// Milliseconds from the table's creation (attach) to the first call
     /// that found a segment ready, if one has.
     pub first_ready_ms: Option<u64>,
+    /// Milliseconds from the table's creation to the first segment a
+    /// proposal condemned (mode `on`), if one has.
+    pub first_proposal_ms: Option<u64>,
+    /// Milliseconds from the table's creation to the first delete of a
+    /// segment a proposal condemned, if there has been one.
+    pub first_proposal_delete_ms: Option<u64>,
+    /// Offers the collector consumed (mode `on`): each segment was condemned
+    /// or rejected (`GcReclaimStats::proposal_*` say which).
+    pub proposals_taken: u64,
+    /// Segments left unoffered because a pin exists (the table knows the tip
+    /// only): counted once per call that had segments ready.
+    pub pin_blocked: u64,
 }
 
 /// A snapshot of the collector for `GcStatus`.
@@ -498,6 +552,41 @@ pub struct GcReclaimStats {
     pub recheck_lag_ms_max: u64,
     /// Objects the lag figures cover.
     pub recheck_lag_count: u64,
+    /// Segments an engine proposal offered ([`Collector::propose_dead`]).
+    pub proposals_offered: u64,
+    /// Offered segments that were condemned (listed, flagged, grace started).
+    pub proposal_condemned: u64,
+    /// The sizes in bytes of those.
+    pub proposal_condemned_bytes: u64,
+    /// Offered segments rejected because a pin exists.
+    pub proposal_rejected_pins: u64,
+    /// Offered segments rejected because a retained FULL below the lag may
+    /// still name them (`since` above the lowest `chain_floor`). The engine's
+    /// lag and the collector's rule agree: expected 0; non-zero is a bug.
+    pub proposal_rejected_early: u64,
+    /// Offered segments rejected for another rule of the collector: named
+    /// by a retained commit, above the high-water mark, an unnamed
+    /// compaction output, already listed, or gone.
+    pub proposal_rejected_kept: u64,
+    /// Offered segments left for a mark because the list or the per-call cap
+    /// had no room.
+    pub proposal_rejected_room: u64,
+    /// Calls that failed after they began (the segments were left to the
+    /// marks).
+    pub propose_errors: u64,
+    /// Calls the collector refused because a pass was running or it was not
+    /// ready: the engine offered the segments again later.
+    pub proposals_deferred: u64,
+    /// Proposed segments a recheck un-condemned (a wrong proposal; it only
+    /// costs a list write and a grace).
+    pub proposal_uncondemned: u64,
+    /// Proposed segments deleted.
+    pub proposal_deleted: u64,
+    /// The sizes in bytes of the deleted ones.
+    pub proposal_deleted_bytes: u64,
+    /// Segments the marks themselves condemned (what no proposal had
+    /// condemned first).
+    pub mark_condemned_segments: u64,
     /// The same three figures for the objects recheck-only passes deleted.
     /// The difference to the figures above is every other pass kind,
     /// urgent passes included (an urgent pass in the `open` state judges

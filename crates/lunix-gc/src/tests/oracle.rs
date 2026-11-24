@@ -8,13 +8,21 @@
 //! objects are exactly `min(chain_floor, rollback floor) ..= tip` plus pins,
 //! where `chain_floor` is the lowest one a retained FULL records (N24).
 //!
+//! "Any proposal is safe" (milestone condemncut): the workloads also offer
+//! the collector arbitrary and adversarial proposals (`Op::Propose`):
+//! segments no root reaches, segments every root reaches, random subsets with
+//! random `since`, ids that do not exist, offers while a pin exists and while
+//! a pass is running. Every root and pin must still read its model content
+//! after every pass and the volume must converge, so no live data is ever
+//! deleted whatever was proposed.
+//!
 //! `LUNIX_GC_CASES` (default 48 per configuration) and `LUNIX_GC_OPS`
 //! (default 300) scale it; the gate run uses 2 000 cases.
 
 use std::time::Duration;
 
-use lunix_format::IdLen;
-use lunix_iface::gc::Collector;
+use lunix_format::{CommitSeq, IdLen};
+use lunix_iface::gc::{Collector, DeadSince};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
@@ -36,6 +44,10 @@ enum Op {
     Crash(u64),
     Pressure(bool),
     Faulty(u8, u8, bool, u8),
+    /// An offer to `propose_dead`: the seed picks the segments and their
+    /// `since`, the second figure the pool (0: the dead ones; else every
+    /// segment, live ones included).
+    Propose(u64, u8),
 }
 
 /// Store and index points a collector call passes (non-crash faults).
@@ -101,6 +113,7 @@ fn op() -> impl Strategy<Value = Op> {
         3 => any::<bool>().prop_map(Op::Pressure),
         4 => (any::<u8>(), 1u8..6, any::<bool>(), 1u8..16)
             .prop_map(|(p, n, ns, k)| Op::Faulty(p, n, ns, k)),
+        6 => (any::<u64>(), 0u8..3).prop_map(|(k, m)| Op::Propose(k, m)),
     ]
 }
 
@@ -118,6 +131,45 @@ fn fail(what: String) -> TestCaseError {
 fn after_pass(s: &Sim, ctx: &str) -> Result<(), TestCaseError> {
     s.check_roots().map_err(|e| fail(format!("{ctx}: {e}")))?;
     s.check_ledger().map_err(|e| fail(format!("{ctx}: {e}")))
+}
+
+/// A random subset of the dead (`pool` 0) or of every segment, each with a
+/// `since` that is mostly the earliest cut (only the collector's other rules
+/// judge it) and sometimes a random one; a missing id now and then.
+fn adversarial_offer(s: &Sim, seed: u64, pool: u8) -> Vec<DeadSince> {
+    let mut k = seed | 1;
+    let mut next = move || {
+        k = k
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        k >> 33
+    };
+    let from = if pool == 0 {
+        s.dead_segments()
+    } else {
+        s.all_segments()
+    };
+    let tip = s.tip.common.commit_seq.0;
+    let mut offer = Vec::new();
+    for d in from {
+        if next().is_multiple_of(3) {
+            continue;
+        }
+        let since = match next() % 5 {
+            0 => CommitSeq(next() % (tip + 4)),
+            _ => CommitSeq(0),
+        };
+        offer.push(DeadSince { seg: d.seg, since });
+    }
+    if next().is_multiple_of(4) {
+        if let Ok(seg) = lunix_format::ObjId::from_raw(1 + next() % 1_000) {
+            offer.push(DeadSince {
+                seg,
+                since: CommitSeq(0),
+            });
+        }
+    }
+    offer
 }
 
 fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
@@ -161,6 +213,14 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
             }
             Op::Pressure(raised) => s.gc.set_pressure(raised),
+            Op::Propose(seed, pool) => {
+                let offer = adversarial_offer(s, seed, pool);
+                s.propose(&offer).map_err(err)?;
+                // Not the ledger: a pass may be in progress or a failed
+                // delete may be waiting for its release.
+                s.check_roots()
+                    .map_err(|e| fail(format!("op {i} proposal: {e}")))?;
+            }
             Op::Faulty(p, nth, nospace, steps) => {
                 faulty_steps(s, usize::from(p), u64::from(nth), nospace, steps)
                     .map_err(|e| fail(format!("op {i}: {e}")))?;
@@ -235,6 +295,8 @@ thread_local! {
     /// the test on this thread (a crash replaces the collector, so the
     /// counters are taken before it).
     static FAST: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    /// Proposals condemned, un-condemned by a recheck and deleted.
+    static PROPOSED: std::cell::Cell<(u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
 
 fn note_fast(s: &Sim) {
@@ -242,6 +304,14 @@ fn note_fast(s: &Sim) {
     FAST.with(|f| {
         let (p, d) = f.get();
         f.set((p + r.fast_passes, d + r.fast_segments_deleted));
+    });
+    PROPOSED.with(|f| {
+        let (c, u, d) = f.get();
+        f.set((
+            c + r.proposal_condemned,
+            u + r.proposal_uncondemned,
+            d + r.proposal_deleted,
+        ));
     });
 }
 
@@ -301,6 +371,14 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
         .unwrap();
     let (fast_passes, fast_deleted) = FAST.with(std::cell::Cell::get);
     eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
+    let (condemned, uncondemned, deleted) = PROPOSED.with(std::cell::Cell::get);
+    eprintln!(
+        "gc oracle: proposals condemned {condemned}, un-condemned by a recheck {uncondemned}, deleted {deleted}"
+    );
+    assert!(
+        condemned > 0 && uncondemned > 0 && deleted > 0,
+        "the proposals exercised nothing: condemned {condemned}, un-condemned {uncondemned}, deleted {deleted}"
+    );
     if fast {
         assert!(
             fast_passes > 0 && fast_deleted > 0,

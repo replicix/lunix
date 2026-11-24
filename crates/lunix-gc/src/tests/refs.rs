@@ -1,6 +1,5 @@
 //! Milestone refs: what the mark reports to the engine's reference table
-//! (`set_tip_refs`, `take_mark_started`, `take_tip_refs`,
-//! `take_mark_condemned`).
+//! (`set_tip_refs`, `take_mark_report`).
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -60,10 +59,17 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
     }
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    let started = s.gc.take_mark_started().expect("a mark pinned its roots");
-    assert_eq!(started, s.tip.common.commit_seq);
-    assert_eq!(s.gc.take_mark_started(), None, "once");
-    let t = s.gc.take_tip_refs().expect("a mark finished");
+    let rep = s.gc.take_mark_report().expect("a mark ran");
+    assert_eq!(s.gc.take_mark_report(), None, "once");
+    assert_eq!(rep.started, None, "the mark finished in the call");
+    // The whole sequence in one call: the condemn mark, then the recheck
+    // mark (which condemns nothing).
+    assert_eq!(rep.finished.len(), 2, "{rep:?}");
+    assert!(rep.finished[1].condemned.is_none());
+    assert!(rep.finished.iter().all(|f| f.began_in_call));
+    let fin = rep.finished[0].clone();
+    let started = s.tip.common.commit_seq;
+    let t = fin.refs;
     assert_eq!(t.tip, started);
     let want: Vec<(SegId, u64)> = counted(&s).into_iter().collect();
     assert_eq!(t.refs, want);
@@ -71,8 +77,7 @@ fn a_mark_reports_the_tip_entries_per_segment_the_tip_and_what_it_condemned() {
         want.iter().any(|&(_, n)| n > 1),
         "dedup put several entries in a segment"
     );
-    assert_eq!(s.gc.take_tip_refs(), None, "once");
-    let c = s.gc.take_mark_condemned().expect("the mark chose segments");
+    let c = fin.condemned.expect("the mark chose segments");
     assert_eq!(c.tip, started);
     assert!(!c.segs.is_empty(), "the overwritten segments are dead");
     assert!(c.segs.windows(2).all(|w| w[0].0 < w[1].0));
@@ -114,7 +119,10 @@ fn a_mark_names_the_segments_an_older_retained_root_hints_at() {
     );
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    let c = s.gc.take_mark_condemned().expect("the mark chose segments");
+    let c =
+        s.gc.take_mark_report()
+            .and_then(|r| r.finished.into_iter().find_map(|f| f.condemned))
+            .expect("the mark chose segments");
     for seg in &old {
         assert!(c.named.contains(seg), "{seg:?} is named by the older root");
         assert!(!c.segs.iter().any(|(x, _)| x == seg), "and kept");
@@ -135,9 +143,7 @@ fn nothing_is_counted_or_reported_without_the_option() {
     s.commit().unwrap();
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    assert_eq!(s.gc.take_mark_started(), None);
-    assert_eq!(s.gc.take_tip_refs(), None);
-    assert_eq!(s.gc.take_mark_condemned(), None);
+    assert_eq!(s.gc.take_mark_report(), None);
 }
 
 /// The engine's one switch: `set_tip_refs` turns the reports on and off.
@@ -151,13 +157,12 @@ fn set_tip_refs_switches_the_reports_on_and_off() {
     s.commit().unwrap();
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    assert!(s.gc.take_mark_started().is_some());
-    assert!(s.gc.take_tip_refs().is_some());
-    assert!(s.gc.take_mark_condemned().is_some());
+    let rep = s.gc.take_mark_report().expect("a mark ran");
+    assert!(rep.finished.iter().any(|f| f.condemned.is_some()));
     s.gc.set_tip_refs(false);
     s.write(1, 99);
     s.commit().unwrap();
     s.clock.advance(Duration::from_secs(1));
     s.pass().unwrap();
-    assert_eq!(s.gc.take_tip_refs(), None);
+    assert_eq!(s.gc.take_mark_report(), None);
 }

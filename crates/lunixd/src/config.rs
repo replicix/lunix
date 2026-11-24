@@ -44,7 +44,7 @@
 //! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent (too low an `A_hat` costs far more than too high a one); 100 ..= 300. The status (`write_path.store_*`, `throttle.rate`) reports both and, above the soft mark, `store_paced_above_soft`, `store_above_soft_ms` and `store_delayed_*` |
 //! | `gc_fast_recheck` | `false` | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
 //! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
-//! | `gc_condemn_on_cut` | `off` | `off` or `shadow`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `off`: no table, no extra work |
+//! | `gc_condemn_on_cut` | `off` | `off`, `shadow` or `on`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `on`: as `shadow`, and a segment the table finds dead (no entry since a cut, and the retained FULLs have rolled past it) is offered to the collector at the first step that finds it between passes; the collector lists, flags and starts the grace of what its own rules accept (never while a pin exists), and the recheck mark that began after the grace ended is still the only judge of a delete. `off`: no table, no extra work |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -486,6 +486,7 @@ impl DaemonConfig {
                 self.gc_condemn_on_cut = match s(v)?.as_str() {
                     "off" => CondemnOnCut::Off,
                     "shadow" => CondemnOnCut::Shadow,
+                    "on" => CondemnOnCut::On,
                     other => return Err(format!("unknown gc_condemn_on_cut {other:?}")),
                 };
             }
@@ -710,7 +711,7 @@ volume_roots = "/a, /b"
     }
 
     #[test]
-    fn gc_condemn_on_cut_parses_off_and_shadow_only() {
+    fn gc_condemn_on_cut_parses_off_shadow_and_on() {
         assert_eq!(
             DaemonConfig::default().gc_condemn_on_cut,
             CondemnOnCut::Off,
@@ -720,8 +721,10 @@ volume_roots = "/a, /b"
         assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::Shadow);
         let c = DaemonConfig::parse("gc_condemn_on_cut = \"off\"\n").unwrap();
         assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::Off);
+        let c = DaemonConfig::parse("gc_condemn_on_cut = \"on\"\n").unwrap();
+        assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::On);
         for bad in [
-            "gc_condemn_on_cut = \"on\"",
+            "gc_condemn_on_cut = \"yes\"",
             "gc_condemn_on_cut = true",
             "gc_condemn_on_cut = shadow",
         ] {
