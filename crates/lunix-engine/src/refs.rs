@@ -70,10 +70,15 @@ struct Counters {
     confirmed_no_lead: u64,
     unconfirmed_live: u64,
     unconfirmed_kept: u64,
+    unconfirmed_named: u64,
     unconfirmed_listed: u64,
     revived: u64,
     early_by_mark: u64,
     missed: u64,
+    confirmed_bytes: u64,
+    early_bytes: u64,
+    missed_bytes: u64,
+    lead_byte_ms: u64,
     lag_sum_ms: u64,
     lag_max_ms: u64,
     lag_count: u64,
@@ -352,7 +357,8 @@ impl SegRefs {
     /// (`c`) at `now`: the offers that began at or before its tip are judged
     /// against them, and the condemns the table had not offered are counted.
     pub(crate) fn judge(&mut self, c: &MarkCondemned, now: Duration) {
-        let dead: BTreeSet<SegId> = c.segs.iter().copied().collect();
+        let dead: BTreeMap<SegId, u64> = c.segs.iter().copied().collect();
+        let named: BTreeSet<SegId> = c.named.iter().copied().collect();
         let live: BTreeSet<SegId> = c.live.iter().copied().collect();
         let listed: BTreeSet<SegId> = c.listed.iter().copied().collect();
         let mut confirmed = BTreeSet::new();
@@ -366,8 +372,12 @@ impl SegRefs {
             let Some(o) = self.offered.remove(&s) else {
                 continue;
             };
-            if dead.contains(&s) {
+            if named.contains(&s) {
+                // The lag rule was broken: counted before anything else.
+                self.c.unconfirmed_named += 1;
+            } else if let Some(&bytes) = dead.get(&s) {
                 self.c.confirmed += 1;
+                self.c.confirmed_bytes = self.c.confirmed_bytes.saturating_add(bytes);
                 confirmed.insert(s);
                 match o.idle_at {
                     Some(t) => {
@@ -375,6 +385,10 @@ impl SegRefs {
                         self.c.confirmed_lead += 1;
                         self.c.lead_sum_ms = self.c.lead_sum_ms.saturating_add(lead);
                         self.c.lead_max_ms = self.c.lead_max_ms.max(lead);
+                        self.c.lead_byte_ms = self
+                            .c
+                            .lead_byte_ms
+                            .saturating_add(bytes.saturating_mul(lead));
                     }
                     None => self.c.confirmed_no_lead += 1,
                 }
@@ -389,7 +403,7 @@ impl SegRefs {
         // The mark condemns these now: the table's own zeros for them are
         // done with (not offered later and then called unconfirmed).
         let was_ready = self.judged.is_some_and(|(t, ready)| t == c.tip && ready);
-        for s in &dead {
+        for (s, &bytes) in &dead {
             let known = self.zero_since.remove(s).is_some();
             self.went_zero.remove(s);
             if confirmed.contains(s) {
@@ -397,8 +411,10 @@ impl SegRefs {
             }
             if known {
                 self.c.early_by_mark += 1;
+                self.c.early_bytes = self.c.early_bytes.saturating_add(bytes);
             } else if was_ready {
                 self.c.missed += 1;
+                self.c.missed_bytes = self.c.missed_bytes.saturating_add(bytes);
             }
         }
         if !dead.is_empty() && self.first_mark_condemn.is_none() {
@@ -443,10 +459,15 @@ impl SegRefs {
             shadow_confirmed_no_lead: self.c.confirmed_no_lead,
             shadow_unconfirmed_live: self.c.unconfirmed_live,
             shadow_unconfirmed_kept: self.c.unconfirmed_kept,
+            shadow_unconfirmed_named: self.c.unconfirmed_named,
             shadow_unconfirmed_listed: self.c.unconfirmed_listed,
             shadow_revived: self.c.revived,
             shadow_early_by_mark: self.c.early_by_mark,
             shadow_missed: self.c.missed,
+            shadow_confirmed_bytes: self.c.confirmed_bytes,
+            shadow_early_bytes: self.c.early_bytes,
+            shadow_missed_bytes: self.c.missed_bytes,
+            shadow_lead_byte_ms: self.c.lead_byte_ms,
             first_mark_condemn_ms: self.first_mark_condemn.map(ms),
             condemn_lag_ms_sum: self.c.lag_sum_ms,
             condemn_lag_ms_max: self.c.lag_max_ms,
@@ -686,11 +707,14 @@ pub(crate) fn bench_ref_map(map: Arc<dyn BlockMap>) -> Arc<dyn BlockMap> {
     Arc::new(RefMap::new(map, Arc::new(Mutex::new(t))))
 }
 
-/// What the table's mark-start snapshot and `ready()` cost for a table of
-/// `segments` segments of which `zeros` wait in `zero_since`: nanoseconds per
-/// call, averaged over `reps` calls.
+/// What the table's mark-start snapshot, `ready()` and `rebase` (a mark that
+/// finds the table right, the steady state: the comparison and the repair
+/// pass over every segment) cost for a table of `segments` segments of which
+/// `zeros` wait in `zero_since`: nanoseconds per call, averaged over `reps`
+/// calls, as `(snapshot, ready, rebase)`. The mark's own count list is built
+/// outside the timed call.
 #[cfg(feature = "testsupport")]
-pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64) {
+pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64) {
     let mut t = SegRefs::new(Duration::ZERO);
     t.mark_started(CommitSeq(0));
     t.rebase(&TipRefs {
@@ -717,7 +741,23 @@ pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64
         std::hint::black_box(t.ready(CommitSeq(u64::MAX / 2), 0, &skip, OFFER_MAX));
     }
     let ready_ns = u64::try_from(t0.elapsed().as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
-    (clone_ns, ready_ns)
+    // What a mark of this table finds: one entry in every segment still
+    // referenced (the table is right).
+    let mark: Vec<(SegId, u64)> = ids.iter().skip(zeros).map(|&s| (s, 1)).collect();
+    let mut rebase_total = Duration::ZERO;
+    for i in 0..reps {
+        let tip = CommitSeq(u64::from(i) + 10);
+        t.mark_started(tip);
+        let r = TipRefs {
+            tip,
+            refs: mark.clone(),
+        };
+        let t0 = std::time::Instant::now();
+        std::hint::black_box(t.rebase(&r));
+        rebase_total += t0.elapsed();
+    }
+    let rebase_ns = u64::try_from(rebase_total.as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
+    (clone_ns, ready_ns, rebase_ns)
 }
 
 #[cfg(test)]
@@ -962,13 +1002,23 @@ mod tests {
         assert_eq!(t.state(), RefsState::Ready);
     }
 
+    /// A mark's decisions; a condemned segment `n` is `100 * n` bytes.
     fn mc(tip: u64, segs: &[u64], live: &[u64], listed: &[u64]) -> MarkCondemned {
         let v = |x: &[u64]| x.iter().map(|&n| seg(n)).collect::<Vec<_>>();
         MarkCondemned {
             tip: seq(tip),
-            segs: v(segs),
+            segs: segs.iter().map(|&n| (seg(n), 100 * n)).collect(),
             live: v(live),
             listed: v(listed),
+            named: Vec::new(),
+        }
+    }
+
+    /// The same, with segments an older retained root names.
+    fn mcn(tip: u64, segs: &[u64], named: &[u64]) -> MarkCondemned {
+        MarkCondemned {
+            named: named.iter().map(|&n| seg(n)).collect(),
+            ..mc(tip, segs, &[], &[])
         }
     }
 
@@ -1000,6 +1050,96 @@ mod tests {
             assert_eq!(t.state(), RefsState::Ready);
             assert_eq!(t.count(seg(2)), 0);
         }
+    }
+
+    /// R2-1: an offered segment a retained root other than the tip still
+    /// names is counted first and never as confirmed, live or kept.
+    #[test]
+    fn an_offer_a_retained_root_still_names_is_counted_as_named() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1), (3, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.apply(&deltas(&[(1, -1), (2, -1), (3, -1)]));
+        t.seal_cut(seq(2), at(10));
+        let r = t.ready(seq(4), 2, &HashSet::new(), 9);
+        t.shadow_offer(&r, seq(4), at(100), true);
+        t.mark_started(seq(4));
+        t.rebase(&tip_refs(4, &[]));
+        // 2 is named by an older root (and by the mark's live set); 1 is
+        // condemned; 3 is kept for another reason.
+        let mut c = mcn(4, &[1], &[2]);
+        c.live = vec![seg(2)];
+        t.judge(&c, at(200));
+        let s = t.stats();
+        assert_eq!(s.shadow_unconfirmed_named, 1);
+        assert_eq!(s.shadow_unconfirmed_live, 0, "named wins over live");
+        assert_eq!((s.shadow_confirmed, s.shadow_unconfirmed_kept), (1, 1));
+        assert_eq!(s.shadow_confirmed_bytes, 100);
+    }
+
+    /// B1, row 2: a second failure after the mark began is not repaired by
+    /// that mark either; the first failure is.
+    #[test]
+    fn two_failures_around_one_mark_start_take_two_marks_to_repair() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1)]));
+        t.seal_cut(seq(1), at(0));
+        // First failure: a transaction put segment 3 in the map and the
+        // table never heard of it.
+        t.drifted(false);
+        assert_eq!(t.state(), RefsState::Drifted);
+        t.mark_started(seq(1));
+        // Second failure after the mark began: segment 2 left the map and
+        // the table did not hear of it either.
+        t.drifted(true);
+        // The mark counted the map as it was at its start.
+        assert_eq!(t.rebase(&tip_refs(1, &[(1, 1), (2, 1), (3, 1)])), 1);
+        assert_eq!(t.state(), RefsState::Drifted, "the second failure is newer");
+        assert_eq!(t.count(seg(3)), 1, "the first one is repaired");
+        assert_eq!(t.count(seg(2)), 1, "the second one is not");
+        assert_eq!(t.judged, Some((seq(1), false)));
+        assert!(t.ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+        // A mark that began after both repairs the second.
+        t.mark_started(seq(2));
+        assert_eq!(t.rebase(&tip_refs(2, &[(1, 1), (3, 1)])), 1);
+        assert_eq!(t.state(), RefsState::Ready);
+        assert_eq!(t.count(seg(2)), 0);
+        assert_eq!(t.stats().drift_segments, 2);
+        assert_eq!(t.stats().report_mismatches, 1);
+    }
+
+    /// B1, row 3: a zero recorded while `Drifted` (from a wrong count) is
+    /// kept by the tainted mark that cannot repair it and gone after the mark
+    /// that does; it is never offered meanwhile.
+    #[test]
+    fn a_zero_recorded_while_drifted_is_gone_after_the_repair() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 1), (2, 1)]));
+        t.seal_cut(seq(1), at(0));
+        t.mark_started(seq(1));
+        // A failure after the snapshot: a transaction put segment 3 in the
+        // map and the table never heard of it.
+        t.drifted(false);
+        // Meanwhile a cut takes the last entry of segment 1: a zero
+        // recorded from counts that are known to be wrong.
+        t.apply(&deltas(&[(1, -1)]));
+        t.seal_cut(seq(2), at(10));
+        assert_eq!(t.state(), RefsState::Drifted);
+        assert!(t.zero_since.contains_key(&seg(1)), "recorded while drifted");
+        assert!(t.ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+        // The mark that began before the failure repairs nothing (diff 0)
+        // and keeps the zero, still unoffered.
+        assert_eq!(t.rebase(&tip_refs(1, &[(1, 1), (2, 1)])), 0);
+        assert_eq!(t.state(), RefsState::Drifted);
+        assert!(t.zero_since.contains_key(&seg(1)));
+        assert!(t.ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+        // The next mark finds segment 3, repairs and drops every zero.
+        t.mark_started(seq(2));
+        assert_eq!(t.rebase(&tip_refs(2, &[(2, 1), (3, 1)])), 1);
+        assert_eq!(t.state(), RefsState::Ready);
+        assert!(t.zero_since.is_empty() && t.went_zero.is_empty());
+        assert!(t.ready(seq(99), 0, &HashSet::new(), 9).is_empty());
+        assert_eq!(t.count(seg(3)), 1);
     }
 
     #[test]
@@ -1051,6 +1191,12 @@ mod tests {
         assert_eq!(s.shadow_unconfirmed_kept, 1);
         assert_eq!(s.shadow_early_by_mark, 1, "5 was known, not yet offered");
         assert_eq!(s.shadow_missed, 0, "a zero the table knew is not a miss");
+        // Bytes: segment 1 is 100 bytes with a 350 ms lead, segment 5 is 500.
+        assert_eq!(s.shadow_confirmed_bytes, 100);
+        assert_eq!(s.shadow_lead_byte_ms, 100 * 350);
+        assert_eq!(s.shadow_early_bytes, 500);
+        assert_eq!(s.shadow_missed_bytes, 0);
+        assert_eq!(s.shadow_unconfirmed_named, 0);
         assert_eq!(s.shadow_offered_idle, 4);
         assert_eq!(s.first_mark_condemn_ms, Some(450));
         // 5 is listed now: it is not offered later; 6 still is.
@@ -1110,6 +1256,9 @@ mod tests {
         assert_eq!((s.shadow_confirmed, s.shadow_unconfirmed_kept), (1, 1));
         assert_eq!(s.shadow_confirmed_no_lead, 1, "offered during a pass");
         assert_eq!(s.shadow_missed, 1, "segment 9 was the mark's alone");
+        assert_eq!(s.shadow_missed_bytes, 900);
+        assert_eq!(s.shadow_confirmed_bytes, 100);
+        assert_eq!(s.shadow_lead_byte_ms, 0, "no lead, no byte-ms");
         assert!(t.offered.is_empty());
     }
 

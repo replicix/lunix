@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use lunix_format::commit::MapRoot;
 use lunix_format::local::RollbackFloor;
-use lunix_format::WriteSeq;
+use lunix_format::{CommitSeq, SegId, WriteSeq};
 use lunix_iface::block::{QueueId, Tag};
 use lunix_iface::clock::Clock;
 use lunix_iface::crypto::{CommitCodec, ExtentCodec};
@@ -78,6 +78,14 @@ pub trait EngineHooks: Send + Sync {
     /// thread and catch a blocking call.
     fn queue_thread(&self, entering: bool) {
         let _ = entering;
+    }
+
+    /// The reference table (shadow mode) offered `offered` for condemnation
+    /// at the tip `tip`, under the coordinator mutex and right before the
+    /// collector's step of the same call (so the collector sees the same
+    /// retained roots). Not called for an empty offer.
+    fn shadow_offered(&self, tip: CommitSeq, offered: &[SegId]) {
+        let _ = (tip, offered);
     }
 }
 

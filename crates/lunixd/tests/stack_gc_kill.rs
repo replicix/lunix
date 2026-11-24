@@ -393,6 +393,10 @@ fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
         t.report_mismatches, 0,
         "{what}: refs report mismatches: {t:?}"
     );
+    assert_eq!(
+        t.shadow_unconfirmed_named, 0,
+        "{what}: an offered segment was named by a retained root (the lag rule): {t:?}"
+    );
 }
 
 /// Ticks the engine until the table is `Ready` (a pass is due at once after
@@ -976,6 +980,16 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         .engine
         .commit_now(true)
         .unwrap_or_else(|e| panic!("{what}: cut after recovery: {e}"));
+    // Marks that rebased the table up to here may have pinned their roots
+    // before the cut (a recheck mark of the base pass): they compare the
+    // base with itself. The marks after this count began after the cut.
+    let r0 = stack
+        .engine
+        .gc_status_handle()
+        .get()
+        .refs
+        .map(|b| b.rebases)
+        .expect("the table exists");
     let back = d
         .read_all(size)
         .unwrap_or_else(|s| panic!("{what}: read-back: {s:?}"));
@@ -995,12 +1009,21 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         lunix_iface::gc::RefsState::Ready,
         "{what}: no mark rebased the table after recovery: {t:?}"
     );
-    // The base mark and at least one later mark that compared (the writes
-    // before `settle_gc` changed the map): drift 0 is not vacuous.
+    // A table rebuilt from the first mark, fed the deltas of one real cut,
+    // equals the next mark's count. The cut was taken at `r0` rebases; the
+    // mark that rebased next may already have pinned its roots (so it saw the
+    // cut or not), the one after it certainly began after the cut: two
+    // rebases after `r0` make drift 0 non-vacuous. Deltas before or during
+    // the first mark after a recovery are not covered here (engine
+    // proptests, `Op::Reopen`).
     assert!(
-        t.rebases >= 2,
-        "{what}: only {} mark(s) rebased the table after recovery: {t:?}",
-        t.rebases
+        t.rebases >= r0 + 2,
+        "{what}: {} mark(s) rebased the table after the cut taken at {r0}: {t:?}",
+        t.rebases - r0
+    );
+    eprintln!(
+        "{what}: refs after recovery: rebases {} (cut at {r0}), drift_segments {}, report_mismatches {}, shadow_unconfirmed_named {}",
+        t.rebases, t.drift_segments, t.report_mismatches, t.shadow_unconfirmed_named
     );
     assert_refs_clean(&stack, what);
     drop(d);

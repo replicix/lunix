@@ -99,10 +99,12 @@ pub fn ref_map_for_bench(
 }
 
 /// Measurement support (feature `testsupport`): nanoseconds per mark-start
-/// snapshot (a clone of the table's counts) and per `ready()` call of a table
-/// with `segments` segments of which `zeros` wait to be offered.
+/// snapshot (a clone of the table's counts), per `ready()` call and per
+/// `rebase` (the mark's comparison and repair) of a table with `segments`
+/// segments of which `zeros` wait to be offered, as `(snapshot, ready,
+/// rebase)`.
 #[cfg(feature = "testsupport")]
 #[doc(hidden)]
-pub fn table_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64) {
+pub fn table_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64) {
     refs::bench_costs(segments, zeros, reps)
 }

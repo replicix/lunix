@@ -307,14 +307,19 @@ pub struct MarkCondemned {
     /// The tip the mark walked (as [`TipRefs::tip`]).
     pub tip: CommitSeq,
     /// The newly dead segments the mark condemns (at most what the list has
-    /// room for), ascending.
-    pub segs: Vec<SegId>,
+    /// room for), ascending, with the size of each in bytes.
+    pub segs: Vec<(SegId, u64)>,
     /// Segments with no map entry hinting at them in the tip root that the
     /// mark nevertheless found live by chunk id (the index's copy of an id
-    /// is there): what hint counts cannot see.
+    /// is there): what hint counts cannot see. Includes the ones in
+    /// `named`.
     pub live: Vec<SegId>,
     /// Segments the mark found dead that are on the condemned list already.
     pub listed: Vec<SegId>,
+    /// Segments a retained root other than the tip names by hint (a retained
+    /// FULL or a pin), and the tip does not. An offered segment in it broke
+    /// the lag rule.
+    pub named: Vec<SegId>,
 }
 
 /// The state of the engine's reference table (`gc_condemn_on_cut`).
@@ -382,12 +387,21 @@ pub struct RefsStats {
     pub shadow_confirmed_no_lead: u64,
     /// Offers such a mark did not condemn because a chunk id in the segment
     /// is live elsewhere than the entries hint: the only class that becomes a
-    /// wrong proposal (the recheck stops it).
+    /// wrong proposal (the recheck stops it). Not counted here when a
+    /// retained root names the segment (`shadow_unconfirmed_named`).
     pub shadow_unconfirmed_live: u64,
-    /// Offers such a mark did not condemn because it was kept for another
-    /// reason (a pin, named by a retained FULL, above the high-water mark,
-    /// an unnamed output, already gone).
+    /// Offers such a mark did not condemn that fit no other class: the
+    /// segment is above the high-water mark, named by a pending re-hint, an
+    /// unnamed compaction output, or gone from the listing. A segment a
+    /// retained root names is never here (it is counted as named), and
+    /// neither is one live by chunk id (`shadow_unconfirmed_live`).
     pub shadow_unconfirmed_kept: u64,
+    /// Offers such a mark found still named by a retained root other than
+    /// the tip (an older FULL or a pin): the lag rule was broken. Always 0 on a
+    /// volume without pins (the shadow check ignores pins, so a pin on an old
+    /// commit can name an offered segment); anything else is a bug in the
+    /// table and blocks the active stage.
+    pub shadow_unconfirmed_named: u64,
     /// Offers such a mark did not condemn because the segment was on the
     /// list already.
     pub shadow_unconfirmed_listed: u64,
@@ -401,6 +415,16 @@ pub struct RefsStats {
     /// Segments the marks condemned that the table did not know (never had
     /// an entry, died by compaction with stale hints, ...).
     pub shadow_missed: u64,
+    /// The sizes in bytes of the segments `shadow_confirmed` counts.
+    pub shadow_confirmed_bytes: u64,
+    /// The sizes in bytes of the segments `shadow_early_by_mark` counts.
+    pub shadow_early_bytes: u64,
+    /// The sizes in bytes of the segments `shadow_missed` counts.
+    pub shadow_missed_bytes: u64,
+    /// Over the confirmed offers that had a lead: the segment's size in bytes
+    /// times its lead in milliseconds, summed (saturating): the space-time
+    /// the grace would have started earlier for.
+    pub shadow_lead_byte_ms: u64,
     /// Milliseconds from the table's creation to the first mark that
     /// condemned a segment, if one has.
     pub first_mark_condemn_ms: Option<u64>,

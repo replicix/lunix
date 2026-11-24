@@ -1642,18 +1642,26 @@ impl Gc {
     }
 
     /// Keeps what a mark decided about segments for the engine's shadow check
-    /// (`GcConfig::tip_refs`): the newly dead ones it condemns, the ones live
-    /// by id that no entry hints at, and the dead ones already listed.
+    /// (`GcConfig::tip_refs`): the newly dead ones it condemns (with their
+    /// sizes), the ones live by id that no entry of the tip hints at, the
+    /// dead ones already listed, and the ones an older retained root names.
     fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
         if !self.cfg.tip_refs {
             return;
         }
         let segs = todo
             .iter()
-            .filter_map(|(o, _)| match o {
-                ObjectRef::Segment(s) => Some(*s),
+            .filter_map(|(o, bytes)| match o {
+                ObjectRef::Segment(s) => Some((*s, *bytes)),
                 _ => None,
             })
+            .collect();
+        // Named by a retained root other than the tip (and not by the tip).
+        let named = l
+            .older_refs
+            .iter()
+            .filter(|s| !l.tip_refs.contains_key(*s))
+            .copied()
             .collect();
         let live = l
             .seg_live
@@ -1675,6 +1683,7 @@ impl Gc {
             segs,
             live,
             listed,
+            named,
         });
     }
 

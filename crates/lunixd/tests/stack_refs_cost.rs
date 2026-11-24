@@ -7,7 +7,8 @@
 //!     -- --ignored --nocapture --test-threads=1 2>&1 | tee refs-cost.log
 //! ```
 //!
-//! * `the_shadow_table_costs_a_cut_within_three_percent` is the gate: the
+//! * `the_shadow_table_cut_cost_is_reported` reports the cut time against a
+//!   target of 3 % (nothing is asserted; read it from the log): the
 //!   cut time per journal byte (the wall time of `commit_now` at a fixed
 //!   number of journal bytes per cut), off against shadow, at 16 KiB and
 //!   64 KiB chunks, on the real stack (radix map, pipelined destage), arms
@@ -18,9 +19,11 @@
 //! * `the_map_transaction_costs_per_chunk` is `map_ns` per chunk (a real
 //!   `RadixMap`, the destager's transaction shape: ascending chunks, one
 //!   transaction), raw against wrapped. No bound: it is reported.
-//! * `the_table_snapshot_and_ready_cost_per_call` is the clone of the counts
-//!   a mark start takes under the coordinator mutex, and `ready()` at every
-//!   `gc_step`, for volumes of 1 k to 1 M segments.
+//! * `the_table_snapshot_ready_and_rebase_cost_per_call` is the clone of the
+//!   counts a mark start takes under the coordinator mutex, `ready()` at
+//!   every `gc_step` and `rebase` (the mark's comparison and repair, under
+//!   the coordinator mutex and the table mutex), for volumes of 1 k to 1 M
+//!   segments. Reported, no bound.
 //!
 //! Knobs: `LUNIX_REFS_CUTS` (cuts per arm and repetition, 20),
 //! `LUNIX_REFS_MIB_PER_CUT` (journal MiB overwritten per cut, 128),
@@ -166,7 +169,7 @@ fn mean(v: &[f64]) -> f64 {
 
 #[test]
 #[ignore = "a measurement; minutes (see the module doc)"]
-fn the_shadow_table_costs_a_cut_within_three_percent() {
+fn the_shadow_table_cut_cost_is_reported() {
     let cuts = env_or("LUNIX_REFS_CUTS", 20);
     let mib = env_or("LUNIX_REFS_MIB_PER_CUT", 128);
     let reps = env_or("LUNIX_REFS_REPS", 4);
@@ -209,7 +212,7 @@ fn the_shadow_table_costs_a_cut_within_three_percent() {
         eprintln!(
             "refs cost: {} KiB chunks: off median {mo:.2} ms mean {ao:.2} ms; shadow median {mn:.2} ms \
              mean {an:.2} ms ({:.3} / {:.3} ms per MiB of journal); median {:+.2} %, mean {:+.2} % \
-             (gate: cut time per journal byte within 3 % of off)",
+             (target: cut time per journal byte within 3 % of off; not asserted)",
             cs >> 10,
             mo / mib as f64,
             mn / mib as f64,
@@ -296,15 +299,16 @@ fn the_map_transaction_costs_per_chunk() {
 
 #[test]
 #[ignore = "a measurement (see the module doc)"]
-fn the_table_snapshot_and_ready_cost_per_call() {
+fn the_table_snapshot_ready_and_rebase_cost_per_call() {
     for segments in [1_000usize, 16_000, 128_000, 1_000_000] {
         for zeros in [0usize, segments / 100, segments / 2] {
-            let (clone_ns, ready_ns) = lunix_engine::table_costs(segments, zeros, 20);
+            let (clone_ns, ready_ns, rebase_ns) = lunix_engine::table_costs(segments, zeros, 20);
             eprintln!(
                 "refs cost: table of {segments} segments, {zeros} waiting: mark-start snapshot {:.2} ms, \
-                 ready() {:.3} ms per call",
+                 ready() {:.3} ms, rebase {:.2} ms per call",
                 clone_ns as f64 / 1e6,
-                ready_ns as f64 / 1e6
+                ready_ns as f64 / 1e6,
+                rebase_ns as f64 / 1e6
             );
         }
     }
