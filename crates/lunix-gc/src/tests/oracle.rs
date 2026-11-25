@@ -246,14 +246,24 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
             Op::FloorStall(stall) => s.raise_floor = !stall,
             Op::InterleavedPass(seed) => {
                 let mut k = seed;
-                s.run_pass_with(seed % 2 == 1, &mut |s| {
-                    k = k.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                    s.write(k >> 40, (k >> 20) % 40);
-                    s.commit()
-                })
-                .map_err(err)?;
-                passes += 1;
-                after_pass(s, &format!("op {i} interleaved pass"))?;
+                let ran = s
+                    .run_pass_with(seed % 2 == 1, &mut |s| {
+                        k = k.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                        s.write(k >> 40, (k >> 20) % 40);
+                        s.commit()
+                    })
+                    .map_err(err)?;
+                // A pass the schedule did not start (idle, nothing due)
+                // settles nothing: a delete that failed after its unlink
+                // keeps its bytes in the ledger until the next pass rechecks
+                // the object, so only a pass that ran owes ledger == files.
+                if ran {
+                    passes += 1;
+                    after_pass(s, &format!("op {i} interleaved pass"))?;
+                } else {
+                    s.check_roots()
+                        .map_err(|e| fail(format!("op {i} idle pass: {e}")))?;
+                }
             }
             Op::Crash(seed) => {
                 note_fast(s);
@@ -449,6 +459,10 @@ fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered:
         })
         .unwrap();
     let (fast_passes, fast_deleted) = FAST.with(std::cell::Cell::get);
+    let (orphan_deferred, seg_deletes) = crate::collector::ORPHAN_STATS.with(std::cell::Cell::get);
+    eprintln!(
+        "gc oracle: orphan_deps deferred {orphan_deferred} segment delete verdicts, {seg_deletes} allowed"
+    );
     eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
     let (condemned, uncondemned, deleted) = PROPOSED.with(std::cell::Cell::get);
     let (only_pin, only_old) = EXCLUSIVE.with(std::cell::Cell::get);

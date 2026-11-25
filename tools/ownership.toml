@@ -625,6 +625,7 @@ paths = [
   "crates/lunix-gc/src/tests/mod.rs",
   "crates/lunix-gc/src/tests/oracle.rs",
   "crates/lunix-gc/src/tests/recheck.rs",
+  "crates/lunix-gc/src/tests/sim.rs",
   "crates/lunix-iface/src/contract/index.rs",
   "crates/lunix-iface/src/gc.rs",
   "crates/lunix-iface/tests/ctl.rs",
@@ -635,6 +636,7 @@ paths = [
   "crates/lunixd/tests/stack_gc_kill.rs",
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-fastrecheck.md",
+  "docs/plans/v1/reports/p1-recheckoracle.md",
   "tools/ownership.toml",
 ]
 
@@ -752,5 +754,16 @@ paths = [
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-condemncut.md",
   "tools/ci.sh",
+
+# orphandeps: B1 sibling of the condemn-on-cut review (`Liveness::orphan_deps`,
+# a delete deferral while a copy relied on through a gone hint is not durable).
+[orphandeps]
+paths = [
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/mod.rs",
+  "crates/lunix-gc/src/tests/orphandeps.rs",
+  "crates/lunix-gc/src/tests/oracle.rs",
+  "docs/plans/v1/reports/p1-orphandeps.md",
   "tools/ownership.toml",
 ]

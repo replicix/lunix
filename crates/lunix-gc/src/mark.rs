@@ -26,7 +26,9 @@
 //! When a hint points into segment `S` but the live copy is in another
 //! segment `T`, `S` can only be deleted while `T` is durable: the mark records
 //! the highest such `T` per `S` (`deps`, the delete-time index invariant of
-//! rule 5).
+//! rule 5). When the hinted segment is already gone there is no `S` to hold
+//! the dependency; the copy's segment goes to `orphan_deps` and the delete
+//! rule defers every segment delete while one is not durable.
 //!
 //! # Shared subtrees and packs
 //!
@@ -103,6 +105,11 @@ pub struct Liveness {
     /// For a segment that hints point into while the live copy of the id is
     /// elsewhere: the segments holding such copies.
     pub deps: BTreeMap<SegId, BTreeSet<SegId>>,
+    /// Segments holding the live copy of an entry whose hinted segment no
+    /// longer exists (a re-hint lost at a restart, the source deleted). No
+    /// segment's `deps` records them, so the delete rule holds every segment
+    /// delete while one of them is not yet durable.
+    pub orphan_deps: BTreeSet<SegId>,
     /// Segments holding a live extent that no confirmed index entry names
     /// (compaction could not relocate it, so they are no candidates).
     pub unindexed: BTreeSet<SegId>,
@@ -184,6 +191,7 @@ impl Liveness {
         (self.live.len()
             + self.seg_live.len()
             + self.deps.len()
+            + self.orphan_deps.len()
             + self.unindexed.len()
             + self.tip_refs.len()
             + self.older_refs.len())
@@ -544,8 +552,14 @@ impl Mark {
     }
 
     fn dep(&mut self, from: SegId, on: SegId) {
-        if from != on && self.existing.contains(&from) {
+        if from == on {
+            return;
+        }
+        if self.existing.contains(&from) {
             self.out.deps.entry(from).or_default().insert(on);
+        } else {
+            // The hinted segment is gone: nothing can carry the dependency.
+            self.out.orphan_deps.insert(on);
         }
     }
 

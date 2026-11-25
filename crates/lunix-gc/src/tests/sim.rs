@@ -463,22 +463,26 @@ impl Sim {
         &mut self,
         cut_between: &mut dyn FnMut(&mut Sim) -> Result<()>,
     ) -> Result<()> {
-        self.run_pass_with(false, cut_between)
+        self.run_pass_with(false, cut_between).map(|_| ())
     }
 
     /// As [`run_pass`](Self::run_pass); with `unit`, every step does one unit
-    /// of work, so the cuts interleave with every step of the pass.
+    /// of work, so the cuts interleave with every step of the pass. Returns
+    /// whether a pass ran: false when the collector was idle with nothing due
+    /// (a pass the schedule did not start, so nothing it owes was settled).
     pub(crate) fn run_pass_with(
         &mut self,
         unit: bool,
         cut_between: &mut dyn FnMut(&mut Sim) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
+        let mut ran = false;
         for _ in 0..1_000_000 {
             let p = if unit { self.unit()? } else { self.step()? };
             // Done, or idle with nothing due.
             if p.done || p.state == lunix_iface::gc::GcState::Idle {
-                return Ok(());
+                return Ok(ran || p.done);
             }
+            ran = true;
             if p.state == lunix_iface::gc::GcState::Grace {
                 self.clock.advance(Duration::from_secs(5));
                 continue;
