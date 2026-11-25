@@ -793,3 +793,10 @@ paths = [
   "docs/reference/gc.md",
   "tools/ownership.toml",
 ]
+
+[throttleflake]
+paths = [
+  "crates/lunixd/tests/stack_throttle.rs",
+  "docs/plans/v1/reports/p1-throttleflake.md",
+  "tools/ownership.toml",
+]
