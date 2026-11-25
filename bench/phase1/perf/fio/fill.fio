@@ -1,0 +1,14 @@
+; M16 Part A: the working set, written first (cells r4k and seqr read it). Environment: DEV, WS (bytes, 4 GiB),
+; BS. The data is 50 % compressible like the ingest cell.
+[fill]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=write
+bs=1m
+iodepth=32
+numjobs=1
+size=${WS}
+refill_buffers=1
+buffer_compress_percentage=50
+end_fsync=1
