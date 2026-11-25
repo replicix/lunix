@@ -458,9 +458,23 @@ their map roots are not roots, so their data may go.
    footer read per dead segment per mark, only while some orphan copy is
    pending. `fsck --repair --gc` cannot cut: a segment held by a pending copy
    is not deleted there (the loop ends when a pass frees nothing). The
-   counters `orphan_deferrals` (delete verdicts the orphan rule deferred) and
-   `cuts_requested` (cuts the collector asked for) are in `lunix gc --status`
-   (`durability holds`); a rate above 1 % of the delete verdicts is a finding.
+   counters in `lunix gc --status` (`durability holds`): `orphan_deferrals` (delete
+   verdicts the orphan rule deferred, counted per verdict, so a segment that
+   waits for several passes counts in each), `segment_delete_verdicts` (its
+   denominator: segment verdicts that ended in a delete or in a deferral for a
+   copy that is not durable), `cuts_requested`, and the cost of the `Hold`
+   stage: `hold_marks` (marks that ran it), `hold_footers` (footers it read) and
+   `hold_footer_errors` (footers it could not read: the segment is held for every
+   pending copy, and a warning names it; **must be 0**, it is the only sign that
+   the conservative branch is what keeps a segment). Reading the ratio
+   `orphan_deferrals / segment_delete_verdicts`: it grows with the pass rate
+   while a copy is pending, so it has no fixed threshold on a volume with a
+   pin, a restart or an old retained root (the oracles' random histories,
+   which have all three, measured 1 to 9 % of the verdicts); on a volume with
+   none of them (the T6 cells) it is expected to be near 0, and a non-zero
+   count there is a finding. The mark keeps at most 65 536 pending ids; past that
+   the copies of the others hold every dead segment (bounded memory, the old
+   global behaviour).
 
    This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL

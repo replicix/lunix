@@ -601,6 +601,10 @@ fn pin_tip(stack: &VolumeStack, name: &str) -> PathBuf {
 /// 6. After the floor grace the host refuses new segments (the bound is what
 ///    is on disk). A cut fails for space, the urgent pass runs and deletes
 ///    `V`; the next cut is made without raising the bound.
+///
+/// The red result with the old global hold was measured by temporarily
+/// restoring that check (240 failed cuts in 120 s); there is no switch for it
+/// in the tree.
 #[test]
 fn a_pending_orphan_copy_does_not_keep_the_urgent_pass_from_freeing_space_on_a_full_host() {
     let t = Scratch::new("orphanhold-full");
@@ -762,6 +766,11 @@ fn a_pending_orphan_copy_does_not_keep_the_urgent_pass_from_freeing_space_on_a_f
     );
     assert!(r2.orphan_deferrals > r1.orphan_deferrals, "{r2:?}");
     assert!(r2.cuts_requested > r0.cuts_requested, "{r2:?}");
+    // The instruments of the hold: the Hold stage ran and read footers, none
+    // failed, and the denominator covers the deferrals.
+    assert!(r2.hold_marks > 0 && r2.hold_footers > 0, "{r2:?}");
+    assert_eq!(r2.hold_footer_errors, 0, "{r2:?}");
+    assert!(r2.segment_delete_verdicts >= r2.orphan_deferrals, "{r2:?}");
     assert!(segment_ids(&stack).contains(&s_seg));
     // The writes resume and the hold ends with the cuts that name `N`.
     fs.cap.store(u64::MAX, Ordering::Release);

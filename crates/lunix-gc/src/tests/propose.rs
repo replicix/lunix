@@ -714,6 +714,18 @@ fn a_wrong_proposal_cannot_delete_the_only_copy_a_gone_hint_relies_on() {
     assert!(r.tip_only, "only the tip names the copy {:?}", r.idx_seg);
 }
 
+/// Negative control on this code (review S10): with the orphan hold off the
+/// proposal script loses the predecessor's chunk after truncate-tip.
+#[test]
+fn control_with_the_hold_off_the_b1_proposal_script_fails() {
+    let r = super::orphandeps::with_hold_off(|| b1_script(true, false));
+    assert!(!r.s_alive, "S is deleted without the hold");
+    assert!(
+        r.read.is_err(),
+        "the predecessor reads back without the hold"
+    );
+}
+
 /// The same script without the proposal: dedup hits `S`, nothing is lost.
 #[test]
 fn control_without_the_proposal_the_predecessor_reads_back() {

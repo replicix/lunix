@@ -496,13 +496,19 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
-    if r.orphan_deferrals + r.cuts_requested > 0 {
+    if r.orphan_deferrals + r.cuts_requested + r.hold_marks + r.segment_delete_verdicts > 0 {
         kv(
             out,
             "durability holds",
             &format!(
-                "{} segment deletes deferred by an orphan copy, {} cuts asked for",
-                r.orphan_deferrals, r.cuts_requested
+                "{} of {} segment delete verdicts deferred by an orphan copy, {} cuts asked for; \
+                 {} marks read {} footers for it, {} unreadable (must be 0)",
+                r.orphan_deferrals,
+                r.segment_delete_verdicts,
+                r.cuts_requested,
+                r.hold_marks,
+                r.hold_footers,
+                r.hold_footer_errors
             ),
         )?;
     }
