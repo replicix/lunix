@@ -384,6 +384,23 @@ const NOT_DURABLE_YET: &str = "live copies of its ids are not durable yet";
 /// not named by the tip, so the engine is not asked for a cut (it would cut
 /// an empty FULL at every pass; M17.B stack re-review M-1).
 const NOT_DURABLE_NO_CUT: &str = "live copies of its ids are not durable yet; a cut does not help";
+/// The same for a copy an index entry with a gone hint relies on (the
+/// segment holds the id, no segment's `deps` records the copy).
+const NOT_DURABLE_ORPHAN: &str =
+    "an orphan copy of an id it holds is not durable yet (the hinted segment is gone)";
+/// [`NOT_DURABLE_ORPHAN`], when no cut would help.
+const NOT_DURABLE_ORPHAN_NO_CUT: &str =
+    "an orphan copy of an id it holds is not durable yet (the hinted segment is gone); a cut does not help";
+
+/// Does a delete deferred for `why` ask the engine for a cut?
+fn asks_for_cut(why: &str) -> bool {
+    why == NOT_DURABLE_YET || why == NOT_DURABLE_ORPHAN
+}
+
+/// Is `why` the orphan rule's deferral?
+fn is_orphan_deferral(why: &str) -> bool {
+    why == NOT_DURABLE_ORPHAN || why == NOT_DURABLE_ORPHAN_NO_CUT
+}
 /// A pipelined pass is followed at the earliest after this many times its
 /// own work (time inside units): see [`Gc::min_gap`].
 const DUTY_FACTOR: u32 = 3;
@@ -416,6 +433,10 @@ thread_local! {
     /// does not stall deletes).
     pub(crate) static ORPHAN_STATS: std::cell::Cell<(u64, u64)> =
         const { std::cell::Cell::new((0, 0)) };
+    /// Per test thread: the orphan hold is off (the negative control of the
+    /// tests that need it).
+    pub(crate) static ORPHAN_HOLD_OFF: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 /// Condemn, recheck and delete decisions over one mark.
@@ -537,30 +558,37 @@ impl Judge<'_> {
         }
     }
 
-    /// Some live copy relied on through a gone hint is above `named_high` or
-    /// an unnamed output.
-    fn orphan_pending(&self) -> bool {
-        self.l
-            .orphan_deps
-            .iter()
-            .any(|d| d.raw() > self.f.named_high || self.outputs.contains(d))
-    }
-
     /// The delete-time index invariant for a segment: every copy its stale
     /// hints rely on must be in a segment a durable FULL named (at or below
     /// `named_high`) that is not an unnamed compaction output.
+    ///
+    /// Two sources: `deps` (the hinted segment still exists, so it carries
+    /// the dependency) and `orphan_holds` (the hinted segment is gone: the
+    /// mark recorded the copy against the dead segments whose footers hold
+    /// the id). A segment that holds no id of a pending copy is not held.
     fn segment_deletable(&self, s: SegId) -> Option<&'static str> {
-        // A copy an entry with a gone hint relies on that a durable FULL does
-        // not name yet: no segment's `deps` holds it, so any delete waits.
-        if self.orphan_pending() {
-            #[cfg(test)]
-            ORPHAN_STATS.with(|c| c.set((c.get().0 + 1, c.get().1)));
-            return Some(NOT_DURABLE_YET);
-        }
-        let deps = self.l.deps.get(&s)?;
-        let blocking: Vec<&SegId> = deps
-            .iter()
-            .filter(|d| d.raw() > self.f.named_high || self.outputs.contains(*d))
+        let pending = |d: &&SegId| d.raw() > self.f.named_high || self.outputs.contains(*d);
+        #[cfg(test)]
+        let off = ORPHAN_HOLD_OFF.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let off = false;
+        let orphans: Vec<&SegId> = self
+            .l
+            .orphan_holds
+            .get(&s)
+            .filter(|_| !off)
+            .into_iter()
+            .flatten()
+            .filter(pending)
+            .collect();
+        let blocking: Vec<&SegId> = self
+            .l
+            .deps
+            .get(&s)
+            .into_iter()
+            .flatten()
+            .filter(pending)
+            .chain(orphans.iter().copied())
             .collect();
         if blocking.is_empty() {
             return None;
@@ -570,10 +598,19 @@ impl Judge<'_> {
         let helps = blocking
             .iter()
             .any(|d| self.outputs.contains(*d) || self.f.tip_named.contains(*d));
+        if orphans.is_empty() {
+            return Some(if helps {
+                NOT_DURABLE_YET
+            } else {
+                NOT_DURABLE_NO_CUT
+            });
+        }
+        #[cfg(test)]
+        ORPHAN_STATS.with(|c| c.set((c.get().0 + 1, c.get().1)));
         Some(if helps {
-            NOT_DURABLE_YET
+            NOT_DURABLE_ORPHAN
         } else {
-            NOT_DURABLE_NO_CUT
+            NOT_DURABLE_ORPHAN_NO_CUT
         })
     }
 }
@@ -1467,7 +1504,11 @@ impl Gc {
                 if kind != PassKind::Recheck {
                     self.last_tip = Some(view.tip.commit_seq);
                 }
-                self.phase = Phase::Marking(Box::new(Mark::new(self.cfg)));
+                self.phase = Phase::Marking(Box::new(Mark::new(
+                    self.cfg,
+                    self.named_high,
+                    self.outputs.clone(),
+                )));
                 Flow::Continue
             }
             Phase::Marking(mut m) => {
@@ -1578,7 +1619,11 @@ impl Gc {
             }
             Phase::Grace { until } => {
                 if view.clock.monotonic() >= until {
-                    self.phase = Phase::Rechecking(Box::new(Mark::new(self.cfg)));
+                    self.phase = Phase::Rechecking(Box::new(Mark::new(
+                        self.cfg,
+                        self.named_high,
+                        self.outputs.clone(),
+                    )));
                     Flow::Continue
                 } else {
                     self.phase = Phase::Grace { until };
@@ -1873,9 +1918,13 @@ impl Gc {
         match v {
             Verdict::Gone => self.forget(view, obj),
             Verdict::Defer(why, kind) => {
-                if why == NOT_DURABLE_YET && self.cut_asked_at != Some(view.tip.commit_seq) {
+                if is_orphan_deferral(why) {
+                    self.reclaim.orphan_deferrals += 1;
+                }
+                if asks_for_cut(why) && self.cut_asked_at != Some(view.tip.commit_seq) {
                     self.cut_wanted = true;
                     self.cut_asked_at = Some(view.tip.commit_seq);
+                    self.reclaim.cuts_requested += 1;
                 }
                 self.defer(view, obj, why, kind);
                 Ok(0)
@@ -2412,7 +2461,10 @@ impl Gc {
         // not delete).
         let (named, _) = self.retained_names(view)?;
         let (hwm, keep_floor) = (view.tip.high_water_mark, crate::mark::keep_floor(view));
+        #[cfg(test)]
         let unfiltered = self.cfg.propose_unfiltered;
+        #[cfg(not(test))]
+        let unfiltered = false;
         if !unfiltered && !view.pins.roots()?.is_empty() {
             self.reclaim.proposal_rejected_pins += offered.len() as u64;
             return Ok(());
@@ -2520,7 +2572,7 @@ impl Gc {
         self.reconcile(view)?;
         self.ctx = Some(self.new_ctx());
         self.last_compacted.clear();
-        let mut m = Mark::new(self.cfg);
+        let mut m = Mark::new(self.cfg, self.named_high, self.outputs.clone());
         let m0 = view.clock.monotonic();
         m.run(view)?;
         let t = m.take_init_tip();
@@ -2674,7 +2726,7 @@ impl Collector for Gc {
     fn dry_run(&mut self, view: &GcView<'_>) -> Result<GcPassSummary> {
         self.precheck(view)?;
         self.load(view)?;
-        let l = crate::mark::liveness(view, self.cfg)?;
+        let l = crate::mark::liveness_with(view, self.cfg, self.named_high, self.outputs.clone())?;
         let by = self.retained_names(view)?;
         let facts = Facts::read(view, &*self.floor, self.named_high, by)?;
         let judge = Judge {
@@ -2828,8 +2880,9 @@ mod orphan_judge {
         }
     }
 
-    /// Segments 3 (dead) and 4 (live), listed; `orphans` as the mark found.
-    fn liveness(orphans: &[u64]) -> Liveness {
+    /// Segments 3 (dead) and 4 (live), listed; segment 3's footer holds the
+    /// id of a copy in each of `copies` (what the mark recorded).
+    fn liveness(copies: &[u64]) -> Liveness {
         let mut l = Liveness {
             segments: [3, 4]
                 .iter()
@@ -2838,27 +2891,48 @@ mod orphan_judge {
                     size_bytes: 10,
                 })
                 .collect(),
-            orphan_deps: orphans.iter().map(|&n| seg(n)).collect(),
+            orphan_deps: copies.iter().map(|&n| seg(n)).collect(),
             ..Liveness::default()
         };
+        if !copies.is_empty() {
+            l.orphan_holds
+                .insert(seg(3), copies.iter().map(|&n| seg(n)).collect());
+        }
         l.seg_live.insert(seg(4), 5);
         l
     }
 
-    fn verdict(named_high: u64, orphans: &[u64], outputs: &[u64], s: u64) -> Verdict {
-        let f = facts(named_high);
-        let l = liveness(orphans);
+    fn verdict_with(
+        named_high: u64,
+        tip_named: &[u64],
+        l: &Liveness,
+        outputs: &[u64],
+        s: u64,
+    ) -> Verdict {
+        let mut f = facts(named_high);
+        f.tip_named = tip_named.iter().map(|&n| seg(n)).collect();
         let outputs: BTreeSet<SegId> = outputs.iter().map(|&n| seg(n)).collect();
         Judge {
             f: &f,
-            l: &l,
+            l,
             outputs: &outputs,
         }
         .verdict(ObjectRef::Segment(seg(s)))
     }
 
+    fn verdict(named_high: u64, orphans: &[u64], outputs: &[u64], s: u64) -> Verdict {
+        verdict_with(named_high, &[], &liveness(orphans), outputs, s)
+    }
+
     fn deferred(v: &Verdict) -> bool {
-        matches!(v, Verdict::Defer(w, Deferral::ForFull) if *w == NOT_DURABLE_YET)
+        matches!(v, Verdict::Defer(w, Deferral::ForFull) if is_orphan_deferral(w))
+    }
+
+    fn reason(v: &Verdict) -> &'static str {
+        match v {
+            Verdict::Defer(w, _) => w,
+            _ => "",
+        }
     }
 
     #[test]
@@ -2878,6 +2952,39 @@ mod orphan_judge {
         assert!(matches!(verdict(10, &[7, 10], &[], 3), Verdict::Delete));
         // An output that is not a member changes nothing.
         assert!(matches!(verdict(10, &[7], &[8], 3), Verdict::Delete));
+    }
+
+    /// The precise hold: a pending copy defers only the segment whose footer
+    /// holds its id. Segment 3 is not in `orphan_holds`, so it goes although
+    /// the mark found a pending orphan copy.
+    #[test]
+    fn an_unrelated_segment_is_not_held_by_a_pending_orphan_copy() {
+        let mut l = liveness(&[11]);
+        assert!(deferred(&verdict_with(10, &[], &l, &[], 3)));
+        l.orphan_holds.clear();
+        assert!(!l.orphan_deps.is_empty(), "the copy is still recorded");
+        assert!(matches!(verdict_with(10, &[], &l, &[], 3), Verdict::Delete));
+    }
+
+    /// S9: the orphan rule asks for a cut only when one helps.
+    #[test]
+    fn the_orphan_rule_asks_for_a_cut_only_when_it_helps() {
+        let l = liveness(&[11]);
+        // Above named_high, not an output, not named by the tip: no cut helps.
+        let v = verdict_with(10, &[], &l, &[], 3);
+        assert_eq!(reason(&v), NOT_DURABLE_ORPHAN_NO_CUT);
+        assert!(!asks_for_cut(reason(&v)));
+        // The tip names it: a cut gives it a successor.
+        let v = verdict_with(10, &[11], &l, &[], 3);
+        assert_eq!(reason(&v), NOT_DURABLE_ORPHAN);
+        assert!(asks_for_cut(reason(&v)));
+        // An unnamed output: a cut names it.
+        let l = liveness(&[7]);
+        let v = verdict_with(10, &[], &l, &[7], 3);
+        assert_eq!(reason(&v), NOT_DURABLE_ORPHAN);
+        // The `deps` reasons are different strings.
+        assert!(!is_orphan_deferral(NOT_DURABLE_YET));
+        assert!(!is_orphan_deferral(NOT_DURABLE_NO_CUT));
     }
 
     #[test]

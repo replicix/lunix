@@ -440,9 +440,11 @@ pub struct RefsStats {
     pub shadow_unconfirmed_kept: u64,
     /// Offers such a mark found still named by a retained root other than
     /// the tip (an older FULL or a pin): the lag rule was broken. Always 0 on a
-    /// volume without pins (the shadow check ignores pins, so a pin on an old
-    /// commit can name an offered segment); anything else is a bug in the
-    /// table and blocks the active stage.
+    /// volume without pins and with a pin that is more than a second old (the
+    /// engine withholds offers while a pin exists, from a cache of one second:
+    /// in `shadow` an offer in the second after a pin appeared is recorded and
+    /// can raise it); anything else is a bug in the table and blocks the active
+    /// stage.
     pub shadow_unconfirmed_named: u64,
     /// Offers such a mark did not condemn because the segment was on the
     /// list already.
@@ -614,6 +616,15 @@ pub struct GcReclaimStats {
     pub fast_lag_ms_max: u64,
     /// See `fast_lag_ms_sum`.
     pub fast_lag_count: u64,
+    /// Segment delete verdicts the orphan rule deferred: the segment holds
+    /// the id of a copy an entry with a gone hint relies on, and no FULL
+    /// below the tip names that copy yet. The evidence reason is distinct from
+    /// the `deps` deferral. Counted per verdict (a segment waiting over
+    /// several passes counts in each).
+    pub orphan_deferrals: u64,
+    /// Cuts the collector asked the engine for (`cut_wanted`: a deferral a
+    /// cut ends), at most one per tip.
+    pub cuts_requested: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by

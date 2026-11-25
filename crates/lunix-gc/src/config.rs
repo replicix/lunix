@@ -120,7 +120,7 @@ pub struct GcConfig {
     /// Tests only: a proposal skips the collector's pin and `since` rejects,
     /// so that only the recheck stands between it and a delete (the oracle's
     /// unfiltered configuration).
-    #[doc(hidden)]
+    #[cfg(test)]
     pub propose_unfiltered: bool,
 }
 
@@ -138,6 +138,7 @@ impl Default for GcConfig {
             fast_recheck_always: false,
             tip_refs: false,
             propose_max: 64,
+            #[cfg(test)]
             propose_unfiltered: false,
         }
     }

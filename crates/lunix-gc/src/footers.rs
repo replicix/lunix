@@ -39,6 +39,11 @@ impl FooterIndex {
         (*clen == hint.clen).then_some(*id)
     }
 
+    /// The chunk ids of the footer.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &ChunkId> {
+        self.entries.iter().map(|e| &e.2)
+    }
+
     fn heap_bytes(&self) -> usize {
         self.entries.capacity() * std::mem::size_of::<(u32, u32, ChunkId)>()
     }

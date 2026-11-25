@@ -143,9 +143,12 @@ Before any of these, an offered segment that a retained root other than the
 tip still names (an older retained FULL or a pin; the mark collects the
 segments hinted at by the leaves it walks for those roots, `Liveness::older_refs`)
 is counted as *named by a retained root* (`shadow_unconfirmed_named`). That is
-the lag rule broken, not a design limit: **it is always 0**, pins or not
-(nothing is offered while one exists), and anything else is a bug in the table
-that blocks the active stage. In mode `on` the `shadow_*` figures are not kept
+the lag rule broken, not a design limit: **it is 0 while a pin has existed for
+more than a second** (nothing is offered while one exists; the engine reads
+the pins through a cache of one second, so an offer made in the second after a
+pin appeared is recorded in `shadow` mode, where the collector does not reject
+it, and can raise the count; in mode `on` the collector rejects it), and
+anything else is a bug in the table that blocks the active stage. In mode `on` the `shadow_*` figures are not kept
 (nothing is offered to `judge`); the witness there is `proposal_named` (below). It is a lower bound (a root
 retired between the offer and the mark is not seen); the engine proptests check
 it exactly, with a ground-truth walk of every retained root at each offer.
@@ -435,7 +438,31 @@ their map roots are not roots, so their data may go.
    engine for that cut (`GcProgress::cut_wanted`, one empty FULL), so the
    source goes at the next pass instead of being deferred at every pass
    (M17.B stack review S-1), and only when a cut helps: the blocking copy is
-   in an unnamed output or named by the tip (re-review M-1). This rule is exact only while the engine
+   in an unnamed output or named by the tip (re-review M-1).
+
+   **Orphan copies.** An entry whose hinted segment is gone (a pinned or old
+   retained root after the segment was compacted and deleted) reads its chunk
+   through the index, and no segment's `deps` carries that dependency. The mark
+   records the copy's segment (`orphan_deps`); when it is *pending* (above the
+   highest named id, or an unnamed output), the mark reads the footers of the
+   dead segments and records, for each one that holds the chunk id of a
+   pending copy, the copy's segment (`orphan_holds`). Only such a segment
+   waits, with the reason `an orphan copy of an id it holds is not durable yet
+   (the hinted segment is gone)`, and it asks for a cut under the same rule
+   (a cut helps; otherwise the reason ends `a cut does not help` and the engine
+   is not asked). Every other dead segment is deleted as usual, so a pinned
+   volume with an unnamed output never stalls the space ladder, and on a full
+   host the urgent pass still frees the unrelated segments that make the cut
+   possible (`stack_gc_ladder`). A dead segment whose footer cannot be read is
+   held for every pending copy (the mark does not fail for it). Cost: one
+   footer read per dead segment per mark, only while some orphan copy is
+   pending. `fsck --repair --gc` cannot cut: a segment held by a pending copy
+   is not deleted there (the loop ends when a pass frees nothing). The
+   counters `orphan_deferrals` (delete verdicts the orphan rule deferred) and
+   `cuts_requested` (cuts the collector asked for) are in `lunix gc --status`
+   (`durability holds`); a rate above 1 % of the delete verdicts is a finding.
+
+   This rule is exact only while the engine
    persists the index entries of a named segment before its naming FULL
    leaves the retained window (spec gap N13). Commit objects go through
    `CommitStore::delete` with the durable tip's `chain_floor`; GC itself keeps
@@ -590,7 +617,7 @@ Each line is one JSON object, keys in this order, no spaces:
 | `kind` | `segment`, `pack`, `run`, `commit` (`pass` for `truncated`) |
 | `id` | 16 lowercase hex digits: the object id, or the `commit_seq` |
 | `bytes` | as above; for `delete` the bytes freed (0 when the file was already gone) |
-| `reason` | a fixed phrase: `unreferenced`, `referenced at recheck`, `named by a retained commit`, `above the high-water mark`, `grace not over`, `rollback floor unreadable`, `live copies of its ids are not durable yet`, ... |
+| `reason` | a fixed phrase: `unreferenced`, `referenced at recheck`, `named by a retained commit`, `above the high-water mark`, `grace not over`, `rollback floor unreadable`, `live copies of its ids are not durable yet`, `an orphan copy of an id it holds is not durable yet (the hinted segment is gone)` (both with a `; a cut does not help` form), ... |
 
 Lines beyond 48 MiB are counted, not kept; a last `truncated` line gives the
 count in `bytes`.
