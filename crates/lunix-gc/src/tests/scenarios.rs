@@ -318,7 +318,7 @@ fn rule12_i_the_mark_walks_exactly_the_root_set_pinned_at_its_start() {
     }
     s.commit().unwrap();
     let start: Vec<u64> = s.retained.iter().map(|c| c.common().commit_seq.0).collect();
-    let mut m = crate::mark::Mark::new(s.cfg.gc);
+    let mut m = crate::mark::Mark::new(s.cfg.gc, u64::MAX, BTreeSet::new());
     let mut n = 0;
     loop {
         let done = s.with_view(|v| m.unit(v)).unwrap();

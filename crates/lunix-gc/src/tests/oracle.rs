@@ -534,6 +534,18 @@ fn oracle_fast_recheck_64k_id32() {
     oracle_with(64 << 10, IdLen::ThirtyTwo, 7, true);
 }
 
+/// Negative control of the unfiltered oracles: with the pin roots left out of
+/// the mark's root set (the recheck then judges without them) a proposal of a
+/// segment or map pack only a pin reaches is deleted and the oracle fails on
+/// that root ("walk of root N" or "root N chunk M: unreadable"). Without this
+/// the unfiltered oracle could pass for the wrong reason.
+#[test]
+#[should_panic(expected = "root")]
+fn control_unfiltered_oracle_fails_without_the_pin_roots_in_the_recheck() {
+    crate::mark::DROP_PIN_ROOTS.with(|c| c.set(true));
+    oracle_cfg(16 << 10, IdLen::Sixteen, 6, false, true);
+}
+
 /// The proposals' own filters off: only the recheck stands between an
 /// arbitrary proposal and a delete (milestone condemncut, review S2).
 #[test]

@@ -496,6 +496,16 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    if r.orphan_deferrals + r.cuts_requested > 0 {
+        kv(
+            out,
+            "durability holds",
+            &format!(
+                "{} segment deletes deferred by an orphan copy, {} cuts asked for",
+                r.orphan_deferrals, r.cuts_requested
+            ),
+        )?;
+    }
     if r.proposals_offered + r.proposals_deferred + r.mark_condemned_segments > 0 {
         kv(
             out,

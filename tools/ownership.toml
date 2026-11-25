@@ -770,3 +770,25 @@ paths = [
   "docs/plans/v1/reports/p1-orphandeps.md",
   "tools/ownership.toml",
 ]
+
+# orphanhold: the orphan durability rule made precise (hold only the segments
+# whose footer holds a pending orphan id), S9, N9, the orphan product counters,
+# the before-T6 test items.
+[orphanhold]
+paths = [
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/config.rs",
+  "crates/lunix-gc/src/footers.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/oracle.rs",
+  "crates/lunix-gc/src/tests/orphandeps.rs",
+  "crates/lunix-gc/src/tests/propose.rs",
+  "crates/lunix-gc/src/tests/scenarios.rs",
+  "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunixd/tests/stack_gc_ladder.rs",
+  "docs/plans/v1/reports/p1-orphanhold.md",
+  "docs/reference/gc.md",
+  "tools/ownership.toml",
+]

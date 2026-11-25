@@ -49,6 +49,10 @@ struct Run {
     /// Every `orphan_deps` set a mark returned along the way, and whether
     /// the source `Y` still existed then.
     orphans: Vec<(bool, BTreeSet<SegId>)>,
+    /// With `unrelated`: the segment of two chunks no copy depends on, dead
+    /// when the delete passes run, and whether it still exists after them.
+    u_seg: Option<SegId>,
+    u_alive: bool,
 }
 
 /// `--truncate-tip` on the simulated volume: drop the tip FULL, delete every
@@ -101,7 +105,7 @@ fn cfg() -> SimCfg {
 /// are then overwritten, `S` is compacted into `N`, a cut names `N`, and the
 /// delete passes run on `S` before any further cut.
 fn script(lose_move: bool) -> Run {
-    run_script(lose_move, Ending::TruncateTip)
+    run_script(lose_move, Ending::TruncateTip, false)
 }
 
 /// How the script ends.
@@ -115,7 +119,7 @@ enum Ending {
     Crash,
 }
 
-fn run_script(lose_move: bool, ending: Ending) -> Run {
+fn run_script(lose_move: bool, ending: Ending, unrelated: bool) -> Run {
     let mut s = Sim::new(cfg());
     for i in 0..8 {
         s.write(i, 200 + i);
@@ -155,9 +159,22 @@ fn run_script(lose_move: bool, ending: Ending) -> Run {
     }
     assert!(!segs(&s).contains(&y), "the source is deleted");
     assert!(segs(&s).contains(&s_seg));
+    // With `unrelated`: chunks 20 and 21 get a segment of their own and die
+    // with chunks 0 and 2, so that segment is condemned by the same pass that
+    // compacts S and is judged by the same delete passes.
+    let u_seg = unrelated.then(|| {
+        s.write(20, 500);
+        s.write(21, 501);
+        s.commit().unwrap();
+        hint_of(&s, 20).seg
+    });
     // Chunks 0 and 2 die; only chunk 1 is live in S (1/3): S -> N.
     s.write(0, 400);
     s.write(2, 402);
+    if unrelated {
+        s.write(20, 600);
+        s.write(21, 601);
+    }
     s.commit().unwrap();
     for _ in 0..4 {
         s.commit().unwrap();
@@ -185,6 +202,7 @@ fn run_script(lose_move: bool, ending: Ending) -> Run {
         }
     }
     let s_alive = segs(&s).contains(&s_seg);
+    let u_alive = u_seg.is_some_and(|u| segs(&s).contains(&u));
     let truncated = match ending {
         Ending::TruncateTip => truncate_tip_and_check(&mut s),
         Ending::Crash => {
@@ -199,6 +217,8 @@ fn run_script(lose_move: bool, ending: Ending) -> Run {
         n_seg,
         s_alive,
         orphans,
+        u_seg,
+        u_alive,
     }
 }
 
@@ -253,7 +273,7 @@ fn orphan_deps_is_recorded_only_for_a_gone_hinted_segment() {
 /// entries that read it hint a gone segment. A crash drops the output.
 #[test]
 fn a_crash_with_the_only_index_copy_in_an_unnamed_output_keeps_every_root_readable() {
-    let r = run_script(true, Ending::Crash);
+    let r = run_script(true, Ending::Crash, false);
     r.truncated
         .unwrap_or_else(|e| panic!("a root is unreadable after the crash: {e}"));
     assert!(r.s_alive, "S outlives the unnamed output");
@@ -261,7 +281,42 @@ fn a_crash_with_the_only_index_copy_in_an_unnamed_output_keeps_every_root_readab
 
 #[test]
 fn control_a_crash_with_every_rehint_applied_keeps_every_root_readable() {
-    let r = run_script(false, Ending::Crash);
+    let r = run_script(false, Ending::Crash, false);
     r.truncated
         .unwrap_or_else(|e| panic!("a root is unreadable after the crash: {e}"));
+}
+
+/// Runs `f` with the orphan hold off on this thread, then restores it.
+fn with_hold_off<T>(f: impl FnOnce() -> T) -> T {
+    use crate::collector::ORPHAN_HOLD_OFF;
+    ORPHAN_HOLD_OFF.with(|c| c.set(true));
+    let out = f();
+    ORPHAN_HOLD_OFF.with(|c| c.set(false));
+    out
+}
+
+/// Negative controls of the precise hold: with it switched off the truncate-tip
+/// sibling and the crash shape fail, with it on (the tests above) they pass.
+#[test]
+fn control_with_the_hold_off_the_sibling_and_the_crash_shape_fail() {
+    let r = with_hold_off(|| script(true));
+    assert!(!r.s_alive, "S is deleted without the hold");
+    assert!(r.truncated.is_err(), "the predecessor is unreadable");
+    let r = with_hold_off(|| run_script(true, Ending::Crash, false));
+    assert!(r.truncated.is_err(), "a root is unreadable after the crash");
+}
+
+/// The hold is precise: a segment whose footer holds none of the pending ids
+/// is deleted while `S` is held.
+#[test]
+fn an_unrelated_dead_segment_is_deleted_while_the_orphan_copy_is_pending() {
+    for ending in [Ending::TruncateTip, Ending::Crash] {
+        let r = run_script(true, ending, true);
+        r.truncated
+            .unwrap_or_else(|e| panic!("a root is unreadable: {e}"));
+        assert!(r.s_alive, "S is still held");
+        let u = r.u_seg.expect("the unrelated segment");
+        assert_ne!(u, r.s_seg);
+        assert!(!r.u_alive, "the unrelated segment {u:?} was not deleted");
+    }
 }

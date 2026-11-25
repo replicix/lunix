@@ -27,8 +27,11 @@
 //! segment `T`, `S` can only be deleted while `T` is durable: the mark records
 //! the highest such `T` per `S` (`deps`, the delete-time index invariant of
 //! rule 5). When the hinted segment is already gone there is no `S` to hold
-//! the dependency; the copy's segment goes to `orphan_deps` and the delete
-//! rule defers every segment delete while one is not durable.
+//! the dependency; the copy's segment goes to `orphan_deps`. A copy that a
+//! durable FULL does not name yet (above `named_high`, or an unnamed output)
+//! is *pending*: the mark then reads the footers of the dead segments and
+//! records, per segment that holds the id of a pending copy, the copy's
+//! segment (`orphan_holds`), and only those segments wait for it.
 //!
 //! # Shared subtrees and packs
 //!
@@ -60,7 +63,7 @@ use std::time::Duration;
 
 use lunix_format::commit::{Commit, Full, MapRoot};
 use lunix_format::node::DataEntry;
-use lunix_format::{CommitSeq, Hint, IdLen, IdPrefix, PackId, SegId};
+use lunix_format::{ChunkId, CommitSeq, Hint, IdLen, IdPrefix, PackId, SegId};
 use lunix_iface::gc::GcView;
 use lunix_iface::index::RunRef;
 use lunix_iface::map::{entry_hint, NodeHash};
@@ -69,6 +72,14 @@ use lunix_iface::{Error, ErrorKind, Result};
 
 use crate::config::GcConfig;
 use crate::footers::{CacheBytes, FooterCache};
+
+#[cfg(test)]
+thread_local! {
+    /// Per test thread: the mark leaves the pin roots out of its root set
+    /// (the negative control of the unfiltered proposal oracle).
+    pub(crate) static DROP_PIN_ROOTS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
 
 /// One root of a mark.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -110,6 +121,12 @@ pub struct Liveness {
     /// segment's `deps` records them, so the delete rule holds every segment
     /// delete while one of them is not yet durable.
     pub orphan_deps: BTreeSet<SegId>,
+    /// For a segment without a live extent whose footer holds the chunk id of
+    /// a *pending* orphan copy (the copy's segment is above the `named_high`
+    /// the mark was given, or an unnamed output): the segments holding those
+    /// copies. The delete rule of `deps`, for the one segment that can still
+    /// be the only durable holder of the id.
+    pub orphan_holds: BTreeMap<SegId, BTreeSet<SegId>>,
     /// Segments holding a live extent that no confirmed index entry names
     /// (compaction could not relocate it, so they are no candidates).
     pub unindexed: BTreeSet<SegId>,
@@ -192,6 +209,7 @@ impl Liveness {
             + self.seg_live.len()
             + self.deps.len()
             + self.orphan_deps.len()
+            + self.orphan_holds.len()
             + self.unindexed.len()
             + self.tip_refs.len()
             + self.older_refs.len())
@@ -289,6 +307,11 @@ pub fn root_set(view: &GcView<'_>) -> Result<(Vec<Root>, BTreeSet<CommitSeq>)> {
     let mut pinned = BTreeSet::new();
     for pin in view.pins.roots()? {
         pinned.insert(pin.commit_seq);
+        // Test control: the commit stays, its map is not a root.
+        #[cfg(test)]
+        if DROP_PIN_ROOTS.with(std::cell::Cell::get) {
+            continue;
+        }
         if roots.iter().any(|r| r.seq == pin.commit_seq) {
             continue;
         }
@@ -321,6 +344,11 @@ enum Stage {
         segs: Vec<SegId>,
         next: usize,
     },
+    /// Footers of the dead segments, read for the pending orphan ids.
+    Hold {
+        segs: Vec<SegId>,
+        next: usize,
+    },
     Done,
 }
 
@@ -340,11 +368,29 @@ pub(crate) struct Mark {
     out: Liveness,
     /// The tip the roots were pinned at, until the collector takes it.
     init_tip: Option<CommitSeq>,
+    /// The highest id a durable FULL is known to name when the mark began
+    /// (`u64::MAX`: every copy counts as durable).
+    named_high: u64,
+    /// The unnamed compaction outputs when the mark began.
+    outputs: BTreeSet<SegId>,
+    /// Chunk ids whose index copy is a pending orphan copy, with the copy's
+    /// segment.
+    orphan_ids: BTreeMap<ChunkId, SegId>,
 }
 
+/// Footers read per unit of the `Hold` stage.
+const HOLD_FOOTERS_PER_UNIT: usize = 32;
+
 impl Mark {
-    pub(crate) fn new(cfg: GcConfig) -> Self {
+    /// A mark. `named_high` and `outputs` are the collector's durability
+    /// facts: an orphan copy in a segment above `named_high` or in `outputs`
+    /// is pending and makes the segments holding its id wait. Pass
+    /// `u64::MAX` and an empty set when no delete is judged.
+    pub(crate) fn new(cfg: GcConfig, named_high: u64, outputs: BTreeSet<SegId>) -> Self {
         Self {
+            named_high,
+            outputs,
+            orphan_ids: BTreeMap::new(),
             footers: FooterCache::new(CacheBytes::new(cfg.footer_cache_bytes)),
             cfg,
             stage: Stage::Init,
@@ -527,6 +573,32 @@ impl Mark {
                     self.stage = Stage::Finish { segs, next };
                     return Ok(false);
                 }
+                if self.orphan_ids.is_empty() {
+                    self.finish();
+                    self.stage = Stage::Done;
+                    return Ok(true);
+                }
+                let seg_live = &self.out.seg_live;
+                let segs: Vec<SegId> = self
+                    .out
+                    .segments
+                    .iter()
+                    .map(|s| s.seg)
+                    .filter(|s| !seg_live.contains_key(s))
+                    .collect();
+                self.stage = Stage::Hold { segs, next: 0 };
+            }
+            Stage::Hold { segs, mut next } => {
+                let end = segs.len().min(next + HOLD_FOOTERS_PER_UNIT);
+                while next < end {
+                    let seg = segs[next];
+                    next += 1;
+                    self.hold_segment(view, seg);
+                }
+                if next < segs.len() {
+                    self.stage = Stage::Hold { segs, next };
+                    return Ok(false);
+                }
                 self.finish();
                 self.stage = Stage::Done;
                 return Ok(true);
@@ -551,7 +623,7 @@ impl Mark {
         self.out.live_count += 1;
     }
 
-    fn dep(&mut self, from: SegId, on: SegId) {
+    fn dep(&mut self, from: SegId, on: SegId, id: ChunkId) {
         if from == on {
             return;
         }
@@ -559,7 +631,16 @@ impl Mark {
             self.out.deps.entry(from).or_default().insert(on);
         } else {
             // The hinted segment is gone: nothing can carry the dependency.
-            self.out.orphan_deps.insert(on);
+            self.orphan_dep(on, id);
+        }
+    }
+
+    /// The live copy of `id` is in `on`, and no segment can carry the
+    /// dependency (the hinted one is gone, or does not hold the id).
+    fn orphan_dep(&mut self, on: SegId, id: ChunkId) {
+        self.out.orphan_deps.insert(on);
+        if on.raw() > self.named_high || self.outputs.contains(&on) {
+            self.orphan_ids.insert(id, on);
         }
     }
 
@@ -596,7 +677,7 @@ impl Mark {
                     Some(c) if c.hint == hint => self.live(hint, ci),
                     Some(c) if self.confirm(view, &id, &c.hint)? => {
                         self.live(c.hint, ci);
-                        self.dep(hint.seg, c.hint.seg);
+                        self.dep(hint.seg, c.hint.seg, id);
                     }
                     // No usable index entry: the hinted copy is the one, and
                     // compaction could not relocate it.
@@ -625,7 +706,12 @@ impl Mark {
             if self.confirm(view, &c.id, &c.hint)? {
                 found = true;
                 self.live(c.hint, ci);
-                self.dep(hint.seg, c.hint.seg);
+                // The hinted segment does not hold the id at the hint (it is
+                // gone, or its footer lacks it): it cannot carry a
+                // dependency, whether it exists or not.
+                if c.hint.seg != hint.seg {
+                    self.orphan_dep(c.hint.seg, c.id);
+                }
             }
         }
         if !found {
@@ -637,6 +723,24 @@ impl Mark {
             }
         }
         Ok(())
+    }
+
+    /// Records the pending orphan copies whose ids `seg` holds. A footer that
+    /// cannot be read holds the segment for every pending copy: the mark does
+    /// not fail for a dead segment it could not prove clear.
+    fn hold_segment(&mut self, view: &GcView<'_>, seg: SegId) {
+        let held: BTreeSet<SegId> = match self.footers.get(view.segments, seg) {
+            Ok(Some(f)) => f
+                .ids()
+                .filter_map(|id| self.orphan_ids.get(id).copied())
+                .filter(|&on| on != seg)
+                .collect(),
+            Ok(None) => return,
+            Err(_) => self.orphan_ids.values().copied().collect(),
+        };
+        if !held.is_empty() {
+            self.out.orphan_holds.insert(seg, held);
+        }
     }
 
     /// Sorts and deduplicates one segment's live extents; returns how many
@@ -679,7 +783,63 @@ impl Mark {
 /// # Errors
 /// As a mark step: store, index and map errors; an unreadable pin.
 pub fn liveness(view: &GcView<'_>, cfg: GcConfig) -> Result<Liveness> {
-    let mut m = Mark::new(cfg);
+    liveness_with(view, cfg, u64::MAX, BTreeSet::new())
+}
+
+/// [`liveness`] with the collector's durability facts (see [`Mark::new`]).
+pub(crate) fn liveness_with(
+    view: &GcView<'_>,
+    cfg: GcConfig,
+    named_high: u64,
+    outputs: BTreeSet<SegId>,
+) -> Result<Liveness> {
+    let mut m = Mark::new(cfg, named_high, outputs);
     m.run(view)?;
     Ok(m.into_liveness())
+}
+
+#[cfg(test)]
+mod tests {
+    use lunix_format::ExtentKind;
+    use lunix_iface::map::ChunkNo;
+
+    use super::*;
+    use crate::tests::sim::{data_of, Sim, SimCfg};
+
+    /// N9: a stale hint whose segment exists but does not hold the id (a
+    /// damaged or foreign hint) cannot carry a dependency: the copy goes to
+    /// `orphan_deps` and no `deps` entry is made for the wrong segment.
+    #[test]
+    fn a_hinted_segment_that_exists_but_does_not_hold_the_id_records_an_orphan_dep() {
+        const CS: u32 = 16 << 10;
+        let mut cfg = SimCfg::new(CS, IdLen::Sixteen);
+        cfg.segment_target = u64::from(CS) * 8;
+        let mut s = Sim::new(cfg);
+        for i in 0..16 {
+            s.write(i, 200 + i);
+        }
+        s.commit().expect("commit");
+        let hint_of = |ci: u64| {
+            let e = s.map.get(ChunkNo(ci)).expect("get").expect("populated");
+            lunix_iface::map::entry_hint(&e)
+        };
+        let (y, z) = (hint_of(1).seg, hint_of(12).seg);
+        assert_ne!(y, z, "two segments");
+        let id = s.codec.chunk_id(ExtentKind::Data, &data_of(201, CS));
+        let prefix = IdPrefix::of(&id, IdLen::Sixteen);
+
+        let mut m = Mark::new(s.cfg.gc, 0, BTreeSet::new());
+        m.existing = [y, z].into_iter().collect();
+        // The entry hints `z` at an offset where `z` holds nothing of the id.
+        let bogus = Hint {
+            seg: z,
+            off: 1,
+            clen: 1,
+        };
+        s.with_view(|v| m.stale(v, &prefix, bogus, 0))
+            .expect("stale");
+        assert!(m.out.deps.is_empty(), "z cannot carry the dependency");
+        assert!(m.out.orphan_deps.contains(&y), "{:?}", m.out.orphan_deps);
+        assert_eq!(m.orphan_ids.get(&id), Some(&y), "y is above named_high 0");
+    }
 }

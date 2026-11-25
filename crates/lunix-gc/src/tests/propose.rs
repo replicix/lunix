@@ -583,7 +583,7 @@ fn an_urgent_pass_less_than_the_grace_floor_after_a_proposal_deletes_none_of_it(
 /// and accepted; chunk 5 gets chunk 1's content (a cut names the new copy
 /// `N`, no further cut); the delete passes run; the volume is truncated back
 /// to the predecessor and every root is read.
-fn b1_script(propose: bool) -> (Result<(), String>, bool, bool) {
+fn b1_script(propose: bool, later_cuts: bool) -> B1 {
     use super::orphandeps::truncate_tip_and_check;
     let mut c = SimCfg::new(CS, IdLen::Sixteen);
     c.segment_target = u64::from(CS) * 8;
@@ -642,26 +642,93 @@ fn b1_script(propose: bool) -> (Result<(), String>, bool, bool) {
     s.write(5, 201);
     s.commit().unwrap();
     let n_new = segs(&s).iter().any(|x| x.raw() > s_seg.raw());
+    // The mechanism, read right after the rewrite's cut (the passes may
+    // compact `S`): where the index keeps the copy of chunk 1's id, and
+    // whether only the tip FULL names that segment.
+    let id = s.codec.chunk_id(
+        lunix_format::ExtentKind::Data,
+        &super::sim::data_of(201, CS),
+    );
+    let idx_seg = s.index.get(&id).unwrap().expect("indexed").hint.seg;
+    let tip_only = s.tip.new_segments.contains(&idx_seg)
+        && !s.retained[..s.retained.len() - 1].iter().any(|c| {
+            matches!(c, lunix_format::commit::Commit::Full(f) if f.new_segments.contains(&idx_seg))
+        });
     for _ in 0..4 {
         s.clock.advance(GRACE * 2);
         s.pass().unwrap();
     }
     let alive = segs(&s).contains(&s_seg);
-    (truncate_tip_and_check(&mut s), alive, n_new)
+    let mut out = B1 {
+        read: Ok(()),
+        s_seg,
+        s_alive: alive,
+        idx_seg,
+        tip_only,
+        n_new,
+        s_alive_after: None,
+    };
+    if later_cuts {
+        // The deferral ends: a cut names the copy and a second gives that
+        // FULL a successor.
+        for _ in 0..3 {
+            s.commit().unwrap();
+            s.clock.advance(GRACE * 2);
+            s.pass().unwrap();
+        }
+        for _ in 0..3 {
+            s.clock.advance(GRACE * 2);
+            s.pass().unwrap();
+        }
+        out.s_alive_after = Some(segs(&s).contains(&s_seg));
+    } else {
+        out.read = truncate_tip_and_check(&mut s);
+    }
+    out
+}
+
+/// What `b1_script` observed.
+struct B1 {
+    read: Result<(), String>,
+    s_seg: SegId,
+    s_alive: bool,
+    /// The segment the index keeps chunk 1's id in after the rewrite.
+    idx_seg: SegId,
+    /// Only the tip FULL names that segment.
+    tip_only: bool,
+    n_new: bool,
+    /// With `later_cuts`: `S` exists after the cuts that end the deferral.
+    s_alive_after: Option<bool>,
 }
 
 #[test]
 fn a_wrong_proposal_cannot_delete_the_only_copy_a_gone_hint_relies_on() {
-    let (read, s_alive, _) = b1_script(true);
-    read.unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
-    assert!(s_alive, "S outlives the copy only the tip names");
+    let r = b1_script(true, false);
+    r.read
+        .unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
+    assert!(r.s_alive, "S outlives the copy only the tip names");
+    // The mechanism, not just the outcome: the flagged `S` was skipped by
+    // dedup, so the index copy is in a new segment only the tip names.
+    assert!(r.n_new);
+    assert_ne!(r.idx_seg, r.s_seg, "the index copy left S");
+    assert!(r.tip_only, "only the tip names the copy {:?}", r.idx_seg);
 }
 
 /// The same script without the proposal: dedup hits `S`, nothing is lost.
 #[test]
 fn control_without_the_proposal_the_predecessor_reads_back() {
-    let (read, _, _) = b1_script(false);
-    read.unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
+    let r = b1_script(false, false);
+    r.read
+        .unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
+    assert_eq!(r.idx_seg, r.s_seg, "the index copy is still in S");
+}
+
+/// The deferral ends: after the cuts that make the copy durable `S` goes.
+#[test]
+fn the_deferral_of_the_b1_script_ends_with_two_more_cuts() {
+    let r = b1_script(true, true);
+    assert!(r.s_alive, "held before the cuts");
+    assert_eq!(r.s_alive_after, Some(false), "S is deleted once durable");
 }
 
 // -------------------------------------------------------------- the witness

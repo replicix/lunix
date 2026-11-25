@@ -331,6 +331,8 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         propose_calls: s[1],
                         propose_us_sum: s[2],
                         propose_us_max: s[3],
+                        orphan_deferrals: s[4],
+                        cuts_requested: s[5],
                     }),
                     refs: Some(Box::new(RefsStats {
                         state: RefsState::Drifted,
