@@ -622,6 +622,18 @@ pub struct GcReclaimStats {
     /// the `deps` deferral. Counted per verdict (a segment waiting over
     /// several passes counts in each).
     pub orphan_deferrals: u64,
+    /// Delete verdicts of segments (the denominator of `orphan_deferrals`):
+    /// those that led to a delete and those deferred for a copy that is not
+    /// durable yet (`deps` or orphan rule). Counted per verdict.
+    pub segment_delete_verdicts: u64,
+    /// Marks that ran the `Hold` stage (some orphan copy was pending).
+    pub hold_marks: u64,
+    /// Footers the `Hold` stage read (one per dead segment per such mark).
+    pub hold_footers: u64,
+    /// Footers the `Hold` stage could not read: the segment was held for every
+    /// pending copy. Expected 0; non-zero is the only sign that the
+    /// conservative branch is what keeps a segment.
+    pub hold_footer_errors: u64,
     /// Cuts the collector asked the engine for (`cut_wanted`: a deferral a
     /// cut ends), at most one per tip.
     pub cuts_requested: u64,

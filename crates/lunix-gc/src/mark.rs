@@ -81,6 +81,25 @@ thread_local! {
         const { std::cell::Cell::new(false) };
 }
 
+/// Test-only: leaves the pin roots out of the root set while alive.
+#[cfg(test)]
+pub(crate) struct DropPinRoots;
+
+#[cfg(test)]
+impl DropPinRoots {
+    pub(crate) fn on() -> Self {
+        DROP_PIN_ROOTS.with(|c| c.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for DropPinRoots {
+    fn drop(&mut self) {
+        DROP_PIN_ROOTS.with(|c| c.set(false));
+    }
+}
+
 /// One root of a mark.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Root {
@@ -127,6 +146,14 @@ pub struct Liveness {
     /// copies. The delete rule of `deps`, for the one segment that can still
     /// be the only durable holder of the id.
     pub orphan_holds: BTreeMap<SegId, BTreeSet<SegId>>,
+    /// The mark ran the `Hold` stage (some orphan copy was pending), the
+    /// footers it read, and the footers that could not be read (those
+    /// segments are held for every pending copy).
+    pub hold_ran: bool,
+    /// See `hold_ran`.
+    pub hold_footers: u64,
+    /// See `hold_ran`.
+    pub hold_failed: u64,
     /// Segments holding a live extent that no confirmed index entry names
     /// (compaction could not relocate it, so they are no candidates).
     pub unindexed: BTreeSet<SegId>,
@@ -376,7 +403,16 @@ pub(crate) struct Mark {
     /// Chunk ids whose index copy is a pending orphan copy, with the copy's
     /// segment.
     orphan_ids: BTreeMap<ChunkId, SegId>,
+    /// Copies of ids dropped because `orphan_ids` is full: every dead segment
+    /// is held for them (the old global hold, bounded memory).
+    orphan_overflow: BTreeSet<SegId>,
+    /// `MAX_ORPHAN_IDS` (a field so a test can lower it).
+    max_orphan_ids: usize,
 }
+
+/// Pending orphan ids a mark keeps (about 100 bytes each). Beyond it the
+/// copies' segments are held for every dead segment instead.
+const MAX_ORPHAN_IDS: usize = 1 << 16;
 
 /// Footers read per unit of the `Hold` stage.
 const HOLD_FOOTERS_PER_UNIT: usize = 32;
@@ -391,6 +427,8 @@ impl Mark {
             named_high,
             outputs,
             orphan_ids: BTreeMap::new(),
+            orphan_overflow: BTreeSet::new(),
+            max_orphan_ids: MAX_ORPHAN_IDS,
             footers: FooterCache::new(CacheBytes::new(cfg.footer_cache_bytes)),
             cfg,
             stage: Stage::Init,
@@ -421,13 +459,14 @@ impl Mark {
                 root_hashes,
                 ..
             } => (new_leaves.capacity() + root_hashes.capacity()) * 32,
-            Stage::Finish { segs, .. } => segs.capacity() * 8,
+            Stage::Finish { segs, .. } | Stage::Hold { segs, .. } => segs.capacity() * 8,
             _ => 0,
         };
         (self.seen.capacity() + self.skip.capacity()) * 40
             + self.refs.capacity() * std::mem::size_of::<(u64, DataEntry)>()
             + self.footers.heap_bytes()
             + self.existing.len() * 24
+            + (self.orphan_ids.len() + self.orphan_overflow.len()) * 100
             + batch
             + self.out.heap_bytes()
     }
@@ -573,19 +612,22 @@ impl Mark {
                     self.stage = Stage::Finish { segs, next };
                     return Ok(false);
                 }
-                if self.orphan_ids.is_empty() {
+                if self.orphan_ids.is_empty() && self.orphan_overflow.is_empty() {
                     self.finish();
                     self.stage = Stage::Done;
                     return Ok(true);
                 }
-                let seg_live = &self.out.seg_live;
-                let segs: Vec<SegId> = self
-                    .out
+                // The segments the judge may delete (`live_bytes == 0`); an
+                // unnamed output is kept by its own rule and needs no hold.
+                let out = &self.out;
+                let outputs = &self.outputs;
+                let segs: Vec<SegId> = out
                     .segments
                     .iter()
                     .map(|s| s.seg)
-                    .filter(|s| !seg_live.contains_key(s))
+                    .filter(|&s| out.live_bytes(s) == 0 && !outputs.contains(&s))
                     .collect();
+                self.out.hold_ran = true;
                 self.stage = Stage::Hold { segs, next: 0 };
             }
             Stage::Hold { segs, mut next } => {
@@ -640,7 +682,11 @@ impl Mark {
     fn orphan_dep(&mut self, on: SegId, id: ChunkId) {
         self.out.orphan_deps.insert(on);
         if on.raw() > self.named_high || self.outputs.contains(&on) {
-            self.orphan_ids.insert(id, on);
+            if self.orphan_ids.len() >= self.max_orphan_ids && !self.orphan_ids.contains_key(&id) {
+                self.orphan_overflow.insert(on);
+            } else {
+                self.orphan_ids.insert(id, on);
+            }
         }
     }
 
@@ -729,15 +775,21 @@ impl Mark {
     /// cannot be read holds the segment for every pending copy: the mark does
     /// not fail for a dead segment it could not prove clear.
     fn hold_segment(&mut self, view: &GcView<'_>, seg: SegId) {
-        let held: BTreeSet<SegId> = match self.footers.get(view.segments, seg) {
-            Ok(Some(f)) => f
-                .ids()
-                .filter_map(|id| self.orphan_ids.get(id).copied())
-                .filter(|&on| on != seg)
-                .collect(),
+        self.out.hold_footers += 1;
+        let mut held: BTreeSet<SegId> = self.orphan_overflow.clone();
+        match self.footers.get(view.segments, seg) {
+            Ok(Some(f)) => held.extend(f.ids().filter_map(|id| self.orphan_ids.get(id).copied())),
             Ok(None) => return,
-            Err(_) => self.orphan_ids.values().copied().collect(),
-        };
+            Err(e) => {
+                self.out.hold_failed += 1;
+                tracing::warn!(
+                    seg = seg.raw(),
+                    error = %e,
+                    "gc mark: a dead segment's footer cannot be read; it is held for every pending orphan copy"
+                );
+                held.extend(self.orphan_ids.values().copied());
+            }
+        }
         if !held.is_empty() {
             self.out.orphan_holds.insert(seg, held);
         }
@@ -841,5 +893,212 @@ mod tests {
         assert!(m.out.deps.is_empty(), "z cannot carry the dependency");
         assert!(m.out.orphan_deps.contains(&y), "{:?}", m.out.orphan_deps);
         assert_eq!(m.orphan_ids.get(&id), Some(&y), "y is above named_high 0");
+    }
+
+    // ----------------------------------------------------- the Hold stage
+
+    use lunix_format::segment::FooterBody;
+    use lunix_format::{Codec, Level};
+    use lunix_iface::crypto::EncodingDesc;
+    use lunix_iface::store::{SegmentInfo, SegmentStore, SegmentWriter};
+
+    const CS: u32 = 16 << 10;
+
+    /// A segment store whose `footer` fails for one segment.
+    struct Failing<'a> {
+        inner: &'a dyn SegmentStore,
+        bad: SegId,
+    }
+
+    impl SegmentStore for Failing<'_> {
+        fn open_segment(&self) -> Result<Box<dyn SegmentWriter>> {
+            self.inner.open_segment()
+        }
+        fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
+            self.inner.read_extent(hint, out)
+        }
+        fn locate(&self, hint: &Hint) -> Result<lunix_iface::store::ExtentLocation> {
+            self.inner.locate(hint)
+        }
+        fn footer(&self, seg: SegId) -> Result<FooterBody> {
+            if seg == self.bad {
+                return Err(Error::invalid("torn footer"));
+            }
+            self.inner.footer(seg)
+        }
+        fn list(&self) -> Result<Vec<SegmentInfo>> {
+            self.inner.list()
+        }
+        fn delete(&self, seg: SegId) -> Result<u64> {
+            self.inner.delete(seg)
+        }
+    }
+
+    /// `n` chunks, one commit each: one segment per chunk (seed `100 + i`).
+    fn volume(n: u64) -> Sim {
+        let mut cfg = SimCfg::new(CS, IdLen::Sixteen);
+        cfg.chunk_count = n.max(8);
+        cfg.segment_target = u64::from(CS) * 2;
+        let mut s = Sim::new(cfg);
+        for i in 0..n {
+            s.write(i, 100 + i);
+            s.commit().expect("commit");
+        }
+        s
+    }
+
+    fn seg_of(s: &Sim, ci: u64) -> SegId {
+        let e = s.map.get(ChunkNo(ci)).expect("get").expect("populated");
+        lunix_iface::map::entry_hint(&e).seg
+    }
+
+    fn id_of(s: &Sim, ci: u64) -> ChunkId {
+        s.codec.chunk_id(ExtentKind::Data, &data_of(100 + ci, CS))
+    }
+
+    /// A mark at the start of its `Hold` stage: every listed segment is dead
+    /// for it, `pending` are its pending orphan ids.
+    fn at_hold(s: &Sim, pending: &[(ChunkId, SegId)]) -> Mark {
+        let mut m = Mark::new(s.cfg.gc, 0, BTreeSet::new());
+        let mut segs = SegmentStore::list(&s.store).expect("list");
+        segs.sort_unstable_by_key(|x| x.seg);
+        m.out.segments = segs;
+        m.orphan_ids = pending.iter().copied().collect();
+        m.stage = Stage::Finish {
+            segs: Vec::new(),
+            next: 0,
+        };
+        m
+    }
+
+    /// Runs the mark to the end; returns the number of `unit` calls.
+    fn run_counting(s: &Sim, m: &mut Mark, store: Option<&dyn SegmentStore>) -> usize {
+        let mut units = 0;
+        s.with_view(|v| {
+            let view = GcView {
+                segments: store.unwrap_or(v.segments),
+                ..*v
+            };
+            loop {
+                units += 1;
+                if m.unit(&view).expect("unit") {
+                    break;
+                }
+            }
+        });
+        units
+    }
+
+    /// An unreadable footer holds the segment for every pending copy (and is
+    /// counted), the readable ones only for the ids they hold.
+    #[test]
+    fn an_unreadable_footer_holds_the_segment_for_every_pending_copy() {
+        let s = volume(6);
+        let (c1, c2) = (seg_of(&s, 5), seg_of(&s, 4));
+        let mut m = at_hold(&s, &[(id_of(&s, 0), c1), (id_of(&s, 1), c2)]);
+        let bad = seg_of(&s, 3);
+        let failing = Failing {
+            inner: &s.store,
+            bad,
+        };
+        run_counting(&s, &mut m, Some(&failing));
+        let h = &m.out.orphan_holds;
+        assert_eq!(
+            h[&bad],
+            [c1, c2].into_iter().collect(),
+            "all pending copies"
+        );
+        assert_eq!(h[&seg_of(&s, 0)], [c1].into_iter().collect());
+        assert_eq!(h[&seg_of(&s, 1)], [c2].into_iter().collect());
+        assert!(
+            !h.contains_key(&seg_of(&s, 2)),
+            "a readable, unrelated segment"
+        );
+        assert_eq!((m.out.hold_footers, m.out.hold_failed), (6, 1));
+        assert!(m.out.hold_ran);
+    }
+
+    /// A second dead segment that holds the same pending id (an older
+    /// duplicate) is held as well.
+    #[test]
+    fn two_dead_holders_of_one_pending_id_are_both_held() {
+        let s = volume(4);
+        let data = data_of(100, CS);
+        let id = id_of(&s, 0);
+        let mut ext = Vec::new();
+        s.codec
+            .seal(
+                ExtentKind::Data,
+                &id,
+                &EncodingDesc {
+                    codec: Codec::Raw,
+                    level: Level(0),
+                    ulen: CS,
+                    dict_id: None,
+                },
+                &data,
+                &mut ext,
+            )
+            .expect("seal");
+        let mut w = s.store.open_segment().expect("open");
+        w.append_extent(&id, None, &ext).expect("append");
+        let dup = w.seal(None).expect("seal segment").seg;
+        let first = seg_of(&s, 0);
+        assert_ne!(first, dup);
+        let copy = seg_of(&s, 3);
+        let mut m = at_hold(&s, &[(id, copy)]);
+        run_counting(&s, &mut m, None);
+        let want: BTreeSet<SegId> = [copy].into_iter().collect();
+        assert_eq!(m.out.orphan_holds.get(&first), Some(&want));
+        assert_eq!(m.out.orphan_holds.get(&dup), Some(&want));
+        assert_eq!(m.out.orphan_holds.len(), 2);
+    }
+
+    /// More dead segments than one `Hold` unit reads: the stage spans units
+    /// and a holder in the last one is still found.
+    #[test]
+    fn the_hold_stage_spans_units() {
+        let n = 3 * HOLD_FOOTERS_PER_UNIT as u64 + 5;
+        let s = volume(n);
+        let copy = seg_of(&s, 1);
+        let last = n - 1;
+        let mut m = at_hold(
+            &s,
+            &[
+                (id_of(&s, 0), copy),
+                (id_of(&s, last), copy),
+                (id_of(&s, 40), copy),
+            ],
+        );
+        let units = run_counting(&s, &mut m, None);
+        // One Finish unit, then ceil(n / 32) Hold units.
+        let hold_units = (n as usize).div_ceil(HOLD_FOOTERS_PER_UNIT);
+        assert!(hold_units >= 3);
+        assert_eq!(units, 1 + hold_units);
+        let h = &m.out.orphan_holds;
+        for ci in [0, 40, last] {
+            assert!(h.contains_key(&seg_of(&s, ci)), "chunk {ci}");
+        }
+        assert_eq!(h.len(), 3);
+        assert_eq!(m.out.hold_footers, n);
+    }
+
+    /// Review N11: past the bound the ids are not kept (memory), their copies
+    /// hold every dead segment instead.
+    #[test]
+    fn past_the_bound_the_copies_hold_every_dead_segment() {
+        let s = volume(5);
+        let mut m = at_hold(&s, &[]);
+        m.max_orphan_ids = 1;
+        let (c1, c2) = (seg_of(&s, 4), seg_of(&s, 3));
+        m.orphan_dep(c1, id_of(&s, 0));
+        m.orphan_dep(c2, id_of(&s, 1));
+        assert_eq!(m.orphan_ids.len(), 1);
+        assert_eq!(m.orphan_overflow, [c2].into_iter().collect());
+        assert!(m.heap_bytes() >= 2 * 100);
+        run_counting(&s, &mut m, None);
+        let h = &m.out.orphan_holds;
+        assert_eq!(h[&seg_of(&s, 0)], [c1, c2].into_iter().collect());
+        assert_eq!(h[&seg_of(&s, 2)], [c2].into_iter().collect());
     }
 }

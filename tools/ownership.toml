@@ -789,6 +789,7 @@ paths = [
   "crates/lunix-iface/tests/ctl.rs",
   "crates/lunixd/tests/stack_gc_ladder.rs",
   "docs/plans/v1/reports/p1-orphanhold.md",
+  "docs/plans/v1/reports/p1-orphanhold2.md",
   "docs/reference/gc.md",
   "tools/ownership.toml",
 ]

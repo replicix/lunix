@@ -5,7 +5,7 @@
 //! deletable, and after `fsck --repair --truncate-tip` the predecessor could
 //! not read the chunk.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use lunix_format::{IdLen, SegId};
@@ -53,6 +53,9 @@ struct Run {
     /// when the delete passes run, and whether it still exists after them.
     u_seg: Option<SegId>,
     u_alive: bool,
+    /// `orphan_holds` of a real mark (with the collector's durability facts)
+    /// taken once `N` exists and before any further cut.
+    holds: BTreeMap<SegId, BTreeSet<SegId>>,
 }
 
 /// `--truncate-tip` on the simulated volume: drop the tip FULL, delete every
@@ -92,8 +95,9 @@ pub(crate) fn truncate_tip_and_check(s: &mut Sim) -> Result<(), String> {
     s.check_roots_with(&rebuilt)
 }
 
-fn cfg() -> SimCfg {
+fn cfg_with(encrypted: bool) -> SimCfg {
     let mut c = SimCfg::new(CS, IdLen::Sixteen);
+    c.encrypted = encrypted;
     c.segment_target = u64::from(CS) * 8;
     c
 }
@@ -120,7 +124,27 @@ enum Ending {
 }
 
 fn run_script(lose_move: bool, ending: Ending, unrelated: bool) -> Run {
-    let mut s = Sim::new(cfg());
+    run_script_with(lose_move, ending, unrelated, false)
+}
+
+/// A mark with the collector's facts: `named_high` is the highest segment a
+/// FULL below the tip names, `outputs` the unnamed compaction outputs.
+fn mark_with_facts(s: &Sim, outputs: BTreeSet<SegId>) -> Liveness {
+    let below = &s.retained[..s.retained.len() - 1];
+    let named_high = below
+        .iter()
+        .filter_map(|c| match c {
+            lunix_format::commit::Commit::Full(f) => f.new_segments.iter().map(|x| x.raw()).max(),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    s.with_view(|v| crate::mark::liveness_with(v, s.cfg.gc, named_high, outputs))
+        .unwrap()
+}
+
+fn run_script_with(lose_move: bool, ending: Ending, unrelated: bool, encrypted: bool) -> Run {
+    let mut s = Sim::new(cfg_with(encrypted));
     for i in 0..8 {
         s.write(i, 200 + i);
     }
@@ -190,6 +214,16 @@ fn run_script(lose_move: bool, ending: Ending, unrelated: bool) -> Run {
         assert!(s.tip.new_segments.contains(&n_seg));
     }
     orphans.push((false, mark(&s).orphan_deps));
+    let outputs: BTreeSet<SegId> = match ending {
+        Ending::Crash => [n_seg].into_iter().collect(),
+        Ending::TruncateTip => BTreeSet::new(),
+    };
+    let real = mark_with_facts(&s, outputs);
+    assert_eq!(
+        real.hold_ran, lose_move,
+        "only a pending orphan copy runs the Hold stage"
+    );
+    let holds = real.orphan_holds;
     // The delete passes, no cut in between.
     for _ in 0..4 {
         s.clock.advance(GRACE * 2);
@@ -219,6 +253,7 @@ fn run_script(lose_move: bool, ending: Ending, unrelated: bool) -> Run {
         orphans,
         u_seg,
         u_alive,
+        holds,
     }
 }
 
@@ -286,13 +321,11 @@ fn control_a_crash_with_every_rehint_applied_keeps_every_root_readable() {
         .unwrap_or_else(|e| panic!("a root is unreadable after the crash: {e}"));
 }
 
-/// Runs `f` with the orphan hold off on this thread, then restores it.
-fn with_hold_off<T>(f: impl FnOnce() -> T) -> T {
-    use crate::collector::ORPHAN_HOLD_OFF;
-    ORPHAN_HOLD_OFF.with(|c| c.set(true));
-    let out = f();
-    ORPHAN_HOLD_OFF.with(|c| c.set(false));
-    out
+/// Runs `f` with the orphan hold off on this thread (restored on drop, also
+/// when `f` panics).
+pub(crate) fn with_hold_off<T>(f: impl FnOnce() -> T) -> T {
+    let _off = crate::collector::HoldOff::on();
+    f()
 }
 
 /// Negative controls of the precise hold: with it switched off the truncate-tip
@@ -319,4 +352,33 @@ fn an_unrelated_dead_segment_is_deleted_while_the_orphan_copy_is_pending() {
         assert_ne!(u, r.s_seg);
         assert!(!r.u_alive, "the unrelated segment {u:?} was not deleted");
     }
+}
+
+/// The hold, read from a real mark (not from the judge's own tests): `S`
+/// holds the id whose only index copy is in the pending `N`, so `S` is held
+/// for `N`; the unrelated dead segment is not a key; with the unrelated
+/// segment present in the volume the set of keys is exactly `{S}`.
+#[test]
+fn a_real_mark_holds_the_segment_that_holds_the_id_and_no_other() {
+    for ending in [Ending::TruncateTip, Ending::Crash] {
+        let r = run_script(true, ending, true);
+        assert_eq!(
+            r.holds.keys().copied().collect::<Vec<_>>(),
+            vec![r.s_seg],
+            "only S is held"
+        );
+        assert_eq!(r.holds[&r.s_seg], [r.n_seg].into_iter().collect());
+        assert!(!r.holds.contains_key(&r.u_seg.expect("U")));
+    }
+}
+
+/// Review N18: the hold in the integrity-less encrypted sim (footers are
+/// authenticated with the codec's keys).
+#[test]
+fn the_hold_works_with_encrypted_extents() {
+    let r = run_script_with(true, Ending::TruncateTip, true, true);
+    r.truncated
+        .unwrap_or_else(|e| panic!("predecessor unreadable after truncate-tip: {e}"));
+    assert!(r.s_alive && !r.u_alive);
+    assert_eq!(r.holds.keys().copied().collect::<Vec<_>>(), vec![r.s_seg]);
 }

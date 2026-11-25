@@ -439,6 +439,25 @@ thread_local! {
         const { std::cell::Cell::new(false) };
 }
 
+/// Test-only: switches the orphan hold off on this thread while alive.
+#[cfg(test)]
+pub(crate) struct HoldOff;
+
+#[cfg(test)]
+impl HoldOff {
+    pub(crate) fn on() -> Self {
+        ORPHAN_HOLD_OFF.with(|c| c.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for HoldOff {
+    fn drop(&mut self) {
+        ORPHAN_HOLD_OFF.with(|c| c.set(false));
+    }
+}
+
 /// Condemn, recheck and delete decisions over one mark.
 struct Judge<'a> {
     f: &'a Facts,
@@ -1826,6 +1845,11 @@ impl Gc {
     }
 
     fn after_mark(&mut self, l: &Liveness) {
+        if l.hold_ran {
+            self.reclaim.hold_marks += 1;
+            self.reclaim.hold_footers += l.hold_footers;
+            self.reclaim.hold_footer_errors += l.hold_failed;
+        }
         self.stats.live_bytes = l.total_live();
         self.stats.dead_bytes = l
             .segments
@@ -1915,6 +1939,17 @@ impl Gc {
 
     /// Applies one verdict; returns the bytes freed.
     fn apply_verdict(&mut self, view: &GcView<'_>, obj: ObjectRef, v: Verdict) -> Result<u64> {
+        if matches!(obj, ObjectRef::Segment(_))
+            && match &v {
+                Verdict::Delete => true,
+                Verdict::Defer(why, _) => {
+                    asks_for_cut(why) || is_orphan_deferral(why) || *why == NOT_DURABLE_NO_CUT
+                }
+                _ => false,
+            }
+        {
+            self.reclaim.segment_delete_verdicts += 1;
+        }
         match v {
             Verdict::Gone => self.forget(view, obj),
             Verdict::Defer(why, kind) => {
@@ -2726,6 +2761,8 @@ impl Collector for Gc {
     fn dry_run(&mut self, view: &GcView<'_>) -> Result<GcPassSummary> {
         self.precheck(view)?;
         self.load(view)?;
+        // Without it a fresh collector (fsck) holds every orphan copy as pending.
+        self.observe_named(view)?;
         let l = crate::mark::liveness_with(view, self.cfg, self.named_high, self.outputs.clone())?;
         let by = self.retained_names(view)?;
         let facts = Facts::read(view, &*self.floor, self.named_high, by)?;

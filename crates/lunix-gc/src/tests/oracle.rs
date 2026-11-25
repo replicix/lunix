@@ -412,6 +412,9 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
 fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered: bool) {
     let cases = env("LUNIX_GC_CASES", 48);
     let ops = env("LUNIX_GC_OPS", 300) as usize;
+    // `LUNIX_GC_HOLD_OFF=1`: the orphan hold is off, to see which oracle
+    // witnesses it (review S10). The run is expected to fail.
+    let _hold = (env("LUNIX_GC_HOLD_OFF", 0) == 1).then(crate::collector::HoldOff::on);
     let mut runner = TestRunner::new(Config {
         cases,
         failure_persistence: None,
@@ -461,7 +464,8 @@ fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered:
     let (fast_passes, fast_deleted) = FAST.with(std::cell::Cell::get);
     let (orphan_deferred, seg_deletes) = crate::collector::ORPHAN_STATS.with(std::cell::Cell::get);
     eprintln!(
-        "gc oracle: orphan_deps deferred {orphan_deferred} segment delete verdicts, {seg_deletes} allowed"
+        "gc oracle: orphan rule deferred {orphan_deferred} segment delete verdicts, {seg_deletes} allowed ({:.1} % of the two)",
+        100.0 * orphan_deferred as f64 / ((orphan_deferred + seg_deletes).max(1)) as f64
     );
     eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
     let (condemned, uncondemned, deleted) = PROPOSED.with(std::cell::Cell::get);
@@ -540,9 +544,9 @@ fn oracle_fast_recheck_64k_id32() {
 /// that root ("walk of root N" or "root N chunk M: unreadable"). Without this
 /// the unfiltered oracle could pass for the wrong reason.
 #[test]
-#[should_panic(expected = "root")]
+#[should_panic(expected = "walk of root")]
 fn control_unfiltered_oracle_fails_without_the_pin_roots_in_the_recheck() {
-    crate::mark::DROP_PIN_ROOTS.with(|c| c.set(true));
+    let _drop = crate::mark::DropPinRoots::on();
     oracle_cfg(16 << 10, IdLen::Sixteen, 6, false, true);
 }
 
