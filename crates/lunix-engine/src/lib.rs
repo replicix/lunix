@@ -98,6 +98,26 @@ pub fn ref_map_for_bench(
     refs::bench_ref_map(map)
 }
 
+/// A reader of the reference table behind [`ref_map_counted`]: its counts per
+/// segment and the map transactions whose report differed from the
+/// prediction.
+#[cfg(feature = "testsupport")]
+#[doc(hidden)]
+pub type TableReader =
+    Box<dyn Fn() -> (std::collections::BTreeMap<lunix_format::SegId, i64>, u64) + Send + Sync>;
+
+/// Test support (feature `testsupport`): the wrapper of the cut over `map`
+/// (already `Ready`), and a reader of the table behind it: its counts per
+/// segment and the map transactions whose report differed from the
+/// prediction.
+#[cfg(feature = "testsupport")]
+#[doc(hidden)]
+pub fn ref_map_counted(
+    map: std::sync::Arc<dyn lunix_iface::map::BlockMap>,
+) -> (std::sync::Arc<dyn lunix_iface::map::BlockMap>, TableReader) {
+    refs::counted_ref_map(map)
+}
+
 /// Measurement support (feature `testsupport`): nanoseconds per mark-start
 /// snapshot (a clone of the table's counts), per `ready()` call and per
 /// `rebase` (the mark's comparison and repair) of a table with `segments`

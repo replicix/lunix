@@ -38,7 +38,7 @@ use lunix_format::local::{CheckpointSlot, RollbackFloor};
 use lunix_format::segment::FooterBody;
 use lunix_format::{CommitSeq, Epoch, Hint, SegId, TimeMs, WriteSeq};
 use lunix_iface::clock::Clock;
-use lunix_iface::gc::{Collector, GcProgress, GcState, Moved};
+use lunix_iface::gc::{Collector, DeadSince, GcProgress, GcState, GcView, Moved};
 use lunix_iface::journal::WriteSeqRange;
 use lunix_iface::map::{entry_hint, ChunkNo};
 use lunix_iface::overlay::OverlayCut;
@@ -46,6 +46,7 @@ use lunix_iface::space::SpaceKind;
 use lunix_iface::store::{ExtentLocation, SealedSegment, SegmentInfo, SegmentStore, SegmentWriter};
 use lunix_iface::{Error, ErrorKind, Result};
 
+use crate::config::CondemnOnCut;
 use crate::destage::{DestageCtx, Retry};
 use crate::engine::{lock, CommitOutcome, Inner};
 use crate::recover::Recovered;
@@ -714,6 +715,14 @@ impl Inner {
         co.prev_cut_end = Some(co.cut_end);
         let c = &self.cuts;
         c.last_cut_bytes.store(co.cut_bytes, Ordering::Relaxed);
+        if co.cut_bytes > 0 {
+            c.cuts.fetch_add(1, Ordering::Relaxed);
+            c.cut_bytes_sum.fetch_add(co.cut_bytes, Ordering::Relaxed);
+            c.cut_ns_sum.fetch_add(
+                u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
+                Ordering::Relaxed,
+            );
+        }
         c.last_cut_ms.store(
             u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             Ordering::Relaxed,
@@ -903,6 +912,8 @@ impl Inner {
         add(&self.cuts.seal_busy_ns, outcome.seal_busy_ns);
         add(&self.cuts.seal_wait_ns, outcome.seal_wait_ns);
         add(&self.cuts.seal_stall_ns, outcome.seal_stall_ns);
+        add(&self.cuts.map_ns_sum, outcome.map_ns);
+        add(&self.cuts.chunks_sum, outcome.chunks_total);
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
         // C3, second: compaction re-hints, in their own transaction, only
@@ -1353,33 +1364,71 @@ impl Inner {
         }
     }
 
-    /// Shadow mode of the reference table: the segments it would offer for
-    /// condemnation now are counted and remembered for the next mark's
-    /// judgement; nothing is offered to the collector.
-    fn shadow_offer(&self, co: &Coord) {
+    /// The reference table's offer for this collector call, made inside
+    /// `with_collector` (the map is at the tip, the coordinator mutex is
+    /// held, the collector's view is the one it steps with).
+    ///
+    /// Nothing is offered while a pin exists: a pin names a root the table
+    /// does not know, so the segments stay waiting (and an offer made before
+    /// the pin existed was judged by the recheck, which has the pin as a
+    /// root). Mode `shadow` counts the offer and remembers it for the next
+    /// mark's judgement; mode `on` hands it to the collector
+    /// ([`Collector::propose_dead`]) and forgets it when the collector
+    /// consumed it.
+    fn offer(&self, c: &mut dyn Collector, v: &GcView<'_>, skip: &HashSet<SegId>) {
         let Some(refs) = &self.refs else {
             return;
         };
-        let lag = 2 * (u64::from(self.cfg.retain_last.max(1)) - 1);
-        // A segment a pending re-hint will name must never be offered.
-        let skip: HashSet<SegId> = co
-            .pending_named
-            .iter()
-            .copied()
-            .chain(co.moved.iter().map(|m| m.new.seg))
-            .collect();
-        let tip = co.tip.common.commit_seq;
-        // A proposal is only taken between passes.
-        let idle = lock(&self.gc_status).state.is_none();
+        let lag = 2 * (u64::from(v.params.retain_last.max(1)) - 1);
+        let tip = v.tip.commit_seq;
+        let now = self.clock.monotonic();
         let ready = {
             let mut t = lock(refs);
-            let ready = t.ready(tip, lag, &skip, crate::refs::OFFER_MAX);
-            t.shadow_offer(&ready, tip, self.clock.monotonic(), idle);
+            let ready = t.ready(tip, lag, skip, crate::refs::OFFER_MAX);
+            t.note_ready(&ready, now);
             ready
         };
-        if !ready.is_empty() {
-            let segs: Vec<SegId> = ready.iter().map(|r| r.seg).collect();
-            self.points.hooks().shadow_offered(tip, &segs);
+        if ready.is_empty() {
+            return;
+        }
+        let on = self.cfg.gc_condemn_on_cut == CondemnOnCut::On;
+        // A busy collector refuses a proposal: do not read the pins for it.
+        if on && lock(&self.gc_status).state.is_some() {
+            return;
+        }
+        // The pins file is read at most once a second (the collector reads it
+        // again for every offer it takes: a stale "none" is safe, a stale
+        // "some" only delays the offer).
+        let cached = lock(refs).pins_none(now);
+        let none = match cached {
+            Some(n) => n,
+            None => {
+                let n = matches!(v.pins.roots(), Ok(p) if p.is_empty());
+                lock(refs).set_pins_none(now, n);
+                n
+            }
+        };
+        if !none {
+            lock(refs).note_pin_blocked();
+            return;
+        }
+        let segs: Vec<SegId> = ready.iter().map(|r| r.seg).collect();
+        self.points.hooks().shadow_offered(tip, &segs);
+        if on {
+            let dead: Vec<DeadSince> = ready
+                .iter()
+                .map(|r| DeadSince {
+                    seg: r.seg,
+                    since: r.since,
+                })
+                .collect();
+            if c.propose_dead(v, &dead) {
+                lock(refs).consume(&ready, self.clock.monotonic());
+            }
+        } else {
+            // A proposal is only taken between passes.
+            let idle = lock(&self.gc_status).state.is_none();
+            lock(refs).shadow_offer(&ready, tip, now, idle);
         }
     }
 
@@ -1387,7 +1436,6 @@ impl Inner {
         let Some(budget) = self.gc_budget_now() else {
             return;
         };
-        self.shadow_offer(co);
         // No collector call starts once a quiesce began (the engine is
         // about to be dropped; moves made now would be lost with it).
         if self.closing.load(Ordering::Acquire) {
@@ -1395,7 +1443,21 @@ impl Inner {
             return;
         }
         let read_before = co.collector.as_ref().map(|c| c.stats().compaction_read);
-        match self.with_collector(co, |c, v| c.step(v, budget)) {
+        // A pending re-hint will add an entry to the segments it names:
+        // those are never offered.
+        let skip: HashSet<SegId> = if self.refs.is_some() {
+            co.pending_named
+                .iter()
+                .copied()
+                .chain(co.moved.iter().map(|m| m.new.seg))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        match self.with_collector(co, |c, v| {
+            self.offer(c, v, &skip);
+            c.step(v, budget)
+        }) {
             Ok(p) => {
                 // Work left that a step can do now: the background thread
                 // ticks again soon (`GC_BUSY_PERIOD`). Not while the pass

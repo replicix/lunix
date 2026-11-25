@@ -25,6 +25,13 @@
 //!   the coordinator mutex and the table mutex), for volumes of 1 k to 1 M
 //!   segments. Reported, no bound.
 //!
+//! A run at the defaults takes about an hour (about 4 minutes per arm: the
+//! fill, one requested pass and the measured cuts; 16 arms). Every phase
+//! prints a line (`fill` every 32 MiB), and a watchdog aborts the process
+//! naming the phase when an arm makes no progress for `LUNIX_REFS_STALL_S`
+//! seconds (default 600). The exact cost per journal byte is read from the
+//! engine's cumulative cut counters (`cuts`, `cut_bytes_sum`, `cut_us_sum`).
+//!
 //! Knobs: `LUNIX_REFS_CUTS` (cuts per arm and repetition, 20),
 //! `LUNIX_REFS_MIB_PER_CUT` (journal MiB overwritten per cut, 128),
 //! `LUNIX_REFS_REPS` (repetitions of the pair of arms, 4).
@@ -51,12 +58,69 @@ fn env_or(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+/// Cuts, journal bytes and microseconds, from the engine's cumulative
+/// counters (`write_path.cuts`, `cut_bytes_sum`, `cut_us_sum`): the cost per
+/// journal byte without sampling.
+type Counted = (u64, u64, u64);
+
 struct Arm {
     cuts_ms: Vec<f64>,
+    /// Over the measured cuts.
+    counted: Counted,
+}
+
+/// Progress of one arm, for the watchdog: a phase name and a counter that
+/// moves while the arm works. A stuck arm is reported (and aborted) instead
+/// of silent (the cost test once ran for 55 minutes without a line).
+struct Progress {
+    phase: std::sync::Mutex<&'static str>,
+    ticks: std::sync::atomic::AtomicU64,
+}
+
+impl Progress {
+    fn set(&self, phase: &'static str) {
+        *self.phase.lock().unwrap_or_else(|p| p.into_inner()) = phase;
+        self.tick();
+    }
+
+    fn tick(&self) {
+        self.ticks
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Aborts the process when `progress` does not move for `LUNIX_REFS_STALL_S`
+/// seconds (default 600), naming the phase it stood in.
+fn watchdog(progress: &Arc<Progress>, tag: &str) -> Arc<std::sync::atomic::AtomicBool> {
+    let stall = Duration::from_secs(env_or("LUNIX_REFS_STALL_S", 600));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (p, d, tag) = (Arc::clone(progress), Arc::clone(&done), tag.to_string());
+    std::thread::spawn(move || {
+        let mut last = (u64::MAX, Instant::now());
+        while !d.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = p.ticks.load(std::sync::atomic::Ordering::Relaxed);
+            if now != last.0 {
+                last = (now, Instant::now());
+            } else if last.1.elapsed() >= stall {
+                let phase = *p.phase.lock().unwrap_or_else(|e| e.into_inner());
+                eprintln!(
+                    "refs cost: {tag} made no progress for {stall:?} in phase {phase:?} (tick {now}); aborting"
+                );
+                std::process::abort();
+            }
+        }
+    });
+    done
 }
 
 fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm {
     lunixd::log::StderrLog::install(tracing::Level::INFO);
+    let progress = Arc::new(Progress {
+        phase: std::sync::Mutex::new("create"),
+        ticks: std::sync::atomic::AtomicU64::new(0),
+    });
+    let finished = watchdog(&progress, tag);
     let chunks = (1u64 << 30) / u64::from(cs);
     let per_cut = (mib_per_cut << 20) / u64::from(cs);
     let t = Scratch::new(tag);
@@ -72,6 +136,7 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
         }
     }));
     let vol = b.create().expect("create");
+    progress.set("open");
     let stack = vol
         .open_with(|o| {
             o.gc = Some(GcConfig {
@@ -88,22 +153,28 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
     let mut d = Driver::new(&stack).expect("driver");
     let csz = u64::from(cs);
     let mut seed = 1u64;
+    progress.set("fill");
     // The volume twice over: the second pass of writes kills the first, so
     // the base pass below has garbage to condemn.
-    for _ in 0..2 {
+    for round in 0..2 {
         for c in 0..chunks {
             seed += 1;
             assert!(d
                 .write(0, c * csz, &payload(seed, cs as usize), false)
                 .is_ok());
+            progress.tick();
             if c % 2048 == 2047 {
                 stack.engine.commit_now(true).expect("cut");
+                eprintln!("refs cost: {tag}: fill {round} chunk {}/{chunks}", c + 1);
             }
         }
+        progress.set("fill cuts");
         for _ in 0..3 {
             stack.engine.commit_now(true).expect("cut");
         }
+        progress.set("fill");
     }
+    progress.set("base pass");
     // One whole pass: the table's base (a request is the whole sequence);
     // its `gc pass done` line has `mark_ms`.
     let started = Instant::now();
@@ -126,6 +197,8 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
     }
     let mut x = 0x9e37_79b9_7f4a_7c15u64 ^ cuts;
     let mut out = Vec::new();
+    let c0 = stack.engine.cut_stats();
+    progress.set("measured cuts");
     for _ in 0..cuts {
         for _ in 0..per_cut {
             x ^= x << 13;
@@ -136,11 +209,18 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
             assert!(d
                 .write(0, c * csz, &payload(seed, cs as usize), false)
                 .is_ok());
+            progress.tick();
         }
         let t0 = Instant::now();
         stack.engine.commit_now(true).expect("cut");
         out.push(t0.elapsed().as_secs_f64() * 1e3);
     }
+    let c1 = stack.engine.cut_stats();
+    let counted = (
+        c1.cuts - c0.cuts,
+        c1.cut_bytes_sum - c0.cut_bytes_sum,
+        c1.cut_us_sum - c0.cut_us_sum,
+    );
     if shadow {
         let refs = stack
             .engine
@@ -152,9 +232,14 @@ fn run_arm(shadow: bool, cs: u32, cuts: u64, mib_per_cut: u64, tag: &str) -> Arm
         assert_eq!(refs.drift_segments, 0, "{refs:?}");
         assert_eq!(refs.report_mismatches, 0, "{refs:?}");
     }
+    progress.set("close");
     drop(d);
     close(stack).expect("close");
-    Arm { cuts_ms: out }
+    finished.store(true, std::sync::atomic::Ordering::Relaxed);
+    Arm {
+        cuts_ms: out,
+        counted,
+    }
 }
 
 fn median(v: &[f64]) -> f64 {
@@ -175,6 +260,8 @@ fn the_shadow_table_cut_cost_is_reported() {
     let reps = env_or("LUNIX_REFS_REPS", 4);
     for cs in [16u32 << 10, 64 << 10] {
         let (mut off, mut on) = (Vec::new(), Vec::new());
+        let (mut counted_off, mut counted_on): (Vec<Counted>, Vec<Counted>) =
+            (Vec::new(), Vec::new());
         for rep in 0..reps {
             // Alternate which arm goes first.
             let order = if rep % 2 == 0 {
@@ -191,13 +278,22 @@ fn the_shadow_table_cut_cost_is_reported() {
                     &format!("refscost{}{rep}{}", cs >> 10, u8::from(shadow)),
                 );
                 eprintln!(
-                    "refs cost: {} KiB rep {rep} {}: median {:.1} ms, mean {:.1} ms over {} cuts",
+                    "refs cost: {} KiB rep {rep} {}: median {:.1} ms, mean {:.1} ms over {} cuts; \
+                     counters: {} cuts, {} journal bytes, {:.3} ms per MiB of journal",
                     cs >> 10,
                     if shadow { "shadow" } else { "off   " },
                     median(&a.cuts_ms),
                     mean(&a.cuts_ms),
-                    a.cuts_ms.len()
+                    a.cuts_ms.len(),
+                    a.counted.0,
+                    a.counted.1,
+                    a.counted.2 as f64 / 1e3 / (a.counted.1 as f64 / (1u64 << 20) as f64),
                 );
+                if shadow {
+                    counted_on.push(a.counted);
+                } else {
+                    counted_off.push(a.counted);
+                }
                 if shadow {
                     on.extend(a.cuts_ms);
                 } else {
@@ -207,6 +303,18 @@ fn the_shadow_table_cut_cost_is_reported() {
         }
         // The journal bytes per cut are the same in every cut: the time per
         // journal byte is the time per cut over `mib` MiB.
+        // From the cumulative counters: the time per journal MiB over every
+        // cut of the arm, exactly (not a sample).
+        let per_mib = |v: &[Counted]| {
+            let (bytes, us) = v.iter().fold((0u64, 0u64), |a, c| (a.0 + c.1, a.1 + c.2));
+            us as f64 / 1e3 / (bytes as f64 / (1u64 << 20) as f64)
+        };
+        let (co, cn) = (per_mib(&counted_off), per_mib(&counted_on));
+        eprintln!(
+            "refs cost: {} KiB chunks, from the counters: off {co:.3} ms per MiB of journal, shadow {cn:.3} ({:+.2} %)",
+            cs >> 10,
+            (cn / co - 1.0) * 100.0
+        );
         let (mo, mn) = (median(&off), median(&on));
         let (ao, an) = (mean(&off), mean(&on));
         eprintln!(

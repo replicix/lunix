@@ -160,6 +160,12 @@ impl Evidence {
         out
     }
 
+    /// The lines written so far (tests).
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> String {
+        String::from_utf8_lossy(&self.bytes).into_owned()
+    }
+
     pub(crate) fn heap_bytes(&self) -> usize {
         self.bytes.capacity()
     }

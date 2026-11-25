@@ -8,13 +8,21 @@
 //! objects are exactly `min(chain_floor, rollback floor) ..= tip` plus pins,
 //! where `chain_floor` is the lowest one a retained FULL records (N24).
 //!
+//! "Any proposal is safe" (milestone condemncut): the workloads also offer
+//! the collector arbitrary and adversarial proposals (`Op::Propose`):
+//! segments no root reaches, segments every root reaches, random subsets with
+//! random `since`, ids that do not exist, offers while a pin exists and while
+//! a pass is running. Every root and pin must still read its model content
+//! after every pass and the volume must converge, so no live data is ever
+//! deleted whatever was proposed.
+//!
 //! `LUNIX_GC_CASES` (default 48 per configuration) and `LUNIX_GC_OPS`
 //! (default 300) scale it; the gate run uses 2 000 cases.
 
 use std::time::Duration;
 
-use lunix_format::IdLen;
-use lunix_iface::gc::Collector;
+use lunix_format::{CommitSeq, IdLen};
+use lunix_iface::gc::{Collector, DeadSince};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
@@ -36,6 +44,10 @@ enum Op {
     Crash(u64),
     Pressure(bool),
     Faulty(u8, u8, bool, u8),
+    /// An offer to `propose_dead`: the seed picks the segments and their
+    /// `since`, the second figure the pool (0: the dead ones; else every
+    /// segment, live ones included).
+    Propose(u64, u8),
 }
 
 /// Store and index points a collector call passes (non-crash faults).
@@ -101,6 +113,7 @@ fn op() -> impl Strategy<Value = Op> {
         3 => any::<bool>().prop_map(Op::Pressure),
         4 => (any::<u8>(), 1u8..6, any::<bool>(), 1u8..16)
             .prop_map(|(p, n, ns, k)| Op::Faulty(p, n, ns, k)),
+        6 => (any::<u64>(), 0u8..3).prop_map(|(k, m)| Op::Propose(k, m)),
     ]
 }
 
@@ -118,6 +131,94 @@ fn fail(what: String) -> TestCaseError {
 fn after_pass(s: &Sim, ctx: &str) -> Result<(), TestCaseError> {
     s.check_roots().map_err(|e| fail(format!("{ctx}: {e}")))?;
     s.check_ledger().map_err(|e| fail(format!("{ctx}: {e}")))
+}
+
+/// A random subset of the dead (`pool` 0) or of every segment, each with a
+/// `since` that is mostly the earliest cut (only the collector's other rules
+/// judge it) and sometimes a random one; a missing id now and then.
+fn adversarial_offer(s: &Sim, seed: u64, pool: u8) -> Vec<DeadSince> {
+    let mut k = seed | 1;
+    let mut next = move || {
+        k = k
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        k >> 33
+    };
+    let from = if pool == 0 {
+        s.dead_segments()
+    } else {
+        s.all_segments()
+    };
+    let tip = s.tip.common.commit_seq.0;
+    let mut offer = Vec::new();
+    for d in from {
+        if next().is_multiple_of(3) {
+            continue;
+        }
+        let since = match next() % 5 {
+            0 => CommitSeq(next() % (tip + 4)),
+            _ => CommitSeq(0),
+        };
+        offer.push(DeadSince { seg: d.seg, since });
+    }
+    if next().is_multiple_of(4) {
+        if let Ok(seg) = lunix_format::ObjId::from_raw(1 + next() % 1_000) {
+            offer.push(DeadSince {
+                seg,
+                since: CommitSeq(0),
+            });
+        }
+    }
+    offer
+}
+
+/// The segments a pin reaches and no retained root does, and the ones only
+/// the oldest retained FULL reaches (by hint), now.
+fn exclusive_segments(
+    s: &Sim,
+) -> (
+    std::collections::BTreeSet<lunix_format::SegId>,
+    std::collections::BTreeSet<lunix_format::SegId>,
+) {
+    use std::collections::BTreeSet;
+    let retained: BTreeSet<u64> = s
+        .gc_retained()
+        .iter()
+        .map(|f| f.common.commit_seq.0)
+        .collect();
+    let mut sets: Vec<(u64, BTreeSet<lunix_format::SegId>)> = Vec::new();
+    for (seq, root) in s.roots() {
+        let mut set = BTreeSet::new();
+        if s.map
+            .walk_leaves(&root, &mut |_, e| {
+                set.insert(e.seg);
+            })
+            .is_ok()
+        {
+            sets.push((seq, set));
+        }
+    }
+    let others = |keep: &dyn Fn(u64) -> bool| -> BTreeSet<lunix_format::SegId> {
+        sets.iter()
+            .filter(|(q, _)| keep(*q))
+            .flat_map(|(_, x)| x.iter().copied())
+            .collect()
+    };
+    let mut only_pin = BTreeSet::new();
+    for (q, set) in &sets {
+        if !retained.contains(q) {
+            let rest = others(&|o| o != *q);
+            only_pin.extend(set.difference(&rest).copied());
+        }
+    }
+    let mut only_old = BTreeSet::new();
+    if let Some(&oldest) = retained.iter().next() {
+        if let Some((_, set)) = sets.iter().find(|(q, _)| *q == oldest) {
+            let rest = others(&|o| o != oldest);
+            only_old.extend(set.difference(&rest).copied());
+        }
+    }
+    (only_pin, only_old)
 }
 
 fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
@@ -171,6 +272,32 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
             }
             Op::Pressure(raised) => s.gc.set_pressure(raised),
+            Op::Propose(seed, pool) => {
+                let offer = adversarial_offer(s, seed, pool);
+                let (only_pin, only_old) = exclusive_segments(s);
+                let before: std::collections::BTreeSet<_> = s.gc.condemned().into_iter().collect();
+                s.propose(&offer).map_err(err)?;
+                let new: Vec<_> =
+                    s.gc.condemned()
+                        .into_iter()
+                        .filter(|o| !before.contains(o))
+                        .filter_map(|o| match o {
+                            crate::condemned::ObjectRef::Segment(x) => Some(x),
+                            _ => None,
+                        })
+                        .collect();
+                EXCLUSIVE.with(|c| {
+                    let (a, b) = c.get();
+                    c.set((
+                        a + new.iter().filter(|x| only_pin.contains(x)).count() as u64,
+                        b + new.iter().filter(|x| only_old.contains(x)).count() as u64,
+                    ));
+                });
+                // Not the ledger: a pass may be in progress or a failed
+                // delete may be waiting for its release.
+                s.check_roots()
+                    .map_err(|e| fail(format!("op {i} proposal: {e}")))?;
+            }
             Op::Faulty(p, nth, nospace, steps) => {
                 faulty_steps(s, usize::from(p), u64::from(nth), nospace, steps)
                     .map_err(|e| fail(format!("op {i}: {e}")))?;
@@ -245,6 +372,11 @@ thread_local! {
     /// the test on this thread (a crash replaces the collector, so the
     /// counters are taken before it).
     static FAST: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    /// Segments a proposal condemned that only a pin reached, and that only
+    /// the oldest retained FULL reached (the unfiltered configuration).
+    static EXCLUSIVE: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    /// Proposals condemned, un-condemned by a recheck and deleted.
+    static PROPOSED: std::cell::Cell<(u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
 
 fn note_fast(s: &Sim) {
@@ -253,15 +385,31 @@ fn note_fast(s: &Sim) {
         let (p, d) = f.get();
         f.set((p + r.fast_passes, d + r.fast_segments_deleted));
     });
+    PROPOSED.with(|f| {
+        let (c, u, d) = f.get();
+        f.set((
+            c + r.proposal_condemned,
+            u + r.proposal_uncondemned,
+            d + r.proposal_deleted,
+        ));
+    });
 }
 
 fn oracle(chunk_size: u32, id_len: IdLen, salt: u64) {
-    oracle_with(chunk_size, id_len, salt, false);
+    oracle_cfg(chunk_size, id_len, salt, false, false);
+}
+
+fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
+    oracle_cfg(chunk_size, id_len, salt, fast, false);
 }
 
 /// `fast`: the daemon's pipelined schedule with recheck-only passes
-/// (`fast_recheck`), the pressure toggled by the workload.
-fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
+/// (`fast_recheck`), the pressure toggled by the workload. `unfiltered`: the
+/// collector's pin and `since` rejects are off (`propose_unfiltered`), so the
+/// proposals the filters would drop (a segment only a pin reaches, one only
+/// the oldest retained FULL reaches) are condemned and only the recheck
+/// stands between them and a delete.
+fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered: bool) {
     let cases = env("LUNIX_GC_CASES", 48);
     let ops = env("LUNIX_GC_OPS", 300) as usize;
     let mut runner = TestRunner::new(Config {
@@ -294,6 +442,7 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
                     ..crate::config::GcConfig::daemon()
                 };
             }
+            cfg.gc.propose_unfiltered = unfiltered;
             let mut s = Sim::new(cfg);
             total_passes.set(total_passes.get() + run_ops(&mut s, &ops)?);
             check_quiescent(&mut s)?;
@@ -315,6 +464,22 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
         "gc oracle: orphan_deps deferred {orphan_deferred} segment delete verdicts, {seg_deletes} allowed"
     );
     eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
+    let (condemned, uncondemned, deleted) = PROPOSED.with(std::cell::Cell::get);
+    let (only_pin, only_old) = EXCLUSIVE.with(std::cell::Cell::get);
+    eprintln!("gc oracle: proposals condemned that only a pin reached {only_pin}, only the oldest retained FULL {only_old}");
+    if unfiltered {
+        assert!(
+            only_pin > 0 && only_old > 0,
+            "the unfiltered oracle condemned no segment only a pin ({only_pin}) or only the oldest retained FULL ({only_old}) reaches"
+        );
+    }
+    eprintln!(
+        "gc oracle: proposals condemned {condemned}, un-condemned by a recheck {uncondemned}, deleted {deleted}"
+    );
+    assert!(
+        condemned > 0 && uncondemned > 0 && deleted > 0,
+        "the proposals exercised nothing: condemned {condemned}, un-condemned {uncondemned}, deleted {deleted}"
+    );
     if fast {
         assert!(
             fast_passes > 0 && fast_deleted > 0,
@@ -367,4 +532,21 @@ fn oracle_fast_recheck_16k_id16() {
 #[test]
 fn oracle_fast_recheck_64k_id32() {
     oracle_with(64 << 10, IdLen::ThirtyTwo, 7, true);
+}
+
+/// The proposals' own filters off: only the recheck stands between an
+/// arbitrary proposal and a delete (milestone condemncut, review S2).
+#[test]
+fn oracle_unfiltered_proposals_16k_id16() {
+    oracle_cfg(16 << 10, IdLen::Sixteen, 8, false, true);
+}
+
+#[test]
+fn oracle_unfiltered_proposals_64k_id32() {
+    oracle_cfg(64 << 10, IdLen::ThirtyTwo, 9, false, true);
+}
+
+#[test]
+fn oracle_unfiltered_proposals_with_recheck_passes_16k_id16() {
+    oracle_cfg(16 << 10, IdLen::Sixteen, 10, true, true);
 }

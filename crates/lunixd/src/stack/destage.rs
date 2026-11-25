@@ -130,6 +130,7 @@ pub fn map_outcome(o: M9Outcome) -> DestageOutcome {
         seal_busy_ns: s.seal_busy_ns,
         seal_wait_ns: s.seal_wait_ns,
         seal_stall_ns: s.seal_stall_ns,
+        map_ns: s.map_ns,
         extent_auth_failures: s.extent_auth_failures,
     }
 }

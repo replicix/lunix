@@ -9,6 +9,7 @@ mod liveness;
 mod oracle;
 mod orphandeps;
 mod pipeline;
+mod propose;
 mod recheck;
 mod refs;
 mod review;

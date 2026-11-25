@@ -54,7 +54,7 @@ struct Run {
 /// `--truncate-tip` on the simulated volume: drop the tip FULL, delete every
 /// segment and pack above the predecessor's high-water mark, rebuild the
 /// index from the segments left, and read every root back.
-fn truncate_tip_and_check(s: &mut Sim) -> Result<(), String> {
+pub(crate) fn truncate_tip_and_check(s: &mut Sim) -> Result<(), String> {
     let n = s.retained.len();
     assert!(n >= 2, "a predecessor");
     let kept = s.retained[..n - 1].to_vec();

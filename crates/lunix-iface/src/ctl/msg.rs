@@ -909,6 +909,21 @@ pub struct WritePathStatus {
     pub last_cut_bytes: u64,
     /// How long the last cut took, C1 to C9, milliseconds.
     pub last_cut_ms: u64,
+    /// Cuts that drained journal bytes, since the attach (a forced FULL or a
+    /// cut that only applies GC moves drains none and is not counted): with
+    /// the two sums below, the cut time per journal byte exactly, not
+    /// sampled.
+    pub cuts: u64,
+    /// The journal bytes of those cuts, summed.
+    pub cut_bytes_sum: u64,
+    /// Their durations, C1 to C9, summed, microseconds.
+    pub cut_us_sum: u64,
+    /// The time the map transactions of all cuts took, nanoseconds, and the
+    /// chunks of all cuts (`map_ns` per chunk is their quotient; the cut
+    /// counters above fit the cost per journal byte with the map separated).
+    pub cut_map_ns_sum: u64,
+    /// See `cut_map_ns_sum`.
+    pub cut_chunks_sum: u64,
     /// Segment seals run since the attach (ADR-33 T8: they run beside the
     /// packer, up to a bound).
     pub seals: u64,

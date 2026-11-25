@@ -29,8 +29,8 @@ use lunix_format::{IdLen, SegId};
 use lunix_gc::{FloorSource, Gc, GcConfig};
 use lunix_iface::block::{BlockEngine, IoOp};
 use lunix_iface::gc::{
-    Collector, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcStats, GcStatusSnapshot,
-    GcView, MarkCondemned, Moved, RefsState, RefsStats, TipRefs,
+    Collector, DeadSince, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcStats,
+    GcStatusSnapshot, GcView, MarkReport, Moved, RefsState, RefsStats,
 };
 use lunix_iface::store::SegmentStore;
 use lunix_iface::Result;
@@ -49,9 +49,19 @@ impl FloorSource for NoFloor {
     }
 }
 
-/// Engine settings for `RETAIN` retained FULLs; the table in shadow mode or
-/// off. Eager compaction (threshold 0.9) and the smallest grace.
-fn cfg<const RETAIN: u32, const SHADOW: bool>(c: &mut EngineConfig) {
+/// The table's mode in a run, and whether the collector compacts: `OFF` and
+/// `SHADOW` compact eagerly (threshold 0.9); `ON` is the active mode, and
+/// `ON_PLAIN` / `OFF_PLAIN` (the two arms of the equivalence test) compact
+/// nothing, so that two runs end with the same segment ids.
+const OFF: u8 = 0;
+const SHADOW: u8 = 1;
+const ON: u8 = 2;
+const ON_PLAIN: u8 = 3;
+const OFF_PLAIN: u8 = 4;
+
+/// Engine settings for `RETAIN` retained FULLs and one of the modes above.
+/// The smallest grace.
+fn cfg<const RETAIN: u32, const MODE: u8>(c: &mut EngineConfig) {
     c.gc_budget = Some(GcBudget {
         max_duration: Duration::from_secs(1),
         max_bytes: 1 << 30,
@@ -61,24 +71,39 @@ fn cfg<const RETAIN: u32, const SHADOW: bool>(c: &mut EngineConfig) {
         grace: Duration::from_secs(10),
         read_timeout: Duration::ZERO,
         rate_bytes_per_s: 1 << 30,
-        live_threshold: 0.9,
+        live_threshold: if MODE == ON_PLAIN || MODE == OFF_PLAIN {
+            0.001
+        } else {
+            0.9
+        },
         chunk_size: CS,
         id_len: IdLen::Sixteen,
     });
     c.retain_last = RETAIN;
-    if SHADOW {
-        c.gc_condemn_on_cut = CondemnOnCut::Shadow;
-    }
+    c.gc_condemn_on_cut = match MODE {
+        SHADOW => CondemnOnCut::Shadow,
+        ON | ON_PLAIN => CondemnOnCut::On,
+        _ => CondemnOnCut::Off,
+    };
 }
 
-fn tweak(retain: u32, shadow: bool) -> fn(&mut EngineConfig) {
-    match (retain, shadow) {
-        (1, false) => cfg::<1, false>,
-        (1, true) => cfg::<1, true>,
-        (3, false) => cfg::<3, false>,
-        (3, true) => cfg::<3, true>,
-        (_, false) => cfg::<2, false>,
-        (_, true) => cfg::<2, true>,
+fn tweak(retain: u32, mode: u8) -> fn(&mut EngineConfig) {
+    match (retain, mode) {
+        (1, OFF) => cfg::<1, OFF>,
+        (1, SHADOW) => cfg::<1, SHADOW>,
+        (1, ON) => cfg::<1, ON>,
+        (1, ON_PLAIN) => cfg::<1, ON_PLAIN>,
+        (1, _) => cfg::<1, OFF_PLAIN>,
+        (3, OFF) => cfg::<3, OFF>,
+        (3, SHADOW) => cfg::<3, SHADOW>,
+        (3, ON) => cfg::<3, ON>,
+        (3, ON_PLAIN) => cfg::<3, ON_PLAIN>,
+        (3, _) => cfg::<3, OFF_PLAIN>,
+        (_, OFF) => cfg::<2, OFF>,
+        (_, SHADOW) => cfg::<2, SHADOW>,
+        (_, ON) => cfg::<2, ON>,
+        (_, ON_PLAIN) => cfg::<2, ON_PLAIN>,
+        (_, _) => cfg::<2, OFF_PLAIN>,
     }
 }
 
@@ -196,14 +221,12 @@ impl Collector for Oracle {
     fn set_tip_refs(&mut self, on: bool) {
         self.inner.set_tip_refs(on);
     }
-    fn take_mark_started(&mut self) -> Option<lunix_format::CommitSeq> {
-        self.inner.take_mark_started()
+    fn take_mark_report(&mut self) -> Option<MarkReport> {
+        self.inner.take_mark_report()
     }
-    fn take_tip_refs(&mut self) -> Option<TipRefs> {
-        self.inner.take_tip_refs()
-    }
-    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
-        self.inner.take_mark_condemned()
+    fn propose_dead(&mut self, v: &GcView<'_>, dead: &[DeadSince]) -> bool {
+        self.check(v);
+        self.inner.propose_dead(v, dead)
     }
 }
 
@@ -229,6 +252,12 @@ enum Op {
     Urgent,
     /// The process dies and the volume is opened again (the table is new).
     Reopen(u8),
+    /// A snapshot pin on the newest commit: the table knows the tip only, so
+    /// nothing may be offered while it exists, and the retained root it adds
+    /// names segments the tip does not once the tip moves on.
+    Pin,
+    /// The pins are removed.
+    Unpin,
 }
 
 fn ops(pool: u8) -> impl Strategy<Value = Vec<Op>> {
@@ -241,6 +270,8 @@ fn ops(pool: u8) -> impl Strategy<Value = Vec<Op>> {
             8 => Just(Op::Tick),
             1 => Just(Op::Urgent),
             1 => any::<u8>().prop_map(Op::Reopen),
+            2 => Just(Op::Pin),
+            2 => Just(Op::Unpin),
         ],
         1..64,
     )
@@ -261,6 +292,16 @@ struct Cov {
     dedup_hits: u64,
     compacted: u64,
     offered: u64,
+    /// Segments proposals condemned, un-condemned by a recheck, deleted;
+    /// offers withheld for a pin.
+    condemned: u64,
+    uncondemned: u64,
+    proposal_deleted: u64,
+    pin_blocked: u64,
+    /// Ticks that ran with a pin present, and proposals condemned in them
+    /// (must be 0).
+    pinned_ticks: u64,
+    pinned_condemned: u64,
     confirmed: u64,
     rebases: u64,
     reopens: u64,
@@ -303,10 +344,15 @@ fn run(
     mk: &dyn Fn() -> Box<dyn Collector>,
     script: &[Op],
     retain: u32,
-    shadow: bool,
+    mode: u8,
 ) -> std::result::Result<Run, TestCaseError> {
+    let shadow = mode != OFF && mode != OFF_PLAIN;
+    // The equivalence arms write data no earlier write had: a flagged
+    // segment is never a dedup target, so with repeated data the two modes
+    // would store different copies (never wrong data, but other files).
+    let unique = mode == ON_PLAIN || mode == OFF_PLAIN;
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
-    v.tweak = tweak(retain, shadow);
+    v.tweak = tweak(retain, mode);
     let log = Arc::new(OracleLog::default());
     *lock(&v.collector) = Some(oracle(&v, mk(), &log));
     let mut r = v.open().map_err(|e| e.0).expect("open");
@@ -314,14 +360,42 @@ fn run(
     let mut cov = Cov::default();
     let mut seed = 5_000u64;
     let cs = u64::from(CS);
-    let tick = |v: &Vol, r: &mut Running, obs: &mut Vec<Obs>| -> Result<(), TestCaseError> {
+    let condemned_now = |r: &Running| r.engine.gc_status_handle().get().reclaim.proposal_condemned;
+    let tick = |v: &Vol,
+                r: &mut Running,
+                obs: &mut Vec<Obs>,
+                pinned: bool,
+                cov: &mut Cov|
+     -> Result<(), TestCaseError> {
         v.clock.advance(Duration::from_secs(11));
+        let before = condemned_now(r);
         r.engine
             .commit_now(false)
             .map_err(|e| TestCaseError::fail(format!("cut: {e}")))?;
         r.engine
             .tick()
             .map_err(|e| TestCaseError::fail(format!("tick: {e}")))?;
+        if pinned {
+            // The pin rule: no proposal is taken while a pin exists.
+            cov.pinned_ticks += 1;
+            let n = condemned_now(r) - before;
+            cov.pinned_condemned += n;
+            prop_assert_eq!(n, 0, "a proposal was condemned while a pin existed");
+        }
+        if mode == ON || mode == ON_PLAIN {
+            let rc = r.engine.gc_status_handle().get().reclaim;
+            prop_assert_eq!(
+                rc.proposal_rejected_early,
+                0,
+                "the engine's lag and the collector's keep_floor disagree"
+            );
+            prop_assert_eq!(rc.propose_errors, 0);
+            prop_assert_eq!(
+                rc.proposal_named,
+                0,
+                "a proposed segment was named by a retained root (the lag rule)"
+            );
+        }
         if shadow {
             let t = refs_of(r);
             prop_assert_eq!(t.drift_segments, 0, "the table differed from a mark");
@@ -338,15 +412,48 @@ fn run(
     let account = |r: &Running, cov: &mut Cov, last: Option<&Obs>| {
         let t = refs_of(r);
         cov.offered += t.shadow_would_propose;
+        cov.pin_blocked += t.pin_blocked;
+        let rc = r.engine.gc_status_handle().get().reclaim;
+        cov.condemned += rc.proposal_condemned;
+        cov.uncondemned += rc.proposal_uncondemned;
+        cov.proposal_deleted += rc.proposal_deleted;
         cov.confirmed += t.shadow_confirmed;
         cov.rebases += t.rebases;
         cov.dedup_hits += r.engine.stats().dedup_hits;
         cov.compacted += last.map_or(0, |o| o.stats.segments_compacted);
     };
+    let mut pinned: Vec<lunix_iface::store::PinRoot> = Vec::new();
     for op in script {
         match *op {
+            Op::Pin => {
+                let tip = lunix_iface::store::CommitStore::list(&r.store)
+                    .expect("commits")
+                    .iter()
+                    .map(|c| c.seq)
+                    .max();
+                if let Some(commit_seq) = tip {
+                    pinned = vec![lunix_iface::store::PinRoot {
+                        kind: lunix_iface::store::PinKind::Snapshot,
+                        name: format!("snap-{}", commit_seq.0),
+                        commit_seq,
+                        deadline: None,
+                    }];
+                    r.store.set_pins(pinned.clone());
+                }
+                // The engine reads the pins at most once a second: a pin made
+                // within the second of an offer is caught by the collector's
+                // own check (and would trip the oracle, which sees the offer
+                // first), so the clock moves past the cache.
+                v.clock.advance(Duration::from_secs(2));
+            }
+            Op::Unpin => {
+                pinned.clear();
+                r.store.set_pins(Vec::new());
+                v.clock.advance(Duration::from_secs(2));
+            }
             Op::Write(c, p) => {
-                let d = pattern(u64::from(p), CS as usize);
+                seed += 1;
+                let d = pattern(if unique { seed } else { u64::from(p) }, CS as usize);
                 prop_assert!(r
                     .write(usize::from(c) % 2, u64::from(c) * cs, &d, false)
                     .is_ok());
@@ -355,7 +462,14 @@ fn run(
                 seed += 1;
                 // The pool of a dedup-heavy run is small: the same block
                 // again; a compaction-heavy one is nearly all distinct.
-                let d = pattern(if p < 8 { 900 + u64::from(p) } else { seed }, 4096);
+                let d = pattern(
+                    if p < 8 && !unique {
+                        900 + u64::from(p)
+                    } else {
+                        seed
+                    },
+                    4096,
+                );
                 let off = u64::from(c) * cs + u64::from(b) * 4096;
                 prop_assert!(r.write(usize::from(c) % 2, off, &d, false).is_ok());
             }
@@ -368,7 +482,7 @@ fn run(
                     .map_err(|e| TestCaseError::fail(format!("cut: {e}")))?;
                 obs.push(observe(&r));
             }
-            Op::Tick => tick(&v, &mut r, &mut obs)?,
+            Op::Tick => tick(&v, &mut r, &mut obs, !pinned.is_empty(), &mut cov)?,
             Op::Urgent => {
                 v.clock.advance(Duration::from_secs(11));
                 // A mark in a call that made no offer. What it returns
@@ -385,13 +499,26 @@ fn run(
                 v.absorb(p, u64::from(s));
                 *lock(&v.collector) = Some(oracle(&v, mk(), &log));
                 r = v.open().map_err(|e| e.0).expect("reopen");
+                r.store.set_pins(pinned.clone());
                 obs.push(observe(&r));
             }
         }
     }
-    // Let the collector finish whatever it started.
-    for _ in 0..8 {
-        tick(&v, &mut r, &mut obs)?;
+    // Let the collector finish whatever it started, with the pins gone: the
+    // volume converges (the equivalence test compares what is left).
+    pinned.clear();
+    r.store.set_pins(Vec::new());
+    // A recheck mark that finds a segment dead which no earlier mark
+    // condemned does not condemn it (a new tip does): new data rolls the
+    // retained window past everything, and both arms see the same writes.
+    for _ in 0..6 {
+        seed += 1;
+        let d = pattern(seed, CS as usize);
+        prop_assert!(r.write(0, (CHUNKS - 1) * cs, &d, false).is_ok());
+        tick(&v, &mut r, &mut obs, false, &mut cov)?;
+    }
+    for _ in 0..14 {
+        tick(&v, &mut r, &mut obs, false, &mut cov)?;
     }
     let data = r.read_all();
     let refs = refs_of(&r);
@@ -414,12 +541,12 @@ fn case(
     total: &Cell<Cov>,
 ) -> std::result::Result<(), TestCaseError> {
     let mk = move || -> Box<dyn Collector> { Box::new(collector(pipeline)) };
-    let on = run(&mk, script, retain, true)?;
+    let on = run(&mk, script, retain, SHADOW)?;
     prop_assert_eq!(on.refs.state, RefsState::Ready);
     prop_assert_eq!(on.refs.drift_segments, 0);
     prop_assert!(on.refs.rebases >= 1, "no mark ran");
     // Shadow changes nothing the collector decides.
-    let off = run(&mk, script, retain, false)?;
+    let off = run(&mk, script, retain, OFF)?;
     prop_assert_eq!(&on.obs, &off.obs);
     prop_assert!(on.data == off.data);
     prop_assert_eq!(off.refs, RefsStats::default());
@@ -428,6 +555,51 @@ fn case(
     t.compacted += on.cov.compacted;
     t.offered += on.cov.offered;
     t.confirmed += on.cov.confirmed;
+    t.rebases += on.cov.rebases;
+    t.reopens += on.cov.reopens;
+    t.urgent += on.cov.urgent;
+    t.checked += on.cov.checked;
+    t.skipped += on.cov.skipped;
+    t.pin_blocked += on.cov.pin_blocked;
+    t.pinned_ticks += on.cov.pinned_ticks;
+    t.pinned_condemned += on.cov.pinned_condemned;
+    total.set(t);
+    Ok(())
+}
+
+/// One case of the active mode: `on` against off. The proposals change
+/// when segments are condemned and deleted, never what stays: both runs
+/// read the same data and, once the pins are gone and the collector has
+/// finished, hold the same segments (nothing compacts, nothing dedups, so
+/// the ids are the same). The oracle runs in the `on` arm at every offer;
+/// the engine and the collector agree on the lag (no early rejection); no
+/// proposal is taken in a tick that has a pin.
+fn case_active(
+    script: &[Op],
+    retain: u32,
+    pipeline: bool,
+    total: &Cell<Cov>,
+) -> std::result::Result<(), TestCaseError> {
+    let mk = move || -> Box<dyn Collector> { Box::new(collector(pipeline)) };
+    let on = run(&mk, script, retain, ON_PLAIN)?;
+    prop_assert_eq!(on.refs.state, RefsState::Ready);
+    prop_assert_eq!(on.refs.drift_segments, 0);
+    let off = run(&mk, script, retain, OFF_PLAIN)?;
+    prop_assert!(on.data == off.data, "the volumes read different data");
+    let (a, b) = (on.obs.last(), off.obs.last());
+    prop_assert_eq!(
+        a.map(|o| (&o.segments, o.condemned_pending)),
+        b.map(|o| (&o.segments, o.condemned_pending)),
+        "the volumes did not converge to the same files"
+    );
+    let mut t = total.get();
+    t.offered += on.cov.offered;
+    t.condemned += on.cov.condemned;
+    t.uncondemned += on.cov.uncondemned;
+    t.proposal_deleted += on.cov.proposal_deleted;
+    t.pin_blocked += on.cov.pin_blocked;
+    t.pinned_ticks += on.cov.pinned_ticks;
+    t.pinned_condemned += on.cov.pinned_condemned;
     t.rebases += on.cov.rebases;
     t.reopens += on.cov.reopens;
     t.urgent += on.cov.urgent;
@@ -442,6 +614,109 @@ fn cases() -> u32 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(48)
+}
+
+/// The active mode on volumes where ids move (dedup, compaction, restarts,
+/// urgent passes, pins): data equal to `off`, the ground-truth oracle at every
+/// offer, no early rejection, no lag-rule witness. A wrong proposal is
+/// possible here (a chunk id live elsewhere than the entries hint), so
+/// `proposal_uncondemned` is counted, not bounded to 0.
+fn case_active_moving(
+    script: &[Op],
+    retain: u32,
+    pipeline: bool,
+    total: &Cell<Cov>,
+) -> std::result::Result<(), TestCaseError> {
+    let mk = move || -> Box<dyn Collector> { Box::new(collector(pipeline)) };
+    let on = run(&mk, script, retain, ON)?;
+    prop_assert_eq!(on.refs.state, RefsState::Ready);
+    prop_assert_eq!(on.refs.drift_segments, 0);
+    let off = run(&mk, script, retain, OFF)?;
+    prop_assert!(on.data == off.data, "the volumes read different data");
+    let mut t = total.get();
+    t.condemned += on.cov.condemned;
+    t.uncondemned += on.cov.uncondemned;
+    t.proposal_deleted += on.cov.proposal_deleted;
+    t.pin_blocked += on.cov.pin_blocked;
+    t.pinned_ticks += on.cov.pinned_ticks;
+    t.pinned_condemned += on.cov.pinned_condemned;
+    t.dedup_hits += on.cov.dedup_hits;
+    t.compacted += on.cov.compacted;
+    t.reopens += on.cov.reopens;
+    t.urgent += on.cov.urgent;
+    t.checked += on.cov.checked;
+    t.skipped += on.cov.skipped;
+    total.set(t);
+    Ok(())
+}
+
+fn drive_active_moving(pool: u8) -> Cov {
+    let total = Cell::new(Cov::default());
+    let mut runner = TestRunner::new(RunnerConfig {
+        cases: cases(),
+        ..RunnerConfig::default()
+    });
+    runner
+        .run(
+            &(ops(pool), 1u32..4, any::<bool>()),
+            |(script, retain, pipeline)| case_active_moving(&script, retain, pipeline, &total),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    total.get()
+}
+
+#[test]
+fn the_active_mode_is_safe_where_ids_move_dedup_and_compaction() {
+    let (d, c) = (drive_active_moving(3), drive_active_moving(200));
+    eprintln!("active, dedup-heavy: {d:?}\nactive, compaction-heavy: {c:?}");
+    assert!(d.dedup_hits > 0 && c.compacted > 0, "{d:?} {c:?}");
+    assert!(d.condemned + c.condemned > 0, "{d:?} {c:?}");
+    // `uncondemned` (the by-id class: a chunk id live elsewhere than the
+    // entries hint) is reported, not required: 1 500 cases of either pool
+    // never made one (the compaction re-hints always landed; the class needs
+    // a lost re-hint, a crash with moves pending). The collector-level tests
+    // and the oracle cover a wrong proposal by offering one.
+    for x in [d, c] {
+        assert_eq!(x.pinned_condemned, 0, "{x:?}");
+        assert!(x.checked > 0 && x.skipped == 0, "{x:?}");
+    }
+}
+
+fn drive_active() -> Cov {
+    let total = Cell::new(Cov::default());
+    let mut runner = TestRunner::new(RunnerConfig {
+        cases: cases(),
+        ..RunnerConfig::default()
+    });
+    runner
+        .run(
+            &(ops(200), 1u32..4, any::<bool>()),
+            |(script, retain, pipeline)| case_active(&script, retain, pipeline, &total),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    total.get()
+}
+
+/// The active mode over random workloads with pins, restarts and urgent
+/// passes: the proposals condemn, the rechecks delete, nothing a root reaches
+/// is lost, the volumes end with the same files as without the mode, and no
+/// proposal is taken while a pin exists.
+#[test]
+fn the_active_mode_converges_to_the_same_files_and_obeys_the_pin_rule() {
+    let c = drive_active();
+    eprintln!("active coverage: {c:?}");
+    assert!(c.condemned > 0, "no proposal condemned anything: {c:?}");
+    assert!(
+        c.proposal_deleted > 0,
+        "no proposed segment was deleted: {c:?}"
+    );
+    assert!(c.pinned_ticks > 0, "no tick ran with a pin: {c:?}");
+    assert!(c.pin_blocked > 0, "a pin never held an offer back: {c:?}");
+    assert_eq!(c.pinned_condemned, 0, "{c:?}");
+    assert_eq!(c.uncondemned, 0, "no id moves without compaction: {c:?}");
+    assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
+    assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
 
 fn drive(pool: u8) -> Cov {
@@ -515,25 +790,21 @@ impl Collector for Skewed {
     fn set_tip_refs(&mut self, on: bool) {
         Collector::set_tip_refs(&mut self.0, on);
     }
-    fn take_mark_started(&mut self) -> Option<lunix_format::CommitSeq> {
-        Collector::take_mark_started(&mut self.0)
-    }
-    fn take_tip_refs(&mut self) -> Option<TipRefs> {
-        let mut t = Collector::take_tip_refs(&mut self.0)?;
-        if let Some(e) = t.refs.first_mut() {
-            e.1 += 1;
+    fn take_mark_report(&mut self) -> Option<MarkReport> {
+        let mut r = Collector::take_mark_report(&mut self.0)?;
+        for f in &mut r.finished {
+            if let Some(e) = f.refs.refs.first_mut() {
+                e.1 += 1;
+            }
         }
-        Some(t)
-    }
-    fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
-        Collector::take_mark_condemned(&mut self.0)
+        Some(r)
     }
 }
 
 #[test]
 fn a_wrong_mark_report_is_found_counted_and_repaired() {
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
-    v.tweak = tweak(2, true);
+    v.tweak = tweak(2, SHADOW);
     *lock(&v.collector) = Some(Box::new(Skewed(collector(false))));
     let mut r = v.open().map_err(|e| e.0).expect("open");
     for c in 0..4u64 {
@@ -561,7 +832,7 @@ fn a_wrong_mark_report_is_found_counted_and_repaired() {
 #[test]
 fn shadow_mode_switches_the_collectors_counting_on_by_itself() {
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
-    v.tweak = tweak(2, true);
+    v.tweak = tweak(2, SHADOW);
     *lock(&v.collector) = Some(Box::new(collector(false)));
     let mut r = v.open().map_err(|e| e.0).expect("open");
     assert!(r.write(0, 0, &pattern(1, CS as usize), false).is_ok());
@@ -575,7 +846,7 @@ fn shadow_mode_switches_the_collectors_counting_on_by_itself() {
     assert!(t.rebases >= 1, "{t:?}");
 
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
-    v.tweak = tweak(2, false);
+    v.tweak = tweak(2, OFF);
     *lock(&v.collector) = Some(Box::new(collector(false)));
     let mut r = v.open().map_err(|e| e.0).expect("open");
     assert!(r.write(0, 0, &pattern(1, CS as usize), false).is_ok());
@@ -590,7 +861,7 @@ fn shadow_mode_switches_the_collectors_counting_on_by_itself() {
     );
     // Shadow without a collector: nothing to compare with, nothing kept.
     let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
-    v.tweak = tweak(2, true);
+    v.tweak = tweak(2, SHADOW);
     let mut r = v.open().map_err(|e| e.0).expect("open");
     assert!(r.write(0, 0, &pattern(1, CS as usize), false).is_ok());
     r.engine.commit_now(false).expect("cut");
@@ -624,8 +895,8 @@ fn the_shadow_check_offers_what_the_marks_condemn() {
         }
     }
     let mk = || -> Box<dyn Collector> { Box::new(collector(true)) };
-    let on = run(&mk, &script, 2, true).expect("run");
-    let off = run(&mk, &script, 2, false).expect("run");
+    let on = run(&mk, &script, 2, SHADOW).expect("run");
+    let off = run(&mk, &script, 2, OFF).expect("run");
     assert_eq!(on.obs, off.obs);
     let t = on.refs;
     eprintln!("{t:?} {:?}", on.cov);
@@ -649,4 +920,36 @@ fn the_shadow_check_offers_what_the_marks_condemn() {
     assert!(t.shadow_confirmed > 0 && t.shadow_confirmed_bytes >= t.shadow_confirmed);
     let last = on.obs.last().expect("obs");
     assert!(last.stats.bytes_freed > 0, "the collector deleted nothing");
+}
+
+/// The cut counters of the gate: cuts that drained journal bytes, their bytes
+/// and their time, cumulative (the cost per journal byte is then exact, not
+/// sampled). A cut that drains nothing is not counted.
+#[test]
+fn the_cut_counters_sum_the_cuts_that_drained_journal_bytes() {
+    let mut v = Vol::create(CS, CHUNKS + 4, 2, JournalMode::Mixed(3));
+    v.tweak = tweak(2, OFF);
+    *lock(&v.collector) = Some(Box::new(collector(false)));
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let s0 = r.engine.cut_stats();
+    assert_eq!((s0.cuts, s0.cut_bytes_sum, s0.cut_us_sum), (0, 0, 0));
+    let mut last = s0;
+    let mut bytes = 0;
+    for i in 0..3u64 {
+        let d = pattern(40 + i, CS as usize);
+        assert!(r.write(0, i * u64::from(CS), &d, false).is_ok());
+        r.engine.commit_now(false).expect("cut");
+        let s = r.engine.cut_stats();
+        assert_eq!(s.cuts, last.cuts + 1, "one more cut");
+        assert!(s.cut_bytes_sum > last.cut_bytes_sum);
+        assert_eq!(s.cut_bytes_sum, bytes + s.last_cut_bytes);
+        bytes = s.cut_bytes_sum;
+        assert!(s.cut_us_sum >= last.cut_us_sum);
+        last = s;
+    }
+    // Nothing to drain: a cut that commits without journal bytes (a forced
+    // FULL) is not in the sums.
+    r.engine.commit_now(true).expect("forced cut");
+    let s = r.engine.cut_stats();
+    assert_eq!((s.cuts, s.cut_bytes_sum), (last.cuts, last.cut_bytes_sum));
 }

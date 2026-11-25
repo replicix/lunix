@@ -258,8 +258,42 @@ struct Spec {
     seed: u64,
     phase: String,
     progress: PathBuf,
-    /// The recheck-only arm (`GcConfig::fast_recheck`).
-    fast: bool,
+    /// Which arm of the loop (the collector's schedule).
+    arm: Arm,
+}
+
+/// The schedules the loops run the collector on. Every arm runs with
+/// `gc_condemn_on_cut = on` and `gc_fast_recheck` on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Arm {
+    /// A pass every second (the daemon's pipelined schedule); the proposals
+    /// of the table come between passes.
+    Plain,
+    /// Recheck-only passes without pressure (`fast_recheck_always`) between
+    /// regular passes that come at most every 5 s (milestone fastrecheck).
+    Recheck,
+    /// Condemn-on-cut (milestone condemncut): regular passes only every 20 s,
+    /// so what is condemned between them comes from the proposals, and the
+    /// recheck-only passes delete it; the proposal points are killed too.
+    Condemn,
+}
+
+impl Arm {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Recheck => "recheck",
+            Self::Condemn => "condemn",
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        match s {
+            "recheck" => Self::Recheck,
+            "condemn" => Self::Condemn,
+            _ => Self::Plain,
+        }
+    }
 }
 
 impl Spec {
@@ -275,13 +309,13 @@ impl Spec {
             .map(|k| k.display().to_string())
             .unwrap_or_default();
         let s = format!(
-            "voldir={}\nmode={mode}\ncs={}\nkey_file={key}\nseed={}\nphase={}\nprogress={}\nfast={}\n",
+            "voldir={}\nmode={mode}\ncs={}\nkey_file={key}\nseed={}\nphase={}\nprogress={}\narm={}\n",
             self.voldir.display(),
             self.cs,
             self.seed,
             self.phase,
             self.progress.display(),
-            u8::from(self.fast)
+            self.arm.name()
         );
         std::fs::write(path, s).expect("write spec");
     }
@@ -304,7 +338,7 @@ impl Spec {
             seed: get("seed").parse().expect("seed"),
             phase: get("phase").to_owned(),
             progress: PathBuf::from(get("progress")),
-            fast: get("fast") == "1",
+            arm: Arm::parse(get("arm")),
         }
     }
 }
@@ -321,37 +355,51 @@ fn gc_tune(c: &mut EngineConfig) {
 /// (`GcConfig::daemon`, gcrate review M-2); `LUNIX_GC_PIPELINE=0` runs the
 /// whole sequence for every pass instead.
 ///
-/// `recheck`: the recheck-only arm (milestone fastrecheck): recheck-only
-/// passes without waiting for pressure, between regular passes that come at
-/// most every 5 s, so the new point `gc.recheck.before_delete` and the
-/// deletes of such a pass are reached.
+/// `Arm::Recheck`: recheck-only passes without waiting for pressure, between
+/// regular passes that come at most every 5 s, so the point
+/// `gc.recheck.before_delete` and the deletes of such a pass are reached.
+/// `Arm::Condemn`: the same recheck-only passes, and regular passes only
+/// every 20 s, so the proposals condemn most of what is garbage.
 ///
-/// Every arm runs with `gc_condemn_on_cut = shadow` and `gc_fast_recheck` on
-/// (milestone refs: the configuration the condemn-on-cut stage will ship
-/// with); the plain arms see no pressure, so their recheck-only passes only
-/// run in the recheck arm, which forces them.
-fn fast_gc(o: &mut lunixd::stack::OpenParams, recheck: bool) {
-    o.gc_condemn_on_cut = lunix_engine::CondemnOnCut::Shadow;
+/// Every arm runs with `gc_condemn_on_cut = on` and `gc_fast_recheck` on
+/// (milestone condemncut: the configuration the active stage will ship with);
+/// the plain arms see no pressure, so their recheck-only passes only run in
+/// the recheck and condemn arms, which force them.
+fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
+    // The recheck arm stays on `shadow` (that mode keeps its kill coverage,
+    // and its `shadow_unconfirmed_named` is a real witness); the others run
+    // `on`, whose witness is `proposal_named`.
+    o.gc_condemn_on_cut = if arm == Arm::Recheck {
+        lunix_engine::CondemnOnCut::Shadow
+    } else {
+        lunix_engine::CondemnOnCut::On
+    };
     o.gc_fast_recheck = Some(Duration::from_secs(1));
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
     } else {
         GcConfig::daemon()
     };
-    o.gc = Some(if recheck {
-        GcConfig {
+    o.gc = Some(match arm {
+        Arm::Recheck => GcConfig {
             pass_interval: Duration::from_secs(10),
             busy_interval: Duration::from_secs(5),
             fast_recheck: Some(Duration::from_secs(1)),
             fast_recheck_always: true,
             ..base
-        }
-    } else {
-        GcConfig {
+        },
+        Arm::Condemn => GcConfig {
+            pass_interval: Duration::from_secs(20),
+            busy_interval: Duration::from_secs(20),
+            fast_recheck: Some(Duration::from_secs(1)),
+            fast_recheck_always: true,
+            ..base
+        },
+        Arm::Plain => GcConfig {
             pass_interval: Duration::from_secs(1),
             busy_interval: Duration::from_secs(1),
             ..base
-        }
+        },
     });
 }
 
@@ -397,6 +445,88 @@ fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
         t.shadow_unconfirmed_named, 0,
         "{what}: an offered segment was named by a retained root (the lag rule): {t:?}"
     );
+    // The active mode: the engine's lag and the collector's rule agree (no
+    // proposal was rejected as early), no proposal failed, and a wrong one
+    // (a chunk id live elsewhere than the entries hint: compaction moved it)
+    // is rare.
+    let r = stack.engine.gc_status_handle().get().reclaim;
+    assert_eq!(
+        r.proposal_rejected_early, 0,
+        "{what}: a proposal named a cut a retained FULL may still reach: {r:?}"
+    );
+    assert_eq!(r.propose_errors, 0, "{what}: a proposal failed: {r:?}");
+    assert_eq!(
+        r.proposal_named, 0,
+        "{what}: a proposed segment was named by a retained root (the lag rule): {r:?}"
+    );
+    assert!(
+        r.proposal_condemned <= r.proposals_offered,
+        "{what}: more condemned than offered: {r:?}"
+    );
+    assert!(
+        r.proposal_uncondemned * 4 <= r.proposal_condemned + 8,
+        "{what}: too many wrong proposals: {r:?}"
+    );
+}
+
+/// The condemn arm after a recovery: the volume takes overwrites and cuts,
+/// the table's zeros age for two cuts, proposals condemn the dead segments
+/// and the recheck-only passes delete them; `actual` follows the writes.
+fn proposals_after_recovery(
+    stack: &lunixd::stack::VolumeStack,
+    d: &mut Driver,
+    actual: &mut [u8],
+    cs: u64,
+    what: &str,
+) {
+    let size = actual.len() as u64;
+    let g0 = stack.engine.gc_status_handle().get().reclaim;
+    for round in 0..6u64 {
+        for i in 0..6u64 {
+            let off = ((i * 11) % (size / cs)) * cs;
+            let data = payload(0xc0de ^ (round << 8) ^ i, cs as usize);
+            assert!(
+                d.write((i % 2) as usize, off, &data, false).is_ok(),
+                "{what}: write for proposals"
+            );
+            actual[off as usize..off as usize + data.len()].copy_from_slice(&data);
+        }
+        assert!(d.flush(0).is_ok() && d.flush(1).is_ok(), "{what}: flush");
+        stack
+            .engine
+            .commit_now(true)
+            .unwrap_or_else(|e| panic!("{what}: cut for proposals: {e}"));
+    }
+    let start = Instant::now();
+    loop {
+        stack.engine.tick().expect("tick for proposals");
+        let r = stack.engine.gc_status_handle().get().reclaim;
+        if r.proposal_condemned > g0.proposal_condemned && r.proposal_deleted > g0.proposal_deleted
+        {
+            eprintln!(
+                "{what}: proposals after recovery: {} condemned, {} deleted, {} un-condemned, {} rejected early, {} calls took {} us (longest {} us), first proposal {:?} ms",
+                r.proposal_condemned - g0.proposal_condemned,
+                r.proposal_deleted - g0.proposal_deleted,
+                r.proposal_uncondemned - g0.proposal_uncondemned,
+                r.proposal_rejected_early,
+                r.propose_calls,
+                r.propose_us_sum,
+                r.propose_us_max,
+                stack
+                    .engine
+                    .gc_status_handle()
+                    .get()
+                    .refs
+                    .and_then(|t| t.first_proposal_ms),
+            );
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "{what}: no proposal condemned and deleted a segment after the overwrites: {r:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// Ticks the engine until the table is `Ready` (a pass is due at once after
@@ -417,10 +547,8 @@ fn wait_refs_ready(stack: &lunixd::stack::VolumeStack, what: &str) {
     }
 }
 
-fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, recheck: bool) {
-    let mut stack = vol
-        .open_with(move |o| fast_gc(o, recheck))
-        .expect("child open");
+fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::File, arm: Arm) {
+    let mut stack = vol.open_with(move |o| fast_gc(o, arm)).expect("child open");
     let mut d = Driver::new(&stack).expect("driver");
     // Recovery kept (and the first lane open synced) everything before.
     progress(prog, base, &d);
@@ -508,7 +636,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                 drop(d);
                 drop(stack);
                 stack = vol
-                    .open_with(move |o| fast_gc(o, recheck))
+                    .open_with(move |o| fast_gc(o, arm))
                     .expect("child reopen");
                 d = Driver::new(&stack).expect("driver");
                 // Every request so far was recovered and synced.
@@ -589,13 +717,13 @@ fn gc_kill_child() {
         .open(&spec.progress)
         .expect("progress file");
     match spec.phase.as_str() {
-        "prep" => execute(&vol, &p.prep, 0, &mut prog, spec.fast),
+        "prep" => execute(&vol, &p.prep, 0, &mut prog, spec.arm),
         _ => execute(
             &vol,
             &p.run,
             p.prep.iter().filter(is_op).count(),
             &mut prog,
-            spec.fast,
+            spec.arm,
         ),
     }
     lunix_iface::crashpoint::dump_counts().expect("dump counts");
@@ -694,7 +822,7 @@ struct Config {
     mode: CryptoMode,
     cs: u32,
     seed: u64,
-    fast: bool,
+    arm: Arm,
 }
 
 struct Prepared {
@@ -716,7 +844,7 @@ fn prepare(cfg: &Config, dir: &Path) -> Prepared {
         seed: cfg.seed,
         phase: "prep".into(),
         progress: progress.clone(),
-        fast: cfg.fast,
+        arm: cfg.arm,
     };
     match spawn_child(&spec, dir, Some(PREP_KILL)) {
         ChildEnd::Killed => {}
@@ -740,7 +868,7 @@ fn run_child(cfg: &Config, p: &Prepared, crash_at: Option<&str>) -> ChildEnd {
         seed: cfg.seed,
         phase: "run".into(),
         progress: p.progress.clone(),
-        fast: cfg.fast,
+        arm: cfg.arm,
     };
     spawn_child(&spec, &p.dir, crash_at)
 }
@@ -936,7 +1064,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     let stack = p
         .vol
         .open_with(|o| {
-            fast_gc(o, cfg.fast);
+            fast_gc(o, cfg.arm);
             o.on_journal_damage = OnJournalDamage::Refuse;
         })
         .unwrap_or_else(|e| panic!("{what}: open after the kill (refuse): {e}"));
@@ -1045,17 +1173,45 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         "{what}: {} mark(s) rebased the table after the cut taken at {r0}: {t:?}",
         t.rebases - r0
     );
+    let rc = stack.engine.gc_status_handle().get().reclaim;
     eprintln!(
-        "{what}: refs after recovery: rebases {} (cut at {r0}), drift_segments {}, report_mismatches {}, shadow_unconfirmed_named {}",
-        t.rebases, t.drift_segments, t.report_mismatches, t.shadow_unconfirmed_named
+        "{what}: refs after recovery: rebases {} (cut at {r0}), drift_segments {}, report_mismatches {}, shadow_unconfirmed_named {}; \
+         proposals offered {}, condemned {}, deleted {}, un-condemned {}, rejected early {}, pinned {}, kept {}",
+        t.rebases,
+        t.drift_segments,
+        t.report_mismatches,
+        t.shadow_unconfirmed_named,
+        rc.proposals_offered,
+        rc.proposal_condemned,
+        rc.proposal_deleted,
+        rc.proposal_uncondemned,
+        rc.proposal_rejected_early,
+        rc.proposal_rejected_pins,
+        rc.proposal_rejected_kept
+    );
+    // The share of wrong proposals (the gate's bound is 5 %; this loop's
+    // volume is tiny, the bound above is loose for that reason).
+    eprintln!(
+        "{what}: proposals un-condemned {} of {} condemned",
+        rc.proposal_uncondemned, rc.proposal_condemned
     );
     assert_refs_clean(&stack, what);
+    // After the counting run and the kills at a point a proposal passes
+    // (the others recover the same way; each phase costs about a minute).
+    if cfg.arm == Arm::Condemn
+        && ["counting run", "propose", "condemn"]
+            .iter()
+            .any(|k| what.contains(k))
+    {
+        proposals_after_recovery(&stack, &mut d, &mut actual, cs, what);
+        assert_refs_clean(&stack, what);
+    }
     drop(d);
     close(stack).unwrap_or_else(|e| panic!("{what}: close: {e}"));
     let stack = p
         .vol
         .open_with(|o| {
-            fast_gc(o, cfg.fast);
+            fast_gc(o, cfg.arm);
             o.on_journal_damage = OnJournalDamage::Refuse;
         })
         .unwrap_or_else(|e| panic!("{what}: second open: {e}"));
@@ -1126,12 +1282,24 @@ const EXPECTED_UNREACHED: &[&str] = &["gc.recheck.before_delete"];
 /// What the recheck-only arm kills at: its own point and the deletes (which a
 /// recheck-only pass runs too).
 const RECHECK_ARM_POINTS: [&str; 3] = ["gc.recheck.", "gc.delete.", "gc.commit_delete."];
+/// What the condemn arm kills at: the proposals (the two points of
+/// `propose_dead`, the list write and the index flags they pass), the
+/// recheck-only point and the deletes.
+const CONDEMN_ARM_POINTS: [&str; 6] = [
+    "gc.propose.",
+    "gc.condemn.",
+    "index.after_condemn_flag",
+    "gc.recheck.",
+    "gc.delete.",
+    "gc.commit_delete.",
+];
 
 fn kill_loop(mode: CryptoMode, cs: u32) {
-    kill_loop_with(mode, cs, false);
+    kill_loop_with(mode, cs, Arm::Plain);
 }
 
-fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
+fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
+    let fast = arm != Arm::Plain;
     // fsck is part of every recovery check: a missing binary fails the loop.
     assert!(
         fsck_binary().is_some(),
@@ -1140,8 +1308,10 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
     // The recheck arm kills at the first, a middle and the last hit of its
     // points, whatever `LUNIX_KILL_HITS` says.
     let all_hits = fast || std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
-    let only: Vec<String> = if fast {
+    let only: Vec<String> = if arm == Arm::Recheck {
         RECHECK_ARM_POINTS.iter().map(|p| (*p).to_owned()).collect()
+    } else if arm == Arm::Condemn {
+        CONDEMN_ARM_POINTS.iter().map(|p| (*p).to_owned()).collect()
     } else {
         std::env::var("LUNIX_KILL_POINTS")
             .map(|v| v.split(',').map(str::to_owned).collect())
@@ -1150,12 +1320,16 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
     let cfg = Config {
         mode,
         cs,
-        seed: 0x6c17_0000 ^ u64::from(cs) ^ ((mode as u64) << 40) ^ (u64::from(fast) << 48),
-        fast,
+        seed: 0x6c17_0000 ^ u64::from(cs) ^ ((mode as u64) << 40) ^ ((arm as u64) << 48),
+        arm,
     };
     let tag = format!(
         "m17b-gckill-{}{mode:?}-{}k",
-        if fast { "recheck-" } else { "" },
+        if fast {
+            format!("{}-", arm.name())
+        } else {
+            String::new()
+        },
         cs >> 10
     )
     .to_lowercase();
@@ -1252,6 +1426,18 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
         // delete points keep the full requirement.
         let want = if fast && point.starts_with("gc.recheck.") {
             want.min(2)
+        } else if point.starts_with("gc.propose.") {
+            // A proposal needs the table ready, two cuts of lag and an idle
+            // collector: two or three hits in a run, and the count moves with
+            // the timing. One kill at the first hit is the requirement (the
+            // state after the first proposal: a few segments, an empty list);
+            // the condemn arm, whose regular passes are far apart, also needs
+            // a later hit when the counting run had one.
+            if arm == Arm::Condemn {
+                want.min(2)
+            } else {
+                want.min(1)
+            }
         } else {
             want
         };
@@ -1269,6 +1455,22 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, fast: bool) {
         assert!(
             reached.contains_key("gc.recheck.before_delete"),
             "the recheck-only pass was never run: {reached:?}"
+        );
+    }
+    // Proposals are the arm's purpose (and every arm's configuration): the
+    // counting run must have made some.
+    for p in [
+        "gc.propose.before_list_write",
+        "gc.propose.after_list_write",
+        "gc.propose.after_flags",
+    ] {
+        if arm == Arm::Recheck {
+            // That arm runs `shadow`: nothing is proposed.
+            break;
+        }
+        assert!(
+            counts.get(p).copied().unwrap_or(0) > 0,
+            "{p}: no proposal condemned anything in the counting run: {reached:?}"
         );
     }
     if only.is_empty() {
@@ -1318,15 +1520,23 @@ fn gc_kill_loop_encrypted_64k() {
 /// delete points (milestone fastrecheck).
 #[test]
 fn gc_kill_loop_recheck_plain_16k() {
-    kill_loop_with(CryptoMode::Plain, 16 << 10, true);
+    kill_loop_with(CryptoMode::Plain, 16 << 10, Arm::Recheck);
 }
 
 #[test]
 fn gc_kill_loop_recheck_plain_64k() {
-    kill_loop_with(CryptoMode::Plain, 64 << 10, true);
+    kill_loop_with(CryptoMode::Plain, 64 << 10, Arm::Recheck);
 }
 
 #[test]
 fn gc_kill_loop_recheck_integrity_16k() {
-    kill_loop_with(CryptoMode::Integrity, 16 << 10, true);
+    kill_loop_with(CryptoMode::Integrity, 16 << 10, Arm::Recheck);
+}
+
+/// The condemn-on-cut arm: regular passes far apart, so the proposals of the
+/// table condemn what dies and the recheck-only passes delete it; killed at
+/// the proposal points, the list write and flags they pass, and the deletes.
+#[test]
+fn gc_kill_loop_condemn_plain_16k() {
+    kill_loop_with(CryptoMode::Plain, 16 << 10, Arm::Condemn);
 }

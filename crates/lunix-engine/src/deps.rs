@@ -80,10 +80,11 @@ pub trait EngineHooks: Send + Sync {
         let _ = entering;
     }
 
-    /// The reference table (shadow mode) offered `offered` for condemnation
-    /// at the tip `tip`, under the coordinator mutex and right before the
-    /// collector's step of the same call (so the collector sees the same
-    /// retained roots). Not called for an empty offer.
+    /// The reference table (mode `shadow` or `on`) offered `offered` for
+    /// condemnation at the tip `tip`, under the coordinator mutex and inside
+    /// the collector call that follows (so the collector sees the same
+    /// retained roots), before the proposal and the step. Not called for an
+    /// empty offer, nor while a pin exists (nothing is offered then).
     fn shadow_offered(&self, tip: CommitSeq, offered: &[SegId]) {
         let _ = (tip, offered);
     }

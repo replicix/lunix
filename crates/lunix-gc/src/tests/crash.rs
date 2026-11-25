@@ -31,10 +31,21 @@ fn next(z: &mut u64) -> u64 {
 
 /// Runs `n` random actions. Returns `Err(point)` when a GC call stopped at
 /// the armed crash point (the caller reopens).
-fn actions(s: &mut Sim, z: &mut u64, n: usize) -> Result<(), &'static str> {
+///
+/// `propose`: some of the writes are replaced by offers to `propose_dead`
+/// (the dead segments, or every segment: live ones too).
+fn actions(s: &mut Sim, z: &mut u64, n: usize, propose: bool) -> Result<(), &'static str> {
     for _ in 0..n {
         let r = next(z) % 100;
         let res = match r {
+            30..=39 if propose => {
+                let offer = if r.is_multiple_of(2) {
+                    s.dead_segments()
+                } else {
+                    s.all_segments()
+                };
+                s.propose(&offer).map(|_| ())
+            }
             0..=39 => {
                 s.write(next(z) % 64, next(z) % 30);
                 Ok(())
@@ -78,15 +89,26 @@ fn actions(s: &mut Sim, z: &mut u64, n: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Whether a point is reached only through a proposal.
+fn is_proposal_point(p: &str) -> bool {
+    p.starts_with("gc.propose.")
+}
+
 fn sweep(
     chunk_size: u32,
     id_len: IdLen,
     workloads: u64,
     pipeline: bool,
     fast: bool,
+    propose: bool,
 ) -> BTreeMap<&'static str, u64> {
     let mut hits: BTreeMap<&'static str, u64> = BTreeMap::new();
     for (pi, &point) in CRASH_POINTS.iter().enumerate() {
+        // The sweeps without proposals do not reach the proposal points; the
+        // ones with proposals sweep every point.
+        if is_proposal_point(point) && !propose {
+            continue;
+        }
         for w in 0..workloads {
             let mut z = (pi as u64) << 32 | w;
             let mut cfg = SimCfg::new(chunk_size, id_len);
@@ -104,7 +126,7 @@ fn sweep(
             s.hooks.arm(point, 1 + w % 3);
             let mut crashed = None;
             for _ in 0..40 {
-                if let Err(p) = actions(&mut s, &mut z, 25) {
+                if let Err(p) = actions(&mut s, &mut z, 25, propose) {
                     crashed = Some(p);
                     break;
                 }
@@ -133,7 +155,7 @@ fn sweep(
                 .unwrap_or_else(|e| panic!("after the pass that follows {point}: {e}"));
             s.check_ledger()
                 .unwrap_or_else(|e| panic!("after the pass that follows {point}: {e}"));
-            actions(&mut s, &mut z, 60).expect("no crash armed after the reopen");
+            actions(&mut s, &mut z, 60, propose).expect("no crash armed after the reopen");
             check_quiescent(&mut s)
                 .unwrap_or_else(|e| panic!("convergence after {point} (workload {w}): {e}"));
         }
@@ -142,19 +164,22 @@ fn sweep(
 }
 
 fn check(chunk_size: u32, id_len: IdLen) {
-    check_with(chunk_size, id_len, false, false);
+    check_with(chunk_size, id_len, false, false, false);
 }
 
-fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool, fast: bool) {
+fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool, fast: bool, propose: bool) {
     let workloads = std::env::var("LUNIX_GC_CRASH_WORKLOADS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let hits = sweep(chunk_size, id_len, workloads, pipeline, fast);
+    let hits = sweep(chunk_size, id_len, workloads, pipeline, fast, propose);
     eprintln!(
-        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}, fast {fast}: {hits:?}"
+        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}, fast {fast}, propose {propose}: {hits:?}"
     );
     for p in CRASH_POINTS {
+        if is_proposal_point(p) && !propose {
+            continue;
+        }
         let needed = if id_len == IdLen::Zero && p.starts_with("gc.compact.") {
             // Lean volumes never compact.
             0
@@ -191,32 +216,51 @@ fn every_crash_point_lean() {
 /// delete with their condemn mark as the recheck.
 #[test]
 fn every_crash_point_pipelined_16k() {
-    check_with(16 << 10, IdLen::Sixteen, true, false);
+    check_with(16 << 10, IdLen::Sixteen, true, false, false);
 }
 
 #[test]
 fn every_crash_point_pipelined_64k() {
-    check_with(64 << 10, IdLen::ThirtyTwo, true, false);
+    check_with(64 << 10, IdLen::ThirtyTwo, true, false, false);
 }
 
 #[test]
 fn every_crash_point_pipelined_lean() {
-    check_with(16 << 10, IdLen::Zero, true, false);
+    check_with(16 << 10, IdLen::Zero, true, false, false);
 }
 
 /// The recheck-only passes (milestone fastrecheck): the point
 /// `gc.recheck.before_delete` and every delete point inside such a pass.
 #[test]
 fn every_crash_point_with_recheck_passes_16k() {
-    check_with(16 << 10, IdLen::Sixteen, true, true);
+    check_with(16 << 10, IdLen::Sixteen, true, true, false);
 }
 
 #[test]
 fn every_crash_point_with_recheck_passes_64k() {
-    check_with(64 << 10, IdLen::ThirtyTwo, true, true);
+    check_with(64 << 10, IdLen::ThirtyTwo, true, true, false);
 }
 
 #[test]
 fn every_crash_point_with_recheck_passes_lean() {
-    check_with(16 << 10, IdLen::Zero, true, true);
+    check_with(16 << 10, IdLen::Zero, true, true, false);
+}
+
+/// Proposals (milestone condemncut): the two points of `propose_dead`, and
+/// the existing condemn and index points reached through a proposal. Offers
+/// are the dead segments or every segment (live ones included); the recheck
+/// is the judge and the volume converges.
+#[test]
+fn every_crash_point_with_proposals_16k() {
+    check_with(16 << 10, IdLen::Sixteen, true, true, true);
+}
+
+#[test]
+fn every_crash_point_with_proposals_64k() {
+    check_with(64 << 10, IdLen::ThirtyTwo, true, true, true);
+}
+
+#[test]
+fn every_crash_point_with_proposals_lean() {
+    check_with(16 << 10, IdLen::Zero, true, true, true);
 }

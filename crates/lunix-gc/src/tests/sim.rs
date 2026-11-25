@@ -23,7 +23,9 @@ use lunix_format::{
 };
 use lunix_iface::clock::{Clock, ManualClock};
 use lunix_iface::crypto::{CommitCodec, EncodingDesc, ExtentCodec, OpenExpect, OpenOutput};
-use lunix_iface::gc::{Collector, GcBudget, GcParams, GcProgress, GcView, Moved, TipInfo};
+use lunix_iface::gc::{
+    Collector, DeadSince, GcBudget, GcParams, GcProgress, GcView, Moved, TipInfo,
+};
 use lunix_iface::index::{ChunkIndex, Confirm};
 use lunix_iface::map::{entry_hint, BlockMap, ChunkNo};
 use lunix_iface::space::{SpaceGate, SpaceKind};
@@ -392,6 +394,55 @@ impl Sim {
         let p = r?;
         self.moved.extend(p.moved.iter().copied());
         Ok(p)
+    }
+
+    /// Offers `dead` to the collector the way the engine does (between
+    /// calls, with the map at the tip). `Err` when the collector stopped at
+    /// a crash point (`hooks.crashed()` says where); else whether the offer
+    /// was consumed.
+    pub(crate) fn propose(&mut self, dead: &[DeadSince]) -> Result<bool> {
+        let mut gc = std::mem::replace(
+            &mut self.gc,
+            Gc::new(Arc::new(self.store.clone()), self.cfg.gc),
+        );
+        let r = self.with_view(|v| gc.propose_dead(v, dead));
+        self.gc = gc;
+        if self.hooks.crashed().is_some() {
+            return Err(lunix_iface::Error::Io(std::io::Error::other(
+                "stopped at a crash point",
+            )));
+        }
+        Ok(r)
+    }
+
+    /// The segments no root of the model reaches (a correct offer, as the
+    /// engine's table would make it once the lag is over), each with
+    /// `since` 0: the earliest cut, so only the collector's other rules
+    /// judge it.
+    pub(crate) fn dead_segments(&self) -> Vec<DeadSince> {
+        let reach = self.model_reachable();
+        self.existing()
+            .into_iter()
+            .filter(|(k, id)| *k == 1 && !reach.contains(&(1, *id)))
+            .filter_map(|(_, id)| ObjId::from_raw(id).ok())
+            .map(|seg| DeadSince {
+                seg,
+                since: CommitSeq(0),
+            })
+            .collect()
+    }
+
+    /// Every segment that exists, as an adversarial offer: live ones too.
+    pub(crate) fn all_segments(&self) -> Vec<DeadSince> {
+        self.existing()
+            .into_iter()
+            .filter(|(k, _)| *k == 1)
+            .filter_map(|(_, id)| ObjId::from_raw(id).ok())
+            .map(|seg| DeadSince {
+                seg,
+                since: CommitSeq(0),
+            })
+            .collect()
     }
 
     pub(crate) fn urgent(&mut self, want: u64) -> Result<GcProgress> {
