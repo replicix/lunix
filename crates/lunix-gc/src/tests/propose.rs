@@ -566,6 +566,104 @@ fn an_urgent_pass_less_than_the_grace_floor_after_a_proposal_deletes_none_of_it(
     s.check_roots().unwrap();
 }
 
+// ------------------------------------------------------- B1 with a proposal
+
+/// The review's B1: a wrong proposal flags a segment that is live by id
+/// through a gone hint. While it is flagged dedup cannot hit it, so the rewrite
+/// of the same content makes a second copy `N` that only the tip names; the
+/// recheck then finds the first segment `S` dead. The entries that relied on
+/// `S` hint a gone segment (a move was lost), so no `deps` held `N`: without
+/// the orphan rule `S` is deleted and, after `--truncate-tip` (or a crash),
+/// `N` is gone with nothing left to read.
+///
+/// Script: chunks 0..8 share `Y`; `Y` is compacted into `S`, the move of
+/// chunk 1 is lost (a restart drops pending moves), `Y` is deleted once `S` is
+/// durable; chunks 0 and 2 are overwritten and the window rolls, so nothing
+/// but chunk 1's gone hint reaches `S`. Then (with `propose`) `S` is offered
+/// and accepted; chunk 5 gets chunk 1's content (a cut names the new copy
+/// `N`, no further cut); the delete passes run; the volume is truncated back
+/// to the predecessor and every root is read.
+fn b1_script(propose: bool) -> (Result<(), String>, bool, bool) {
+    use super::orphandeps::truncate_tip_and_check;
+    let mut c = SimCfg::new(CS, IdLen::Sixteen);
+    c.segment_target = u64::from(CS) * 8;
+    let mut s = Sim::new(c);
+    let hint = |s: &Sim, ci: u64| {
+        let e = s
+            .map
+            .get(lunix_iface::map::ChunkNo(ci))
+            .unwrap()
+            .expect("populated");
+        lunix_iface::map::entry_hint(&e)
+    };
+    for i in 0..8 {
+        s.write(i, 200 + i);
+    }
+    s.commit().unwrap();
+    let y = hint(&s, 0).seg;
+    let h1 = hint(&s, 1);
+    for i in 3..8 {
+        s.write(i, 300 + i);
+    }
+    s.commit().unwrap();
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    s.clock.advance(Duration::from_secs(5));
+    s.pass().unwrap();
+    let s_seg = s.moved[0].new.seg;
+    s.moved.retain(|m| m.old != h1);
+    s.commit().unwrap();
+    assert_eq!(hint(&s, 1).seg, y, "the entry of chunk 1 still hints Y");
+    for _ in 0..12 {
+        if !segs(&s).contains(&y) {
+            break;
+        }
+        s.commit().unwrap();
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    assert!(!segs(&s).contains(&y) && segs(&s).contains(&s_seg));
+    s.write(0, 400);
+    s.write(2, 402);
+    s.commit().unwrap();
+    for _ in 0..4 {
+        s.commit().unwrap();
+    }
+    if propose {
+        let offer = [DeadSince {
+            seg: s_seg,
+            since: CommitSeq(0),
+        }];
+        assert!(s.propose(&offer).unwrap());
+        assert!(listed(&s).contains(&s_seg), "the wrong proposal was taken");
+    }
+    // Chunk 1's content again, at chunk 5.
+    s.write(5, 201);
+    s.commit().unwrap();
+    let n_new = segs(&s).iter().any(|x| x.raw() > s_seg.raw());
+    for _ in 0..4 {
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+    }
+    let alive = segs(&s).contains(&s_seg);
+    (truncate_tip_and_check(&mut s), alive, n_new)
+}
+
+#[test]
+fn a_wrong_proposal_cannot_delete_the_only_copy_a_gone_hint_relies_on() {
+    let (read, s_alive, _) = b1_script(true);
+    read.unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
+    assert!(s_alive, "S outlives the copy only the tip names");
+}
+
+/// The same script without the proposal: dedup hits `S`, nothing is lost.
+#[test]
+fn control_without_the_proposal_the_predecessor_reads_back() {
+    let (read, _, _) = b1_script(false);
+    read.unwrap_or_else(|e| panic!("the predecessor is unreadable after truncate-tip: {e}"));
+}
+
 // -------------------------------------------------------------- the witness
 
 /// The lag-rule witness of mode `on` (`proposal_named`): a proposed segment

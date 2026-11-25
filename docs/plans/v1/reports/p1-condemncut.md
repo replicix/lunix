@@ -182,3 +182,23 @@ product's own and the unreadable chunk is real after a crash (it is readable bef
 15's early death, so the same hole is reachable on main without proposals (a pin or retained root that hints at a segment
 that was deleted, plus a compaction of the later copy). `p1/orphandeps` (an `orphan_deps` set with a deferral in `Judge`)
 closes it; rerun this oracle at 400 cases on the merged tree.
+
+## After the orphandeps merge (origin/main 62be9f23: `p1/recheckoracle` and `p1/orphandeps`)
+
+* **B1 test with a proposal** (`propose.rs`, `a_wrong_proposal_cannot_delete_the_only_copy_a_gone_hint_relies_on` and its
+  control): `Y` is compacted into `S`, the move of chunk 1 is lost, `Y` is deleted, chunks 0 and 2 are overwritten and the
+  window rolls; `S` (live only through chunk 1's gone hint) is proposed and accepted (a wrong proposal); chunk 5 gets
+  chunk 1's content (dedup cannot hit the flagged `S`, so a second copy `N` is written, named by the tip alone); the delete
+  passes run with no further cut; truncate-tip back to the predecessor and every root is read. Passes with the orphan rule;
+  `control_without_the_proposal_the_predecessor_reads_back` passes too. **With the deferral disabled** (`orphan_pending`
+  forced `false`) the proposal test fails ("the predecessor is unreadable after truncate-tip: root 13 chunk 1") together
+  with the two orphandeps tests that cover the same hole; restored. (`truncate_tip_and_check` of `orphandeps.rs` is now
+  `pub(crate)`; the file is in `[condemncut]` for that word.)
+* **All ten gc oracles at `LUNIX_GC_CASES=400` are green**, `oracle_unfiltered_proposals_16k_id16` and the two recheck-only
+  oracles included (59.6 s): the 400-case failure analysed above is closed by the orphan rule, and the ledger failure by
+  `recheckoracle`. Unfiltered witnesses at 400: only-a-pin 1 077-1 217, only-the-oldest-FULL 3 231-4 184.
+* **Kill loops** (release, `LUNIX_KILL_HITS=all`, `on`, `gc_fast_recheck` on, four at once, CPUs 0-15): condemn arm 30 kills
+  (3 429 s), plain 16K 74 kills (5 268 s), integrity 16K 74 (5 214 s), plain 64K 74 (5 367 s); all green, fsck clean.
+* `tools/ci.sh` was green on the previous tree. On the merged tree a first run failed `stack_throttle::
+  with_the_band_off_the_volume_is_never_paced` (state `Stop`, headroom 0, one space waiter) while four kill loops and the
+  ci ran on the same disk; the test passed 3 of 3 alone under the same load and the clean rerun is below.

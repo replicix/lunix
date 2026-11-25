@@ -738,6 +738,7 @@ paths = [
   "crates/lunix-gc/src/tests/crash.rs",
   "crates/lunix-gc/src/tests/mod.rs",
   "crates/lunix-gc/src/tests/oracle.rs",
+  "crates/lunix-gc/src/tests/orphandeps.rs",
   "crates/lunix-gc/src/tests/propose.rs",
   "crates/lunix-gc/src/tests/refs.rs",
   "crates/lunix-gc/src/tests/sim.rs",
