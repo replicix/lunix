@@ -755,6 +755,8 @@ paths = [
   "docs/reference/gc.md",
   "docs/plans/v1/reports/p1-condemncut.md",
   "tools/ci.sh",
+  "tools/ownership.toml",
+]
 
 # orphandeps: B1 sibling of the condemn-on-cut review (`Liveness::orphan_deps`,
 # a delete deferral while a copy relied on through a gone hint is not durable).

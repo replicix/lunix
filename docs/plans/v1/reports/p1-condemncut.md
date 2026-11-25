@@ -202,3 +202,7 @@ closes it; rerun this oracle at 400 cases on the merged tree.
 * `tools/ci.sh` was green on the previous tree. On the merged tree a first run failed `stack_throttle::
   with_the_band_off_the_volume_is_never_paced` (state `Stop`, headroom 0, one space waiter) while four kill loops and the
   ci ran on the same disk; the test passed 3 of 3 alone under the same load and the clean rerun is below.
+* Clean rerun of `tools/ci.sh` on the merged tree (all 16 CPUs, nothing else running): fmt, clippy (workspace and `lunixd` with
+  `testsupport,crashpoints`), the whole test run (no failure, `stack_throttle` included), the crashpoint legs and the stack
+  tests in release all passed; the last step, ownership, failed once because the merge resolution of `tools/ownership.toml`
+  had dropped the closing lines of `[condemncut]`; fixed, `tools/check-ownership.sh` reports "condemncut ok (35 changed paths)".
