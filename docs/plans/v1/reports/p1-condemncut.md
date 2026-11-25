@@ -151,3 +151,34 @@ Done on this branch (B1 is on `p1/orphandeps`; the B1 sim test, confirming scrip
 | nits | N1 `last_pass_changed` set when a proposal condemns; N2 four unused ownership paths removed; N3 `gc.md`; N4 `proposals_deferred` documented as calls; N5 `gc.md` (lines lost with an unwritable evidence object); N6 the warning says how many segments were dropped; N7 doc fixed. N8 left |
 
 Gate on this tree: `tools/ci.sh` green (CPUs 8-15, `-j 8`, 2 448 passed, 0 failed, ownership 34 paths); kill loops with `on` and `gc_fast_recheck` on, `LUNIX_KILL_HITS=all`: condemn arm 30 kills / 31 recoveries (3 403 s, all three `gc.propose.*` points killed at hits 1, 2 and 3), plain 16K 74 / 75 (5 315 s), integrity 16K 74 / 75 (5 384 s), and the recheck arm (now `shadow`) 15 / 16; all with fsck clean, `proposal_named == 0`, `proposal_rejected_early == 0`, `propose_errors == 0`, drift 0.
+
+## The unfiltered oracle failure at 400 cases (analysis, before the orphandeps merge)
+
+`oracle_unfiltered_proposals_16k_id16`, case with the flat map and the encrypted codec: 300 ops, fails at op 287 (`Crash`)
+with "root 13 chunk 9: unreadable (seg 0xf, off 49476)". Replayed deterministically from the shrunk input (a temporary test, not
+kept) with traces in `delete`, `propose_inner` and the un-condemn path:
+
+1. Segment 0xf (15) is proposed three times (800 s, 986 s, 1161 s; filters off) while live by id; each recheck un-condemns it
+   (`Referenced`). While it was flagged dedup could not hit it, so the content was written again elsewhere; the index moved off
+   it. A mark then condemned it (1305 s, kind Whole) and it was deleted at 1729 s (`deps {0x26, 0x2f}`, both named, `live 0`):
+   a legitimate delete of a dead segment, not a proposal's. The proposal's part is only that 15 died at all (without it dedup
+   hits 15 and it stays live).
+2. Roots 13 and 17 are pins (`s.pins [13, 17]`). Pin 13 hints chunk 9 at 15, which is now gone, so every read of it resolves
+   through the index by prefix.
+3. At 2141 s a pass (Whole) compacts segment 0x26 (38), where the index then held the only copy of that id, into the unnamed
+   outputs {0xb7 (183), 0xb8}: the index copy moves to 183 (off 49476, the same extent). The same pass deletes 0x26 (`live 0`,
+   `deps {0x76, 0x89}`, `named_high 180`: both deps named, rule satisfied). Before the crash the only index copy of the id is
+   in 0xb7, an unnamed output above `named_high`; pin 13 reads through it.
+4. `Crash`: the process dies; 0xb7 and 0xb8 are above the high-water mark and the open-time sweep removes them; the index
+   copy goes with them. Pin 13's hint points at gone 15: unreadable. (Commit 13 pinned, no retained FULL names the chunk.)
+
+**Classification: (a), the B1 hole**, in its compaction form (the review's "sibling"). The durability rule for a delete,
+`deps[source]`, is built only from entries whose hinted segment exists (`mark.rs:546-550`, `dep`:
+`self.existing.contains(&from)`; called from `stale` at `mark.rs:603-626`, line 614, and from `resolve` at line 585). Pin 13's
+entry hints at gone segment 15, so it contributes no dep: the copy in the unnamed output 183 is invisible to
+`segment_deletable` (`collector.rs:530-549`), and 0x26, the previous copy, is deleted while the new one is not durable below
+the tip. Not (b): every verdict followed the specified rules; not (c): the oracle's read through hint then index is the
+product's own and the unreadable chunk is real after a crash (it is readable before it). The proposal is a cause only of
+15's early death, so the same hole is reachable on main without proposals (a pin or retained root that hints at a segment
+that was deleted, plus a compaction of the later copy). `p1/orphandeps` (an `orphan_deps` set with a deferral in `Judge`)
+closes it; rerun this oracle at 400 cases on the merged tree.
