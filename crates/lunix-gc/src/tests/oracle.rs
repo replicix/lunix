@@ -310,6 +310,10 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
         })
         .unwrap();
     let (fast_passes, fast_deleted) = FAST.with(std::cell::Cell::get);
+    let (orphan_deferred, seg_deletes) = crate::collector::ORPHAN_STATS.with(std::cell::Cell::get);
+    eprintln!(
+        "gc oracle: orphan_deps deferred {orphan_deferred} segment delete verdicts, {seg_deletes} allowed"
+    );
     eprintln!("gc oracle: recheck-only passes {fast_passes}, segments they deleted {fast_deleted}");
     if fast {
         assert!(

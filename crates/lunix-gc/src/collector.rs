@@ -409,6 +409,15 @@ const EVIDENCE_PRUNE_PER_PASS: usize = 16;
 /// when a pass writes a new one (gc.md "the evidence object").
 const EVIDENCE_KEEP: usize = 1024;
 
+#[cfg(test)]
+thread_local! {
+    /// Per test thread: segment deletes deferred by `orphan_deps` and segment
+    /// deletes the judge allowed (the oracles print them to show the rule
+    /// does not stall deletes).
+    pub(crate) static ORPHAN_STATS: std::cell::Cell<(u64, u64)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
 /// Condemn, recheck and delete decisions over one mark.
 struct Judge<'a> {
     f: &'a Facts,
@@ -513,7 +522,11 @@ impl Judge<'_> {
             None => match obj {
                 ObjectRef::Segment(s) => match self.segment_deletable(s) {
                     Some(why) => Verdict::Defer(why, Deferral::ForFull),
-                    None => Verdict::Delete,
+                    None => {
+                        #[cfg(test)]
+                        ORPHAN_STATS.with(|c| c.set((c.get().0, c.get().1 + 1)));
+                        Verdict::Delete
+                    }
                 },
                 _ => Verdict::Delete,
             },
@@ -524,10 +537,26 @@ impl Judge<'_> {
         }
     }
 
+    /// Some live copy relied on through a gone hint is above `named_high` or
+    /// an unnamed output.
+    fn orphan_pending(&self) -> bool {
+        self.l
+            .orphan_deps
+            .iter()
+            .any(|d| d.raw() > self.f.named_high || self.outputs.contains(d))
+    }
+
     /// The delete-time index invariant for a segment: every copy its stale
     /// hints rely on must be in a segment a durable FULL named (at or below
     /// `named_high`) that is not an unnamed compaction output.
     fn segment_deletable(&self, s: SegId) -> Option<&'static str> {
+        // A copy an entry with a gone hint relies on that a durable FULL does
+        // not name yet: no segment's `deps` holds it, so any delete waits.
+        if self.orphan_pending() {
+            #[cfg(test)]
+            ORPHAN_STATS.with(|c| c.set((c.get().0 + 1, c.get().1)));
+            return Some(NOT_DURABLE_YET);
+        }
         let deps = self.l.deps.get(&s)?;
         let blocking: Vec<&SegId> = deps
             .iter()
@@ -2490,5 +2519,90 @@ impl Collector for Gc {
 
     fn take_mark_condemned(&mut self) -> Option<MarkCondemned> {
         self.mark_condemned.take()
+    }
+}
+
+#[cfg(test)]
+mod orphan_judge {
+    use super::*;
+    use lunix_iface::store::SegmentInfo;
+
+    fn seg(n: u64) -> SegId {
+        SegId::from_raw(n).expect("id")
+    }
+
+    fn facts(named_high: u64) -> Facts {
+        Facts {
+            named: BTreeSet::new(),
+            manifest: BTreeSet::new(),
+            retained: BTreeSet::new(),
+            hwm: 100,
+            named_high,
+            keep_floor: CommitSeq(0),
+            tip: CommitSeq(9),
+            tip_named: BTreeSet::new(),
+            floor: Some(None),
+        }
+    }
+
+    /// Segments 3 (dead) and 4 (live), listed; `orphans` as the mark found.
+    fn liveness(orphans: &[u64]) -> Liveness {
+        let mut l = Liveness {
+            segments: [3, 4]
+                .iter()
+                .map(|&n| SegmentInfo {
+                    seg: seg(n),
+                    size_bytes: 10,
+                })
+                .collect(),
+            orphan_deps: orphans.iter().map(|&n| seg(n)).collect(),
+            ..Liveness::default()
+        };
+        l.seg_live.insert(seg(4), 5);
+        l
+    }
+
+    fn verdict(named_high: u64, orphans: &[u64], outputs: &[u64], s: u64) -> Verdict {
+        let f = facts(named_high);
+        let l = liveness(orphans);
+        let outputs: BTreeSet<SegId> = outputs.iter().map(|&n| seg(n)).collect();
+        Judge {
+            f: &f,
+            l: &l,
+            outputs: &outputs,
+        }
+        .verdict(ObjectRef::Segment(seg(s)))
+    }
+
+    fn deferred(v: &Verdict) -> bool {
+        matches!(v, Verdict::Defer(w, Deferral::ForFull) if *w == NOT_DURABLE_YET)
+    }
+
+    #[test]
+    fn a_member_above_named_high_defers_the_delete() {
+        assert!(deferred(&verdict(10, &[11], &[], 3)));
+        assert!(deferred(&verdict(10, &[5, 40], &[], 3)));
+    }
+
+    #[test]
+    fn a_member_that_is_an_unnamed_output_defers_the_delete() {
+        assert!(deferred(&verdict(10, &[7], &[7], 3)));
+    }
+
+    #[test]
+    fn durable_members_and_an_empty_set_leave_the_delete_alone() {
+        assert!(matches!(verdict(10, &[], &[], 3), Verdict::Delete));
+        assert!(matches!(verdict(10, &[7, 10], &[], 3), Verdict::Delete));
+        // An output that is not a member changes nothing.
+        assert!(matches!(verdict(10, &[7], &[8], 3), Verdict::Delete));
+    }
+
+    #[test]
+    fn the_rule_never_turns_a_keep_into_a_delete_or_a_delete_into_a_keep() {
+        // A live segment is un-condemned whatever the set holds.
+        assert!(matches!(verdict(10, &[11], &[], 4), Verdict::Uncondemn(_)));
+        assert!(matches!(verdict(10, &[], &[], 4), Verdict::Uncondemn(_)));
+        // A segment that is gone stays gone.
+        assert!(matches!(verdict(10, &[11], &[], 9), Verdict::Gone));
     }
 }
