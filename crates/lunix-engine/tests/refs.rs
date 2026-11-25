@@ -390,6 +390,11 @@ fn run(
                 "the engine's lag and the collector's keep_floor disagree"
             );
             prop_assert_eq!(rc.propose_errors, 0);
+            prop_assert_eq!(
+                rc.proposal_named,
+                0,
+                "a proposed segment was named by a retained root (the lag rule)"
+            );
         }
         if shadow {
             let t = refs_of(r);
@@ -435,10 +440,16 @@ fn run(
                     }];
                     r.store.set_pins(pinned.clone());
                 }
+                // The engine reads the pins at most once a second: a pin made
+                // within the second of an offer is caught by the collector's
+                // own check (and would trip the oracle, which sees the offer
+                // first), so the clock moves past the cache.
+                v.clock.advance(Duration::from_secs(2));
             }
             Op::Unpin => {
                 pinned.clear();
                 r.store.set_pins(Vec::new());
+                v.clock.advance(Duration::from_secs(2));
             }
             Op::Write(c, p) => {
                 seed += 1;
@@ -603,6 +614,72 @@ fn cases() -> u32 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(48)
+}
+
+/// The active mode on volumes where ids move (dedup, compaction, restarts,
+/// urgent passes, pins): data equal to `off`, the ground-truth oracle at every
+/// offer, no early rejection, no lag-rule witness. A wrong proposal is
+/// possible here (a chunk id live elsewhere than the entries hint), so
+/// `proposal_uncondemned` is counted, not bounded to 0.
+fn case_active_moving(
+    script: &[Op],
+    retain: u32,
+    pipeline: bool,
+    total: &Cell<Cov>,
+) -> std::result::Result<(), TestCaseError> {
+    let mk = move || -> Box<dyn Collector> { Box::new(collector(pipeline)) };
+    let on = run(&mk, script, retain, ON)?;
+    prop_assert_eq!(on.refs.state, RefsState::Ready);
+    prop_assert_eq!(on.refs.drift_segments, 0);
+    let off = run(&mk, script, retain, OFF)?;
+    prop_assert!(on.data == off.data, "the volumes read different data");
+    let mut t = total.get();
+    t.condemned += on.cov.condemned;
+    t.uncondemned += on.cov.uncondemned;
+    t.proposal_deleted += on.cov.proposal_deleted;
+    t.pin_blocked += on.cov.pin_blocked;
+    t.pinned_ticks += on.cov.pinned_ticks;
+    t.pinned_condemned += on.cov.pinned_condemned;
+    t.dedup_hits += on.cov.dedup_hits;
+    t.compacted += on.cov.compacted;
+    t.reopens += on.cov.reopens;
+    t.urgent += on.cov.urgent;
+    t.checked += on.cov.checked;
+    t.skipped += on.cov.skipped;
+    total.set(t);
+    Ok(())
+}
+
+fn drive_active_moving(pool: u8) -> Cov {
+    let total = Cell::new(Cov::default());
+    let mut runner = TestRunner::new(RunnerConfig {
+        cases: cases(),
+        ..RunnerConfig::default()
+    });
+    runner
+        .run(
+            &(ops(pool), 1u32..4, any::<bool>()),
+            |(script, retain, pipeline)| case_active_moving(&script, retain, pipeline, &total),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+    total.get()
+}
+
+#[test]
+fn the_active_mode_is_safe_where_ids_move_dedup_and_compaction() {
+    let (d, c) = (drive_active_moving(3), drive_active_moving(200));
+    eprintln!("active, dedup-heavy: {d:?}\nactive, compaction-heavy: {c:?}");
+    assert!(d.dedup_hits > 0 && c.compacted > 0, "{d:?} {c:?}");
+    assert!(d.condemned + c.condemned > 0, "{d:?} {c:?}");
+    // `uncondemned` (the by-id class: a chunk id live elsewhere than the
+    // entries hint) is reported, not required: 1 500 cases of either pool
+    // never made one (the compaction re-hints always landed; the class needs
+    // a lost re-hint, a crash with moves pending). The collector-level tests
+    // and the oracle cover a wrong proposal by offering one.
+    for x in [d, c] {
+        assert_eq!(x.pinned_condemned, 0, "{x:?}");
+        assert!(x.checked > 0 && x.skipped == 0, "{x:?}");
+    }
 }
 
 fn drive_active() -> Cov {

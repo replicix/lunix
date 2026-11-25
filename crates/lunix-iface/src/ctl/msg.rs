@@ -918,6 +918,12 @@ pub struct WritePathStatus {
     pub cut_bytes_sum: u64,
     /// Their durations, C1 to C9, summed, microseconds.
     pub cut_us_sum: u64,
+    /// The time the map transactions of all cuts took, nanoseconds, and the
+    /// chunks of all cuts (`map_ns` per chunk is their quotient; the cut
+    /// counters above fit the cost per journal byte with the map separated).
+    pub cut_map_ns_sum: u64,
+    /// See `cut_map_ns_sum`.
+    pub cut_chunks_sum: u64,
     /// Segment seals run since the attach (ADR-33 T8: they run beside the
     /// packer, up to a bound).
     pub seals: u64,

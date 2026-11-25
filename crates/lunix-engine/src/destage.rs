@@ -92,6 +92,8 @@ pub struct DestageOutcome {
     pub seal_wait_ns: u64,
     /// Time the packer waited for a free seal slot.
     pub seal_stall_ns: u64,
+    /// Nanoseconds of the map transaction of the cut.
+    pub map_ns: u64,
     /// Extents whose tag, AEAD or id failed in the pipeline's own reads
     /// (base reads, dedup confirmation). Reads through `DestageCtx::reader`
     /// are already counted by the engine and must not be added here.

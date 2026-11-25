@@ -181,6 +181,14 @@ fn nothing_is_proposed_while_a_snapshot_pin_exists_and_proposals_resume_without_
             < pinned_segments + 64,
         "the store grew without bound"
     );
+    eprintln!(
+        "pin test: proposals {} calls took {} us (longest {} us), {} condemned, {} deleted",
+        r.propose_calls,
+        r.propose_us_sum,
+        r.propose_us_max,
+        r.proposal_condemned,
+        r.proposal_deleted
+    );
     let end = d.read_all(size).expect("read");
     for c in 0..CHUNKS / 2 {
         let want = payload(11 * 1_000 + c, CS as usize);

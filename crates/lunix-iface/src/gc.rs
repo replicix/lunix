@@ -575,7 +575,8 @@ pub struct GcReclaimStats {
     /// marks).
     pub propose_errors: u64,
     /// Calls the collector refused because a pass was running or it was not
-    /// ready: the engine offered the segments again later.
+    /// ready: the engine offered the segments again later. A count of calls
+    /// (one per step of a busy collector), not of segments.
     pub proposals_deferred: u64,
     /// Proposed segments a recheck un-condemned (a wrong proposal; it only
     /// costs a list write and a grace).
@@ -587,6 +588,22 @@ pub struct GcReclaimStats {
     /// Segments the marks themselves condemned (what no proposal had
     /// condemned first).
     pub mark_condemned_segments: u64,
+    /// The sizes in bytes of those (the marks' side of the share of proposals
+    /// in the condemned bytes).
+    pub mark_condemned_bytes: u64,
+    /// Proposed segments (still in their grace) that a later mark found named
+    /// by a retained root other than the tip: the lag rule broken. Always 0;
+    /// the witness in mode `on`, where the `shadow_*` figures are not kept. A
+    /// pin made after the proposal can raise it (the pin is such a root).
+    pub proposal_named: u64,
+    /// Proposal calls that did work (something was offered to a collector that
+    /// was idle and the call ran), their summed and longest time in
+    /// microseconds (real time, the whole call under the coordinator mutex).
+    pub propose_calls: u64,
+    /// See `propose_calls`.
+    pub propose_us_sum: u64,
+    /// See `propose_calls`.
+    pub propose_us_max: u64,
     /// The same three figures for the objects recheck-only passes deleted.
     /// The difference to the figures above is every other pass kind,
     /// urgent passes included (an urgent pass in the `open` state judges

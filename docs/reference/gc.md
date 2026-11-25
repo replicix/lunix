@@ -145,7 +145,8 @@ segments hinted at by the leaves it walks for those roots, `Liveness::older_refs
 is counted as *named by a retained root* (`shadow_unconfirmed_named`). That is
 the lag rule broken, not a design limit: **it is always 0**, pins or not
 (nothing is offered while one exists), and anything else is a bug in the table
-that blocks the active stage. It is a lower bound (a root
+that blocks the active stage. In mode `on` the `shadow_*` figures are not kept
+(nothing is offered to `judge`); the witness there is `proposal_named` (below). It is a lower bound (a root
 retired between the offer and the mark is not seen); the engine proptests check
 it exactly, with a ground-truth walk of every retained root at each offer.
 Segments a mark condemns that the table did not offer are *early by the mark*
@@ -189,7 +190,13 @@ or un-condemns it when a root of that mark reaches it (a table that is wrong
 costs one list write and one grace: `proposal_uncondemned`, and a log line
 with the reason). A table can be wrong without a bug: it counts hints, the
 mark counts the index's current copy of each chunk id, and they differ after
-compaction. The consumed offer leaves the table; the table's count of the
+compaction. **A long-lived snapshot or pin disables condemn-on-cut for the volume**: no offer
+is made while any pin exists (the table knows the tip only), so the segments
+keep waiting and the marks do all the condemning, as with the mode off. The
+pins file is read by the engine at most once a second (and not at all while the
+collector is busy); the collector reads it again for every offer it takes.
+
+The consumed offer leaves the table; the table's count of the
 time from a count reaching zero to the consumption is `condemn_lag`.
 `first_proposal_ms` and `first_proposal_delete_ms` (from attach) time the
 first segment condemned by a proposal and the first one deleted.
@@ -198,8 +205,10 @@ The condemn lines of proposals (`condemn`, reason `unreferenced`: the same
 vocabulary as a mark's) are **carried** and written first into the evidence
 object of the next pass, whatever its kind: one object per proposal would turn
 the 1 024 kept objects over in minutes. A crash loses the carried lines of a
-grace that was still running; the list file still has `condemned_at` and the
-`delete` line is written by the pass that deletes. `lunix gc --status` prints
+grace that was still running; so does a pass abandoned on an error whose
+evidence object cannot be written (the lines it took are lost with it); the
+list file still has `condemned_at` and the `delete` line is written by the pass
+that deletes. `lunix gc --status` prints
 the counters (`proposals`) and `refs timing`.
 
 Instruments for the gate that measures the mode (nothing here changes a
@@ -208,9 +217,24 @@ it is told (`gc: the engine's pressure level changed`, field `raised`) and of
 the grace in force (`gc: the grace in force changed`, `from_ms`, `to_ms`) at
 its first call after the change (the engine's own throttle lines are merged
 within 5 s); `first_proposal_ms` and `first_proposal_delete_ms` (above);
-`proposal_rejected_early` (must be 0); and the cumulative cut counters of the
+`proposal_rejected_early` (must be 0); `proposal_named` (must be 0: a proposed
+segment a later mark found named by a retained root other than the tip, the
+lag-rule witness of mode `on`; a pin made after the proposal can raise it);
+`propose_errors` (must be 0; a failed call drops its segments from the table's
+queue, the marks find them, and the once-only warning says how many);
+`mark_condemned_segments` and `mark_condemned_bytes` (the marks' side of the
+proposals' share of the condemned bytes); `propose_calls`, `propose_us_sum` and
+`propose_us_max` (real time of a call under the coordinator mutex; one listing
+of the segment directory per tip, dropped at every delete); one INFO line per
+offer taken (`refs: an offer was taken`, with the median and maximum of the
+time since each count reached zero) and one per proposed segment deleted (with
+its size and recheck lag), from which medians are computed; `proposals_deferred`
+is a count of calls (one per step of a busy collector), not of segments; and
+the cumulative cut counters of the
 write path (`write_path.cuts`, `cut_bytes_sum`, `cut_us_sum`: cuts that
-drained journal bytes, their bytes and their time, C1 to C9), from which the
+drained journal bytes, their bytes and their time, C1 to C9, and
+`cut_map_ns_sum` and `cut_chunks_sum`: the map transactions' time and the
+chunks of all cuts, so that `map_ns` per chunk can be told apart), from which the
 cut time per journal byte is exact over any window by the difference of two
 status reads.
 
@@ -579,6 +603,7 @@ count in `bytes`.
 | `gc.urgent.after_mark` | the urgent pass's mark is complete (nothing durable yet; one name per call site) |
 | `gc.condemn.after_list_write` | the list is durable, the index flags may be missing: they are set again (with a fresh grace) when the list is loaded (also reached through a proposal) |
 | `gc.propose.before_list_write` | a proposal, filtered: nothing written yet |
+| `gc.propose.after_list_write` | a proposal: the list is durable, the index flags are not (the state `gc.condemn.after_list_write` also names for a mark): the same recovery |
 | `gc.propose.after_flags` | a proposal: the list and the index flags are durable, the graces had not started: they start when the list is loaded |
 | `gc.recheck.before_delete` | a recheck-only pass: its condemn units are done, nothing deleted by this pass yet (the deletes hit the `gc.delete.*` points) |
 | `gc.delete.before_unlink` | nothing deleted |

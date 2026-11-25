@@ -17,6 +17,7 @@ pub const CRASH_POINTS: &[&str] = &[
     // list is written and after the index flags are durable. A proposal also
     // passes `gc.condemn.after_list_write` and `index.after_condemn_flag`.
     "gc.propose.before_list_write",
+    "gc.propose.after_list_write",
     "gc.propose.after_flags",
     // A recheck-only pass, after its condemn units and before its deletes
     // (its deletes hit the `gc.delete.*` sites too; this name proves the

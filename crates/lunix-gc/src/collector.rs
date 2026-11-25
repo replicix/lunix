@@ -653,6 +653,11 @@ pub struct Gc {
     carried: Evidence,
     /// The last error a proposal logged (once per distinct error).
     propose_error: Option<String>,
+    /// The sealed segments and their sizes at one tip, for the existence and
+    /// size lookups of proposals (one listing of the directory per tip, not
+    /// per call). Dropped at every delete; a segment sealed after the listing
+    /// is not in it and is rejected (a new segment is named by the tip).
+    seg_cache: Option<(CommitSeq, BTreeMap<SegId, u64>)>,
     /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
     /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
@@ -765,6 +770,7 @@ impl Gc {
             proposed: BTreeMap::new(),
             carried: Evidence::default(),
             propose_error: None,
+            seg_cache: None,
             last_pass_busy: false,
             last_mark: Duration::ZERO,
             last_aborted: false,
@@ -1688,10 +1694,13 @@ impl Gc {
     /// sizes), the ones live by id that no entry of the tip hints at, the
     /// dead ones already listed, and the ones an older retained root names.
     fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
-        self.reclaim.mark_condemned_segments += todo
-            .iter()
-            .filter(|(o, _)| matches!(o, ObjectRef::Segment(_)))
-            .count() as u64;
+        for (o, bytes) in todo {
+            if matches!(o, ObjectRef::Segment(_)) {
+                self.reclaim.mark_condemned_segments += 1;
+                self.reclaim.mark_condemned_bytes =
+                    self.reclaim.mark_condemned_bytes.saturating_add(*bytes);
+            }
+        }
         if !self.cfg.tip_refs {
             return;
         }
@@ -1703,7 +1712,7 @@ impl Gc {
             })
             .collect();
         // Named by a retained root other than the tip (and not by the tip).
-        let named = l
+        let named: Vec<SegId> = l
             .older_refs
             .iter()
             .filter(|s| !l.tip_refs.contains_key(*s))
@@ -1724,6 +1733,12 @@ impl Gc {
                 _ => None,
             })
             .collect();
+        // A proposed segment that a retained root other than the tip names:
+        // the lag rule broken (the witness of mode `on`).
+        self.reclaim.proposal_named += named
+            .iter()
+            .filter(|s| self.proposed.contains_key(*s))
+            .count() as u64;
         let condemned = l.roots.first().map(|r| MarkCondemned {
             tip: r.seq,
             segs,
@@ -1948,6 +1963,18 @@ impl Gc {
         p.2 += 1;
     }
 
+    /// The lag of a delete in milliseconds, as [`Gc::note_lag`] measures it
+    /// (for the per-event line of a proposed segment).
+    fn delete_lag_ms(&self, view: &GcView<'_>, obj: ObjectRef) -> u64 {
+        let Some(&start) = self.grace.get(&obj).filter(|&&t| t != Duration::MAX) else {
+            return 0;
+        };
+        let from = start
+            .saturating_add(self.used_grace)
+            .max(self.grace_changed);
+        u64::try_from(view.clock.monotonic().saturating_sub(from).as_millis()).unwrap_or(u64::MAX)
+    }
+
     /// Notes when `params.grace` changed (the lag figures start there).
     fn note_grace(&mut self, view: &GcView<'_>) {
         if self.seen_grace != Some(view.params.grace) {
@@ -1997,6 +2024,19 @@ impl Gc {
                 .and_then(|l| l.run(r)),
             _ => None,
         };
+        // A delete this process makes: a mark that judged this segment live
+        // would have un-condemned it (the oracle's check for a wrongly deleted
+        // live extent that another copy hides from the reads).
+        #[cfg(test)]
+        if let (ObjectRef::Segment(s), Some(l)) =
+            (obj, self.ctx.as_ref().and_then(|c| c.liveness.as_ref()))
+        {
+            assert!(
+                l.live_bytes(s) == 0,
+                "gc: the delete of segment {s:?}, which the pass's mark found live"
+            );
+        }
+        self.seg_cache = None;
         if matches!(obj, ObjectRef::Commit(_)) {
             point!(self.points, "gc.commit_delete.before_unlink");
         } else {
@@ -2035,6 +2075,12 @@ impl Gc {
             // one update when the phase ends.
             self.retire(view, s)?;
             if self.proposed.remove(&s).is_some() {
+                tracing::info!(
+                    seg = s.raw(),
+                    bytes = n,
+                    lag_ms = self.delete_lag_ms(view, obj),
+                    "gc: a proposed segment was deleted"
+                );
                 self.reclaim.proposal_deleted += 1;
                 self.reclaim.proposal_deleted_bytes =
                     self.reclaim.proposal_deleted_bytes.saturating_add(n);
@@ -2332,22 +2378,31 @@ impl Gc {
         self.reclaim.proposals_offered += offered.len() as u64;
         // A pin names a root the engine's table does not know: no proposal
         // is taken while one exists.
-        let pins = view.pins.roots()?.len();
-        if pins > 0 {
-            self.reclaim.proposal_rejected_pins += offered.len() as u64;
-            return Ok(());
-        }
-        let sizes: BTreeMap<SegId, u64> = view
-            .segments
-            .list()?
-            .into_iter()
-            .map(|s| (s.seg, s.size_bytes))
-            .collect();
         // What the rules below read: not the whole of `Facts` (the rollback
         // floor and the index manifest are for deletes, and a proposal does
         // not delete).
         let (named, _) = self.retained_names(view)?;
         let (hwm, keep_floor) = (view.tip.high_water_mark, crate::mark::keep_floor(view));
+        let unfiltered = self.cfg.propose_unfiltered;
+        if !unfiltered && !view.pins.roots()?.is_empty() {
+            self.reclaim.proposal_rejected_pins += offered.len() as u64;
+            return Ok(());
+        }
+        // One listing of the directory per tip (a delete drops it), not per
+        // call: the call runs under the coordinator mutex.
+        if !matches!(&self.seg_cache, Some((t, _)) if *t == view.tip.commit_seq) {
+            let sizes: BTreeMap<SegId, u64> = view
+                .segments
+                .list()?
+                .into_iter()
+                .map(|s| (s.seg, s.size_bytes))
+                .collect();
+            self.seg_cache = Some((view.tip.commit_seq, sizes));
+        }
+        let sizes = match &self.seg_cache {
+            Some((_, m)) => m,
+            None => return Err(Error::invalid("segment listing missing")),
+        };
         let room = (MAX_ENTRIES as usize)
             .saturating_sub(self.list.entries.len())
             .min(self.cfg.propose_max);
@@ -2363,7 +2418,7 @@ impl Gc {
             // Every root of a mark is a FULL at or above `keep_floor`: one
             // of them can still name a segment whose count reached zero in a
             // later cut only if `k` is above it.
-            if k > keep_floor {
+            if k > keep_floor && !unfiltered {
                 early += 1;
                 continue;
             }
@@ -2394,6 +2449,9 @@ impl Gc {
         }
         point!(self.points, "gc.propose.before_list_write");
         self.list_condemned(view, &todo)?;
+        // The state between the list and the flags, as a proposal's own
+        // (`gc.condemn.after_list_write` is a mark's too).
+        point!(self.points, "gc.propose.after_list_write");
         flag_segments(view, &todo)?;
         point!(self.points, "gc.propose.after_flags");
         let now = view.clock.monotonic();
@@ -2406,6 +2464,9 @@ impl Gc {
             bytes_sum = bytes_sum.saturating_add(bytes);
         }
         self.proposed.extend(since);
+        // Without `pipeline` nothing else starts a pass for a volume that
+        // then idles: the next pass must look at the list.
+        self.last_pass_changed = true;
         self.reclaim.proposal_condemned += todo.len() as u64;
         self.reclaim.proposal_condemned_bytes = self
             .reclaim
@@ -2684,7 +2745,12 @@ impl Collector for Gc {
             self.reclaim.proposals_deferred += 1;
             return false;
         }
+        let t0 = std::time::Instant::now();
         let res = self.propose_inner(view, dead);
+        let us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.reclaim.propose_calls += 1;
+        self.reclaim.propose_us_sum = self.reclaim.propose_us_sum.saturating_add(us);
+        self.reclaim.propose_us_max = self.reclaim.propose_us_max.max(us);
         match res {
             Ok(()) => true,
             Err(e) => {
@@ -2697,7 +2763,11 @@ impl Collector for Gc {
                 self.reclaim.propose_errors += 1;
                 let msg = e.to_string();
                 if self.propose_error.as_deref() != Some(msg.as_str()) {
-                    tracing::warn!(error = %msg, "gc: a proposal failed; the marks find those segments");
+                    tracing::warn!(
+                        error = %msg,
+                        segments = dead.len(),
+                        "gc: a proposal failed and its segments are dropped from the table's queue; the marks find them"
+                    );
                     self.propose_error = Some(msg);
                 }
                 true

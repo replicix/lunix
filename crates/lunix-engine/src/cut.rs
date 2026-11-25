@@ -342,6 +342,9 @@ pub(crate) struct CutCounters {
     pub(crate) cuts: AtomicU64,
     pub(crate) cut_bytes_sum: AtomicU64,
     pub(crate) cut_ns_sum: AtomicU64,
+    /// Map-transaction time and chunks of all cuts.
+    pub(crate) map_ns_sum: AtomicU64,
+    pub(crate) chunks_sum: AtomicU64,
     /// `A_hat` when the last cut began and the cut's measured factor,
     /// thousandths (0: no cut yet).
     pub(crate) store_pred_milli: AtomicU64,
@@ -369,6 +372,8 @@ impl CutCounters {
             cuts: self.cuts.load(Ordering::Relaxed),
             cut_bytes_sum: self.cut_bytes_sum.load(Ordering::Relaxed),
             cut_us_sum: self.cut_ns_sum.load(Ordering::Relaxed) / 1_000,
+            cut_map_ns_sum: self.map_ns_sum.load(Ordering::Relaxed),
+            cut_chunks_sum: self.chunks_sum.load(Ordering::Relaxed),
             store_pred_milli: self.store_pred_milli.load(Ordering::Relaxed),
             store_real_milli: self.store_real_milli.load(Ordering::Relaxed),
             seals: self.seals.load(Ordering::Relaxed),
@@ -410,6 +415,10 @@ pub struct CutStats {
     pub cut_bytes_sum: u64,
     /// Their durations, C1 to C9, summed, microseconds.
     pub cut_us_sum: u64,
+    /// The map-transaction time and the chunks of every cut, summed.
+    pub cut_map_ns_sum: u64,
+    /// See `cut_map_ns_sum`.
+    pub cut_chunks_sum: u64,
     /// `A_hat` as it stood when the last cut began, thousandths (0: no cut
     /// yet).
     pub store_pred_milli: u64,

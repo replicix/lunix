@@ -64,6 +64,8 @@ fn scene(n: u64) -> Sim {
 
 fn scene_with(cfg: SimCfg, n: u64) -> Sim {
     let mut s = Sim::new(cfg);
+    // A clock well past a grace, so that a grace start of zero is "long ago".
+    s.clock.advance(Duration::from_secs(1_000));
     // The collector loads its list at its first step.
     s.step().unwrap();
     make_dead(&mut s, 0, n, 1_000);
@@ -474,6 +476,144 @@ fn the_mark_report_says_which_marks_began_and_finished_in_a_call() {
     }
     assert!(finished >= 1 && began >= 1, "{began} {finished}");
     assert!(same <= finished);
+}
+
+// ------------------------------------------------------------- the grace
+
+/// Steps one pass to its end (or until the collector is idle) without moving
+/// the clock.
+fn pass_now(s: &mut Sim) {
+    for _ in 0..100_000 {
+        let p = s.step().unwrap();
+        if p.done || p.state == GcState::Idle {
+            return;
+        }
+    }
+    panic!("a pass did not finish");
+}
+
+/// `secs` seconds, one at a time, a pass at each: what a daemon that ticks
+/// does while a grace runs.
+fn age(s: &mut Sim, secs: u64) {
+    for _ in 0..secs {
+        s.clock.advance(Duration::from_secs(1));
+        pass_now(s);
+    }
+}
+
+fn all_there(s: &Sim, dead: &BTreeSet<SegId>) {
+    assert!(dead.is_subset(&segs(s)), "deleted before the grace ended");
+    assert!(dead.is_subset(&listed(s)), "no longer listed");
+    assert!(dead.is_subset(&flagged(s)), "no longer flagged");
+}
+
+/// The grace of a proposal starts when it is made: with passes every second
+/// (recheck-only ones, as soon as a grace ends) nothing goes before it ends
+/// and everything after. A grace start of `Duration::ZERO`, or one derived
+/// from `since`, fails the first half.
+#[test]
+fn nothing_proposed_is_deleted_before_its_grace_ends_and_all_of_it_after() {
+    let mut s = scene_with(slow_cfg(), 4);
+    let dead = s.dead_segments();
+    assert!(s.propose(&dead).unwrap());
+    let want = ids(&dead);
+    age(&mut s, GRACE.as_secs() - 1);
+    all_there(&s, &want);
+    age(&mut s, 4);
+    assert!(want.is_disjoint(&segs(&s)), "still there after the grace");
+    assert_eq!(s.gc.status().reclaim.proposal_deleted, want.len() as u64);
+}
+
+/// The same across a crash between the flags and the grace: the grace
+/// restarts at the load, not at the proposal.
+#[test]
+fn the_grace_of_a_proposal_restarts_at_the_load_after_a_crash() {
+    let mut s = scene_with(slow_cfg(), 4);
+    let dead = s.dead_segments();
+    let want = ids(&dead);
+    s.hooks.arm("gc.propose.after_flags", 1);
+    assert!(s.propose(&dead).is_err());
+    // Most of a grace passes while the process is down.
+    s.clock.advance(GRACE - Duration::from_secs(5));
+    s.crash_reopen(3).unwrap();
+    s.hooks.arm("none", 1);
+    age(&mut s, GRACE.as_secs() - 1);
+    assert!(
+        want.is_subset(&segs(&s)),
+        "deleted before the restarted grace"
+    );
+    age(&mut s, 5);
+    assert!(want.is_disjoint(&segs(&s)), "still there after it");
+    s.check_roots().unwrap();
+}
+
+/// An urgent pass judges with the grace floor of its own (30 s here) from the
+/// start of the proposal's grace: before it nothing goes.
+#[test]
+fn an_urgent_pass_less_than_the_grace_floor_after_a_proposal_deletes_none_of_it() {
+    let mut s = scene_with(slow_cfg(), 4);
+    let dead = s.dead_segments();
+    let want = ids(&dead);
+    assert!(s.propose(&dead).unwrap());
+    s.clock.advance(Duration::from_secs(20));
+    s.urgent(1 << 30).unwrap();
+    all_there(&s, &want);
+    // After the floor (and before the configured grace) the urgent pass may
+    // delete them, which shows the first half was not vacuous.
+    s.clock.advance(Duration::from_secs(15));
+    s.urgent(1 << 30).unwrap();
+    assert!(want.is_disjoint(&segs(&s)), "the floor grace was over");
+    s.check_roots().unwrap();
+}
+
+// -------------------------------------------------------------- the witness
+
+/// The lag-rule witness of mode `on` (`proposal_named`): a proposed segment
+/// that a retained root other than the tip still names. The collector's own
+/// `since` filter keeps it out; with the filter off (test configuration) the
+/// mark that follows counts it, and the recheck un-condemns it.
+#[test]
+fn a_proposal_a_retained_older_root_still_names_is_counted_and_never_deleted() {
+    let run = |unfiltered: bool| {
+        let mut c = cfg();
+        c.gc.propose_unfiltered = unfiltered;
+        let mut s = Sim::new(c);
+        s.step().unwrap();
+        s.write(5, 7_001);
+        s.commit().unwrap();
+        // Its creating commit leaves the retained window; the chunk stays
+        // in every retained root.
+        for _ in 0..4 {
+            s.commit().unwrap();
+        }
+        let before = segs(&s);
+        s.write(5, 7_002);
+        s.commit().unwrap();
+        let old: Vec<DeadSince> = before
+            .iter()
+            .map(|&seg| DeadSince {
+                seg,
+                since: s.tip.common.commit_seq,
+            })
+            .collect();
+        (s, old)
+    };
+    // Filtered: the cut is newer than the lowest chain_floor.
+    let (mut s, old) = run(false);
+    assert!(s.propose(&old).unwrap());
+    assert!(listed(&s).is_empty());
+    assert!(s.gc.status().reclaim.proposal_rejected_early > 0);
+    // Unfiltered: condemned, then named by the older root at the next mark.
+    let (mut s, old) = run(true);
+    assert!(s.propose(&old).unwrap());
+    let taken = listed(&s);
+    assert!(!taken.is_empty(), "the filter is off");
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    let r = s.gc.status().reclaim;
+    assert!(r.proposal_named > 0, "{r:?}");
+    assert!(taken.iter().all(|x| segs(&s).contains(x)), "kept");
+    s.check_roots().unwrap();
 }
 
 // ------------------------------------------------------------ equivalence

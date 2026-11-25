@@ -739,6 +739,8 @@ impl Daemon {
                         cuts: cuts.cuts,
                         cut_bytes_sum: cuts.cut_bytes_sum,
                         cut_us_sum: cuts.cut_us_sum,
+                        cut_map_ns_sum: cuts.cut_map_ns_sum,
+                        cut_chunks_sum: cuts.cut_chunks_sum,
                         seals: cuts.seals,
                         seal_in_flight_max: cuts.seal_in_flight_max,
                         seal_busy_ms: cuts.seal_busy_ms,

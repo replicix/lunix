@@ -503,7 +503,8 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             &format!(
                 "{} offered, {} condemned ({}), {} deleted ({}), {} un-condemned by a recheck; \
                  rejected: {} pinned, {} early (must be 0), {} kept, {} no room; {} errors, {} refused while busy; \
-                 the marks condemned {} segments themselves",
+                 the marks condemned {} segments ({}) themselves; {} named by an older root (must be 0); \
+                 {} calls took {} us (longest {} us)",
                 r.proposals_offered,
                 r.proposal_condemned,
                 size_with_bytes(r.proposal_condemned_bytes),
@@ -517,6 +518,11 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
                 r.propose_errors,
                 r.proposals_deferred,
                 r.mark_condemned_segments,
+                size_with_bytes(r.mark_condemned_bytes),
+                r.proposal_named,
+                r.propose_calls,
+                r.propose_us_sum,
+                r.propose_us_max,
             ),
         )?;
     }

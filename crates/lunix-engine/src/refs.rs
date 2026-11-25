@@ -133,7 +133,8 @@ pub(crate) struct SegRefs {
     /// The segments of `zero_since` per cut, ascending by the cut: the
     /// ready ones are a prefix, so a call looks at the front only. A segment
     /// that left `zero_since` (revived, offered, condemned by a mark) stays
-    /// here until the front reaches it (`CutZeros::live`).
+    /// here until the front reaches it (`ready` skips it: it is not in
+    /// `zero_since` any more).
     queue: VecDeque<CutZeros>,
     /// `counts` as they stood when the current mark pinned its roots, with
     /// whether the table was `Ready` then.
@@ -146,6 +147,9 @@ pub(crate) struct SegRefs {
     offered: BTreeMap<SegId, Offer>,
     /// Segments ready at the last offer.
     ready_last: u64,
+    /// Whether a pin existed at the last read of the pins and when (the
+    /// engine's monotonic clock): the engine reads them at most once a second.
+    pins_seen: Option<(Duration, bool)>,
     /// When the table was created (the engine's monotonic clock).
     born: Duration,
     /// Time from `born` to the first call that found a segment ready.
@@ -169,6 +173,7 @@ struct Snapshot {
 impl SegRefs {
     pub(crate) fn new(now: Duration) -> Self {
         Self {
+            pins_seen: None,
             born: now,
             first_ready: None,
             first_proposal: None,
@@ -299,6 +304,19 @@ impl SegRefs {
         }
     }
 
+    /// Whether the pins were read less than a second before `now`, and found
+    /// none.
+    pub(crate) fn pins_none(&self, now: Duration) -> Option<bool> {
+        self.pins_seen
+            .filter(|(t, _)| now.saturating_sub(*t) < Duration::from_secs(1))
+            .map(|(_, none)| none)
+    }
+
+    /// The pins were read at `now`.
+    pub(crate) fn set_pins_none(&mut self, now: Duration, none: bool) {
+        self.pins_seen = Some((now, none));
+    }
+
     /// A pin exists: nothing is offered (the table knows the tip only), the
     /// segments stay waiting.
     pub(crate) fn note_pin_blocked(&mut self) {
@@ -310,14 +328,27 @@ impl SegRefs {
     /// each count reached zero is the condemn lag.
     pub(crate) fn consume(&mut self, ready: &[Ready], now: Duration) {
         self.c.taken += 1;
+        let mut lags = Vec::with_capacity(ready.len());
         for r in ready {
             if self.zero_since.remove(&r.seg).is_none() {
                 continue;
             }
             let lag = ms(now.saturating_sub(r.at));
+            lags.push(lag);
             self.c.lag_sum_ms = self.c.lag_sum_ms.saturating_add(lag);
             self.c.lag_max_ms = self.c.lag_max_ms.max(lag);
             self.c.lag_count += 1;
+        }
+        // One line per offer taken: the median the gate reads (the status has
+        // the sum and the maximum).
+        lags.sort_unstable();
+        if let (Some(&max), Some(&median)) = (lags.last(), lags.get(lags.len() / 2)) {
+            tracing::info!(
+                segments = lags.len(),
+                lag_median_ms = median,
+                lag_max_ms = max,
+                "refs: an offer was taken (time since each count reached zero)"
+            );
         }
     }
 

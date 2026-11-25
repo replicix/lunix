@@ -366,7 +366,14 @@ fn gc_tune(c: &mut EngineConfig) {
 /// the plain arms see no pressure, so their recheck-only passes only run in
 /// the recheck and condemn arms, which force them.
 fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
-    o.gc_condemn_on_cut = lunix_engine::CondemnOnCut::On;
+    // The recheck arm stays on `shadow` (that mode keeps its kill coverage,
+    // and its `shadow_unconfirmed_named` is a real witness); the others run
+    // `on`, whose witness is `proposal_named`.
+    o.gc_condemn_on_cut = if arm == Arm::Recheck {
+        lunix_engine::CondemnOnCut::Shadow
+    } else {
+        lunix_engine::CondemnOnCut::On
+    };
     o.gc_fast_recheck = Some(Duration::from_secs(1));
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
@@ -448,6 +455,10 @@ fn assert_refs_clean(stack: &lunixd::stack::VolumeStack, what: &str) {
         "{what}: a proposal named a cut a retained FULL may still reach: {r:?}"
     );
     assert_eq!(r.propose_errors, 0, "{what}: a proposal failed: {r:?}");
+    assert_eq!(
+        r.proposal_named, 0,
+        "{what}: a proposed segment was named by a retained root (the lag rule): {r:?}"
+    );
     assert!(
         r.proposal_condemned <= r.proposals_offered,
         "{what}: more condemned than offered: {r:?}"
@@ -493,11 +504,14 @@ fn proposals_after_recovery(
         if r.proposal_condemned > g0.proposal_condemned && r.proposal_deleted > g0.proposal_deleted
         {
             eprintln!(
-                "{what}: proposals after recovery: {} condemned, {} deleted, {} un-condemned, {} rejected early, first proposal {:?} ms",
+                "{what}: proposals after recovery: {} condemned, {} deleted, {} un-condemned, {} rejected early, {} calls took {} us (longest {} us), first proposal {:?} ms",
                 r.proposal_condemned - g0.proposal_condemned,
                 r.proposal_deleted - g0.proposal_deleted,
                 r.proposal_uncondemned - g0.proposal_uncondemned,
                 r.proposal_rejected_early,
+                r.propose_calls,
+                r.propose_us_sum,
+                r.propose_us_max,
                 stack
                     .engine
                     .gc_status_handle()
@@ -1175,6 +1189,12 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
         rc.proposal_rejected_pins,
         rc.proposal_rejected_kept
     );
+    // The share of wrong proposals (the gate's bound is 5 %; this loop's
+    // volume is tiny, the bound above is loose for that reason).
+    eprintln!(
+        "{what}: proposals un-condemned {} of {} condemned",
+        rc.proposal_uncondemned, rc.proposal_condemned
+    );
     assert_refs_clean(&stack, what);
     // After the counting run and the kills at a point a proposal passes
     // (the others recover the same way; each phase costs about a minute).
@@ -1409,9 +1429,15 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
         } else if point.starts_with("gc.propose.") {
             // A proposal needs the table ready, two cuts of lag and an idle
             // collector: two or three hits in a run, and the count moves with
-            // the timing. One kill at the first hit is the requirement; the
-            // others are tried.
-            want.min(1)
+            // the timing. One kill at the first hit is the requirement (the
+            // state after the first proposal: a few segments, an empty list);
+            // the condemn arm, whose regular passes are far apart, also needs
+            // a later hit when the counting run had one.
+            if arm == Arm::Condemn {
+                want.min(2)
+            } else {
+                want.min(1)
+            }
         } else {
             want
         };
@@ -1433,7 +1459,15 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
     }
     // Proposals are the arm's purpose (and every arm's configuration): the
     // counting run must have made some.
-    for p in ["gc.propose.before_list_write", "gc.propose.after_flags"] {
+    for p in [
+        "gc.propose.before_list_write",
+        "gc.propose.after_list_write",
+        "gc.propose.after_flags",
+    ] {
+        if arm == Arm::Recheck {
+            // That arm runs `shadow`: nothing is proposed.
+            break;
+        }
         assert!(
             counts.get(p).copied().unwrap_or(0) > 0,
             "{p}: no proposal condemned anything in the counting run: {reached:?}"

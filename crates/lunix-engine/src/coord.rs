@@ -912,6 +912,8 @@ impl Inner {
         add(&self.cuts.seal_busy_ns, outcome.seal_busy_ns);
         add(&self.cuts.seal_wait_ns, outcome.seal_wait_ns);
         add(&self.cuts.seal_stall_ns, outcome.seal_stall_ns);
+        add(&self.cuts.map_ns_sum, outcome.map_ns);
+        add(&self.cuts.chunks_sum, outcome.chunks_total);
         let index_inserts = outcome.index_inserts;
         let segments = outcome.segments;
         // C3, second: compaction re-hints, in their own transaction, only
@@ -1389,13 +1391,30 @@ impl Inner {
         if ready.is_empty() {
             return;
         }
-        if !matches!(v.pins.roots(), Ok(p) if p.is_empty()) {
+        let on = self.cfg.gc_condemn_on_cut == CondemnOnCut::On;
+        // A busy collector refuses a proposal: do not read the pins for it.
+        if on && lock(&self.gc_status).state.is_some() {
+            return;
+        }
+        // The pins file is read at most once a second (the collector reads it
+        // again for every offer it takes: a stale "none" is safe, a stale
+        // "some" only delays the offer).
+        let cached = lock(refs).pins_none(now);
+        let none = match cached {
+            Some(n) => n,
+            None => {
+                let n = matches!(v.pins.roots(), Ok(p) if p.is_empty());
+                lock(refs).set_pins_none(now, n);
+                n
+            }
+        };
+        if !none {
             lock(refs).note_pin_blocked();
             return;
         }
         let segs: Vec<SegId> = ready.iter().map(|r| r.seg).collect();
         self.points.hooks().shadow_offered(tip, &segs);
-        if self.cfg.gc_condemn_on_cut == CondemnOnCut::On {
+        if on {
             let dead: Vec<DeadSince> = ready
                 .iter()
                 .map(|r| DeadSince {

@@ -117,6 +117,11 @@ pub struct GcConfig {
     /// condemns at most (default 64; 0: the collector takes no proposals).
     /// The rest of an offer is left to the marks.
     pub propose_max: usize,
+    /// Tests only: a proposal skips the collector's pin and `since` rejects,
+    /// so that only the recheck stands between it and a delete (the oracle's
+    /// unfiltered configuration).
+    #[doc(hidden)]
+    pub propose_unfiltered: bool,
 }
 
 impl Default for GcConfig {
@@ -133,6 +138,7 @@ impl Default for GcConfig {
             fast_recheck_always: false,
             tip_refs: false,
             propose_max: 64,
+            propose_unfiltered: false,
         }
     }
 }
