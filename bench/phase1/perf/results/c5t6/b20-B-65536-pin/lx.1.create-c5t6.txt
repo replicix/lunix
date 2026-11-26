@@ -1,0 +1,7 @@
+warning: this is a plain volume. Plain mode detects corruption only: its
+checksums are unkeyed, so it protects against nobody who can write to the
+volume's storage. It has no key material and no key slots, and its mode can
+never be changed. Use the default integrity mode or --encrypt to detect
+tampering.
+created volume c5t6 (plain, uuid 766c54d0-a287-4210-bcb6-ac734a5db859)
+directory        <spike-dir>/c5t6-pin-vols/766c54d0-a287-4210-bcb6-ac734a5db859

@@ -1,0 +1,4 @@
+created volume c5t6 (integrity, uuid aca43925-afbc-4801-8eec-3abe72f4896c)
+directory        <spike-dir>/c5t6-w4k-vols/aca43925-afbc-4801-8eec-3abe72f4896c
+key file         <spike-dir>/c5t6-w4k-vols/aca43925-afbc-4801-8eec-3abe72f4896c/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

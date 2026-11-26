@@ -1,0 +1,1 @@
+attached c5t6 as <spike-dir>/c5t6-pin-state/dev/c5t6 (4 queues, depth 128)

@@ -1,0 +1,22 @@
+   Compiling lunix-testkit v0.1.0 (<tree>/crates/lunix-testkit)
+   Compiling lunix-map v0.1.0 (<tree>/crates/lunix-map)
+   Compiling lunix-gc v0.1.0 (<tree>/crates/lunix-gc)
+    Finished `release` profile [optimized + debuginfo] target(s) in 10.37s
+     Running unittests src/lib.rs (<target>/release/deps/lunix_gc-32b2ef54118087fd)
+
+running 11 tests
+test tests::oracle::control_unfiltered_oracle_fails_without_the_pin_roots_in_the_recheck - should panic ... ok
+test tests::oracle::oracle_16k_id32 ... ok
+test tests::oracle::oracle_16k_id16 ... ok
+test tests::oracle::oracle_fast_recheck_16k_id16 ... ok
+test tests::oracle::oracle_unfiltered_proposals_16k_id16 ... ok
+test tests::oracle::oracle_unfiltered_proposals_with_recheck_passes_16k_id16 ... ok
+test tests::oracle::oracle_lean_id0 ... ok
+test tests::oracle::oracle_64k_id16 ... ok
+test tests::oracle::oracle_unfiltered_proposals_64k_id32 ... ok
+test tests::oracle::oracle_64k_id32 ... ok
+test tests::oracle::oracle_fast_recheck_64k_id32 ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 148 filtered out; finished in 59.26s
+
+rc=0

@@ -421,7 +421,7 @@ def reps_of(blocks, arm, ck, kind, grp):
 
 
 def fit2(rows):
-    """Least squares y = a x1 + b x2 (no intercept) over rows (x1, x2, y); None when singular. Returns (a, b)."""
+    """Least squares y = a x1 + b x2 (no intercept) over rows (x1, x2, y). Returns (a, b, se_a, se_b) or None when singular."""
     s11 = sum(x1 * x1 for x1, _, _ in rows)
     s12 = sum(x1 * x2 for x1, x2, _ in rows)
     s22 = sum(x2 * x2 for _, x2, _ in rows)
@@ -430,20 +430,45 @@ def fit2(rows):
     det = s11 * s22 - s12 * s12
     if len(rows) < 3 or abs(det) < 1e-9 * max(1.0, s11 * s22):
         return None
-    return ((t1 * s22 - t2 * s12) / det, (s11 * t2 - s12 * t1) / det)
+    a, b = ((t1 * s22 - t2 * s12) / det, (s11 * t2 - s12 * t1) / det)
+    rss = sum((y - a * x1 - b * x2) ** 2 for x1, x2, y in rows)
+    s2 = rss / (len(rows) - 2)
+    return a, b, math.sqrt(s2 * s22 / det), math.sqrt(s2 * s11 / det)
 
 
-def cost(rs):
+def line_fit(pts):
+    """Weighted least squares y = A + B x over (x, y, w); returns (A, B, se_A, se_B, x_mean) or None."""
+    if len(pts) < 3:
+        return None
+    sw = sum(w for _, _, w in pts)
+    mx_ = sum(w * x for x, _, w in pts) / sw
+    my_ = sum(w * y for _, y, w in pts) / sw
+    sxx = sum(w * (x - mx_) ** 2 for x, _, w in pts)
+    if sxx <= 0:
+        return None
+    B = sum(w * (x - mx_) * (y - my_) for x, y, w in pts) / sxx
+    A = my_ - B * mx_
+    rss = sum(w * (y - A - B * x) ** 2 for x, y, w in pts)
+    s2 = rss / (len(pts) - 2) / (sw / len(pts))
+    return A, B, math.sqrt(s2 * (1 / len(pts) * 0 + sum(w * x * x for x, _, w in pts) / (sw * sxx))), math.sqrt(s2 / sxx * (sw / len(pts))), mx_
+
+
+def cost(rs, x0=None):
     rs = [r for r in rs if r["cuts"]]
     if not rs:
         return None
     cuts, by, us = sum(r["cuts"] for r in rs), sum(r["cut_bytes_sum"] for r in rs), sum(r["cut_us_sum"] for r in rs)
     mapns, chunks = sum(r["cut_map_ns_sum"] for r in rs), sum(r["cut_chunks_sum"] for r in rs)
     fit = fit2([(r["cuts"], r["cut_bytes_sum"] / 2 ** 20, r["cut_us_sum"]) for r in rs])
+    per = [r["cut_us_sum"] / (r["cut_bytes_sum"] / 2 ** 20) for r in rs if r["cut_bytes_sum"]]
+    # equal size: per repetition the mean cut time (us) against the mean cut size (MiB), weighted by the cuts; evaluated at x0 MiB
+    lf = line_fit([(r["cut_bytes_sum"] / 2 ** 20 / r["cuts"], r["cut_us_sum"] / r["cuts"], r["cuts"]) for r in rs])
+    eq = (lf[0] + lf[1] * x0) / x0 if lf and x0 else None
     return dict(n=len(rs), cuts=cuts, mib=by / 2 ** 20, us=us, mean_cut_mib=by / 2 ** 20 / cuts, mean_cut_ms=us / 1000 / cuts,
                 us_per_mib=us / (by / 2 ** 20) if by else None, a_us_per_cut=fit[0] if fit else None, b_us_per_mib=fit[1] if fit else None,
-                map_ns_per_chunk=mapns / chunks if chunks else None,
-                per_rep_us_per_mib=[r["cut_us_sum"] / (r["cut_bytes_sum"] / 2 ** 20) for r in rs if r["cut_bytes_sum"]])
+                b_se=fit[3] if fit else None, a_se=fit[2] if fit else None, us_per_mib_at_x0=eq, x0_mib=x0,
+                us_per_mib_rep_sd=st.stdev(per) if len(per) > 1 else None, us_per_mib_rep_se=(st.stdev(per) / math.sqrt(len(per))) if len(per) > 1 else None,
+                map_ns_per_chunk=mapns / chunks if chunks else None, per_rep_us_per_mib=per)
 
 
 def stat_line(vals, d=0, lower=False):
@@ -499,7 +524,7 @@ def main():
         lines = len(b["uncond"])
         checks = dict(
             fsck=b["fsck_exit"] == 0, fio=fio_err == 0, eio=b["eio_log"] == 0, reftable=b["ref_table_lines"] == 0, space=fe == 0,
-            drift=T["drift_segments"] == 0, mism=T["report_mismatches"] == 0, rebases=T["rebases"] > 0,
+            drift=T["drift_segments"] == 0, mism=T["report_mismatches"] == 0, rebases=(T["rebases"] > 0) if b["arm"] != "off" else True,
             early=T.get("proposal_rejected_early", 0) == 0, perr=T.get("propose_errors", 0) == 0,
             named=(T.get("proposal_named", 0) == 0) if b["arm"] == "B" else True,
             shadow=(T["shadow_unconfirmed_named"] == 0) if b["arm"] == "A" else True,
@@ -523,7 +548,7 @@ def main():
       "was not run). Condemn lag = the per-event lines `refs: an offer was taken` (`lag_median_ms` of each offer weighted by its segments; target median "
       "at most 3 s) and the longest `lag_max_ms` outside a stop (a stop = a second with a completion of 2 s or more in the fio log, from 1 s before it to 5 s "
       "after; target at most 15 s).\n")
-    A("| block | chunk | kind | share % | offers | segments | condemn lag median s | max s (all) | max s outside a stop | proposal delete lag median / max s (lines) | verdict |")
+    A("| block | chunk | kind | share % (block; rep 1 / reps 2-5) | offers | segments | condemn lag median s | max s (all) | max s outside a stop | proposal delete lag median / max s (lines) | verdict |")
     A("|---|---|---|---|---|---|---|---|---|---|---|")
     g2 = {}
     for b in blocks:
@@ -541,9 +566,15 @@ def main():
         ok = None
         if b["kind"] == "w4k" and b["ck"] == 64:
             ok = share is not None and share >= 45 and lagmed is not None and lagmed <= 3 and (lagmax_out or 0) <= 15
-        g2[b["name"]] = dict(share=share, lag_median_s=lagmed, lag_max_all_s=lagmax_all, lag_max_outside_s=lagmax_out, offers=len(offers),
+        def grp_share(rs):
+            rs = [r for r in rs if r["R"].get("proposal_condemned_bytes") is not None]
+            p_ = sum(r["R"]["proposal_condemned_bytes"] for r in rs)
+            m_ = sum(r["R"]["mark_condemned_bytes"] for r in rs)
+            return 100.0 * p_ / (p_ + m_) if p_ + m_ else None
+        sh1, sh25 = grp_share([r for r in b["reps"] if r["rep"] == 1]), grp_share([r for r in b["reps"] if r["rep"] != 1])
+        g2[b["name"]] = dict(share_rep1=sh1, share_reps2_5=sh25, share=share, lag_median_s=lagmed, lag_max_all_s=lagmax_all, lag_max_outside_s=lagmax_out, offers=len(offers),
                              segments=sum(o["n"] for o in offers), delete_lag_median_s=med(dl), delete_lag_max_s=mx(dl), ok=ok)
-        A(f"| {b['name']} | {b['ck']}K | {b['kind']} | {f1(share)} | {len(offers)} | {sum(o['n'] for o in offers)} | {f1(lagmed, 2)} | {f1(lagmax_all, 1)} | "
+        A(f"| {b['name']} | {b['ck']}K | {b['kind']} | {f1(share)} ({f1(sh1)} / {f1(sh25)}) | {len(offers)} | {sum(o['n'] for o in offers)} | {f1(lagmed, 2)} | {f1(lagmax_all, 1)} | "
           f"{f1(lagmax_out, 1)} | {f1(med(dl), 2)} / {f1(mx(dl), 1)} ({len(dl)}) | {'-' if ok is None else verdict(ok)} |")
     gated = [v["ok"] for v in g2.values() if v["ok"] is not None]
     G["2_mechanism"] = dict(verdict=verdict(all(gated)) if gated else "n/a", blocks=g2)
@@ -714,28 +745,33 @@ def main():
     A("`us / MiB` = summed cut time over summed journal MiB (cost per journal byte at equal size; mean cut size shown). `a`, `b` = least squares "
       "`cut_us = a x cuts + b x MiB` over the repetitions (no intercept); the gate reads `b`. `map ns / chunk` = `cut_map_ns_sum / cut_chunks_sum`. "
       "A repetition with a restart inside has no delta and is left out.\n")
-    A("| chunk | arm | group | reps | cuts | mean cut MiB | mean cut ms | us / MiB | vs off | a us per cut | b us / MiB | b vs off | map ns / chunk |")
-    A("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    A("| chunk | arm | group | reps | cuts | mean cut MiB | mean cut ms | us / MiB (+- SE of the reps) | vs off | us / MiB at the common size | vs off | fit a us per cut | fit b us / MiB (+- SE) | map ns / chunk |")
+    A("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     g7 = {}
     for ck in (16, 64):
         for grp, lab in (("1", "rep 1"), ("2-5", "reps 2-5"), (None, "reps 1-5")):
-            base = cost(reps_of(blocks, "off", ck, "w4k", grp))
+            allr = [r for arm in ("off", "A", "B") for r in reps_of(blocks, arm, ck, "w4k", grp) if r["cuts"]]
+            x0 = (sum(r["cut_bytes_sum"] for r in allr) / 2 ** 20 / sum(r["cuts"] for r in allr)) if allr else None
+            base = cost(reps_of(blocks, "off", ck, "w4k", grp), x0)
             for arm in ("off", "A", "B"):
-                c = cost(reps_of(blocks, arm, ck, "w4k", grp))
+                c = cost(reps_of(blocks, arm, ck, "w4k", grp), x0)
                 if not c:
                     continue
                 rel = (c["us_per_mib"] / base["us_per_mib"] - 1) * 100 if base and base["us_per_mib"] else None
-                relb = (c["b_us_per_mib"] / base["b_us_per_mib"] - 1) * 100 if base and base["b_us_per_mib"] and c["b_us_per_mib"] else None
-                g7[f"{ck}K|{arm}|{lab}"] = dict(c, us_per_mib_vs_off_pct=rel, b_vs_off_pct=relb)
-                A(f"| {ck}K | {arm} | {lab} | {c['n']} | {c['cuts']} | {f1(c['mean_cut_mib'], 0)} | {f1(c['mean_cut_ms'], 0)} | {f1(c['us_per_mib'], 0)} | "
-                  f"{'-' if rel is None or arm == 'off' else f'{rel:+.1f} %'} | {f1(c['a_us_per_cut'], 0)} | {f1(c['b_us_per_mib'], 0)} | "
-                  f"{'-' if relb is None or arm == 'off' else f'{relb:+.1f} %'} | {f1(c['map_ns_per_chunk'], 0)} |")
+                rel0 = (c["us_per_mib_at_x0"] / base["us_per_mib_at_x0"] - 1) * 100 if base and base["us_per_mib_at_x0"] and c["us_per_mib_at_x0"] else None
+                g7[f"{ck}K|{arm}|{lab}"] = dict(c, us_per_mib_vs_off_pct=rel, at_x0_vs_off_pct=rel0)
+                A(f"| {ck}K | {arm} | {lab} | {c['n']} | {c['cuts']} | {f1(c['mean_cut_mib'], 0)} | {f1(c['mean_cut_ms'], 0)} | {f1(c['us_per_mib'], 0)} +- {f1(c['us_per_mib_rep_se'], 0)} | "
+                  f"{'-' if rel is None or arm == 'off' else f'{rel:+.1f} %'} | {f1(c['us_per_mib_at_x0'], 0)} ({f1(x0, 0)} MiB) | {'-' if rel0 is None or arm == 'off' else f'{rel0:+.1f} %'} | "
+                  f"{f1(c['a_us_per_cut'], 0)} | {f1(c['b_us_per_mib'], 0)} +- {f1(c['b_se'], 0)} | {f1(c['map_ns_per_chunk'], 0)} |")
     items7 = {}
     for ck in (16, 64):
         for arm in ("A", "B"):
             x = g7.get(f"{ck}K|{arm}|reps 1-5")
-            if x and x["b_vs_off_pct"] is not None:
-                items7[f"b of {arm} within 3 % of off at {ck}K (reps 1-5 fit)"] = (abs(x["b_vs_off_pct"]) <= 3, f"{x['b_vs_off_pct']:+.1f} % (us per MiB {x['us_per_mib_vs_off_pct']:+.1f} %)")
+            if x and x["at_x0_vs_off_pct"] is not None:
+                items7[f"cost per journal byte of {arm} within 3 % of off at {ck}K (reps 1-5, at the common cut size)"] = (
+                    abs(x["at_x0_vs_off_pct"]) <= 3,
+                    f"{x['at_x0_vs_off_pct']:+.1f} % at {f1(x['x0_mib'], 0)} MiB (plain ratio {x['us_per_mib_vs_off_pct']:+.1f} %; the off arm's own rep-to-rep SE is "
+                    f"{f1(100 * g7[f'{ck}K|off|reps 1-5']['us_per_mib_rep_se'] / g7[f'{ck}K|off|reps 1-5']['us_per_mib'], 1)} % of its mean; fit b {f1(x['b_us_per_mib'], 0)} +- {f1(x['b_se'], 0)} us/MiB, not identified: the cuts have nearly one size)")
     A("\n### Proposal cost (B; `propose_us_sum`, `propose_calls` deltas per repetition, `propose_us_max` since the attach)\n")
     A("| block | group | propose calls | propose_us_sum / window wall % (max over reps) | mean ms per call (reps pooled) | propose_us_max ms (end of block) | segments at the end |")
     A("|---|---|---|---|---|---|---|")

@@ -1,0 +1,8 @@
+Kill loops on the build of this run (release, LUNIX_KILL_HITS=all, gc_fast_recheck on; the recheck arm on `shadow`, the others `on`, as stack_gc_kill.rs sets them),
+five of the loops at once, after the blocks. Test result: 5 passed, 0 failed (5,190 s).
+(the source of the lines below: the test's own summary lines)
+kill loop Plain 16 KiB (recheck arm, shadow): 5 points, 5 reached, 15 runs, 15 kills in 1637 s
+kill loop Plain 16 KiB (condemn arm, on): 10 points, 10 reached, 30 runs, 30 kills in 3163 s; the three gc.propose.* points killed at hits 1, 2, 3
+kill loop Integrity 64 KiB: 27 points, 26 reached, 74 runs, 74 kills in 5092 s
+kill loop Plain 64 KiB: 27 points, 26 reached, 74 runs, 74 kills in 5096 s
+kill loop Plain 16 KiB: 27 points, 26 reached, 74 runs, 74 kills in 5190 s
