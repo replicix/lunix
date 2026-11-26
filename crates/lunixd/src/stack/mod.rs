@@ -521,6 +521,9 @@ pub struct OpenParams {
     /// `gc_condemn_on_cut`); `Shadow` also makes the engine switch the
     /// collector's counting of the tip root's entries on.
     pub gc_condemn_on_cut: lunix_engine::CondemnOnCut,
+    /// The short grace of condemned segments under pressure (the daemon's
+    /// `gc_pressure_grace_ms`; `None`: off).
+    pub gc_pressure_grace: Option<std::time::Duration>,
     /// The band's middle rate in bytes per second, instead of
     /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
     /// small volume hold writes for seconds; the daemon never sets it.
@@ -551,6 +554,7 @@ impl OpenParams {
             gc_pressure_rate_factor: 4,
             gc_fast_recheck: None,
             gc_condemn_on_cut: lunix_engine::CondemnOnCut::Off,
+            gc_pressure_grace: None,
             throttle_mid_rate: None,
         }
     }
@@ -866,6 +870,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     cfg.full_timeout = space.full_timeout();
     cfg.gc_pressure_rate_factor = p.gc_pressure_rate_factor;
     cfg.gc_condemn_on_cut = p.gc_condemn_on_cut;
+    cfg.gc_pressure_grace = p.gc_pressure_grace;
     cfg.cut_target = p.cut_target;
     // GC (plan M17, the M12 wiring): one budgeted step at every C10 and on
     // idle ticks, with the settings of volume.json. A step may compact up to

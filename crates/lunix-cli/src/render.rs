@@ -507,6 +507,22 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             ),
         )?;
     }
+    if g.segment_grace_ms > 0 {
+        kv(out, "segment grace", &human_ms(g.segment_grace_ms))?;
+    }
+    if r.pgrace_deletes + r.pgrace_uncondemned > 0 {
+        kv(
+            out,
+            "short grace",
+            &format!(
+                "{} segments deleted ({} freed), least wait {} ms, {} un-condemned by the recheck",
+                r.pgrace_deletes,
+                format_bytes(r.pgrace_bytes),
+                r.pgrace_min_wait_ms,
+                r.pgrace_uncondemned
+            ),
+        )?;
+    }
     if r.orphan_deferrals + r.cuts_requested + r.hold_marks + r.segment_delete_verdicts > 0 {
         kv(
             out,

@@ -302,6 +302,7 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                     },
                     last_finished_ms,
                     requests: s[7],
+                    segment_grace_ms: s[2],
                     reclaim: Box::new(GcReclaimStats {
                         fast_passes: s[0],
                         regular_passes: s[1],
@@ -337,6 +338,10 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         hold_marks: s[7],
                         hold_footers: s[0],
                         hold_footer_errors: s[1],
+                        pgrace_deletes: s[2],
+                        pgrace_bytes: s[3],
+                        pgrace_min_wait_ms: s[4],
+                        pgrace_uncondemned: s[5],
                     }),
                     refs: Some(Box::new(RefsStats {
                         state: RefsState::Drifted,

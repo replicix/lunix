@@ -663,3 +663,330 @@ fn the_real_collector_at_the_floor_grace_never_breaks_a_partial_overwrite() {
     assert_eq!(s.extent_auth_failures, 0);
     assert_eq!(s.read_revalidate_exhausted, 0);
 }
+
+// ---------------------------------------------------------------------
+// Milestone pgrace: the short segment grace under pressure, real collector.
+// ---------------------------------------------------------------------
+
+/// The short grace the case runs with: 0, one tick (1 ms) or 2 s. The
+/// collector's own minimum is lifted to 0 so the engine's value is used.
+const SHORT_GRACES: [Duration; 3] = [
+    Duration::ZERO,
+    Duration::from_millis(1),
+    Duration::from_secs(2),
+];
+
+fn gc_cfg(c: &mut lunix_engine::EngineConfig, short: Duration) {
+    c.gc_budget = Some(lunix_iface::gc::GcBudget {
+        max_duration: Duration::from_secs(1),
+        max_bytes: 1 << 30,
+    });
+    c.gc_params = Some(lunix_iface::gc::GcParams {
+        retain_last: 1,
+        // The floor with `read_timeout` 0: the smallest grace there is.
+        grace: Duration::from_secs(10),
+        read_timeout: Duration::ZERO,
+        // No compaction: the collector's work here is condemn and delete.
+        rate_bytes_per_s: 0,
+        live_threshold: 0.5,
+        chunk_size: CS,
+        id_len: IdLen::Sixteen,
+    });
+    c.gc_pressure_grace = Some(short);
+}
+
+fn short_0(c: &mut lunix_engine::EngineConfig) {
+    gc_cfg(c, SHORT_GRACES[0]);
+}
+
+fn short_1(c: &mut lunix_engine::EngineConfig) {
+    gc_cfg(c, SHORT_GRACES[1]);
+}
+
+fn short_2(c: &mut lunix_engine::EngineConfig) {
+    gc_cfg(c, SHORT_GRACES[2]);
+}
+
+#[derive(Clone, Debug)]
+enum GOp {
+    /// A read now (completes before the next op).
+    Read(u8, u8),
+    /// A read parked at the store until the next `Drain`.
+    Held(u8, u8),
+    Write(u8),
+    Discard(u8),
+    /// A cut.
+    Cut,
+    /// Time passes (index into `STEPS`) and the engine ticks the collector.
+    GcStep(u8),
+    Pressure(bool),
+    Drain,
+    /// The chunk's current extent is damaged and read once.
+    Tamper(u8),
+}
+
+const STEPS: [Duration; 4] = [
+    Duration::from_millis(100),
+    Duration::from_secs(3),
+    Duration::from_secs(6),
+    Duration::from_secs(12),
+];
+
+fn gop() -> impl Strategy<Value = GOp> {
+    prop_oneof![
+        3 => (0..CHUNKS as u8, 0..4u8).prop_map(|(c, b)| GOp::Read(c, b)),
+        3 => (0..CHUNKS as u8, 0..4u8).prop_map(|(c, b)| GOp::Held(c, b)),
+        3 => (0..CHUNKS as u8).prop_map(GOp::Write),
+        1 => (0..CHUNKS as u8).prop_map(GOp::Discard),
+        3 => Just(GOp::Cut),
+        5 => (0..STEPS.len() as u8).prop_map(GOp::GcStep),
+        2 => any::<bool>().prop_map(GOp::Pressure),
+        1 => Just(GOp::Drain),
+        1 => (0..CHUNKS as u8).prop_map(GOp::Tamper),
+    ]
+}
+
+/// What a block of version `seed` holds (0 is a hole: zeros).
+fn block_of(seed: u64, block: usize) -> Vec<u8> {
+    if seed == 0 {
+        vec![0; 4096]
+    } else {
+        pattern(seed, CS as usize)[block * 4096..][..4096].to_vec()
+    }
+}
+
+fn gdrain(
+    r: &mut Running,
+    pending: &mut Vec<Pending>,
+    hold: &mut Option<Hold>,
+) -> Result<(), TestCaseError> {
+    if let Some(h) = hold.take() {
+        h.release.send(()).unwrap();
+    }
+    for p in std::mem::take(pending) {
+        let (st, data) = r.wait(&[p.tag]).remove(0);
+        // P3: no read fails (a tampered chunk is never read here).
+        prop_assert!(st.is_ok(), "chunk {}: {st:?}", p.chunk);
+        // P1: the block of some version it could see; never another
+        // block's bytes, zeros only for a hole.
+        prop_assert!(
+            p.allowed.iter().any(|s| data == block_of(*s, p.block)),
+            "chunk {} block {} returned bytes of no version it could see",
+            p.chunk,
+            p.block
+        );
+    }
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(24),
+        ..ProptestConfig::default()
+    })]
+
+    /// The short segment grace under pressure with the real collector and a
+    /// manual clock: reads race overwrites, discards, cuts, collector steps
+    /// that delete what its recheck allows after the short grace, pressure
+    /// coming and going, and damage to extents.
+    ///
+    /// P1 every read returns, per block, the content of that block at some
+    /// instant between its submission and its completion (never another
+    /// block's bytes, zeros only for a hole); P2 `extent_auth_failures`
+    /// equals the damaged extents the map named when they were read, and a
+    /// stale read never counts; P3 no read fails except the damaged one, and
+    /// `read_revalidate_exhausted` stays 0; P4 a read that found its extent
+    /// gone held its hint at least as long as the short grace (I-A: the
+    /// least age is not below it); P5 `read_revalidated` is at least the
+    /// parked reads whose segment was deleted (the race was hit).
+    #[test]
+    fn a_short_segment_grace_never_fails_or_misreads_a_racing_read(
+        ops in proptest::collection::vec(gop(), 1..40),
+        mode in 0usize..6,
+        grace in 0usize..3,
+    ) {
+        use lunix_gc::{FloorSource, Gc, GcConfig};
+        use lunix_iface::space::ThrottleState;
+
+        struct NoFloor;
+        impl FloorSource for NoFloor {
+            fn current_floor(
+                &self,
+            ) -> lunix_iface::Result<Option<lunix_format::local::RollbackFloor>> {
+                Ok(None)
+            }
+        }
+
+        let (codec, id_len) = modes()[mode];
+        let short = SHORT_GRACES[grace];
+        let mut v = Vol::create_with(CS, 16, 2, JournalMode::Mixed(3), codec, id_len);
+        v.tweak = [short_0, short_1, short_2][grace];
+        *lock(&v.collector) = Some(Box::new(Gc::new(
+            Arc::new(NoFloor),
+            GcConfig {
+                pass_interval: Duration::ZERO,
+                busy_interval: Duration::ZERO,
+                fast_recheck: Some(Duration::from_millis(100)),
+                segment_grace_min: Duration::ZERO,
+                ..GcConfig::daemon()
+            },
+        )));
+        let mut r = v.open().map_err(|e| e.0).expect("open");
+        for c in 0..CHUNKS {
+            prop_assert!(r
+                .write(0, c * u64::from(CS), &pattern(100 + c, CS as usize), false)
+                .is_ok());
+        }
+        r.engine.commit_now(false).expect("commit");
+
+        let mut next_seed = 1000u64;
+        // The version each chunk holds (0: a hole).
+        let mut cur: Vec<u64> = (0..CHUNKS).map(|c| 100 + c).collect();
+        let mut cold = [true; CHUNKS as usize];
+        // Chunks whose current extent is damaged: never read until rewritten.
+        let mut bad = [false; CHUNKS as usize];
+        // Chunks written and not yet cut: a read is served from the overlay.
+        let mut dirty = [false; CHUNKS as usize];
+        let mut pending: Vec<Pending> = Vec::new();
+        let mut hold: Option<Hold> = None;
+        let mut parked_seg = None;
+        let mut must_revalidate = 0u64;
+        let mut tampers = 0u64;
+        for o in ops {
+            match o {
+                GOp::Read(c, b) | GOp::Held(c, b) => {
+                    let ci = usize::from(c);
+                    if bad[ci] {
+                        continue;
+                    }
+                    let held = matches!(o, GOp::Held(..));
+                    let off = u64::from(c) * u64::from(CS) + u64::from(b) * 4096;
+                    let tag = if held && hold.is_none() && cold[ci] && cur[ci] != 0 && !dirty[ci] {
+                        let hint = entry_hint(&entry(&r, codec, id_len, u64::from(c)));
+                        let h = arm(&v, hint);
+                        let tag = r.submit(0, IoOp::Read, false, off, 4096, &[]);
+                        h.reached();
+                        hold = Some(h);
+                        parked_seg = Some(hint.seg);
+                        tag
+                    } else {
+                        r.submit(0, IoOp::Read, false, off, 4096, &[])
+                    };
+                    cold[ci] = false;
+                    pending.push(Pending {
+                        tag, chunk: c, block: usize::from(b), allowed: vec![cur[ci]],
+                    });
+                }
+                GOp::Write(c) => {
+                    let seed = next_seed;
+                    next_seed += 1;
+                    prop_assert!(r
+                        .write(1, u64::from(c) * u64::from(CS), &pattern(seed, CS as usize), false)
+                        .is_ok());
+                    cur[usize::from(c)] = seed;
+                    bad[usize::from(c)] = false;
+                    dirty[usize::from(c)] = true;
+                    cold[usize::from(c)] = !pending.iter().any(|p| p.chunk == c);
+                    for p in &mut pending {
+                        if p.chunk == c {
+                            p.allowed.push(seed);
+                        }
+                    }
+                }
+                GOp::Discard(c) => {
+                    prop_assert!(r
+                        .hole(1, IoOp::Discard, u64::from(c) * u64::from(CS), CS)
+                        .is_ok());
+                    cur[usize::from(c)] = 0;
+                    bad[usize::from(c)] = false;
+                    dirty[usize::from(c)] = true;
+                    for p in &mut pending {
+                        if p.chunk == c {
+                            p.allowed.push(0);
+                        }
+                    }
+                }
+                GOp::Cut => {
+                    r.engine.commit_now(false).expect("commit");
+                    dirty = [false; CHUNKS as usize];
+                }
+                GOp::GcStep(i) => {
+                    v.clock.advance(STEPS[usize::from(i)]);
+                    for _ in 0..8 {
+                        r.engine
+                            .tick()
+                            .unwrap_or_else(|e| panic!("a tick failed: {e}"));
+                    }
+                    if hold.is_some() {
+                        if let Some(seg) = parked_seg {
+                            let alive = SegmentStore::list(&r.store)
+                                .unwrap()
+                                .iter()
+                                .any(|i| i.seg == seg);
+                            if !alive {
+                                must_revalidate += 1;
+                                parked_seg = None;
+                            }
+                        }
+                    }
+                }
+                GOp::Pressure(on) => {
+                    r.space.set_throttle_state(if on {
+                        ThrottleState::Slowdown
+                    } else {
+                        ThrottleState::Open
+                    });
+                }
+                GOp::Drain => {
+                    gdrain(&mut r, &mut pending, &mut hold)?;
+                    parked_seg = None;
+                }
+                GOp::Tamper(c) => {
+                    let ci = usize::from(c);
+                    // Only an extent no decoded chunk hides, that no pending
+                    // read of the chunk could trip over, and that is stored.
+                    if bad[ci]
+                        || !cold[ci]
+                        || cur[ci] == 0
+                        || pending.iter().any(|p| p.chunk == c)
+                    {
+                        continue;
+                    }
+                    // The cut that stores it must have happened.
+                    r.engine.commit_now(false).expect("commit");
+                    dirty = [false; CHUNKS as usize];
+                    let hint = entry_hint(&entry(&r, codec, id_len, u64::from(c)));
+                    lock(&v.read_faults.flip).insert(hint);
+                    let (st, data) = r.read(0, u64::from(c) * u64::from(CS), 4096);
+                    prop_assert_eq!(st.errno(), Some(5), "damaged data is EIO, never data");
+                    prop_assert!(data.is_empty());
+                    tampers += 1;
+                    bad[ci] = true;
+                }
+            }
+        }
+        gdrain(&mut r, &mut pending, &mut hold)?;
+        let s = r.engine.stats();
+        // P2 and P3.
+        prop_assert_eq!(s.extent_auth_failures, tampers);
+        prop_assert_eq!(s.read_revalidate_exhausted, 0);
+        // P5.
+        prop_assert!(
+            s.read_revalidated >= must_revalidate,
+            "{} parked reads lost their segment, {} retries",
+            must_revalidate,
+            s.read_revalidated
+        );
+        // P4 (I-A): a hint that failed `NotFound` was held for at least the
+        // short grace in force when its segment was deleted, and the grace
+        // in force at any other time was longer.
+        if s.read_stale_age_max_ms > 0 {
+            let g = u64::try_from(short.as_millis()).unwrap();
+            prop_assert!(
+                s.read_stale_age_min_ms >= g,
+                "a segment vanished {} ms after a read took its hint, under a grace of {g} ms",
+                s.read_stale_age_min_ms
+            );
+        }
+    }
+}

@@ -116,6 +116,11 @@ pub struct EngineConfig {
     pub full_timeout: Duration,
     /// The per-segment reference table of the cut (default off).
     pub gc_condemn_on_cut: CondemnOnCut,
+    /// The short grace of condemned segments while the GC pressure is raised
+    /// or urgent (the daemon's `gc_pressure_grace_ms`; ADR-32 amendment,
+    /// rule change F3). `None`: off (the default). The collector holds it to
+    /// its own minimum.
+    pub gc_pressure_grace: Option<Duration>,
 }
 
 impl EngineConfig {
@@ -152,6 +157,7 @@ impl EngineConfig {
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
             gc_condemn_on_cut: CondemnOnCut::Off,
+            gc_pressure_grace: None,
         }
     }
 

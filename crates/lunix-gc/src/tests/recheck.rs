@@ -36,7 +36,7 @@ fn cfg(fast: Option<Duration>, always: bool) -> SimCfg {
     cfg
 }
 
-fn segs(s: &Sim) -> std::collections::BTreeSet<SegId> {
+pub(super) fn segs(s: &Sim) -> std::collections::BTreeSet<SegId> {
     SegmentStore::list(&s.store)
         .unwrap()
         .iter()
@@ -46,7 +46,7 @@ fn segs(s: &Sim) -> std::collections::BTreeSet<SegId> {
 
 /// `n` segments (one chunk each, chunks `first..`) overwritten, and the
 /// retained window rolled past the overwrite: dead at the next mark.
-fn make_dead(s: &mut Sim, first: u64, n: u64, seed: u64) {
+pub(super) fn make_dead(s: &mut Sim, first: u64, n: u64, seed: u64) {
     for i in 0..n {
         s.write(first + i, seed + i);
         s.commit().unwrap();
@@ -61,7 +61,7 @@ fn make_dead(s: &mut Sim, first: u64, n: u64, seed: u64) {
 }
 
 /// Steps one pass to its end without moving the clock.
-fn pass_now(s: &mut Sim) -> Vec<GcState> {
+pub(super) fn pass_now(s: &mut Sim) -> Vec<GcState> {
     let mut states = Vec::new();
     for _ in 0..100_000 {
         let p = s.step().unwrap();
@@ -74,14 +74,14 @@ fn pass_now(s: &mut Sim) -> Vec<GcState> {
 }
 
 /// Moves the clock to `ms` milliseconds after `base`.
-fn at(s: &mut Sim, base: Duration, ms: u64) {
+pub(super) fn at(s: &mut Sim, base: Duration, ms: u64) {
     let target = base + Duration::from_millis(ms);
     let now = s.clock.monotonic();
     assert!(now <= target, "the clock is past {ms} ms");
     s.clock.advance(target - now);
 }
 
-fn listed_segments(s: &Sim) -> Vec<ObjectRef> {
+pub(super) fn listed_segments(s: &Sim) -> Vec<ObjectRef> {
     s.gc.condemned()
         .into_iter()
         .filter(|o| matches!(o, ObjectRef::Segment(_)))
@@ -148,7 +148,7 @@ fn scene(fast: Option<Duration>, always: bool, mark_secs: u64) -> Scene {
     Scene { s, base, x, z }
 }
 
-fn reclaim(s: &Sim) -> lunix_iface::gc::GcReclaimStats {
+pub(super) fn reclaim(s: &Sim) -> lunix_iface::gc::GcReclaimStats {
     *s.gc.status().reclaim
 }
 

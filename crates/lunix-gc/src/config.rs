@@ -117,6 +117,11 @@ pub struct GcConfig {
     /// condemns at most (default 64; 0: the collector takes no proposals).
     /// The rest of an offer is left to the marks.
     pub propose_max: usize,
+    /// The least short grace of condemned segments the collector accepts from
+    /// [`Collector::set_segment_grace`](lunix_iface::gc::Collector::set_segment_grace)
+    /// (default 2 s, the lower end of `gc_pressure_grace_ms`): a smaller one
+    /// is raised to it. Tests set 0 to run the rule at one tick.
+    pub segment_grace_min: Duration,
     /// Tests only: a proposal skips the collector's pin and `since` rejects,
     /// so that only the recheck stands between it and a delete (the oracle's
     /// unfiltered configuration).
@@ -138,6 +143,7 @@ impl Default for GcConfig {
             fast_recheck_always: false,
             tip_refs: false,
             propose_max: 64,
+            segment_grace_min: Duration::from_secs(2),
             #[cfg(test)]
             propose_unfiltered: false,
         }

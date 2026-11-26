@@ -131,7 +131,9 @@ impl Inner {
         };
         // The level of the last tick (it already carries the 5 s hold, so the
         // flag does not flap): the collector may run recheck-only passes.
-        collector.set_pressure(self.pressure_now() != Pressure::Normal);
+        let pressure = self.pressure_now();
+        collector.set_pressure(pressure != Pressure::Normal);
+        collector.set_segment_grace(pressure.segment_grace(self.cfg.gc_pressure_grace));
         let r = f(&mut **collector, &view);
         if r.is_err() {
             // Moves a failed call sealed before it failed reach the next cut
@@ -325,7 +327,7 @@ impl Inner {
         if freed > 0 {
             SPACE_URGENT_MIN
         } else if condemned {
-            doubled.min(self.floor_grace()).max(SPACE_URGENT_MIN)
+            doubled.min(self.condemn_wait()).max(SPACE_URGENT_MIN)
         } else {
             doubled
         }
@@ -365,6 +367,16 @@ impl Inner {
         let freed = p.freed;
         co.absorb(p);
         Ok(freed)
+    }
+
+    /// How long what a pass condemned waits before it can go: the floor grace,
+    /// or with `gc_pressure_grace_ms` the short segment grace plus 1 s (the
+    /// recheck mark after it).
+    fn condemn_wait(&self) -> Duration {
+        let floor = self.floor_grace();
+        self.cfg.gc_pressure_grace.map_or(floor, |g| {
+            g.saturating_add(Duration::from_secs(1)).min(floor)
+        })
     }
 
     /// The urgent pass's grace: 10 s plus twice `read_timeout` (the

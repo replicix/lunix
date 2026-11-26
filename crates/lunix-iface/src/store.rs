@@ -178,6 +178,13 @@ pub trait SegmentStore: Send + Sync {
     /// sealed for a cut that failed before any durable object named them.
     /// Never delete a segment that a durable commit, the index or a pending
     /// re-hint names.
+    ///
+    /// A sealed segment's bytes never change: it leaves the store by unlink
+    /// only (no in-place punching or zeroing), so a reader that holds the
+    /// file open (an [`ExtentLocation`], a read in flight) keeps reading the
+    /// bytes it opened, and a reader that opens it afterwards gets
+    /// `NotFound`. The short grace of condemned segments under pressure
+    /// (ADR-32 amendment) relies on this.
     fn delete(&self, seg: SegId) -> Result<u64>;
 }
 

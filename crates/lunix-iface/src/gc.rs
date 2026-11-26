@@ -46,9 +46,12 @@ pub struct Moved {
 pub struct GcParams {
     /// FULL commits kept (`last:N`), default 2.
     pub retain_last: u32,
-    /// Grace between condemn and delete (floor 30 s).
+    /// Grace between condemn and delete (floor 30 s). Under pressure a
+    /// condemned segment may have a shorter one
+    /// ([`Collector::set_segment_grace`]); every other object keeps this.
     pub grace: Duration,
-    /// Read timeout; the grace floor is 10 s plus twice this.
+    /// Read timeout; the grace floor is 10 s plus twice this. Not enforced:
+    /// it sets the floor and nothing else.
     pub read_timeout: Duration,
     /// Compaction rate cap in bytes per second.
     pub rate_bytes_per_s: u64,
@@ -254,6 +257,19 @@ pub trait Collector: Send {
     /// default ignores it.
     fn set_pressure(&mut self, raised: bool) {
         let _ = raised;
+    }
+
+    /// The grace of condemned **segments** for the calls that follow, when it
+    /// differs from [`GcParams::grace`] (ADR-32 amendment, rule change F3: a
+    /// short grace under pressure). `None`: `GcParams::grace` applies to
+    /// every object. Map packs, index runs and commit objects always use
+    /// `GcParams::grace`. The grace of a segment counts from its own flag.
+    /// Called after `set_pressure` and before every call into the collector;
+    /// the engine passes `Some` only while the pressure is `Raised` or
+    /// `Urgent`. The default ignores it. Not a [`GcParams`] field: the
+    /// settings validation refuses a grace below the floor.
+    fn set_segment_grace(&mut self, grace: Option<Duration>) {
+        let _ = grace;
     }
 
     /// The engine keeps a reference table (`gc_condemn_on_cut`): count the
@@ -525,6 +541,10 @@ pub struct GcStatusSnapshot {
     /// Control calls waiting for a pass on request (`GcControl::run_pass`);
     /// set by the engine wiring, 0 from a collector.
     pub requests: u64,
+    /// The grace of condemned segments in force at the last call, in
+    /// milliseconds: the short grace under pressure (`gc_pressure_grace_ms`),
+    /// else the general grace (0 before the first call).
+    pub segment_grace_ms: u64,
     /// Reclaim latency and pass-kind counters of this process.
     pub reclaim: Box<GcReclaimStats>,
     /// The engine's reference table (set by the engine wiring; `None` from a
@@ -637,6 +657,20 @@ pub struct GcReclaimStats {
     /// Cuts the collector asked the engine for (`cut_wanted`: a deferral a
     /// cut ends), at most one per tip.
     pub cuts_requested: u64,
+    /// Segments deleted while their flag was younger, at the start of the
+    /// mark that judged them, than the grace floor: the deletes only the
+    /// short grace under pressure allowed (`gc_pressure_grace_ms`).
+    pub pgrace_deletes: u64,
+    /// The sizes in bytes of those.
+    pub pgrace_bytes: u64,
+    /// The least time in milliseconds between a flag and the start of the
+    /// mark that deleted its segment, over `pgrace_deletes` (0 while there
+    /// is none). Never below the configured short grace.
+    pub pgrace_min_wait_ms: u64,
+    /// Segments a recheck un-condemned while their flag was younger than the
+    /// grace floor at the mark's start (a short grace that deleted nothing
+    /// wrong: the recheck is the judge).
+    pub pgrace_uncondemned: u64,
 }
 
 /// How the rest of the daemon asks the coordinator for GC work. Implemented by
