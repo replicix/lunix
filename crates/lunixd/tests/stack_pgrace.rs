@@ -8,7 +8,7 @@
 //! collector free the garbage, with `gc_pressure_grace_ms = 2000`,
 //! `gc_fast_recheck` and `gc_condemn_on_cut = on`: while the gate paces, a
 //! condemned segment is deleted 2 s after its flag. Readers read random
-//! ranges of the hot set all the time, and a store wrapper holds about 5 % of
+//! ranges of the hot set all the time, and the store's read hook (`lunix_store::ReadHook`) holds about 5 % of
 //! the guest read helpers' `read_extent` calls for 0 to 8 short graces
 //! (16 s; a segment is deleted about 6 s after a read took its hint at the
 //! earliest, so holds of the specified 0 to 3 graces never lost one), before
@@ -45,7 +45,7 @@
 //! `LUNIX_PGRACE_SECS` sets the length of a cell (60); the `#[ignore]` soak
 //! runs one cell for `LUNIX_PGRACE_SOAK_SECS` (600).
 
-#![cfg(feature = "testsupport")]
+#![cfg(all(feature = "testsupport", feature = "crashpoints"))]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -60,7 +60,8 @@ use lunix_iface::block::{
     BlockEngine, Completer, IoOp, IoRequest, IoStatus, QueueConfig, QueueHandler, QueueId, Tag,
 };
 use lunix_iface::space::{SpaceGate, ThrottleState};
-use lunixd::stack::{OpenParams, ReadDelay, VolumeStack};
+use lunix_store::{ReadHook, ReadStage};
+use lunixd::stack::{OpenParams, VolumeStack};
 use lunixd::testsupport::{close, fsck_binary, Scratch, TestRng, TestVolume, VolumeBuilder};
 
 const CS: u32 = 64 << 10;
@@ -354,25 +355,45 @@ fn volume(t: &Scratch, mode: CryptoMode, id_len: IdLen) -> TestVolume {
     b.create().expect("create")
 }
 
-/// The delay of one `read_extent` of a guest read helper: none for 95 of 100,
-/// else 0 to 8 short graces, in whole milliseconds (odd: after the read).
-/// How many guest `read_extent` calls the wrapper saw, and how many it held.
+/// How many guest `read_extent` calls the hook saw, and how many it held
+/// (before the open, after it).
 static CALLS: AtomicU64 = AtomicU64::new(0);
-static HELD: AtomicU64 = AtomicU64::new(0);
+static HELD_BEFORE: AtomicU64 = AtomicU64::new(0);
+static HELD_AFTER: AtomicU64 = AtomicU64::new(0);
 
-fn read_delay() -> ReadDelay {
-    Arc::new(move || {
-        let n = CALLS.fetch_add(1, Ordering::Relaxed);
-        let mut r = TestRng::new(n ^ 0x7067_7261_6365);
-        if r.below(100) >= 5 {
-            return Duration::ZERO;
+/// The store's read hook (`lunix_store::ReadStage`): on a guest read helper,
+/// 5 % of the reads wait before the open (the part keeps its hint taken from
+/// the map while its segment is collected) and 2.5 % wait after it (the part
+/// keeps the file open across the delete), for 0 to 8 short graces.
+fn read_hook() -> ReadHook {
+    Arc::new(move |stage, hint| {
+        let on_helper = std::thread::current()
+            .name()
+            .is_some_and(|n| n.starts_with("lunix-read-"));
+        if !on_helper {
+            return;
         }
-        HELD.fetch_add(1, Ordering::Relaxed);
+        let n = if stage == ReadStage::BeforeOpen {
+            CALLS.fetch_add(1, Ordering::Relaxed)
+        } else {
+            CALLS.load(Ordering::Relaxed)
+        };
+        let mut r = TestRng::new(n ^ hint.off as u64 ^ 0x7067_7261_6365);
+        let (every, counter) = match stage {
+            ReadStage::BeforeOpen => (20, &HELD_BEFORE),
+            ReadStage::AfterOpen => (40, &HELD_AFTER),
+        };
+        if r.below(every) != 0 {
+            return;
+        }
+        counter.fetch_add(1, Ordering::Relaxed);
         let graces = std::env::var("LUNIX_PGRACE_HOLD_GRACES")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(8);
-        Duration::from_millis(r.below(graces * SHORT.as_millis() as u64) + 1)
+        std::thread::sleep(Duration::from_millis(
+            r.below(graces * SHORT.as_millis() as u64) + 1,
+        ));
     })
 }
 
@@ -385,7 +406,7 @@ fn pgrace_open(o: &mut OpenParams) {
     o.gc_fast_recheck = Some(Duration::from_secs(1));
     o.gc_condemn_on_cut = CondemnOnCut::On;
     o.gc_pressure_grace = Some(SHORT);
-    o.segment_read_delay = Some(read_delay());
+    o.segment_read_hook = Some(read_hook());
 }
 
 // -------------------------------------------------------------- the cell
@@ -547,9 +568,10 @@ fn cell(name: &str, mode: CryptoMode, id_len: IdLen, partial: bool, run: Duratio
     let gc = stack.engine.gc_status_handle().get();
     let rc = *gc.reclaim;
     eprintln!(
-        "pgrace {name}: guest read_extent calls {} held {};",
+        "pgrace {name}: guest read_extent calls {} held before the open {} and after it {};",
         CALLS.load(Ordering::Relaxed),
-        HELD.load(Ordering::Relaxed)
+        HELD_BEFORE.load(Ordering::Relaxed),
+        HELD_AFTER.load(Ordering::Relaxed)
     );
     eprintln!(
         "pgrace {name}: {n_writes} writes, {n_reads} reads in {:?}, states {states:?}, \

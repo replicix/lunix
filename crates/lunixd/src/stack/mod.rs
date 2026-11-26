@@ -24,7 +24,6 @@
 //! 6. Only then record the trust-on-first-use pin and the keyring sequence in
 //!    `state/pins` (R4 precedes every write).
 
-mod delay;
 mod destage;
 mod floor;
 mod ladder;
@@ -64,7 +63,6 @@ use lunix_overlay::ShardedOverlay;
 use lunix_space::{LunixSpace, SpaceConfig, StatvfsProbe};
 use lunix_store::{read_volume_file, FsOps, LocalVolume, StoreOptions};
 
-pub use delay::ReadDelay;
 pub use destage::{map_error, map_outcome, retry_of, PipelineDestager, PressureThresholds};
 pub use floor::DirFloor;
 pub use ladder::{Borrow, Borrows, CompactStep};
@@ -526,10 +524,12 @@ pub struct OpenParams {
     /// The short grace of condemned segments under pressure (the daemon's
     /// `gc_pressure_grace_ms`; `None`: off).
     pub gc_pressure_grace: Option<std::time::Duration>,
-    /// Holds some guest reads of segment extents for the duration this
-    /// returns (zero: none), so that a read part outlives the collector's
-    /// grace. Tests only; the daemon never sets it.
-    pub segment_read_delay: Option<ReadDelay>,
+    /// A hook that runs inside every segment `read_extent` (before the open
+    /// and after it) and may block, so that a read part outlives the
+    /// collector's grace and a delete falls between its lookup, its open and
+    /// its read. Tests only (`crashpoints` build); the daemon never sets it.
+    #[cfg(feature = "crashpoints")]
+    pub segment_read_hook: Option<lunix_store::ReadHook>,
     /// The band's middle rate in bytes per second, instead of
     /// `max(gc_rate, 16 MiB/s)` (`None`). Tests only: a slow band lets a
     /// small volume hold writes for seconds; the daemon never sets it.
@@ -561,7 +561,8 @@ impl OpenParams {
             gc_fast_recheck: None,
             gc_condemn_on_cut: lunix_engine::CondemnOnCut::Off,
             gc_pressure_grace: None,
-            segment_read_delay: None,
+            #[cfg(feature = "crashpoints")]
+            segment_read_hook: None,
             throttle_mid_rate: None,
         }
     }
@@ -906,6 +907,10 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     if let Some(t) = &p.tweak {
         t(&mut cfg);
     }
+    #[cfg(feature = "crashpoints")]
+    if let Some(h) = &p.segment_read_hook {
+        store.set_read_hook(Some(Arc::clone(h)));
+    }
     let dir: Arc<dyn VolumeDir> = Arc::new(store.clone());
     let mut gc_config = p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon);
     if p.gc_fast_recheck.is_some() {
@@ -913,10 +918,7 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     }
     let deps = EngineDeps {
         dir: Arc::clone(&dir),
-        segments: match &p.segment_read_delay {
-            Some(d) => Arc::new(delay::DelayedSegments::new(store.clone(), Arc::clone(d))),
-            None => Arc::new(store.clone()),
-        },
+        segments: Arc::new(store.clone()),
         packs: Arc::new(store.clone()),
         commits: Arc::new(store.clone()),
         checkpoint: Arc::new(store.clone()),

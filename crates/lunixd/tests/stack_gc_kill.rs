@@ -483,8 +483,40 @@ fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
                 t(c);
             }
             c.gc_pressure_force = Some(lunix_engine::Pressure::Raised);
+            // Most of the idle reader's reads reach the store.
+            c.read_cache_max = 1 << 20;
         }));
+        o.segment_read_hook = Some(pgrace_read_hook());
     }
+}
+
+/// The pgrace arm's store hook (`lunix_store::ReadHook`): on a guest read
+/// helper, some reads wait before the open (the part keeps the hint it took
+/// from the map while the collector deletes its segment: compaction moves it
+/// and the sweep removes the source) and some after it (the part keeps the
+/// file open across the delete), for up to 8 s (4 short graces). This is what
+/// lets the loop's reader make C7 fire; without it no read outlasts a grace.
+fn pgrace_read_hook() -> lunix_store::ReadHook {
+    use lunix_store::ReadStage;
+    let n = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    Arc::new(move |stage, _hint| {
+        let helper = std::thread::current()
+            .name()
+            .is_some_and(|t| t.starts_with("lunix-read-"));
+        if !helper {
+            return;
+        }
+        let k = n.fetch_add(1, Ordering::Relaxed);
+        let mut r = TestRng::new(k ^ 0x6b69_6c6c);
+        let every = if stage == ReadStage::BeforeOpen {
+            200
+        } else {
+            400
+        };
+        if r.below(every) == 0 {
+            std::thread::sleep(Duration::from_millis(1 + r.below(8_000)));
+        }
+    })
 }
 
 fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
@@ -1571,6 +1603,12 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
         tally.rv.reads
     );
     assert_eq!(tally.rv.exhausted, 0, "a read gave up revalidating");
+    if arm == Arm::Pgrace {
+        assert!(
+            tally.rv.revalidated > 0,
+            "the store's read hook made no read lose its segment: C7 never fired in the loop"
+        );
+    }
     for (point, hits) in &killed {
         let c = counts[*point];
         let want = if all_hits { c.min(3) } else { 1 };

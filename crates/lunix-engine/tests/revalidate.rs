@@ -990,3 +990,80 @@ proptest! {
         }
     }
 }
+
+/// I-C of the short grace (the destage base read does not revalidate through
+/// the map, so a delete must never overlap a cut): a cut parked at its base
+/// read holds the coordinator, and a collector step with the short grace in
+/// force and a clock far past it waits for the cut to end; the cut then
+/// reads the right base, and the collector's delete follows it.
+#[test]
+fn no_collector_call_overlaps_a_cut_under_the_short_grace() {
+    use lunix_gc::{FloorSource, Gc, GcConfig};
+    use lunix_iface::space::ThrottleState;
+
+    struct NoFloor;
+    impl FloorSource for NoFloor {
+        fn current_floor(&self) -> lunix_iface::Result<Option<lunix_format::local::RollbackFloor>> {
+            Ok(None)
+        }
+    }
+
+    for (codec, id_len) in modes() {
+        let mut v = Vol::create_with(CS, 16, 2, JournalMode::Mixed(3), codec, id_len);
+        v.tweak = short_0;
+        *lock(&v.collector) = Some(Box::new(Gc::new(
+            Arc::new(NoFloor),
+            GcConfig {
+                pass_interval: Duration::ZERO,
+                busy_interval: Duration::ZERO,
+                fast_recheck: Some(Duration::from_millis(100)),
+                segment_grace_min: Duration::ZERO,
+                ..GcConfig::daemon()
+            },
+        )));
+        let mut r = v.open().map_err(|e| e.0).expect("open");
+        for c in 0..CHUNKS {
+            assert!(r
+                .write(0, c * u64::from(CS), &pattern(100 + c, CS as usize), false)
+                .is_ok());
+        }
+        r.engine.commit_now(false).expect("commit");
+        // Pressure with the short grace in force.
+        r.space.set_throttle_state(ThrottleState::Slowdown);
+        r.engine.tick().expect("tick");
+        assert_eq!(r.engine.gc_pressure(), lunix_engine::Pressure::Raised);
+
+        let old = entry_hint(&entry(&r, codec, id_len, 1));
+        let hold = arm(&v, old);
+        let patch = pattern(777, 4096);
+        assert!(r.write(1, u64::from(CS) + 8192, &patch, false).is_ok());
+        let engine = &r.engine;
+        let clock = Arc::clone(&v.clock);
+        let (done_tx, done_rx) = channel();
+        let cut = std::thread::scope(|s| {
+            let cut = s.spawn(|| engine.commit_now(false));
+            hold.reached();
+            // The cut is parked inside its base read, under the coordinator.
+            clock.advance(Duration::from_secs(30));
+            let gc = s.spawn(move || {
+                let _ = engine.tick();
+                let _ = done_tx.send(());
+            });
+            assert!(
+                done_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+                "{id_len:?}: a collector step ran while a cut was in flight"
+            );
+            hold.release.send(()).unwrap();
+            gc.join().unwrap();
+            cut.join().unwrap()
+        });
+        cut.unwrap_or_else(|e| panic!("{id_len:?}: the cut failed: {e}"));
+        let s = r.engine.stats();
+        assert_eq!(s.extent_auth_failures, 0, "{id_len:?}");
+        let (st, got) = r.read(0, u64::from(CS), CS);
+        assert!(st.is_ok(), "{id_len:?}: {st:?}");
+        let mut want = pattern(101, CS as usize);
+        want[8192..8192 + 4096].copy_from_slice(&patch);
+        assert_eq!(got, want, "{id_len:?}: the cut patched the right base");
+    }
+}

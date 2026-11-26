@@ -559,9 +559,13 @@ impl SegmentStore for LocalVolume {
     }
 
     fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> Result<()> {
+        #[cfg(any(test, feature = "crashpoints"))]
+        crate::volume::run_read_hook(&self.inner, crate::volume::ReadStage::BeforeOpen, hint);
         let c = self
             .inner
             .open_container(ContainerKind::Segment, hint.seg)?;
+        #[cfg(any(test, feature = "crashpoints"))]
+        crate::volume::run_read_hook(&self.inner, crate::volume::ReadStage::AfterOpen, hint);
         self.inner.read_range(&c, hint.off, hint.clen, out)
     }
 

@@ -189,6 +189,9 @@ pub(crate) struct Inner {
     /// validated, before it is cached (the window a delete can fall into).
     #[cfg(test)]
     pub(crate) open_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Test hook of `SegmentStore::read_extent` (see [`ReadHook`]).
+    #[cfg(any(test, feature = "crashpoints"))]
+    pub(crate) read_hook: Mutex<Option<ReadHook>>,
     // Held for the life of the volume; dropping the last handle releases it.
     _lock: LockGuard,
 }
@@ -232,6 +235,41 @@ const MAX_WARNINGS: usize = 64;
 struct Warnings {
     items: VecDeque<String>,
     dropped: u64,
+}
+
+/// Where in `SegmentStore::read_extent` a [`ReadHook`] runs.
+#[cfg(any(test, feature = "crashpoints"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadStage {
+    /// The read is about to open the segment: the caller holds a hint it
+    /// took from the map, and a delete may still remove the file.
+    BeforeOpen,
+    /// The segment is open (or its descriptor taken from the cache) and the
+    /// bytes are not read yet: a delete now unlinks a file the read holds.
+    AfterOpen,
+}
+
+/// A test hook that runs at each [`ReadStage`] of every `read_extent` and may
+/// block (a delayed read, as the testkit's `ReadFaults::hold` does for the
+/// engine tests). Behind `test` and the `crashpoints` feature; the daemon
+/// never sets one.
+#[cfg(any(test, feature = "crashpoints"))]
+pub type ReadHook = Arc<dyn Fn(ReadStage, &lunix_format::Hint) + Send + Sync>;
+
+#[cfg(any(test, feature = "crashpoints"))]
+impl LocalVolume {
+    /// Sets (or clears) the read hook of this volume and its clones.
+    pub fn set_read_hook(&self, hook: Option<ReadHook>) {
+        *lock(&self.inner.read_hook) = hook;
+    }
+}
+
+#[cfg(any(test, feature = "crashpoints"))]
+pub(crate) fn run_read_hook(inner: &Inner, stage: ReadStage, hint: &lunix_format::Hint) {
+    let hook = lock(&inner.read_hook).clone();
+    if let Some(h) = hook {
+        h(stage, hint);
+    }
 }
 
 /// Runs the test hook of `open_container`, if one is set.
@@ -475,6 +513,8 @@ impl LocalVolume {
                 open_writers: Mutex::new(HashSet::new()),
                 #[cfg(test)]
                 open_hook: Mutex::new(None),
+                #[cfg(any(test, feature = "crashpoints"))]
+                read_hook: Mutex::new(None),
                 _lock: guard,
             }),
         }

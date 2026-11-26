@@ -823,6 +823,7 @@ paths = [
   "crates/lunix-iface/tests/trivial/store.rs",
   "crates/lunix-index/tests/behaviour.rs",
   "crates/lunix-store/src/container.rs",
+  "crates/lunix-store/src/lib.rs",
   "crates/lunix-store/src/volume.rs",
   "crates/lunix-store/src/tests/misc.rs",
   "crates/lunixd/src/**",
