@@ -126,6 +126,7 @@ pub struct EngineConfig {
     /// loops use it to run the short grace in processes that never fill a
     /// volume. The daemon never sets it.
     #[doc(hidden)]
+    #[cfg(feature = "testsupport")]
     pub gc_pressure_force: Option<crate::pressure::Pressure>,
 }
 
@@ -164,6 +165,7 @@ impl EngineConfig {
             full_timeout: Duration::from_secs(60),
             gc_condemn_on_cut: CondemnOnCut::Off,
             gc_pressure_grace: None,
+            #[cfg(feature = "testsupport")]
             gc_pressure_force: None,
         }
     }

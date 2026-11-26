@@ -494,8 +494,9 @@ fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
 /// helper, some reads wait before the open (the part keeps the hint it took
 /// from the map while the collector deletes its segment: compaction moves it
 /// and the sweep removes the source) and some after it (the part keeps the
-/// file open across the delete), for up to 8 s (4 short graces). This is what
-/// lets the loop's reader make C7 fire; without it no read outlasts a grace.
+/// file open across the delete), for up to 8 s (4 short graces), so that a read
+/// part can outlast a grace and the delete can fall inside its window; the
+/// loop's idle reader seldom loses a segment this way (see the report).
 fn pgrace_read_hook() -> lunix_store::ReadHook {
     use lunix_store::ReadStage;
     let n = Arc::new(std::sync::atomic::AtomicU64::new(0));

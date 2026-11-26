@@ -102,6 +102,11 @@ LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features 
 step "lunixd with crashpoints: a write after a kill between C6 and C9 and the recovery does not stall (milestone jcut)"
 cargo test -j "$jobs" --release -p lunixd --features testsupport,crashpoints --test stack_ring_recover
 
+step "lunixd stack_pgrace: one short cell of the reader-racing-delete stress (milestone pgrace; revalidation under the short grace on the real store, review S3)"
+# A segment goes about 6 s after a read took its hint at the earliest, so the
+# cell needs 40 s of load to see read_revalidated > 0 (the test asserts it).
+LUNIX_PGRACE_SECS=40 LUNIX_STACK_REQUIRE_FSCK=1 cargo test -j "$jobs" --release -p lunixd --features testsupport,crashpoints --test stack_pgrace integrity_default_ids_with_partial_chunk_writers
+
 if [ "${LUNIX_SKIP_OWNERSHIP:-}" = "1" ]; then
   step "ownership (skipped: not a milestone branch)"
 else

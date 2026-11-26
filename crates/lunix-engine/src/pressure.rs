@@ -405,6 +405,7 @@ impl Pressure {
 impl Inner {
     /// The pressure as of the last tick.
     pub(crate) fn pressure_now(&self) -> Pressure {
+        #[cfg(feature = "testsupport")]
         if let Some(p) = self.cfg.gc_pressure_force {
             return p;
         }

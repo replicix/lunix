@@ -2456,7 +2456,8 @@ sketch are in
 - **GC's duty.** The engine reads the gate's state at each tick. Outside
   `open` the collector gets four times the step budget, `gc_rate ×
   gc_pressure_rate_factor` (4; uncapped at the limit) and the floor grace
-  (10 s + 2 × `read_timeout`) instead of `gc_grace_ms`: the urgent pass's
+  (10 s + 2 × `read_timeout`) instead of `gc_grace_ms` (for segments, with `gc_pressure_grace_ms`, the
+  short grace of the 2026-11-26 amendment): the urgent pass's
   concession, per step. `GcBudget` and `GcParams` are per step already, so
   the `Collector` trait does not change. The ladder's urgent pass gets the
   back-off that commits failing for space already have (2 s, doubling to
@@ -2622,8 +2623,8 @@ measurement is not part of this amendment. Reader groundwork landed with
 it: the descriptor cache no longer pins a file deleted while a reader was
 opening it, and the status reports the age of the hints that went stale
 under a read (`read_stale_age_min_ms`, `read_stale_age_max_ms`), whose
-minimum must not be below the grace in force. The note is
-`docs/explanation/research/` material of the lead; the implementation
+minimum must not be below the grace in force. The design note
+behind it is a lead working document, not in the tree; the implementation
 report is `docs/plans/v1/reports/p1-pgrace.md`. "A segment of a local
 volume" must be read again when phase 2 (remote objects, reader pins)
 lands.
@@ -2639,7 +2640,7 @@ lands.
 | M5 | A quiesce while writes wait for space | fail them with `ENOSPC` and finish the drain | abort the process and let `REISSUE` park them again in the successor |
 | M6 | The window turn after a discard on a full volume | yes, only in the stop and full states | no: a discard then frees space only as later commits happen |
 | M7 | DESIGN §20 and the gates | say "burst" in §20; M16 cells declare their garbage room and are void if throttled; M15 cells set `cache_max` and gate on the store size; one full-volume cell is added | leave §20 as it is and report throttled cells as shortfalls |
-| M8 | GC under pressure | floor grace, 4 × budget and rate while writes are slowed | budget and rate only, the configured grace kept |
+| M8 | GC under pressure | floor grace (for segments the short grace of the 2026-11-26 amendment, when set), 4 × budget and rate while writes are slowed | budget and rate only, the configured grace kept |
 | M9 | Order of work | T1 and T2 now, on `main`; the rest after `p1/gcrate` | everything after `p1/gcrate` |
 
 *Gate:* the note's §9: the gate's property test (no waiter pending longer

@@ -246,7 +246,7 @@ fn without_pressure_the_short_grace_does_nothing() {
             assert!(s.gc.condemned().contains(o), "{o} deleted at {ms} ms");
         }
     }
-    assert_eq!(s.gc.status().segment_grace_ms, 60_000);
+    assert_eq!(s.gc.status().segment_grace_ms, 0, "no short grace in force");
     at(&mut s, base, 61_000);
     s.write(40, 9_999);
     s.commit().unwrap();

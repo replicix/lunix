@@ -39,7 +39,15 @@
 //!   unit). In the whole sequence it is a new mark after the grace; in a
 //!   pipelined pass it is the pass's own mark, which began after the grace of
 //!   every object it may delete; the urgent pass uses its own mark the same
-//!   way with the floor grace. Nothing gains a reference to a flagged segment
+//!   way with the floor grace. The length of the grace is no part of this
+//!   argument: a segment's grace is the general grace, or under pressure the
+//!   floor or the engine's short segment grace (`Collector::set_segment_grace`,
+//!   ADR-32 amendment), because no reader of a segment depends on the time
+//!   between condemn and delete (cuts, destage, compaction and the mark run
+//!   under the coordinator mutex with the deletes; a guest read looks its
+//!   block up again when its extent is gone; an open file survives the
+//!   unlink); map packs, runs and commit objects keep the general grace or
+//!   the floor. Nothing gains a reference to a flagged segment
 //!   (dedup skips flagged segments and runs only inside a cut, and a step
 //!   runs only with the map at the tip), so what such a mark finds dead stays
 //!   dead; an object it finds referenced (or named, or above the mark) is
@@ -930,13 +938,22 @@ impl Gc {
                 s => Some(s),
             },
             condemned_pending: self.list.entries.len() as u64,
+            condemned_segments: self
+                .list
+                .entries
+                .keys()
+                .filter(|o| matches!(o, ObjectRef::Segment(_)))
+                .count() as u64,
             moved_pending: self.outputs.len() as u64,
             last_pass: self.last_pass.clone(),
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
             requests: 0,
+            // 0 unless a short grace is in force (then it differs from the
+            // general grace), so the status is as before with the key off.
             segment_grace_ms: self
                 .seen_seg_grace
+                .filter(|g| Some(*g) != self.seen_grace)
                 .map_or(0, |g| u64::try_from(g.as_millis()).unwrap_or(u64::MAX)),
             reclaim: Box::new(self.reclaim),
             refs: None,
@@ -1240,7 +1257,7 @@ impl Gc {
         }
         match obj {
             ObjectRef::Segment(_) => self.segment_grace(view),
-            _ => view.params.grace,
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => view.params.grace,
         }
     }
 
@@ -1254,7 +1271,9 @@ impl Gc {
     fn urgent_grace_of(&self, view: &GcView<'_>, obj: ObjectRef) -> Duration {
         match obj {
             ObjectRef::Segment(_) => self.urgent_segment_grace(view),
-            _ => config::grace_floor(&view.params),
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => {
+                config::grace_floor(&view.params)
+            }
         }
     }
 
@@ -1262,7 +1281,7 @@ impl Gc {
     fn last_mark_grace_of(&self, obj: ObjectRef) -> Duration {
         match obj {
             ObjectRef::Segment(_) => self.last_mark_seg_grace,
-            _ => self.last_mark_grace,
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => self.last_mark_grace,
         }
     }
 
@@ -2802,7 +2821,8 @@ impl Gc {
         if let Some(ctx) = &mut self.ctx {
             ctx.liveness = Some(l);
         }
-        // Old entries whose floor grace ended before this mark began: this
+        // Old entries whose grace (the floor, or a segment's short grace)
+        // ended before this mark began: this
         // mark is their recheck.
         for obj in self.list.entries.keys().copied().collect::<Vec<_>>() {
             let grace = self.urgent_grace_of(view, obj);
@@ -2813,7 +2833,7 @@ impl Gc {
             *freed += self.apply_verdict(view, obj, v)?;
         }
         self.flush_index(view)?;
-        // New dead objects start their (floor) grace now.
+        // New dead objects start their grace now.
         if !todo.is_empty() {
             self.list_condemned(view, &todo)?;
             flag_segments(view, &todo)?;

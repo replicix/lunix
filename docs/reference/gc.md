@@ -334,7 +334,8 @@ lets it run recheck-only passes (above).
   a restart starts every grace again. Map packs, index runs and commit
   objects keep the grace in force (the floor under pressure), as does every
   delete without pressure, a pass on request (`lunix gc NAME`, which waits
-  `gc_grace_ms` in its grace phase) and `fsck --repair --gc`. The recheck is
+  the grace in force, the floor under pressure, in its grace
+  phase) and `fsck --repair --gc`. The recheck is
   the only judge of a delete, unchanged (a mark pinned after the flag and
   the grace finds the segment unreferenced, unnamed, at or below the mark and
   past the delete-time index invariant), and the evidence reason is the
@@ -369,7 +370,8 @@ lets it run recheck-only passes (above).
     reader may hold a segment's hint under pressure, and a read that outlives
     the short grace is not failed, it retries with the block's new entry.
   - *Figures (`lunix gc --status`, not on disk):* `segment_grace_ms` (the
-    grace of segments in force), `pgrace_deletes` and `pgrace_bytes` (segments
+    short grace of segments in force, 0 when none is: the key off or no
+    pressure), `pgrace_deletes` and `pgrace_bytes` (segments
     deleted, and their bytes, while their flag was younger than the floor at
     the start of the mark that judged them: the deletes only the short grace
     allowed), `pgrace_min_wait_ms` (the least flag-to-mark-start time over
@@ -390,8 +392,8 @@ lets it run recheck-only passes (above).
     negative control for a clock that starts at the onset, the urgent pass,
     the counters, a restart) and the oracle and crash matrices with the short
     grace on; `lunix-engine/tests/pressure.rs` (the value handed per state);
-    `lunix-engine/tests/revalidate.rs` (the property test of the seven
-    invariants over a real collector, and `no_collector_call_overlaps_a_cut_
+    `lunix-engine/tests/revalidate.rs` (the property test of the five
+    properties P1-P5 over a real collector, and `no_collector_call_overlaps_a_cut_
     under_the_short_grace`: a cut parked at its destage base read holds the
     coordinator and a collector step waits for it; the base read does not
     revalidate through the map, so that ordering (no collector call overlaps a

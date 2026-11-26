@@ -94,12 +94,15 @@ impl Inner {
     ) -> Result<u64> {
         let path = self.container_path(kind, id);
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let removed = if segment_points {
-            crate::fsops::unlink_segment_durable(self, &path)?
+        let res = if segment_points {
+            crate::fsops::unlink_segment_durable(self, &path)
         } else {
-            crate::fsops::unlink_durable(self, &path)?
+            crate::fsops::unlink_durable(self, &path)
         };
+        // Also when the directory fsync failed after the unlink: the cached
+        // descriptor must not keep the unlinked file.
         self.cache().remove(id);
+        let removed = res?;
         Ok(if removed { size } else { 0 })
     }
 
@@ -146,7 +149,10 @@ impl Inner {
         // under the cache lock: a descriptor seen linked here is inserted
         // before that removal, so it is removed with it.
         let mut cache = self.cache();
-        let linked = fstat(&*c.fd).map_err(|e| io_err(e.into()))?.st_nlink > 0;
+        // A file system that keeps the count of an unlinked open file at 1
+        // (an NFS silly-rename) falls back to caching it: a space leak until
+        // eviction, never wrong bytes. A failing `fstat` does not cache.
+        let linked = fstat(&*c.fd).is_ok_and(|st| st.st_nlink > 0);
         if linked {
             cache.insert(c.clone(), self.max_open_files);
         }

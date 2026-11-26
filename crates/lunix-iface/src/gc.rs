@@ -530,6 +530,9 @@ pub struct GcStatusSnapshot {
     pub state: Option<GcState>,
     /// Objects waiting out the grace period.
     pub condemned_pending: u64,
+    /// Of those, the segments (a segment may use the short grace under
+    /// pressure; packs, runs and commit objects may not).
+    pub condemned_segments: u64,
     /// Segments with pending `moved` records.
     pub moved_pending: u64,
     /// The last completed pass.
@@ -541,9 +544,9 @@ pub struct GcStatusSnapshot {
     /// Control calls waiting for a pass on request (`GcControl::run_pass`);
     /// set by the engine wiring, 0 from a collector.
     pub requests: u64,
-    /// The grace of condemned segments in force at the last call, in
-    /// milliseconds: the short grace under pressure (`gc_pressure_grace_ms`),
-    /// else the general grace (0 before the first call).
+    /// The short grace of condemned segments in force at the last call, in
+    /// milliseconds (`gc_pressure_grace_ms` under pressure); 0 when none is,
+    /// the key off included.
     pub segment_grace_ms: u64,
     /// Reclaim latency and pass-kind counters of this process.
     pub reclaim: Box<GcReclaimStats>,

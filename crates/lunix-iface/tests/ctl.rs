@@ -289,6 +289,7 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                 GcStatusSnapshot {
                     state,
                     condemned_pending,
+                    condemned_segments: moved_pending,
                     moved_pending,
                     last_pass,
                     stats: GcStats {

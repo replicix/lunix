@@ -97,7 +97,7 @@ pg-plain       writes 11699 reads 240154 revalidated 79 exhausted 0 stale age 62
 pg-plain-id32  writes 11710 reads 252904 revalidated 71 exhausted 0 stale age 6438..15991 ms auth 0 pgrace deletes 48 least wait 2003 ms
 ```
 
-All seven alarms of the note's 3.3 held in every cell: `read_revalidate_exhausted` 0, `extent_auth_failures` 0, no guest
+All five alarms of the note's 3.3 held in every cell: `read_revalidate_exhausted` 0, `extent_auth_failures` 0, no guest
 error, `pgrace_min_wait_ms` >= 2000, `read_stale_age_min_ms` (5.9 to 6.7 s) >= the grace, every block verified, fsck clean.
 
 ## Gate
@@ -127,7 +127,7 @@ error, `pgrace_min_wait_ms` >= 2000, `read_stale_age_min_ms` (5.9 to 6.7 s) >= t
    after a read took its hint at the earliest (the table of lifetimes: the chunk is overwritten, the cut, the flag, 2 s,
    the next mark). The cells hold 5 % of the guest calls for 0 to 8 graces (16 s; `LUNIX_PGRACE_HOLD_GRACES`), the
    read cache is 2 MiB, 32 read helpers, so that holds do not starve the others. With these `read_revalidated` is
-   36 to 53 per cell, always above 0.
+   61 to 79 per cell, always above 0.
 3. **The kill-loop arm forces the pressure.** The child processes never fill a volume, and the gate's `Raised`
    needs an active writer; `EngineConfig::gc_pressure_force` (a `#[doc(hidden)]` test hook) makes the engine report
    `Raised`. The real gate is covered by `stack_pgrace`.
@@ -160,3 +160,27 @@ error, `pgrace_min_wait_ms` >= 2000, `read_stale_age_min_ms` (5.9 to 6.7 s) >= t
 12. Not done, as instructed: T6 (arm C and C2), the default decision (S8 stays off).
 
 Remote disk: 38 GiB peak (target debug and release, scratch of the parallel loops), over the 10 GiB budget; the tree is removed at the end.
+
+## Review fixes (review of f612fe2d)
+
+- **S1** `EngineConfig::gc_pressure_force` and its use in `pressure_now` are behind the engine's `testsupport` feature:
+  not in release builds. The kill-loop arm (built with `testsupport,crashpoints`) is the only user.
+- **S2** The ladder's back-off bound is `condemn_wait(floor, key, short_in_force)`: the short grace plus 1 s only when
+  the engine's pressure is not normal, the key is set and a listed object is a segment (new status figure
+  `GcStatusSnapshot::condemned_segments`); otherwise the floor, as on main. Unit tests for both cases
+  (`backoff_tests`).
+- **S3** `tools/ci.sh` runs one `stack_pgrace` cell (integrity, 16-byte ids, partial-chunk writers, `LUNIX_PGRACE_SECS=40`);
+  the test still asserts `read_revalidated > 0`, `exhausted == 0` and no auth failure. It took 81.6 s in the gate run.
+- **Nits.** The collector's module safety argument, `urgent_inner` comments and the three grace selectors (explicit
+  `ObjectRef` arms); docs (five properties, requested-pass wording, the note no longer cited as a tree path, pointers
+  from the M8 row and the GC-duty bullet, the 5 s hold in the key's row, one set of revalidation figures, the kill hook's
+  comment); `segment_grace_ms` is 0 unless a short grace is in force, so `lunix gc --status` prints no `segment grace`
+  line with the key off; a failed directory fsync after an unlink still evicts the descriptor (`container.rs`), and a
+  failing `fstat` or a file system that keeps `st_nlink` at 1 for an unlinked file is noted in the comment (the first
+  does not cache).
+- **Left as they are, as asked:** the re-flag stamp in `reconcile` is read before the flag write (the grace of a
+  re-flagged segment can be younger than its flag by the scan and the write; the recheck mark still starts after the
+  flag, and no reader depends on the length); `ReadJob::born` is stamped once per request, so `read_stale_age_*` can
+  overstate the age by the lookup loop (microseconds), in the direction that hides an alarm, not raises one.
+- Gate: `tools/ci.sh` green (with the new cell), oracles at 400 cases 17 passed, the pgrace kill-loop arm on plain 16K
+  once: 27 runs, 27 kills at 10 points, recovery, fsck and oracle clean, exhausted 0.
