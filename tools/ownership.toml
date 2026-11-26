@@ -800,3 +800,13 @@ paths = [
   "docs/plans/v1/reports/p1-throttleflake.md",
   "tools/ownership.toml",
 ]
+
+[gracepre]
+paths = [
+  "crates/lunix-destage/tests/base_revalidate.rs",
+  "crates/lunix-destage/tests/common/mod.rs",
+  "crates/lunix-engine/src/queue.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "docs/plans/v1/reports/p1-gracepre.md",
+  "tools/ownership.toml",
+]
