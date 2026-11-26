@@ -22,6 +22,8 @@ use lunix_iface::store::{
 };
 use lunix_iface::{Error, Result};
 
+use rustix::fs::fstat;
+
 use crate::fsops::{io_err, io_or_missing, list_hex_ids, pread_exact, PACK_POINTS, SEGMENT_POINTS};
 use crate::volume::{Inner, LocalVolume};
 
@@ -135,7 +137,20 @@ impl Inner {
             kind,
             trailer,
         });
-        self.cache().insert(c.clone(), self.max_open_files);
+        #[cfg(test)]
+        crate::volume::run_open_hook(self);
+        // A delete that ran after the `open` above has unlinked the file and
+        // found nothing to remove from the cache yet; inserting now would pin
+        // the deleted bytes (and their blocks) until eviction. The delete
+        // removes from the cache after its unlink, and the link count is read
+        // under the cache lock: a descriptor seen linked here is inserted
+        // before that removal, so it is removed with it.
+        let mut cache = self.cache();
+        let linked = fstat(&*c.fd).map_err(|e| io_err(e.into()))?.st_nlink > 0;
+        if linked {
+            cache.insert(c.clone(), self.max_open_files);
+        }
+        drop(cache);
         Ok(c)
     }
 

@@ -23,10 +23,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use lunix_format::node::DataEntry;
 use lunix_format::{ChunkId, ExtentKind, Hint, IdLen, IdPrefix};
 use lunix_iface::block::Tag;
+use lunix_iface::clock::Clock;
 use lunix_iface::crypto::{ExtentCodec, OpenExpect, OpenOutput};
 use lunix_iface::index::ChunkIndex;
 use lunix_iface::map::{entry_hint, BlockMap, ChunkNo};
@@ -211,6 +213,10 @@ pub(crate) struct ReadJob {
     pub(crate) len: usize,
     /// The map entry seen on the queue thread, or `None` to ask the map.
     pub(crate) entry: Option<DataEntry>,
+    /// `clock.monotonic()` when `entry` was taken from the map; the age of a
+    /// hint that goes stale (`read_stale_age_*`). Unused when `entry` is
+    /// `None`: the helper's own lookup stamps its time.
+    pub(crate) born: Duration,
 }
 
 /// What the helpers share.
@@ -218,6 +224,8 @@ pub(crate) struct ReadCtx {
     pub(crate) map: Arc<dyn BlockMap>,
     pub(crate) reader: Arc<ExtentReader>,
     pub(crate) cache: Arc<ChunkCache>,
+    /// The engine's clock, for the age of a stale hint.
+    pub(crate) clock: Arc<dyn Clock>,
 }
 
 /// Retries of one read part after a failed read (C7). Each needs an observed
@@ -256,9 +264,12 @@ impl ReadCtx {
     /// write is newer than its siblings). That is allowed for a read that
     /// overlaps a write; it is never older than the request's start.
     fn run(&self, job: &ReadJob) -> Result<Vec<u8>> {
-        let mut entry = match job.entry {
-            Some(e) => Some(e),
-            None => self.map.get(ChunkNo(job.ci))?,
+        let (mut entry, mut held_since) = match job.entry {
+            Some(e) => (Some(e), job.born),
+            None => {
+                let e = self.map.get(ChunkNo(job.ci))?;
+                (e, self.clock.monotonic())
+            }
         };
         let mut retries = 0;
         loop {
@@ -281,9 +292,10 @@ impl ReadCtx {
                 }
                 Err(err) => err,
             };
-            match self.after_failure(job.ci, &e, &err, auth, retries) {
+            match self.after_failure(job.ci, &e, &err, auth, retries, held_since) {
                 Some(next) => {
                     entry = next;
+                    held_since = self.clock.monotonic();
                     retries += 1;
                 }
                 None => return Err(err),
@@ -317,6 +329,7 @@ impl ReadCtx {
         err: &Error,
         auth: u64,
         retries: u32,
+        held_since: Duration,
     ) -> Option<Option<DataEntry>> {
         if !revalidates(err) {
             self.reader.count_auth(auth);
@@ -342,6 +355,14 @@ impl ReadCtx {
             return None;
         }
         add(&self.reader.stats.read_revalidated, 1);
+        if err.kind() == ErrorKind::NotFound {
+            // The extent vanished under a hint taken `age` ago: a collected
+            // segment must have waited out its grace longer than that.
+            let age = self.clock.monotonic().saturating_sub(held_since);
+            self.reader
+                .stats
+                .note_stale_age(u64::try_from(age.as_millis()).unwrap_or(u64::MAX));
+        }
         tracing::debug!(chunk = ci, error = %err, "read part retried with the block's new entry");
         Some(now)
     }

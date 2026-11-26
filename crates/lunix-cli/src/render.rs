@@ -236,6 +236,17 @@ pub fn status(out: &mut dyn Write, s: &VolumeStatusBody) -> io::Result<()> {
             ),
         )?;
     }
+    if st.read_stale_age_max_ms > 0 {
+        kv(
+            out,
+            "stale hint age",
+            &format!(
+                "{} to {} before a read found its extent gone",
+                human_ms(st.read_stale_age_min_ms),
+                human_ms(st.read_stale_age_max_ms)
+            ),
+        )?;
+    }
     figures(out, &s.space)?;
     throttle(out, &s.throttle)
 }

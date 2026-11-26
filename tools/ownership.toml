@@ -800,3 +800,38 @@ paths = [
   "docs/plans/v1/reports/p1-throttleflake.md",
   "tools/ownership.toml",
 ]
+
+# pgrace: the short GC grace for segments under space pressure (ADR-32
+# amendment, FREEZE rule change F3): reader groundwork (descriptor cache,
+# contract tests, stale-hint age), the rule, stress and kill-loop arms, docs.
+[pgrace]
+paths = [
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-cli/tests/socket.rs",
+  "crates/lunix-engine/src/**",
+  "crates/lunix-engine/tests/**",
+  "crates/lunix-format/FREEZE.md",
+  "crates/lunix-gc/src/**",
+  "crates/lunix-iface/src/contract/index.rs",
+  "crates/lunix-iface/src/contract/mod.rs",
+  "crates/lunix-iface/src/contract/store.rs",
+  "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-iface/src/stats.rs",
+  "crates/lunix-iface/src/store.rs",
+  "crates/lunix-iface/src/ctl/msg.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-iface/tests/trivial/store.rs",
+  "crates/lunix-index/tests/behaviour.rs",
+  "crates/lunix-store/src/container.rs",
+  "crates/lunix-store/src/volume.rs",
+  "crates/lunix-store/src/tests/misc.rs",
+  "crates/lunixd/src/**",
+  "crates/lunixd/tests/**",
+  "docs/explanation/DECISIONS.md",
+  "docs/explanation/DESIGN.md",
+  "docs/reference/gc.md",
+  "docs/how-to-guides/**",
+  "docs/plans/v1/reports/p1-pgrace.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]

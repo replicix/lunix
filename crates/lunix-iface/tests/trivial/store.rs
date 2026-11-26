@@ -171,12 +171,19 @@ impl SegmentStore for TStore {
         Ok(())
     }
     fn locate(&self, hint: &Hint) -> Result<ExtentLocation> {
-        if !lock(&self.st).segments.contains_key(&hint.seg.raw()) {
-            return Err(Error::not_found("segment"));
-        }
-        let fd = OwnedFd::from(std::fs::File::open("/dev/null")?);
+        let st = lock(&self.st);
+        let f = st
+            .segments
+            .get(&hint.seg.raw())
+            .ok_or(Error::not_found("segment"))?;
+        // A real descriptor holding the extent region: it keeps reading after
+        // a delete, as an unlinked segment file does.
+        let fd = rustix::fs::memfd_create("trivial-segment", rustix::fs::MemfdFlags::CLOEXEC)
+            .map_err(std::io::Error::from)?;
+        let mut file = std::fs::File::from(fd);
+        std::io::Write::write_all(&mut file, &f.bytes)?;
         Ok(ExtentLocation {
-            fd: Arc::new(fd),
+            fd: Arc::new(OwnedFd::from(file)),
             offset: u64::from(hint.off),
             len: hint.clen + OVH as u32,
         })

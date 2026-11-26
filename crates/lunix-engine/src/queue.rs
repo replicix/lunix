@@ -710,6 +710,9 @@ impl Queue {
         let cb = self.inner.cfg.chunk_blocks();
         let end = range.lba + range.blocks;
         let mut b = range.lba;
+        // Stamped on the first part that needs a helper: the cached hits and
+        // holes of a request pay nothing for it.
+        let mut born = None;
         while b < end {
             let ci = b / cb;
             let part_end = end.min((ci + 1) * cb);
@@ -737,6 +740,7 @@ impl Queue {
                 Cached::Miss => None,
             };
             st.pending += 1;
+            let born = *born.get_or_insert_with(|| self.inner.clock.monotonic());
             self.inner.pool.submit(ReadJob {
                 queue: Arc::clone(&self.shared),
                 tag,
@@ -746,6 +750,7 @@ impl Queue {
                 chunk_off,
                 len,
                 entry,
+                born,
             });
             b = part_end;
         }

@@ -165,6 +165,35 @@ fn a_segment_deleted_between_lookup_and_read_is_read_through_the_new_entry() {
 }
 
 #[test]
+fn the_age_of_a_hint_that_went_stale_is_the_time_the_read_held_it() {
+    const HELD: Duration = Duration::from_secs(7);
+    for (codec, id_len) in modes() {
+        let (v, mut r) = setup(codec, id_len);
+        let before = r.engine.stats();
+        assert_eq!(
+            (before.read_stale_age_min_ms, before.read_stale_age_max_ms),
+            (0, 0),
+            "{id_len:?}: no sample yet"
+        );
+        let clock = Arc::clone(&v.clock);
+        let (st, data, fresh) = read_across_overwrite(&v, &mut r, codec, id_len, |r, old, _| {
+            // The reader holds its hint while the segment is collected.
+            clock.advance(HELD);
+            SegmentStore::delete(&r.store, old.seg).unwrap();
+        });
+        assert!(st.is_ok(), "{id_len:?}: {st:?}");
+        assert_eq!(data, fresh[..4096], "{id_len:?}");
+        let s = r.engine.stats();
+        let ms = HELD.as_millis() as u64;
+        assert_eq!(
+            (s.read_stale_age_min_ms, s.read_stale_age_max_ms),
+            (ms, ms),
+            "{id_len:?}: the age is at least the manual clock's advance"
+        );
+    }
+}
+
+#[test]
 fn auth_on_a_stale_hint_is_not_an_integrity_failure() {
     for (codec, id_len) in modes() {
         let (v, mut r) = setup(codec, id_len);

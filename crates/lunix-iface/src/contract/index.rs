@@ -306,3 +306,97 @@ pub fn all_runs_lists_every_run_file<F: IndexFixture>(f: &mut F) {
         .iter()
         .any(|a| a.id == made[0].id));
 }
+
+/// Deleting a run file never fails a lookup that is running at the time: a
+/// reader sees the run's entries or the index without it, never an error and
+/// never an entry it should not have. (The collector deletes runs no manifest
+/// names while helper threads look chunks up.) A run that no manifest names is
+/// deleted when there is one; otherwise a named one is, and then its entries
+/// may disappear for lookups that start after the manifest changed.
+pub fn delete_run_never_fails_a_lookup_in_flight<F: IndexFixture>(f: &mut F) {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const ROUNDS: u8 = 6;
+    const PER_ROUND: u8 = 12;
+    let ix = f.index();
+    let mut expect: Vec<(ChunkId, Hint)> = Vec::new();
+    for round in 0..ROUNDS {
+        let s = u64::from(round) + 1;
+        for k in 0..PER_ROUND {
+            let n = round * PER_ROUND + k + 1;
+            let h = hint(s, u32::from(k) * 600);
+            ix.insert(id(n), h).expect("insert");
+            expect.push((id(n), h));
+        }
+        ix.persist(seg(s)).expect("persist");
+    }
+    let named: Vec<_> = ix.runs().expect("runs");
+    let all = ix.all_runs().expect("all_runs");
+    let dead = all
+        .iter()
+        .find(|r| !named.iter().any(|n| n.id == r.id))
+        .copied();
+    let victim = dead.or_else(|| named.first().copied()).expect("a run");
+    let must_stay = dead.is_some();
+
+    let stop = AtomicBool::new(false);
+    let warm = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..3)
+            .map(|t| {
+                let (expect, stop, warm) = (&expect, &stop, &warm);
+                scope.spawn(move || {
+                    let mut looked = 0u64;
+                    let mut counted = false;
+                    while !stop.load(Ordering::Acquire) {
+                        // Point lookups.
+                        for (cid, h) in expect {
+                            match ix.get(cid).expect("a lookup never fails") {
+                                Some(c) => assert_eq!(c.hint, *h, "the right entry"),
+                                None => assert!(!must_stay, "an entry of a live run vanished"),
+                            }
+                            looked += 1;
+                        }
+                        // A scan holds the runs it cloned for its whole walk.
+                        if t == 0 {
+                            let mut seen = 0usize;
+                            ix.iter_entries(&mut |c| {
+                                seen += 1;
+                                assert!(
+                                    expect.iter().any(|(i, h)| *i == c.id && *h == c.hint),
+                                    "an entry nobody inserted"
+                                );
+                            })
+                            .expect("a scan never fails");
+                            assert!(!must_stay || seen == expect.len(), "{seen} entries");
+                        }
+                        if !counted {
+                            counted = true;
+                            warm.fetch_add(1, Ordering::AcqRel);
+                        }
+                    }
+                    looked
+                })
+            })
+            .collect();
+        // Delete while every reader is mid-loop.
+        while warm.load(Ordering::Acquire) < 3 {
+            std::thread::yield_now();
+        }
+        let freed = ix.delete_run(victim).expect("delete the run");
+        assert!(freed > 0 || dead.is_none());
+        // Let the readers run through the moment after the unlink as well.
+        for _ in 0..50 {
+            std::thread::yield_now();
+        }
+        stop.store(true, Ordering::Release);
+        for r in readers {
+            assert!(r.join().expect("a reader panicked") > 0);
+        }
+    });
+    assert!(!ix
+        .all_runs()
+        .expect("all_runs")
+        .iter()
+        .any(|r| r.id == victim.id));
+}

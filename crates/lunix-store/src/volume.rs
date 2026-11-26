@@ -185,6 +185,10 @@ pub(crate) struct Inner {
     pins_lock: Mutex<()>,
     /// Raw ids of containers being written; their `.open` files are not leftovers.
     pub(crate) open_writers: Mutex<HashSet<u64>>,
+    /// Test hook: runs in `open_container` after the file is open and
+    /// validated, before it is cached (the window a delete can fall into).
+    #[cfg(test)]
+    pub(crate) open_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     // Held for the life of the volume; dropping the last handle releases it.
     _lock: LockGuard,
 }
@@ -228,6 +232,15 @@ const MAX_WARNINGS: usize = 64;
 struct Warnings {
     items: VecDeque<String>,
     dropped: u64,
+}
+
+/// Runs the test hook of `open_container`, if one is set.
+#[cfg(test)]
+pub(crate) fn run_open_hook(inner: &Inner) {
+    let hook = lock(&inner.open_hook).clone();
+    if let Some(h) = hook {
+        h();
+    }
 }
 
 /// A poisoned mutex only means a panic elsewhere; the data is plain state.
@@ -460,6 +473,8 @@ impl LocalVolume {
                 replace_lock: Mutex::new(()),
                 pins_lock: Mutex::new(()),
                 open_writers: Mutex::new(HashSet::new()),
+                #[cfg(test)]
+                open_hook: Mutex::new(None),
                 _lock: guard,
             }),
         }

@@ -52,6 +52,13 @@ pub struct EngineStats {
     /// Read parts that ran out of retries while their entry kept changing
     /// (C7); each is an EIO for the guest.
     pub read_revalidate_exhausted: u64,
+    /// Least age in milliseconds of a hint whose read failed `NotFound` after
+    /// the block's entry had changed (C7); 0 when there is no sample. The
+    /// hint was taken from the map this long before the failure. Since the
+    /// engine started: not a checkpoint slot, so a restart clears it.
+    pub read_stale_age_min_ms: u64,
+    /// Greatest such age in milliseconds; 0 when there is no sample.
+    pub read_stale_age_max_ms: u64,
     /// Nanoseconds spent per destage stage: hash, dedup, compress, seal, append.
     pub stage_ns: [u64; 5],
 }
@@ -131,6 +138,8 @@ impl EngineStats {
             read_revalidated: g(19),
             read_revalidate_exhausted: g(20),
             stage_ns: [g(21), g(22), g(23), g(24), g(25)],
+            read_stale_age_min_ms: 0,
+            read_stale_age_max_ms: 0,
         })
     }
 }

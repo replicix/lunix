@@ -1136,3 +1136,94 @@ fn a_rejected_pins_file_is_replaced_only_by_the_repair_reason() {
     let log = std::fs::read_to_string(dir.path().join("state/floor-resets.log")).expect("audit");
     assert!(log.contains("repair_pins"), "{log}");
 }
+
+/// Descriptors of this process that point at deleted segment files of the
+/// volume at `dir` (tests run in parallel in one process).
+fn deleted_segment_fds(dir: &std::path::Path) -> usize {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let dir = dir.to_string_lossy().into_owned();
+    std::fs::read_dir("/proc/self/fd")
+        .expect("fd directory")
+        .filter_map(|e| std::fs::read_link(e.ok()?.path()).ok())
+        .filter(|t| {
+            let t = t.to_string_lossy();
+            t.starts_with(&dir) && t.ends_with(".seg (deleted)")
+        })
+        .count()
+}
+
+/// A reader that opened a segment, lost the race to a delete (the unlink and
+/// the cache removal both happened before it inserted) must not leave the
+/// unlinked file in the descriptor cache: the cache would pin its blocks
+/// until eviction, and the ledger would say freed what the file system has
+/// not freed. The read itself still returns the right bytes.
+#[test]
+fn a_reader_that_opened_before_a_delete_does_not_cache_the_unlinked_file() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let seg = seal_one(&vol, 1);
+    let want = data_extent(MODE, 16 * 1024, &cid(1), 100);
+    let hint = lunix_format::Hint {
+        seg,
+        off: 0,
+        clen: 100,
+    };
+    assert_eq!(deleted_segment_fds(dir.path()), 0);
+
+    // Parks the reader between its `open` and the cache insert and deletes.
+    let once = std::sync::atomic::AtomicBool::new(true);
+    let deleter = vol.clone();
+    let hook: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+        if once.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            assert!(SegmentStore::delete(&deleter, seg).expect("delete") > 0);
+        }
+    });
+    *crate::volume::lock(&vol.inner.open_hook) = Some(hook);
+
+    let mut out = Vec::new();
+    vol.read_extent(&hint, &mut out)
+        .expect("the open file reads the unlinked bytes");
+    assert_eq!(out, want);
+    *crate::volume::lock(&vol.inner.open_hook) = None;
+
+    assert!(
+        vol.inner.cache().get(seg).is_none(),
+        "the cache must not hold the deleted segment"
+    );
+    assert_eq!(
+        deleted_segment_fds(dir.path()),
+        0,
+        "the unlinked file is closed"
+    );
+    assert_eq!(
+        vol.read_extent(&hint, &mut out).expect_err("gone").kind(),
+        ErrorKind::NotFound
+    );
+}
+
+/// The other order: a reader that holds an extent location keeps reading
+/// across the delete, and drops the last reference to the file with it.
+#[test]
+fn a_location_taken_before_a_delete_reads_the_unlinked_file_and_frees_it_on_drop() {
+    let dir = tempdir();
+    let vol = plain(dir.path());
+    let seg = seal_one(&vol, 1);
+    let want = data_extent(MODE, 16 * 1024, &cid(1), 100);
+    let hint = lunix_format::Hint {
+        seg,
+        off: 0,
+        clen: 100,
+    };
+    let loc = vol.locate(&hint).expect("locate");
+    assert!(SegmentStore::delete(&vol, seg).expect("delete") > 0);
+    assert_eq!(
+        deleted_segment_fds(dir.path()),
+        1,
+        "only the location holds it"
+    );
+    let mut buf = vec![0u8; loc.len as usize];
+    crate::fsops::pread_exact(&loc.fd, &mut buf, loc.offset).expect("pread");
+    assert_eq!(buf, want);
+    drop(loc);
+    assert_eq!(deleted_segment_fds(dir.path()), 0);
+}
