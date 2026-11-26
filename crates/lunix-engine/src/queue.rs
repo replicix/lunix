@@ -695,10 +695,16 @@ impl Queue {
     /// holes are zeros, resident entries are served from the decoded-chunk
     /// cache, everything else goes to a read helper.
     ///
-    /// A helper reads the entry seen here even if a cut replaces it before
-    /// the read runs. That is correct because the new extent differs from
-    /// the old one only in blocks the cut wrote, and the overlay holds every
-    /// such block until C9 (after C6), so this lookup did not route them here.
+    /// A helper starts from the entry seen here, and may read a newer one.
+    /// If a cut replaces the entry before the read runs, the old extent is
+    /// still right: the new extent differs from it only in blocks the cut
+    /// wrote, and the overlay holds every such block until C9 (after C6), so
+    /// this lookup did not route them here. If the read of the entry seen
+    /// here fails with NotFound, Corrupt or Auth (GC deleted the segment, or
+    /// compaction moved the chunk), the helper looks the chunk up in the map
+    /// again and retries up to `REVALIDATE_MAX` times (C7, `read.rs`), so the
+    /// retry may read an entry newer than the one seen here. Parts of one
+    /// request can therefore reflect different map instants.
     fn map_parts(
         &mut self,
         tag: Tag,
