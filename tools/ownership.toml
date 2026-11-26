@@ -846,3 +846,13 @@ paths = [
   "docs/plans/v1/reports/p1-gracepre.md",
   "tools/ownership.toml",
 ]
+
+# pgracet6: real-daemon T6 of the short segment grace (arms B, C, C2); a measurement
+# branch, never merged. Harness brought over from p1/c5t6.
+[pgracet6]
+paths = [
+  "bench/phase1/perf/**",
+  "tests/perf/**",
+  "docs/plans/v1/reports/p1-pgracet6.md",
+  "tools/ownership.toml",
+]

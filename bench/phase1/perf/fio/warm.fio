@@ -1,0 +1,12 @@
+; ADR-33 T6: read the whole working set once so that a read cache that holds it is populated before the r4k and seqr cells
+; (WARM_CACHE=1 of tests/perf/partA.sh). Environment: DEV, WS (bytes), CPUS.
+[warm]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=read
+bs=1m
+iodepth=32
+numjobs=1
+size=${WS}
+cpus_allowed=${CPUS}
