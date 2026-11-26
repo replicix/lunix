@@ -279,7 +279,8 @@ calling thread runs the collector under the coordinator mutex):
   again each second while requests wait for space (ADR-32). That path has a
   back-off of its own: not sooner than 2 s after the end of the last urgent
   pass (either kind), doubling up to 60 s while ladder passes free nothing,
-  at most the floor grace after one that condemned something, back to 2 s
+  at most the floor grace after one that condemned something (the short
+  segment grace plus 1 s with `gc_pressure_grace_ms`), back to 2 s
   after one that freed bytes or when a write is admitted again; a successful
   commit does not reset it. Within the pause the step frees nothing and
   returns at once, and the ladder thread then waits 100 ms before its next
@@ -309,8 +310,8 @@ lets it run recheck-only passes (above).
 | gate state | step budget | compaction rate | grace | passes |
 |---|---|---|---|---|
 | `open` | `gc_step_budget_ms` (50 ms), `gc_rate` bytes | `gc_rate` | `gc_grace_ms` (60 s) | the pipelined schedule |
-| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms` | the same, always busy; recheck-only passes with `gc_fast_recheck` |
-| `stop`, `full` | as `slowdown` | uncapped | the floor | and the ladder's urgent pass, with its back-off |
+| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms`; **segments**: `gc_pressure_grace_ms` when set (below) | the same, always busy; recheck-only passes with `gc_fast_recheck` |
+| `stop`, `full` | as `slowdown` | uncapped | the floor (segments: as `slowdown`) | and the ladder's urgent pass, with its back-off |
 
 - The pressure rises at once and ends with a hold: the engine returns to the
   normal figures after the gate has been `open` for 5 s (`lunix status` shows
@@ -322,6 +323,86 @@ lets it run recheck-only passes (above).
   monotonic clock that stamped the condemn, so a grace shortened between the
   two only moves the delete earlier by what the floor allows. The default
   `gc_grace_ms` (60 s) is not changed.
+- **A short grace for segments** (`gc_pressure_grace_ms`, a `lunixd.toml`
+  key; ADR-32 amendment of 2026-11-26, FREEZE rule change F3). Off (0) by
+  default; else 2 000 ..= 10 000 ms. While the pressure is raised or urgent,
+  the grace of a condemned **segment** is that value (never longer than the
+  grace in force), counted from the segment's own flag on the collector's
+  monotonic clock, instead of the floor. Segments listed before the pressure
+  began are covered at its onset, each from its own flag (the same
+  shrink-at-onset the floor's 60 s to 30 s already has, with a smaller number);
+  a restart starts every grace again. Map packs, index runs and commit
+  objects keep the grace in force (the floor under pressure), as does every
+  delete without pressure, a pass on request (`lunix gc NAME`, which waits
+  `gc_grace_ms` in its grace phase) and `fsck --repair --gc`. The recheck is
+  the only judge of a delete, unchanged (a mark pinned after the flag and
+  the grace finds the segment unreferenced, unnamed, at or below the mark and
+  past the delete-time index invariant), and the evidence reason is the
+  existing `unreferenced after grace and recheck`. The urgent pass judges
+  segments with the short grace too, and the ladder's back-off after a pass
+  that condemned something is at most the short grace plus 1 s.
+  The collector gets it through the defaulted
+  `Collector::set_segment_grace(Option<Duration>)`, called with
+  `set_pressure` before every call and `Some` only while the pressure is
+  raised or urgent; the collector refuses it without pressure and raises a
+  value below its own minimum (`GcConfig::segment_grace_min`, 2 s). It is not
+  a `GcParams` field: the settings validation still refuses a grace below the
+  floor. Set `gc_fast_recheck` with it: without it the next mark waits for the
+  regular schedule (`busy_interval` or three marks), and the daemon logs a
+  warning at attach.
+  - *Why it is safe:* no reader of a segment depends on the time between
+    condemn and delete any more. A cut, destage, a dedup confirmation,
+    compaction and the mark run under the coordinator mutex with the
+    deletes, and the collector needs the map at the tip. A guest read looks
+    its block up again when its extent is gone or fails authentication (the
+    revalidating read, up to 16 times) and counts an authentication failure
+    only for the entry the map still names. A reader that already has the
+    file open reads the unlinked file: a delete is `unlink`, a sealed
+    segment is never modified in place (nothing punches a segment; adding
+    that needs its own design with revalidation in every reader first), and
+    the descriptor cache does not keep a file deleted while it was being
+    opened. Object ids are never reused, so a hint names one extent for ever.
+    A map leaf read (a map pack, not a segment) is not covered by this, which
+    is why packs keep the floor.
+  - *Not enforced:* `read_timeout_ms` is not enforced anywhere. It sets the
+    floor of the grace and nothing else: it no longer bounds how long a
+    reader may hold a segment's hint under pressure, and a read that outlives
+    the short grace is not failed, it retries with the block's new entry.
+  - *Figures (`lunix gc --status`, not on disk):* `segment_grace_ms` (the
+    grace of segments in force), `pgrace_deletes` and `pgrace_bytes` (segments
+    deleted, and their bytes, while their flag was younger than the floor at
+    the start of the mark that judged them: the deletes only the short grace
+    allowed), `pgrace_min_wait_ms` (the least flag-to-mark-start time over
+    those, never below the key), `pgrace_uncondemned` (the same test for a
+    recheck that un-condemned). The log line `gc: the grace in force
+    changed` carries `segment_from_ms` and `segment_to_ms` too. The engine's
+    status adds `read_stale_age_min_ms` and `read_stale_age_max_ms`: how long
+    a read part held its hint (the engine's monotonic clock, since the part
+    took the entry from the map) when its extent was gone and the block's
+    entry had changed; they are not checkpoint slots (a restart clears
+    them), and the minimum must not be below the short grace in force when
+    the segment went (0 and 0 without a sample).
+  - *Alarms:* `read_revalidate_exhausted > 0`; `extent_auth_failures > 0`
+    with no injected damage; `read_stale_age_min_ms` below the grace;
+    `pgrace_min_wait_ms` below the key; any guest `EIO`.
+  - Tests: `lunix-gc` `tests/pgrace.rs` (the rule at its boundaries, the
+    scope with a negative control for packs and commits, the onset with a
+    negative control for a clock that starts at the onset, the urgent pass,
+    the counters, a restart) and the oracle and crash matrices with the short
+    grace on; `lunix-engine/tests/pressure.rs` (the value handed per state);
+    `lunix-engine/tests/revalidate.rs` (the property test of the seven
+    invariants over a real collector, and `no_collector_call_overlaps_a_cut_
+    under_the_short_grace`: a cut parked at its destage base read holds the
+    coordinator and a collector step waits for it; the base read does not
+    revalidate through the map, so that ordering (no collector call overlaps a
+    cut, `precheck` needs the map at the tip) is what keeps a delete from
+    failing a cut); `lunixd/tests/stack_pgrace.rs` (the reader-racing-delete
+    stress on the real stack, every codec, the 16- and 32-byte id prefixes);
+    the `pgrace` arm of `lunixd/tests/stack_gc_kill.rs`. Both use the store's
+    read hook (`lunix_store::ReadHook`, behind the `crashpoints` feature): a
+    guest read can wait between its map lookup and the segment open and
+    between the open and the read, so that a delete falls into the window
+    (without it no read outlasts a grace on a local store and C7 never fires).
 - A cut may wait one unit past a 200 ms step instead of a 50 ms one: writes
   are being delayed already, and this is the trade the urgent pass makes for a
   whole mark.
@@ -403,10 +484,14 @@ their map roots are not roots, so their data may go.
    manifest swap however many), after which dedup never returns them. The
    grace of each object starts when the flags are set.
 2. **Grace.** `gc_grace_ms` (default 60 s) on the collector's monotonic clock.
-   It covers in-flight cuts, destage and reads; it may not be shorter than
-   10 s plus twice `read_timeout_ms` (30 s with the defaults), and a shorter
-   setting is refused. An object read back from the list after a restart
-   starts its grace again.
+   It covers in-flight cuts, destage and reads of map packs, index runs and
+   commit objects; it may not be shorter than 10 s plus twice
+   `read_timeout_ms` (30 s with the defaults), and a shorter setting is
+   refused. Under pressure the grace in force is the floor, and with
+   `gc_pressure_grace_ms` the grace of a **segment** is that value instead
+   (see "GC under write pressure"): the time no longer protects any reader of
+   a segment. An object read back from the list after a restart starts its
+   grace again.
 3. **Recheck.** A new mark from roots pinned after the grace. Each listed
    object is then decided in its own unit, against the facts of that step: an
    object the mark finds referenced (or named by a retained commit, above the
@@ -495,7 +580,8 @@ their map roots are not roots, so their data may go.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
-`read_timeout`), with that mark as their recheck, condemns what is newly dead,
+`read_timeout`; for a segment the short grace under pressure when
+`gc_pressure_grace_ms` is set), with that mark as their recheck, condemns what is newly dead,
 and compacts if still short. It never deletes without a recheck. When it stops
 on an error after it freed bytes, it reports the bytes freed (and writes its
 evidence) rather than an error.
@@ -565,7 +651,7 @@ scratch is bounded.
 |---|---|---|
 | `retain_last` | 2 | FULL commits kept as roots; the engine derives `chain_floor` from it |
 | `gc_grace_ms` | 60 000 | grace between condemn and delete; at least `10 000 + 2 × read_timeout_ms` |
-| `read_timeout_ms` | 10 000 | the longest a read may hold a hint; sets the grace floor |
+| `read_timeout_ms` | 10 000 | the bound a read is expected to stay within; **not enforced**. It sets the grace floor (10 s plus twice this) that map packs, index runs and commit objects keep, and that segments keep unless `gc_pressure_grace_ms` shortens theirs under pressure |
 | `gc_rate` | 67 108 864 | compaction bytes per second |
 | `gc_live_threshold` | 0.5 | compact segments whose live fraction is below this |
 | `gc_step_budget_ms` | 50 | time one step may spend |

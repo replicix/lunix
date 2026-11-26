@@ -2585,6 +2585,49 @@ defaulted method, `set_pressure`, which the GC duty bullet above said would
 not be needed. The delete rule is unchanged. Its T6 measurement is
 `p1/fastrecheck-t6`.
 
+**Amendment (2026-11-26, `p1/pgrace`; the maintainer approved the rule as
+worded in the note's sign-off section and chose to record it as this
+amendment and FREEZE rule change F3, no layout change).** *A short segment
+grace under pressure* (`gc_pressure_grace_ms`: 0 = off, else 2 000 ..=
+10 000; default 0). While GC pressure is raised or urgent, a condemned
+segment may be deleted once its index flag is at least
+`gc_pressure_grace_ms` old and a mark whose roots were pinned after that
+finds it unreferenced. The grace counts from each segment's own flag, so
+segments condemned before the pressure began are covered at its onset; a
+restart starts every grace again. Map packs, index runs and commit objects
+keep the floor grace (10 s + 2 × `read_timeout`), as does every delete
+outside pressure and `fsck --repair --gc`. This replaces, for segments
+under pressure, M8's "floor grace" and the sentence of DESIGN §11 that a
+local grace "is never shorter" than what covers in-flight cuts, destage and
+reads. The reason it is safe: the time between condemn and delete no longer
+protects any reader of a segment. Cuts, destage, dedup confirmation,
+compaction and the mark run under the coordinator mutex with the deletes; a
+guest read looks its block up again when its extent is gone (the
+revalidating read, `p1/revalidate`) and counts an authentication failure
+only against the entry the map still names; a reader that has the file open
+reads the unlinked file. A sealed segment is never modified in place: it is
+removed by unlink only, and in-place punching is excluded until every
+reader revalidates. `read_timeout_ms` is not enforced; it still sets the
+floor of the grace (and so of every other object's), but it no longer
+bounds how long a reader may hold a segment's hint under pressure. The
+recheck stays the only judge of a delete: the evidence reason of these
+deletes is the existing one, and `lunix gc --status` counts them
+(`pgrace_*`). `volume.json` and all on-disk bytes are unchanged; the
+`Collector` trait gains one defaulted method, `set_segment_grace` (the
+short grace is not a `GcParams` field: the validation refuses a grace below
+the floor). Map leaf reads stay protected by time only; map packs keep the
+floor for that reason. The key is off by default until the T6 arm
+measurement (milestone M4 of the note) decides the default; that
+measurement is not part of this amendment. Reader groundwork landed with
+it: the descriptor cache no longer pins a file deleted while a reader was
+opening it, and the status reports the age of the hints that went stale
+under a read (`read_stale_age_min_ms`, `read_stale_age_max_ms`), whose
+minimum must not be below the grace in force. The note is
+`docs/explanation/research/` material of the lead; the implementation
+report is `docs/plans/v1/reports/p1-pgrace.md`. "A segment of a local
+volume" must be read again when phase 2 (remote objects, reader pins)
+lands.
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |
