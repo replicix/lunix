@@ -68,3 +68,5 @@ pub use volume::{
     lock_holder_pid, read_volume_file, IdCounter, LocalVolume, StoreOptions, FLOOR_AUDIT,
     SEGMENT_TARGET,
 };
+#[cfg(any(test, feature = "crashpoints"))]
+pub use volume::{ReadHook, ReadStage};

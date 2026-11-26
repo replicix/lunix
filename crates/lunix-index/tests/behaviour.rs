@@ -424,6 +424,84 @@ fn prefix_lookup_is_unsupported_without_a_prefix() {
     assert_eq!(e.kind(), ErrorKind::Unsupported);
 }
 
+/// A lookup that is running while the collector deletes the runs no manifest
+/// names (the dead inputs of a compaction) is never failed by the unlink: it
+/// holds the run list under the read lock and the runs by `Arc`, and a scan
+/// keeps the file it opened. The answers are the same before, during and
+/// after.
+#[test]
+fn delete_run_does_not_fail_or_change_a_lookup_in_flight() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let dir = tempfile::tempdir().expect("tmp");
+    let ids = Ids::new();
+    let ix = open_with(dir.path(), &ids, 2);
+    let mut expect = BTreeMap::new();
+    for round in 0..30u64 {
+        for n in 0..40u64 {
+            let id = cid(n * 11 + round % 3);
+            let h = hint(round + 1, n as u32);
+            ix.insert(id, h).expect("insert");
+            expect.insert(id, h);
+        }
+        ix.persist(seg(round + 1)).expect("persist");
+    }
+    let named: Vec<_> = ix.runs().expect("runs").iter().map(|r| r.id).collect();
+    let dead: Vec<_> = ix
+        .all_runs()
+        .expect("all")
+        .into_iter()
+        .filter(|r| !named.contains(&r.id))
+        .collect();
+    assert!(dead.len() >= 4, "compaction left dead runs: {}", dead.len());
+
+    let stop = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..4)
+            .map(|t| {
+                let (ix, expect, stop) = (&ix, &expect, &stop);
+                scope.spawn(move || {
+                    let mut passes = 0u32;
+                    while !stop.load(Ordering::Acquire) {
+                        for (id, h) in expect {
+                            let got = ix.get(id).expect("a lookup never fails");
+                            assert_eq!(got.expect("the entry stays").hint, *h);
+                        }
+                        match t {
+                            0 => assert_eq!(all_entries(ix), {
+                                let mut m = BTreeMap::new();
+                                for (id, h) in expect {
+                                    m.insert(*id, (*h, false));
+                                }
+                                m
+                            }),
+                            1 => {
+                                for id in expect.keys().take(30) {
+                                    let p = IdPrefix::of(id, IdLen::Sixteen);
+                                    let found = ix.get_by_prefix(&p).expect("prefix");
+                                    assert!(found.iter().any(|c| c.id == *id));
+                                }
+                            }
+                            _ => {}
+                        }
+                        passes += 1;
+                    }
+                    passes
+                })
+            })
+            .collect();
+        for r in &dead {
+            std::thread::yield_now();
+            assert_eq!(ix.delete_run(*r).expect("delete"), r.size_bytes);
+        }
+        stop.store(true, Ordering::Release);
+        for r in readers {
+            assert!(r.join().expect("a reader failed") > 0);
+        }
+    });
+    assert_eq!(ix.all_runs().expect("all").len(), named.len());
+}
+
 #[test]
 fn delete_run_removes_file_and_manifest_entry() {
     let dir = tempfile::tempdir().expect("tmp");

@@ -296,3 +296,146 @@ fn the_collector_is_told_the_pressure_before_every_step() {
     assert_eq!(told(4), Some(false), "5 s after it opened");
     assert_eq!(flags.lock().unwrap().len(), 5, "one call per step");
 }
+
+/// What the collector was told, in order (milestone pgrace).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Told {
+    Pressure(bool),
+    SegmentGrace(Option<Duration>),
+    Call,
+}
+
+type Log = Arc<Mutex<Vec<Told>>>;
+
+/// Records `set_pressure`, `set_segment_grace` and every call, in order.
+struct GraceRecorder(Log);
+
+impl GraceRecorder {
+    fn idle() -> GcProgress {
+        GcProgress {
+            moved: Vec::new(),
+            freed: 0,
+            state: GcState::Idle,
+            done: true,
+            cut_wanted: false,
+        }
+    }
+}
+
+impl Collector for GraceRecorder {
+    fn step(&mut self, _view: &GcView<'_>, _b: GcBudget) -> Result<GcProgress> {
+        self.0.lock().unwrap().push(Told::Call);
+        Ok(Self::idle())
+    }
+
+    fn urgent(&mut self, _view: &GcView<'_>, _want: u64) -> Result<GcProgress> {
+        self.0.lock().unwrap().push(Told::Call);
+        Ok(Self::idle())
+    }
+
+    fn dry_run(&mut self, _v: &GcView<'_>) -> Result<GcPassSummary> {
+        Ok(GcPassSummary::default())
+    }
+
+    fn stats(&self) -> GcStats {
+        GcStats::default()
+    }
+
+    fn set_pressure(&mut self, raised: bool) {
+        self.0.lock().unwrap().push(Told::Pressure(raised));
+    }
+
+    fn set_segment_grace(&mut self, grace: Option<Duration>) {
+        self.0.lock().unwrap().push(Told::SegmentGrace(grace));
+    }
+}
+
+const SHORT: Duration = Duration::from_millis(5_000);
+
+fn short_segment_grace(cfg: &mut lunix_engine::EngineConfig) {
+    gc_on(cfg);
+    cfg.gc_pressure_grace = Some(SHORT);
+}
+
+fn setup_told(tweak: fn(&mut lunix_engine::EngineConfig)) -> (Vol, Running, Log) {
+    let mut v = Vol::create(CS, 64, 1, JournalMode::Mixed(5));
+    v.tweak = tweak;
+    let log: Log = Arc::default();
+    *lock(&v.collector) = Some(Box::new(GraceRecorder(Arc::clone(&log))));
+    let r = v.open().map_err(|e| e.0).expect("open");
+    (v, r, log)
+}
+
+/// The three things one tick told the collector, in order: the pressure,
+/// then the segment grace, then the call itself.
+fn tick_told(r: &Running, log: &Log) -> (bool, Option<Duration>) {
+    let before = log.lock().unwrap().len();
+    assert_eq!(r.engine.tick().expect("tick"), CommitOutcome::Idle);
+    let l = log.lock().unwrap();
+    match l[before..] {
+        [Told::Pressure(p), Told::SegmentGrace(g), Told::Call] => (p, g),
+        ref other => panic!("pressure, segment grace, call expected, got {other:?}"),
+    }
+}
+
+/// `Pressure::segment_grace`: the short grace exactly while the pressure is
+/// raised or urgent, `None` at normal, and the key is passed as configured.
+#[test]
+fn the_segment_grace_is_handed_over_exactly_while_the_pressure_is_raised_or_urgent() {
+    assert_eq!(Pressure::Normal.segment_grace(Some(SHORT)), None);
+    assert_eq!(Pressure::Raised.segment_grace(Some(SHORT)), Some(SHORT));
+    assert_eq!(Pressure::Urgent.segment_grace(Some(SHORT)), Some(SHORT));
+    assert_eq!(Pressure::Raised.segment_grace(None), None);
+    assert_eq!(Pressure::Urgent.segment_grace(None), None);
+
+    let (v, r, log) = setup_told(short_segment_grace);
+    assert_eq!(tick_told(&r, &log), (false, None));
+    r.space.set_throttle_state(ThrottleState::Slowdown);
+    assert_eq!(tick_told(&r, &log), (true, Some(SHORT)), "raised");
+    r.space.set_throttle_state(ThrottleState::Stop);
+    assert_eq!(tick_told(&r, &log), (true, Some(SHORT)), "urgent");
+    r.space.set_throttle_state(ThrottleState::Open);
+    assert_eq!(
+        tick_told(&r, &log),
+        (true, Some(SHORT)),
+        "held after the stop"
+    );
+    v.clock.advance(Duration::from_millis(4_999));
+    assert_eq!(tick_told(&r, &log), (true, Some(SHORT)), "4.999 s");
+    v.clock.advance(Duration::from_millis(1));
+    assert_eq!(tick_told(&r, &log), (false, None), "5 s after it opened");
+}
+
+/// With the key off (the default) the collector is never told a short grace.
+#[test]
+fn without_the_key_the_collector_is_never_told_a_short_grace() {
+    let (_v, r, log) = setup_told(gc_on);
+    for s in [
+        ThrottleState::Open,
+        ThrottleState::Slowdown,
+        ThrottleState::Stop,
+        ThrottleState::Full,
+    ] {
+        r.space.set_throttle_state(s);
+        assert_eq!(tick_told(&r, &log).1, None, "{s:?}");
+    }
+}
+
+/// The ladder's urgent pass is told too (every call goes through one place).
+#[test]
+fn the_urgent_pass_is_told_the_segment_grace() {
+    let (_v, r, log) = setup_told(short_segment_grace);
+    r.space.set_throttle_state(ThrottleState::Stop);
+    tick_told(&r, &log);
+    let n = log.lock().unwrap().len();
+    let _ = lunix_iface::gc::GcControl::run_urgent(&r.engine, 1 << 20);
+    let l = log.lock().unwrap();
+    assert_eq!(
+        l[n..],
+        [
+            Told::Pressure(true),
+            Told::SegmentGrace(Some(SHORT)),
+            Told::Call
+        ]
+    );
+}

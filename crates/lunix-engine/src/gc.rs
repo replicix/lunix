@@ -131,7 +131,9 @@ impl Inner {
         };
         // The level of the last tick (it already carries the 5 s hold, so the
         // flag does not flap): the collector may run recheck-only passes.
-        collector.set_pressure(self.pressure_now() != Pressure::Normal);
+        let pressure = self.pressure_now();
+        collector.set_pressure(pressure != Pressure::Normal);
+        collector.set_segment_grace(pressure.segment_grace(self.cfg.gc_pressure_grace));
         let r = f(&mut **collector, &view);
         if r.is_err() {
             // Moves a failed call sealed before it failed reach the next cut
@@ -317,15 +319,20 @@ impl Inner {
     /// at most the floor grace after one that condemned (what it condemned
     /// can go then, not later), else doubling to the maximum.
     fn next_backoff(&self, co: &Coord, cur: Duration, freed: u64) -> Duration {
-        let condemned = co
-            .collector
-            .as_ref()
-            .is_some_and(|c| c.status().condemned_pending > 0);
+        let st = co.collector.as_ref().map(|c| c.status());
+        let condemned = st.as_ref().is_some_and(|s| s.condemned_pending > 0);
+        let segments = st.as_ref().is_some_and(|s| s.condemned_segments > 0);
         let doubled = cur.saturating_mul(2).min(SPACE_URGENT_MAX);
         if freed > 0 {
             SPACE_URGENT_MIN
         } else if condemned {
-            doubled.min(self.floor_grace()).max(SPACE_URGENT_MIN)
+            let in_force = self.pressure_now() != Pressure::Normal;
+            let cap = condemn_wait(
+                self.floor_grace(),
+                self.cfg.gc_pressure_grace,
+                in_force && segments,
+            );
+            doubled.min(cap).max(SPACE_URGENT_MIN)
         } else {
             doubled
         }
@@ -373,6 +380,18 @@ impl Inner {
         self.cfg.gc_params.map_or(SPACE_URGENT_MAX, |p| {
             Duration::from_secs(10).saturating_add(p.read_timeout.saturating_mul(2))
         })
+    }
+}
+
+/// How long what a pass condemned waits before it can go: the floor grace,
+/// or, when the short segment grace is in force (`short_in_force`: the
+/// pressure is raised or urgent and a listed segment can use it), the short
+/// grace plus 1 s (the recheck mark after it). Map packs, index runs and
+/// commit objects wait the floor whatever the key says.
+fn condemn_wait(floor: Duration, short: Option<Duration>, short_in_force: bool) -> Duration {
+    match short {
+        Some(g) if short_in_force => g.saturating_add(Duration::from_secs(1)).min(floor),
+        _ => floor,
     }
 }
 
@@ -470,5 +489,30 @@ impl Answer {
                 .saturating_sub(self.start.segments_compacted),
             ..self.sum.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::*;
+
+    const FLOOR: Duration = Duration::from_secs(30);
+    const SHORT: Option<Duration> = Some(Duration::from_millis(2_000));
+
+    #[test]
+    fn the_short_grace_bounds_the_back_off_only_when_it_is_in_force_for_a_listed_segment() {
+        // In force and a segment listed: 2 s grace plus the recheck's 1 s.
+        assert_eq!(condemn_wait(FLOOR, SHORT, true), Duration::from_secs(3));
+        // Never above the floor.
+        let long = Some(Duration::from_secs(60));
+        assert_eq!(condemn_wait(FLOOR, long, true), FLOOR);
+    }
+
+    #[test]
+    fn without_it_the_back_off_keeps_the_floor() {
+        // Key off, pressure normal, or only packs, runs and commits listed.
+        assert_eq!(condemn_wait(FLOOR, None, true), FLOOR);
+        assert_eq!(condemn_wait(FLOOR, SHORT, false), FLOOR);
+        assert_eq!(condemn_wait(FLOOR, None, false), FLOOR);
     }
 }

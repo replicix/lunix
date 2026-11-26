@@ -39,7 +39,15 @@
 //!   unit). In the whole sequence it is a new mark after the grace; in a
 //!   pipelined pass it is the pass's own mark, which began after the grace of
 //!   every object it may delete; the urgent pass uses its own mark the same
-//!   way with the floor grace. Nothing gains a reference to a flagged segment
+//!   way with the floor grace. The length of the grace is no part of this
+//!   argument: a segment's grace is the general grace, or under pressure the
+//!   floor or the engine's short segment grace (`Collector::set_segment_grace`,
+//!   ADR-32 amendment), because no reader of a segment depends on the time
+//!   between condemn and delete (cuts, destage, compaction and the mark run
+//!   under the coordinator mutex with the deletes; a guest read looks its
+//!   block up again when its extent is gone; an open file survives the
+//!   unlink); map packs, runs and commit objects keep the general grace or
+//!   the floor. Nothing gains a reference to a flagged segment
 //!   (dedup skips flagged segments and runs only inside a cut, and a step
 //!   runs only with the map at the tip), so what such a mark finds dead stays
 //!   dead; an object it finds referenced (or named, or above the mark) is
@@ -437,6 +445,43 @@ thread_local! {
     /// tests that need it).
     pub(crate) static ORPHAN_HOLD_OFF: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Per test thread: a broken short-grace rule (the negative controls of
+    /// the pgrace tests).
+    pub(crate) static PGRACE_MUTANT: std::cell::Cell<PgraceMutant> =
+        const { std::cell::Cell::new(PgraceMutant::None) };
+}
+
+/// Test-only: the ways the short segment grace could be wrong. The pgrace
+/// tests must fail under each of them.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PgraceMutant {
+    /// The rule as specified.
+    None,
+    /// Map packs, index runs and commit objects get the short grace too.
+    AllObjects,
+    /// A segment's clock starts at the onset of the pressure (when the short
+    /// grace came into force) instead of at its own flag.
+    OnsetClock,
+}
+
+/// Test-only: sets a [`PgraceMutant`] on this thread while alive.
+#[cfg(test)]
+pub(crate) struct MutantOn;
+
+#[cfg(test)]
+impl MutantOn {
+    pub(crate) fn new(m: PgraceMutant) -> Self {
+        PGRACE_MUTANT.with(|c| c.set(m));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for MutantOn {
+    fn drop(&mut self) {
+        PGRACE_MUTANT.with(|c| c.set(PgraceMutant::None));
+    }
 }
 
 /// Test-only: switches the orphan hold off on this thread while alive.
@@ -767,6 +812,17 @@ pub struct Gc {
     /// The grace `params.grace` had at the last call, and since when.
     seen_grace: Option<Duration>,
     grace_changed: Duration,
+    /// The short grace of condemned segments the engine asked for
+    /// ([`Collector::set_segment_grace`]); `None` outside pressure, whatever
+    /// the engine said last (the collector refuses a short grace without it).
+    seg_grace: Option<Duration>,
+    /// The segment grace the last mark judged with (as `last_mark_grace`).
+    last_mark_seg_grace: Duration,
+    /// The segment grace in force at the last call (`GcStatusSnapshot`).
+    seen_seg_grace: Option<Duration>,
+    /// Test-only: when the short segment grace last came into force.
+    #[cfg(test)]
+    seg_onset: Duration,
     /// The lag figures of the pass in progress: sum, max and count of
     /// milliseconds, and the same total of the recheck-only passes.
     pass_lag: (u64, u64, u64),
@@ -865,6 +921,11 @@ impl Gc {
             used_grace: Duration::ZERO,
             seen_grace: None,
             grace_changed: Duration::ZERO,
+            seg_grace: None,
+            last_mark_seg_grace: Duration::ZERO,
+            seen_seg_grace: None,
+            #[cfg(test)]
+            seg_onset: Duration::ZERO,
             pass_lag: (0, 0, 0),
         }
     }
@@ -877,11 +938,23 @@ impl Gc {
                 s => Some(s),
             },
             condemned_pending: self.list.entries.len() as u64,
+            condemned_segments: self
+                .list
+                .entries
+                .keys()
+                .filter(|o| matches!(o, ObjectRef::Segment(_)))
+                .count() as u64,
             moved_pending: self.outputs.len() as u64,
             last_pass: self.last_pass.clone(),
             stats: self.stats,
             last_finished_ms: self.last_finished_ms,
             requests: 0,
+            // 0 unless a short grace is in force (then it differs from the
+            // general grace), so the status is as before with the key off.
+            segment_grace_ms: self
+                .seen_seg_grace
+                .filter(|g| Some(*g) != self.seen_grace)
+                .map_or(0, |g| u64::try_from(g.as_millis()).unwrap_or(u64::MAX)),
             reclaim: Box::new(self.reclaim),
             refs: None,
         }
@@ -1155,13 +1228,67 @@ impl Gc {
     /// (a recheck-only pass does not consume this trigger). A grace that
     /// shrank since that mark judged (pressure) counts every object whose
     /// shorter grace ended.
-    fn grace_ended_since_mark(&self, grace: Duration, now: Duration) -> bool {
-        let shrunk = grace < self.last_mark_grace;
+    fn grace_ended_since_mark(&self, view: &GcView<'_>, now: Duration) -> bool {
         self.grace
-            .values()
-            .filter(|&&t| t != Duration::MAX)
-            .map(|t| t.saturating_add(grace))
-            .any(|end| end <= now && (shrunk || self.last_full_mark_start.is_none_or(|m| m < end)))
+            .iter()
+            .filter(|&(_, &t)| t != Duration::MAX)
+            .any(|(&obj, &t)| {
+                let (grace, last) = (self.grace_of(view, obj), self.last_mark_grace_of(obj));
+                let end = t.saturating_add(grace);
+                end <= now && (grace < last || self.last_full_mark_start.is_none_or(|m| m < end))
+            })
+    }
+
+    /// The segment grace in force: the short grace under pressure when the
+    /// engine asked for one (never longer than the general grace in force),
+    /// else the general grace.
+    fn segment_grace(&self, view: &GcView<'_>) -> Duration {
+        self.seg_grace
+            .map_or(view.params.grace, |g| g.min(view.params.grace))
+    }
+
+    /// The grace of one listed object: the segment grace for a segment, the
+    /// general grace for a map pack, an index run or a commit object (ADR-32
+    /// amendment: the short grace is for segments only).
+    fn grace_of(&self, view: &GcView<'_>, obj: ObjectRef) -> Duration {
+        #[cfg(test)]
+        if PGRACE_MUTANT.with(std::cell::Cell::get) == PgraceMutant::AllObjects {
+            return self.segment_grace(view);
+        }
+        match obj {
+            ObjectRef::Segment(_) => self.segment_grace(view),
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => view.params.grace,
+        }
+    }
+
+    /// The segment grace of the urgent pass, whose base is the grace floor.
+    fn urgent_segment_grace(&self, view: &GcView<'_>) -> Duration {
+        let floor = config::grace_floor(&view.params);
+        self.seg_grace.map_or(floor, |g| g.min(floor))
+    }
+
+    /// As [`Gc::grace_of`] for the urgent pass.
+    fn urgent_grace_of(&self, view: &GcView<'_>, obj: ObjectRef) -> Duration {
+        match obj {
+            ObjectRef::Segment(_) => self.urgent_segment_grace(view),
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => {
+                config::grace_floor(&view.params)
+            }
+        }
+    }
+
+    /// The grace the last mark judged `obj` with.
+    fn last_mark_grace_of(&self, obj: ObjectRef) -> Duration {
+        match obj {
+            ObjectRef::Segment(_) => self.last_mark_seg_grace,
+            ObjectRef::Pack(_) | ObjectRef::Run(_) | ObjectRef::Commit(_) => self.last_mark_grace,
+        }
+    }
+
+    /// Records the graces a mark judged with.
+    fn note_mark_graces(&mut self, view: &GcView<'_>) {
+        self.last_mark_grace = view.params.grace;
+        self.last_mark_seg_grace = self.segment_grace(view);
     }
 
     /// The kind of pass to start now, if one is due.
@@ -1205,7 +1332,7 @@ impl Gc {
             } else {
                 gap
             })
-            && self.grace_ended_since_mark(view.params.grace, now)
+            && self.grace_ended_since_mark(view, now)
         {
             return Ok(true);
         }
@@ -1259,15 +1386,14 @@ impl Gc {
         if !self.last_end.is_none_or(|e| now >= e.saturating_add(duty)) {
             return false;
         }
-        let grace = view.params.grace;
-        let shrunk = grace < self.last_mark_grace;
         self.grace
-            .values()
-            .filter(|&&t| t != Duration::MAX)
-            .map(|t| t.saturating_add(grace))
-            .any(|end| {
+            .iter()
+            .filter(|&(_, &t)| t != Duration::MAX)
+            .any(|(&obj, &t)| {
+                let (grace, last) = (self.grace_of(view, obj), self.last_mark_grace_of(obj));
+                let end = t.saturating_add(grace);
                 end.saturating_add(delay) <= now
-                    && (shrunk || self.last_mark_start.is_none_or(|m| m < end))
+                    && (grace < last || self.last_mark_start.is_none_or(|m| m < end))
             })
     }
 
@@ -1572,7 +1698,7 @@ impl Gc {
                         // this mark is the recheck of the objects listed
                         // before it whose grace ended before it began.
                         self.last_mark_start = Some(started);
-                        self.last_mark_grace = view.params.grace;
+                        self.note_mark_graces(view);
                         if self.kind != PassKind::Recheck {
                             self.last_full_mark_start = Some(started);
                         }
@@ -1659,7 +1785,7 @@ impl Gc {
                     self.after_mark(&l);
                     self.last_mark_start = Some(l.started);
                     self.last_full_mark_start = Some(l.started);
-                    self.last_mark_grace = view.params.grace;
+                    self.note_mark_graces(view);
                     if let Some(ctx) = &mut self.ctx {
                         ctx.liveness = Some(l);
                     }
@@ -1681,7 +1807,8 @@ impl Gc {
             } => {
                 match queue.pop_front() {
                     Some(obj) => {
-                        let v = self.recheck_verdict(view, obj, view.params.grace)?;
+                        let grace = self.grace_of(view, obj);
+                        let v = self.recheck_verdict(view, obj, grace)?;
                         // Pipelined: a grace still running is no news; a
                         // later pass decides (`due` starts it when the grace
                         // ends).
@@ -1922,10 +2049,19 @@ impl Gc {
         ) else {
             return Err(Error::invalid("recheck without a mark"));
         };
-        let elapsed = self
-            .grace
-            .get(&obj)
-            .is_some_and(|&t| t != Duration::MAX && t.saturating_add(grace) <= l.started);
+        #[cfg(test)]
+        let onset = if PGRACE_MUTANT.with(std::cell::Cell::get) == PgraceMutant::OnsetClock
+            && matches!(obj, ObjectRef::Segment(_))
+        {
+            self.seg_onset
+        } else {
+            Duration::ZERO
+        };
+        #[cfg(not(test))]
+        let onset = Duration::ZERO;
+        let elapsed = self.grace.get(&obj).is_some_and(|&t| {
+            t != Duration::MAX && t.max(onset).saturating_add(grace) <= l.started
+        });
         if !elapsed {
             return Ok(Verdict::Defer("grace not over", Deferral::Grace));
         }
@@ -1965,6 +2101,9 @@ impl Gc {
                 Ok(0)
             }
             Verdict::Uncondemn(keep) => {
+                if self.short_wait(view, obj).is_some() {
+                    self.reclaim.pgrace_uncondemned += 1;
+                }
                 // The flag and the list change together at the end of the
                 // step (`flush_index`): the flag first, then the list, so a
                 // crash in between re-flags a segment the next recheck
@@ -2090,19 +2229,53 @@ impl Gc {
 
     /// Notes when `params.grace` changed (the lag figures start there).
     fn note_grace(&mut self, view: &GcView<'_>) {
-        if self.seen_grace != Some(view.params.grace) {
-            if let Some(old) = self.seen_grace {
+        let seg = self.segment_grace(view);
+        if self.seen_grace != Some(view.params.grace) || self.seen_seg_grace != Some(seg) {
+            if let (Some(old), Some(old_seg)) = (self.seen_grace, self.seen_seg_grace) {
                 self.grace_changed = view.clock.monotonic();
+                let ms = |d: Duration| u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
                 // Not coalesced: the pressure onset the gate's timings read
                 // from comes with the grace the engine switches to.
                 tracing::info!(
-                    from_ms = u64::try_from(old.as_millis()).unwrap_or(u64::MAX),
-                    to_ms = u64::try_from(view.params.grace.as_millis()).unwrap_or(u64::MAX),
+                    from_ms = ms(old),
+                    to_ms = ms(view.params.grace),
+                    segment_from_ms = ms(old_seg),
+                    segment_to_ms = ms(seg),
                     "gc: the grace in force changed"
                 );
             }
+            #[cfg(test)]
+            if seg < view.params.grace
+                && self
+                    .seen_seg_grace
+                    .is_none_or(|old| old >= view.params.grace)
+            {
+                self.seg_onset = view.clock.monotonic();
+            }
             self.seen_grace = Some(view.params.grace);
+            self.seen_seg_grace = Some(seg);
         }
+    }
+
+    /// For a segment whose flag is younger than the grace floor at the start
+    /// of the mark that judges it (so only the short grace under pressure let
+    /// it be judged): that age. The `pgrace_*` figures count these.
+    fn short_wait(&self, view: &GcView<'_>, obj: ObjectRef) -> Option<Duration> {
+        if !matches!(obj, ObjectRef::Segment(_)) {
+            return None;
+        }
+        let flagged = self
+            .grace
+            .get(&obj)
+            .copied()
+            .filter(|&t| t != Duration::MAX)?;
+        let started = self
+            .ctx
+            .as_ref()
+            .and_then(|c| c.liveness.as_ref())
+            .map(|l| l.started)?;
+        let wait = started.saturating_sub(flagged);
+        (wait < config::grace_floor(&view.params)).then_some(wait)
     }
 
     fn count_delete(&mut self, obj: ObjectRef, freed: u64) {
@@ -2150,6 +2323,7 @@ impl Gc {
             );
         }
         self.seg_cache = None;
+        let short = self.short_wait(view, obj);
         if matches!(obj, ObjectRef::Commit(_)) {
             point!(self.points, "gc.commit_delete.before_unlink");
         } else {
@@ -2178,6 +2352,17 @@ impl Gc {
         self.uncertain.remove(&obj);
         if n > 0 {
             view.space.release(space_kind(obj), n);
+        }
+        if let Some(wait) = short {
+            let ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX);
+            let r = &mut self.reclaim;
+            r.pgrace_min_wait_ms = if r.pgrace_deletes == 0 {
+                ms
+            } else {
+                r.pgrace_min_wait_ms.min(ms)
+            };
+            r.pgrace_deletes += 1;
+            r.pgrace_bytes = r.pgrace_bytes.saturating_add(n);
         }
         self.note_lag(view, obj);
         if !matches!(obj, ObjectRef::Commit(_)) {
@@ -2620,6 +2805,7 @@ impl Gc {
         self.last_mark_start = Some(l.started);
         self.last_full_mark_start = Some(l.started);
         self.last_mark_grace = config::grace_floor(&view.params);
+        self.last_mark_seg_grace = self.urgent_segment_grace(view);
         let room = (MAX_ENTRIES as usize).saturating_sub(self.list.entries.len());
         self.facts(view)?;
         let todo = match &self.facts {
@@ -2635,18 +2821,19 @@ impl Gc {
         if let Some(ctx) = &mut self.ctx {
             ctx.liveness = Some(l);
         }
-        // Old entries whose floor grace ended before this mark began: this
+        // Old entries whose grace (the floor, or a segment's short grace)
+        // ended before this mark began: this
         // mark is their recheck.
-        let floor_grace = config::grace_floor(&view.params);
         for obj in self.list.entries.keys().copied().collect::<Vec<_>>() {
-            let v = self.recheck_verdict(view, obj, floor_grace)?;
+            let grace = self.urgent_grace_of(view, obj);
+            let v = self.recheck_verdict(view, obj, grace)?;
             if *freed >= want && v == Verdict::Delete {
                 continue;
             }
             *freed += self.apply_verdict(view, obj, v)?;
         }
         self.flush_index(view)?;
-        // New dead objects start their (floor) grace now.
+        // New dead objects start their grace now.
         if !todo.is_empty() {
             self.list_condemned(view, &todo)?;
             flag_segments(view, &todo)?;
@@ -2832,6 +3019,18 @@ impl Collector for Gc {
             tracing::info!(raised, "gc: the engine's pressure level changed");
         }
         self.pressure = raised;
+        if !raised {
+            self.seg_grace = None;
+        }
+    }
+
+    fn set_segment_grace(&mut self, grace: Option<Duration>) {
+        // The engine passes `Some` only under pressure; the collector holds
+        // that line itself (a short grace is a pressure rule) and never goes
+        // below its configured minimum.
+        self.seg_grace = grace
+            .filter(|_| self.pressure)
+            .map(|g| g.max(self.cfg.segment_grace_min));
     }
 
     fn set_tip_refs(&mut self, on: bool) {

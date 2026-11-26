@@ -485,7 +485,8 @@ journal):
     in play;
   - while the gate is not open, GC works harder: 4 times the step budget,
     `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and the
-    floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms`,
+    floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms` (for
+    segments `gc_pressure_grace_ms`, when set, instead of the floor),
     until the gate has been open for 5 s (§11, `docs/reference/gc.md`).
 
   If the reservation would cross the limit, the space ladder runs:
@@ -1342,11 +1343,24 @@ mirrors (phase 5).
   the floor commit's parent may be absent. Phase 4 adds tiered retention
   and the other roots.
 - **Local grace.** A local-only volume has no lease and no reader pins, so
-  its grace covers only in-flight cuts, destage and reads. It is never
-  shorter than that. The same condemn, grace, recheck, delete order
-  applies, and `epoch` is 0.
+  its grace covers only in-flight cuts, destage and reads. For map packs,
+  index runs and commit objects it is never shorter than that (the floor,
+  10 s + 2 x `read_timeout`). For a **segment** the time between condemn and
+  delete protects no reader (cuts, destage, dedup confirmation, compaction
+  and the mark run under the coordinator mutex with the deletes; a guest read
+  looks its block up again when its extent is gone; a reader with the file
+  open reads the unlinked file; a sealed segment is never modified in
+  place), so under pressure it may be as short as `gc_pressure_grace_ms`
+  (2 s to 10 s, off by default; ADR-32 amendment of 2026-11-26, FREEZE rule
+  change F3). The same condemn, grace, recheck, delete order applies, the
+  recheck is the only judge, and `epoch` is 0. `read_timeout_ms` is not
+  enforced. Phase 2 (remote objects, reader pins, warmers) keeps graces
+  based on time and must re-read this.
 - **Passes under pressure.** While GC pressure is raised (ADR-32), the
-  grace drops to the floor and, with `gc_fast_recheck` on, a recheck-only
+  grace drops to the floor (for a segment, with `gc_pressure_grace_ms` set,
+  to that value, counted from the segment's own flag, so the backlog
+  condemned before the pressure is covered at its onset) and, with
+  `gc_fast_recheck` on, a recheck-only
   pass (mark, condemn, delete, no compaction) runs about 1 s after a
   condemned segment's grace ends, or at once when the grace shrinks.
   Regular passes keep their own schedule, so compaction is not starved.

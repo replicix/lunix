@@ -335,6 +335,13 @@ enum Arm {
     /// so what is condemned between them comes from the proposals, and the
     /// recheck-only passes delete it; the proposal points are killed too.
     Condemn,
+    /// The short segment grace under pressure (milestone pgrace): the
+    /// condemn arm's schedule, with `gc_pressure_grace_ms = 2000` and the
+    /// engine's pressure forced to `Raised` (these processes never fill a
+    /// volume; the stress test `stack_pgrace` runs the real gate), so the
+    /// recheck-only passes come from the pressure and not from
+    /// `fast_recheck_always`.
+    Pgrace,
 }
 
 impl Arm {
@@ -343,6 +350,7 @@ impl Arm {
             Self::Plain => "plain",
             Self::Recheck => "recheck",
             Self::Condemn => "condemn",
+            Self::Pgrace => "pgrace",
         }
     }
 
@@ -350,6 +358,7 @@ impl Arm {
         match s {
             "recheck" => Self::Recheck,
             "condemn" => Self::Condemn,
+            "pgrace" => Self::Pgrace,
             _ => Self::Plain,
         }
     }
@@ -459,7 +468,56 @@ fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
             busy_interval: Duration::from_secs(1),
             ..base
         },
+        Arm::Pgrace => GcConfig {
+            pass_interval: Duration::from_secs(20),
+            busy_interval: Duration::from_secs(20),
+            fast_recheck: Some(Duration::from_secs(1)),
+            ..base
+        },
     });
+    if arm == Arm::Pgrace {
+        o.gc_pressure_grace = Some(Duration::from_millis(2_000));
+        let prev = o.tweak.take();
+        o.tweak = Some(Arc::new(move |c: &mut EngineConfig| {
+            if let Some(t) = &prev {
+                t(c);
+            }
+            c.gc_pressure_force = Some(lunix_engine::Pressure::Raised);
+            // Most of the idle reader's reads reach the store.
+            c.read_cache_max = 1 << 20;
+        }));
+        o.segment_read_hook = Some(pgrace_read_hook());
+    }
+}
+
+/// The pgrace arm's store hook (`lunix_store::ReadHook`): on a guest read
+/// helper, some reads wait before the open (the part keeps the hint it took
+/// from the map while the collector deletes its segment: compaction moves it
+/// and the sweep removes the source) and some after it (the part keeps the
+/// file open across the delete), for up to 8 s (4 short graces), so that a read
+/// part can outlast a grace and the delete can fall inside its window; the
+/// loop's idle reader seldom loses a segment this way (see the report).
+fn pgrace_read_hook() -> lunix_store::ReadHook {
+    use lunix_store::ReadStage;
+    let n = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    Arc::new(move |stage, _hint| {
+        let helper = std::thread::current()
+            .name()
+            .is_some_and(|t| t.starts_with("lunix-read-"));
+        if !helper {
+            return;
+        }
+        let k = n.fetch_add(1, Ordering::Relaxed);
+        let mut r = TestRng::new(k ^ 0x6b69_6c6c);
+        let every = if stage == ReadStage::BeforeOpen {
+            200
+        } else {
+            400
+        };
+        if r.below(every) == 0 {
+            std::thread::sleep(Duration::from_millis(1 + r.below(8_000)));
+        }
+    })
 }
 
 fn builder(parent: &Path, mode: CryptoMode, cs: u32) -> VolumeBuilder {
@@ -738,6 +796,20 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
     progress(prog, n, &d);
     rv_note(&stack, &mut seen, 0);
     assert_refs_clean(&stack, "child at the end");
+    if arm == Arm::Pgrace {
+        // The arm's purpose: the short grace deleted segments, and never
+        // early (a killed child does not get here; the counting run does).
+        let rc = *stack.engine.gc_status_handle().get().reclaim;
+        eprintln!("pgrace arm: {rc:?}");
+        assert!(
+            rc.pgrace_deletes > 0,
+            "the short grace deleted nothing: {rc:?}"
+        );
+        assert!(rc.pgrace_min_wait_ms >= 2_000, "{rc:?}");
+        let es = stack.engine.stats();
+        assert_eq!(es.read_revalidate_exhausted, 0);
+        assert_eq!(es.extent_auth_failures, 0);
+    }
     drop(d);
     close(stack).expect("child close");
     writeln!(prog, "{n} 0").expect("progress");
@@ -1301,7 +1373,7 @@ fn verify(cfg: &Config, p: &Prepared, what: &str, tally: &mut Tally) {
     assert_refs_clean(&stack, what);
     // After the counting run and the kills at a point a proposal passes
     // (the others recover the same way; each phase costs about a minute).
-    if cfg.arm == Arm::Condemn
+    if matches!(cfg.arm, Arm::Condemn | Arm::Pgrace)
         && ["counting run", "propose", "condemn"]
             .iter()
             .any(|k| what.contains(k))
@@ -1413,7 +1485,7 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
     let all_hits = fast || std::env::var("LUNIX_KILL_HITS").is_ok_and(|v| v == "all");
     let only: Vec<String> = if arm == Arm::Recheck {
         RECHECK_ARM_POINTS.iter().map(|p| (*p).to_owned()).collect()
-    } else if arm == Arm::Condemn {
+    } else if arm == Arm::Condemn || arm == Arm::Pgrace {
         CONDEMN_ARM_POINTS.iter().map(|p| (*p).to_owned()).collect()
     } else {
         std::env::var("LUNIX_KILL_POINTS")
@@ -1532,6 +1604,13 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
         tally.rv.reads
     );
     assert_eq!(tally.rv.exhausted, 0, "a read gave up revalidating");
+    if arm == Arm::Pgrace && tally.rv.revalidated == 0 {
+        // Not an assertion: the loop's reader runs in idle phases, where no
+        // entry changes except by compaction, so even with the store's read
+        // hook a held read seldom finds its segment gone. `stack_pgrace`
+        // (reads racing overwrites and the collector) is the gate for C7.
+        eprintln!("pgrace arm: the loop's reader revalidated no read part");
+    }
     for (point, hits) in &killed {
         let c = counts[*point];
         let want = if all_hits { c.min(3) } else { 1 };
@@ -1654,4 +1733,17 @@ fn gc_kill_loop_recheck_integrity_16k() {
 #[test]
 fn gc_kill_loop_condemn_plain_16k() {
     kill_loop_with(CryptoMode::Plain, 16 << 10, Arm::Condemn);
+}
+
+/// The short segment grace under pressure (milestone pgrace): the condemn
+/// arm's schedule with `gc_pressure_grace_ms = 2000` and the pressure
+/// forced; killed at the proposal, condemn, recheck and delete points.
+#[test]
+fn gc_kill_loop_pgrace_plain_16k() {
+    kill_loop_with(CryptoMode::Plain, 16 << 10, Arm::Pgrace);
+}
+
+#[test]
+fn gc_kill_loop_pgrace_encrypted_16k() {
+    kill_loop_with(CryptoMode::Encrypted, 16 << 10, Arm::Pgrace);
 }

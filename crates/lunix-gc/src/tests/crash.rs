@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use lunix_format::IdLen;
+use lunix_iface::gc::Collector;
 
 use super::oracle::check_quiescent;
 use super::sim::{Sim, SimCfg, GRACE};
@@ -101,6 +102,7 @@ fn sweep(
     pipeline: bool,
     fast: bool,
     propose: bool,
+    pgrace: bool,
 ) -> BTreeMap<&'static str, u64> {
     let mut hits: BTreeMap<&'static str, u64> = BTreeMap::new();
     for (pi, &point) in CRASH_POINTS.iter().enumerate() {
@@ -122,7 +124,14 @@ fn sweep(
                 cfg.gc.fast_recheck = Some(Duration::from_secs(1));
                 cfg.gc.fast_recheck_always = true;
             }
+            if pgrace {
+                cfg.gc.segment_grace_min = Duration::ZERO;
+            }
             let mut s = Sim::new(cfg);
+            if pgrace {
+                s.gc.set_pressure(true);
+                s.gc.set_segment_grace(Some(Duration::from_millis(1)));
+            }
             s.hooks.arm(point, 1 + w % 3);
             let mut crashed = None;
             for _ in 0..40 {
@@ -145,6 +154,10 @@ fn sweep(
             assert_eq!(p, point);
             *hits.entry(point).or_insert(0) += 1;
             s.crash_reopen(next(&mut z)).unwrap();
+            if pgrace {
+                s.gc.set_pressure(true);
+                s.gc.set_segment_grace(Some(Duration::from_millis(1)));
+            }
             s.check_roots()
                 .unwrap_or_else(|e| panic!("after a crash at {point} (workload {w}): {e}"));
             // A second pass finishes the work.
@@ -168,13 +181,26 @@ fn check(chunk_size: u32, id_len: IdLen) {
 }
 
 fn check_with(chunk_size: u32, id_len: IdLen, pipeline: bool, fast: bool, propose: bool) {
+    check_pg(chunk_size, id_len, pipeline, fast, propose, false);
+}
+
+fn check_pg(
+    chunk_size: u32,
+    id_len: IdLen,
+    pipeline: bool,
+    fast: bool,
+    propose: bool,
+    pgrace: bool,
+) {
     let workloads = std::env::var("LUNIX_GC_CRASH_WORKLOADS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
-    let hits = sweep(chunk_size, id_len, workloads, pipeline, fast, propose);
+    let hits = sweep(
+        chunk_size, id_len, workloads, pipeline, fast, propose, pgrace,
+    );
     eprintln!(
-        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}, fast {fast}, propose {propose}: {hits:?}"
+        "gc crash sweep: chunk {chunk_size}, id_len {id_len:?}, pipeline {pipeline}, fast {fast}, propose {propose}, pgrace {pgrace}: {hits:?}"
     );
     for p in CRASH_POINTS {
         if is_proposal_point(p) && !propose {
@@ -263,4 +289,28 @@ fn every_crash_point_with_proposals_64k() {
 #[test]
 fn every_crash_point_with_proposals_lean() {
     check_with(16 << 10, IdLen::Zero, true, true, true);
+}
+
+/// Milestone pgrace: the same matrices with the short segment grace in force
+/// (pressure on, grace 1 ms, the collector's minimum 0): a kill at any point
+/// reopens to a volume whose every root reads and which converges. The
+/// restart starts every grace again.
+#[test]
+fn every_crash_point_with_the_short_grace_16k() {
+    check_pg(16 << 10, IdLen::Sixteen, true, true, false, true);
+}
+
+#[test]
+fn every_crash_point_with_the_short_grace_64k() {
+    check_pg(64 << 10, IdLen::ThirtyTwo, true, true, false, true);
+}
+
+#[test]
+fn every_crash_point_with_the_short_grace_lean() {
+    check_pg(16 << 10, IdLen::Zero, true, true, false, true);
+}
+
+#[test]
+fn every_crash_point_with_the_short_grace_and_proposals_16k() {
+    check_pg(16 << 10, IdLen::Sixteen, true, true, true, true);
 }

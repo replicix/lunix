@@ -98,6 +98,18 @@ impl Pressure {
         }
     }
 
+    /// The grace of condemned segments at this pressure: the configured short
+    /// grace (`gc_pressure_grace_ms`) while raised or urgent, else `None`
+    /// (the general grace applies). Map packs, index runs and commit objects
+    /// never get it.
+    #[must_use]
+    pub fn segment_grace(self, configured: Option<Duration>) -> Option<Duration> {
+        match self {
+            Self::Normal => None,
+            Self::Raised | Self::Urgent => configured,
+        }
+    }
+
     /// The collector's settings at this pressure: the compaction rate times
     /// `rate_factor` (uncapped when urgent) and the grace at the floor (10 s
     /// plus twice `read_timeout`, the urgent pass's rule), never longer than
@@ -393,6 +405,10 @@ impl Pressure {
 impl Inner {
     /// The pressure as of the last tick.
     pub(crate) fn pressure_now(&self) -> Pressure {
+        #[cfg(feature = "testsupport")]
+        if let Some(p) = self.cfg.gc_pressure_force {
+            return p;
+        }
         Pressure::from_code(self.pressure_level.load(Ordering::Acquire))
     }
 

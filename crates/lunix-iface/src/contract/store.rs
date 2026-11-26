@@ -128,6 +128,52 @@ pub fn segment_delete_is_idempotent<F: StoreFixture>(f: &mut F) {
     );
 }
 
+/// A location taken before a delete still reads the extent's bytes (the open
+/// file outlives the unlink; a sealed segment is never modified in place),
+/// and every read that starts after the delete is `NotFound`, whether it goes
+/// through `read_extent`, `locate` or `footer`. A reader that already holds
+/// the file is why a delete may follow a condemn without waiting for readers;
+/// one that has not opened it re-resolves.
+pub fn a_location_outlives_the_delete_and_new_reads_are_not_found<F: StoreFixture>(f: &mut F) {
+    use std::os::unix::fs::FileExt;
+
+    let mut w = f.segments().open_segment().expect("open");
+    let exts: Vec<Vec<u8>> = (1..=2u8)
+        .map(|n| f.data_extent(&cid(n), 200 + usize::from(n)))
+        .collect();
+    let hints: Vec<_> = exts
+        .iter()
+        .enumerate()
+        .map(|(i, e)| w.append_extent(&cid(i as u8 + 1), None, e).expect("append"))
+        .collect();
+    let sealed = w.seal(None).expect("seal");
+    let s = f.segments();
+
+    let locs: Vec<_> = hints.iter().map(|h| s.locate(h).expect("locate")).collect();
+    assert_eq!(s.delete(sealed.seg).expect("delete"), sealed.size_bytes);
+
+    for ((loc, want), hint) in locs.iter().zip(&exts).zip(&hints) {
+        let file = std::fs::File::from(loc.fd.try_clone().expect("dup the descriptor"));
+        let mut got = vec![0u8; loc.len as usize];
+        file.read_exact_at(&mut got, loc.offset).expect("pread");
+        assert_eq!(&got, want, "the unlinked file keeps its bytes");
+
+        let mut out = Vec::new();
+        let e = s.read_extent(hint, &mut out).expect_err("deleted");
+        assert_eq!(e.kind(), ErrorKind::NotFound, "read_extent after delete");
+        assert_eq!(
+            s.locate(hint).expect_err("deleted").kind(),
+            ErrorKind::NotFound,
+            "locate after delete"
+        );
+    }
+    assert_eq!(
+        s.footer(sealed.seg).expect_err("deleted").kind(),
+        ErrorKind::NotFound
+    );
+    assert!(!s.list().expect("list").iter().any(|i| i.seg == sealed.seg));
+}
+
 /// Ids rise across segments, packs and reopen, and are never reused.
 pub fn ids_are_never_reused<F: StoreFixture>(f: &mut F) {
     let mut seen = Vec::new();

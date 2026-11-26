@@ -395,6 +395,7 @@ impl Engine {
                 map: Arc::clone(&rec.map),
                 reader: Arc::clone(&reader),
                 cache: Arc::clone(&cache),
+                clock: Arc::clone(&deps.clock),
             }),
             cfg.read_helpers,
         );

@@ -116,6 +116,18 @@ pub struct EngineConfig {
     pub full_timeout: Duration,
     /// The per-segment reference table of the cut (default off).
     pub gc_condemn_on_cut: CondemnOnCut,
+    /// The short grace of condemned segments while the GC pressure is raised
+    /// or urgent (the daemon's `gc_pressure_grace_ms`; ADR-32 amendment,
+    /// rule change F3). `None`: off (the default). The collector holds it to
+    /// its own minimum.
+    pub gc_pressure_grace: Option<Duration>,
+    /// Tests only: the pressure level the engine reports (to the collector,
+    /// the budget and the params) whatever the space gate says. The kill
+    /// loops use it to run the short grace in processes that never fill a
+    /// volume. The daemon never sets it.
+    #[doc(hidden)]
+    #[cfg(feature = "testsupport")]
+    pub gc_pressure_force: Option<crate::pressure::Pressure>,
 }
 
 impl EngineConfig {
@@ -152,6 +164,9 @@ impl EngineConfig {
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
             gc_condemn_on_cut: CondemnOnCut::Off,
+            gc_pressure_grace: None,
+            #[cfg(feature = "testsupport")]
+            gc_pressure_force: None,
         }
     }
 

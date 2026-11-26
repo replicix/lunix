@@ -271,7 +271,11 @@ fn run_ops(s: &mut Sim, ops: &[Op]) -> Result<u64, TestCaseError> {
                 s.check_roots()
                     .map_err(|e| fail(format!("op {i} after a crash: {e}")))?;
             }
-            Op::Pressure(raised) => s.gc.set_pressure(raised),
+            Op::Pressure(raised) => {
+                s.gc.set_pressure(raised);
+                // As the engine does before every call.
+                s.gc.set_segment_grace(PGRACE.with(std::cell::Cell::get).filter(|_| raised));
+            }
             Op::Propose(seed, pool) => {
                 let offer = adversarial_offer(s, seed, pool);
                 let (only_pin, only_old) = exclusive_segments(s);
@@ -377,10 +381,19 @@ thread_local! {
     static EXCLUSIVE: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
     /// Proposals condemned, un-condemned by a recheck and deleted.
     static PROPOSED: std::cell::Cell<(u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0)) };
+    /// The short segment grace the engine hands the collector while the
+    /// workload's pressure is raised (milestone pgrace); `None`: off.
+    static PGRACE: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+    /// Segments deleted and bytes freed by the short grace (`pgrace_*`).
+    static PGRACE_DELETES: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
 }
 
 fn note_fast(s: &Sim) {
     let r = s.gc.status().reclaim;
+    PGRACE_DELETES.with(|f| {
+        let (d, b) = f.get();
+        f.set((d + r.pgrace_deletes, b + r.pgrace_bytes));
+    });
     FAST.with(|f| {
         let (p, d) = f.get();
         f.set((p + r.fast_passes, d + r.fast_segments_deleted));
@@ -410,6 +423,22 @@ fn oracle_with(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool) {
 /// the oldest retained FULL reaches) are condemned and only the recheck
 /// stands between them and a delete.
 fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered: bool) {
+    oracle_pg(chunk_size, id_len, salt, fast, unfiltered, None);
+}
+
+/// As [`oracle_cfg`] with the short segment grace `pg` handed to the
+/// collector whenever the workload raises the pressure (the collector's
+/// minimum is 0 here). Needs `fast`.
+fn oracle_pg(
+    chunk_size: u32,
+    id_len: IdLen,
+    salt: u64,
+    fast: bool,
+    unfiltered: bool,
+    pg: Option<Duration>,
+) {
+    PGRACE.with(|c| c.set(pg));
+    PGRACE_DELETES.with(|c| c.set((0, 0)));
     let cases = env("LUNIX_GC_CASES", 48);
     let ops = env("LUNIX_GC_OPS", 300) as usize;
     // `LUNIX_GC_HOLD_OFF=1`: the orphan hold is off, to see which oracle
@@ -446,6 +475,9 @@ fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered:
                 };
             }
             cfg.gc.propose_unfiltered = unfiltered;
+            if pg.is_some() {
+                cfg.gc.segment_grace_min = Duration::ZERO;
+            }
             let mut s = Sim::new(cfg);
             total_passes.set(total_passes.get() + run_ops(&mut s, &ops)?);
             check_quiescent(&mut s)?;
@@ -488,6 +520,14 @@ fn oracle_cfg(chunk_size: u32, id_len: IdLen, salt: u64, fast: bool, unfiltered:
         assert!(
             fast_passes > 0 && fast_deleted > 0,
             "the fast oracle ran no recheck pass that deleted"
+        );
+    }
+    if pg.is_some() {
+        let (n, bytes) = PGRACE_DELETES.with(std::cell::Cell::get);
+        eprintln!("gc oracle: the short grace deleted {n} segments, {bytes} bytes");
+        assert!(
+            n > 0,
+            "the short grace deleted nothing: the oracle proves nothing"
         );
     }
     eprintln!(
@@ -565,4 +605,80 @@ fn oracle_unfiltered_proposals_64k_id32() {
 #[test]
 fn oracle_unfiltered_proposals_with_recheck_passes_16k_id16() {
     oracle_cfg(16 << 10, IdLen::Sixteen, 10, true, true);
+}
+
+/// Milestone pgrace: the short segment grace (rule change F3) under the
+/// workload's random pressure, with a grace of 0 and of 1 ms (the smallest
+/// ticks), the recheck passes on, and the proposals unfiltered in the last
+/// one so that the recheck alone stands between a wrong proposal and a
+/// delete. Every root reads, the ledger equals the files, `live_bytes == 0`
+/// holds at every delete (I-R), and the volume converges.
+#[test]
+fn oracle_pgrace_zero_16k_id16() {
+    oracle_pg(
+        16 << 10,
+        IdLen::Sixteen,
+        11,
+        true,
+        false,
+        Some(Duration::ZERO),
+    );
+}
+
+#[test]
+fn oracle_pgrace_1ms_64k_id32() {
+    oracle_pg(
+        64 << 10,
+        IdLen::ThirtyTwo,
+        12,
+        true,
+        false,
+        Some(Duration::from_millis(1)),
+    );
+}
+
+#[test]
+fn oracle_pgrace_lean_id0() {
+    oracle_pg(16 << 10, IdLen::Zero, 13, true, false, Some(Duration::ZERO));
+}
+
+#[test]
+fn oracle_pgrace_unfiltered_proposals_16k_id16() {
+    oracle_pg(
+        16 << 10,
+        IdLen::Sixteen,
+        14,
+        true,
+        true,
+        Some(Duration::from_millis(1)),
+    );
+}
+
+#[test]
+fn oracle_pgrace_unfiltered_proposals_64k_id32() {
+    oracle_pg(
+        64 << 10,
+        IdLen::ThirtyTwo,
+        15,
+        true,
+        true,
+        Some(Duration::ZERO),
+    );
+}
+
+/// Negative control: with the pin roots left out of the recheck's roots the
+/// short grace oracle fails too (the oracle does not pass for the wrong
+/// reason under the short grace).
+#[test]
+#[should_panic(expected = "walk of root")]
+fn control_pgrace_unfiltered_oracle_fails_without_the_pin_roots_in_the_recheck() {
+    let _drop = crate::mark::DropPinRoots::on();
+    oracle_pg(
+        16 << 10,
+        IdLen::Sixteen,
+        14,
+        true,
+        true,
+        Some(Duration::ZERO),
+    );
 }

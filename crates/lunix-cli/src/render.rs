@@ -236,6 +236,17 @@ pub fn status(out: &mut dyn Write, s: &VolumeStatusBody) -> io::Result<()> {
             ),
         )?;
     }
+    if st.read_stale_age_max_ms > 0 {
+        kv(
+            out,
+            "stale hint age",
+            &format!(
+                "{} to {} before a read found its extent gone",
+                human_ms(st.read_stale_age_min_ms),
+                human_ms(st.read_stale_age_max_ms)
+            ),
+        )?;
+    }
     figures(out, &s.space)?;
     throttle(out, &s.throttle)
 }
@@ -493,6 +504,22 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             &format!(
                 "mean {mean} ms, max {} ms over {} deletes",
                 r.fast_lag_ms_max, r.fast_lag_count
+            ),
+        )?;
+    }
+    if g.segment_grace_ms > 0 {
+        kv(out, "segment grace", &human_ms(g.segment_grace_ms))?;
+    }
+    if r.pgrace_deletes + r.pgrace_uncondemned > 0 {
+        kv(
+            out,
+            "short grace",
+            &format!(
+                "{} segments deleted ({} freed), least wait {} ms, {} un-condemned by the recheck",
+                r.pgrace_deletes,
+                format_bytes(r.pgrace_bytes),
+                r.pgrace_min_wait_ms,
+                r.pgrace_uncondemned
             ),
         )?;
     }

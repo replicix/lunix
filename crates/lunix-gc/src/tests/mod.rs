@@ -8,6 +8,7 @@ mod footercache;
 mod liveness;
 mod oracle;
 mod orphandeps;
+mod pgrace;
 mod pipeline;
 mod propose;
 mod recheck;

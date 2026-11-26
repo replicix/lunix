@@ -216,3 +216,21 @@ The golden `14-volume.json` gains the `"cache_max_percent": null` line; the
 rows of on-disk-formats.md §21 change with it. Maintainer sign-off
 2026-11-18 (layout change of `volume.json`), given with the decision "Store %
 in volume.json".
+
+**Rule change F3 (2026-11-26, ADR-32 amendment "a short segment grace under
+pressure").** The grace of a condemned segment is no longer always at least
+10 s plus twice `read_timeout`. While the engine's GC pressure is raised or
+urgent and the daemon key `gc_pressure_grace_ms` is set (0 = off, the
+default; else 2 000 ..= 10 000 ms), a segment may be deleted once its own
+flag is that old and a mark pinned after that finds it unreferenced, so the
+documented meaning of `gc_grace_ms` ("covers in-flight cuts, destage and
+reads; not shorter than 10 s plus twice `read_timeout_ms`") and of
+`read_timeout_ms` ("the longest a read may hold a hint") narrows: it holds
+for map packs, index runs and commit objects, for every delete without
+pressure and for `fsck --repair --gc`, and it no longer bounds the delete of
+a segment under pressure. `read_timeout_ms` is not enforced. No byte of any
+golden changes; `volume.json` keys, bytes and validation (`gc_grace_ms >=
+10 000 + 2 x read_timeout_ms`) are as before; the condemned list and the
+evidence envelope are unchanged. Maintainer sign-off 2026-11-26 (rule
+change, no layout change), given with the approval of the rule and the
+choice to record it as an ADR-32 amendment plus this entry.

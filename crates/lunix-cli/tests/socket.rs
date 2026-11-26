@@ -774,6 +774,7 @@ fn gc_pass_dry_run_and_status() {
     let status = GcStatusSnapshot {
         state: None,
         condemned_pending: 1,
+        condemned_segments: 1,
         moved_pending: 2,
         last_pass: Some(pass.clone()),
         stats: lunix_iface::gc::GcStats {
@@ -787,6 +788,7 @@ fn gc_pass_dry_run_and_status() {
         },
         last_finished_ms: Some(1_767_225_600_000),
         requests: 1,
+        segment_grace_ms: 0,
         reclaim: Box::default(),
         refs: None,
     };
