@@ -67,6 +67,65 @@ const CHILD_ENV: &str = "LUNIX_GC_KILL_CHILD";
 const IDLE_SECS: u64 = 13;
 /// The hot region rewritten every round.
 const HOT: u64 = 8 << 20;
+/// Where the child appends the revalidation counters (`<progress>.rv`):
+/// one line per idle phase, `revalidated exhausted reads`, as deltas since
+/// the stack was opened or the previous line (milestone gracepre).
+static RV_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+fn rv_path_of(progress: &Path) -> PathBuf {
+    let mut s = progress.as_os_str().to_owned();
+    s.push(".rv");
+    PathBuf::from(s)
+}
+
+/// Reader counters of a run: C7's `read_revalidated` and
+/// `read_revalidate_exhausted` and the reads the idle-phase reader made.
+#[derive(Clone, Copy, Default, Debug)]
+struct Rv {
+    revalidated: u64,
+    exhausted: u64,
+    reads: u64,
+}
+
+fn rv_sum(progress: &Path) -> Rv {
+    let mut t = Rv::default();
+    for l in std::fs::read_to_string(rv_path_of(progress))
+        .unwrap_or_default()
+        .lines()
+    {
+        let v: Vec<u64> = l.split(' ').filter_map(|x| x.parse().ok()).collect();
+        if let [a, b, c] = v[..] {
+            t.revalidated += a;
+            t.exhausted += b;
+            t.reads += c;
+        }
+    }
+    t
+}
+
+/// Appends the counters since `seen` and moves `seen` up.
+fn rv_note(stack: &lunixd::stack::VolumeStack, seen: &mut Rv, reads: u64) {
+    let Some(path) = RV_PATH.get() else { return };
+    let st = stack.engine.stats();
+    let now = Rv {
+        revalidated: st.read_revalidated,
+        exhausted: st.read_revalidate_exhausted,
+        reads: 0,
+    };
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("rv file");
+    writeln!(
+        f,
+        "{} {} {reads}",
+        now.revalidated - seen.revalidated,
+        now.exhausted - seen.exhausted
+    )
+    .expect("rv line");
+    *seen = now;
+}
 
 fn env_or(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -554,6 +613,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
     progress(prog, base, &d);
     let mut n = base;
     let mut bounds: Vec<u64> = Vec::new();
+    let mut seen = Rv::default();
     for s in steps {
         match *s {
             Step::Write {
@@ -615,20 +675,49 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
             Step::Sleep(ms) => std::thread::sleep(Duration::from_millis(ms)),
             Step::Idle(secs) => {
                 let end = Instant::now() + Duration::from_secs(secs);
-                let mut i = 0u64;
-                while Instant::now() < end {
-                    i += 1;
-                    let out = if i.is_multiple_of(20) {
-                        stack.engine.commit_now(true).expect("child commit")
-                    } else {
-                        stack.engine.tick().expect("child tick")
-                    };
-                    if let CommitOutcome::Committed { cut_seq, .. } = out {
-                        let k = bounds.partition_point(|b| *b <= cut_seq.0);
-                        progress(prog, base + k, &d);
+                let mut reads = 0u64;
+                let mut last_k = None;
+                // This thread keeps reading the whole hot region while a
+                // second one ticks (GC steps, commits, deletes): any read
+                // error fails the child (a revalidation that gave up, an Auth
+                // or Corrupt that was not a tamper).
+                std::thread::scope(|sc| {
+                    let engine = &stack.engine;
+                    let bounds = &bounds;
+                    let ticker = sc.spawn(move || {
+                        let mut last_k = None;
+                        let mut i = 0u64;
+                        while Instant::now() < end {
+                            i += 1;
+                            let out = if i.is_multiple_of(20) {
+                                engine.commit_now(true).expect("child commit")
+                            } else {
+                                engine.tick().expect("child tick")
+                            };
+                            if let CommitOutcome::Committed { cut_seq, .. } = out {
+                                last_k = Some(bounds.partition_point(|b| *b <= cut_seq.0));
+                            }
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        last_k
+                    });
+                    let mut rng = TestRng::new(0x6772_6163 ^ n as u64);
+                    while !ticker.is_finished() {
+                        let len = [4096u32, 16 << 10, 64 << 10][rng.below(3) as usize];
+                        let off = rng.below((2 * HOT - u64::from(len)) / BLOCK) * BLOCK;
+                        let q = rng.below(QUEUES.into()) as usize;
+                        if let Err(st) = d.read(q, off, len) {
+                            panic!("child read at {off} len {len}: {st:?}");
+                        }
+                        reads += 1;
+                        std::thread::sleep(Duration::from_micros(200));
                     }
-                    std::thread::sleep(Duration::from_millis(100));
+                    last_k = ticker.join().expect("the ticker failed");
+                });
+                if let Some(k) = last_k {
+                    progress(prog, base + k, &d);
                 }
+                rv_note(&stack, &mut seen, reads);
             }
             Step::Ladder => run_ladder(&stack),
             Step::Reopen => {
@@ -639,6 +728,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
                     .open_with(move |o| fast_gc(o, arm))
                     .expect("child reopen");
                 d = Driver::new(&stack).expect("driver");
+                seen = Rv::default();
                 // Every request so far was recovered and synced.
                 bounds.fill(0);
                 progress(prog, n, &d);
@@ -646,6 +736,7 @@ fn execute(vol: &TestVolume, steps: &[Step], base: usize, prog: &mut std::fs::Fi
         }
     }
     progress(prog, n, &d);
+    rv_note(&stack, &mut seen, 0);
     assert_refs_clean(&stack, "child at the end");
     drop(d);
     close(stack).expect("child close");
@@ -703,6 +794,7 @@ fn gc_kill_child() {
     // warning even when the child was killed before it could assert.
     lunixd::log::StderrLog::install(tracing::Level::WARN);
     let spec = Spec::read(Path::new(&spec_path));
+    let _ = RV_PATH.set(rv_path_of(&spec.progress));
     let parent = spec.voldir.parent().expect("parent").to_path_buf();
     let vol = TestVolume::at(
         &spec.voldir,
@@ -887,6 +979,17 @@ struct Tally {
     runs: u64,
     /// Journal records damaged above the durable bound after a kill.
     damaged_records: u64,
+    /// The reader counters summed over every child (C7, milestone gracepre).
+    rv: Rv,
+}
+
+impl Tally {
+    fn add_rv(&mut self, progress: &Path) {
+        let r = rv_sum(progress);
+        self.rv.revalidated += r.revalidated;
+        self.rv.exhausted += r.exhausted;
+        self.rv.reads += r.reads;
+    }
 }
 
 /// The `lunix-fsck` findings a phase may show. Anything else, and any
@@ -1343,6 +1446,7 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
         ChildEnd::Exited(c) => c,
         ChildEnd::Killed => panic!("the counting run was killed"),
     };
+    tally.add_rv(&p.progress);
     verify(&cfg, &p, "counting run", &mut tally);
     drop(p);
     std::fs::remove_dir_all(t.path().join("count")).expect("cleanup");
@@ -1403,6 +1507,7 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
                 }
                 ChildEnd::Exited(_) => eprintln!("{what}: not reached in this run"),
             }
+            tally.add_rv(&p.progress);
             verify(&cfg, &p, &what, &mut tally);
             drop(p);
             std::fs::remove_dir_all(&dir).expect("cleanup");
@@ -1417,6 +1522,16 @@ fn kill_loop_with(mode: CryptoMode, cs: u32, arm: Arm) {
         tally.kills,
         started.elapsed()
     );
+    eprintln!(
+        "GRACEPRE_RV {mode:?} {} KiB {}: read_revalidated={} read_revalidate_exhausted={} \
+         idle_phase_reads={}",
+        cs >> 10,
+        arm.name(),
+        tally.rv.revalidated,
+        tally.rv.exhausted,
+        tally.rv.reads
+    );
+    assert_eq!(tally.rv.exhausted, 0, "a read gave up revalidating");
     for (point, hits) in &killed {
         let c = counts[*point];
         let want = if all_hits { c.min(3) } else { 1 };

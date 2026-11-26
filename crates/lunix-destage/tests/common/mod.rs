@@ -534,6 +534,18 @@ impl Rig {
         destage_cut(cut, &deps)
     }
 
+    /// Like `destage_via` with another index.
+    pub fn destage_with_index_via(
+        &self,
+        cut: &OverlayCut,
+        index: &MemIndex,
+        store: &dyn SegmentStore,
+    ) -> Result<DestageOutcome, DestageError> {
+        let mut deps = self.deps(index);
+        deps.segments = store;
+        destage_cut(cut, &deps)
+    }
+
     /// Map content as `(chunk, entry)`.
     pub fn snapshot(&self) -> std::collections::BTreeMap<u64, DataEntry> {
         self.map.snapshot()
