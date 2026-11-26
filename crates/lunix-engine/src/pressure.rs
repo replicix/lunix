@@ -405,6 +405,9 @@ impl Pressure {
 impl Inner {
     /// The pressure as of the last tick.
     pub(crate) fn pressure_now(&self) -> Pressure {
+        if let Some(p) = self.cfg.gc_pressure_force {
+            return p;
+        }
         Pressure::from_code(self.pressure_level.load(Ordering::Acquire))
     }
 

@@ -121,6 +121,12 @@ pub struct EngineConfig {
     /// rule change F3). `None`: off (the default). The collector holds it to
     /// its own minimum.
     pub gc_pressure_grace: Option<Duration>,
+    /// Tests only: the pressure level the engine reports (to the collector,
+    /// the budget and the params) whatever the space gate says. The kill
+    /// loops use it to run the short grace in processes that never fill a
+    /// volume. The daemon never sets it.
+    #[doc(hidden)]
+    pub gc_pressure_force: Option<crate::pressure::Pressure>,
 }
 
 impl EngineConfig {
@@ -158,6 +164,7 @@ impl EngineConfig {
             full_timeout: Duration::from_secs(60),
             gc_condemn_on_cut: CondemnOnCut::Off,
             gc_pressure_grace: None,
+            gc_pressure_force: None,
         }
     }
 
