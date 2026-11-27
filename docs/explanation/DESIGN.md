@@ -486,7 +486,7 @@ journal):
   - while the gate is not open, GC works harder: 4 times the step budget,
     `gc_rate x gc_pressure_rate_factor` (uncapped at the limit) and the
     floor grace (10 s + 2 x `read_timeout`) instead of `gc_grace_ms` (for
-    segments `gc_pressure_grace_ms`, when set, instead of the floor),
+    segments `gc_pressure_grace_ms`, 2 s by default, instead of the floor),
     until the gate has been open for 5 s (§11, `docs/reference/gc.md`).
 
   If the reservation would cross the limit, the space ladder runs:
@@ -1351,16 +1351,16 @@ mirrors (phase 5).
   looks its block up again when its extent is gone; a reader with the file
   open reads the unlinked file; a sealed segment is never modified in
   place), so under pressure it may be as short as `gc_pressure_grace_ms`
-  (2 s to 10 s, off by default; ADR-32 amendment of 2026-11-26, FREEZE rule
-  change F3). The same condemn, grace, recheck, delete order applies, the
+  (2 s to 10 s, 2 s by default, 0 turns it off; ADR-32 amendment of
+  2026-11-26 and its 2026-11-27 default, FREEZE rule change F3). The same condemn, grace, recheck, delete order applies, the
   recheck is the only judge, and `epoch` is 0. `read_timeout_ms` is not
   enforced. Phase 2 (remote objects, reader pins, warmers) keeps graces
   based on time and must re-read this.
 - **Passes under pressure.** While GC pressure is raised (ADR-32), the
-  grace drops to the floor (for a segment, with `gc_pressure_grace_ms` set,
+  grace drops to the floor (for a segment, with `gc_pressure_grace_ms` not 0,
   to that value, counted from the segment's own flag, so the backlog
   condemned before the pressure is covered at its onset) and, with
-  `gc_fast_recheck` on, a recheck-only
+  `gc_fast_recheck` on (the default since 2026-11-27), a recheck-only
   pass (mark, condemn, delete, no compaction) runs about 1 s after a
   condemned segment's grace ends, or at once when the grace shrinks.
   Regular passes keep their own schedule, so compaction is not starved.

@@ -515,14 +515,14 @@ pub struct OpenParams {
     pub gc_pressure_rate_factor: u64,
     /// Recheck-only GC passes under pressure, with their delay (the daemon's
     /// `gc_fast_recheck` and `gc_fast_recheck_delay_ms`; `None`: whatever
-    /// `gc` says).
-    pub gc_fast_recheck: Option<std::time::Duration>,
+    /// `gc` says; `Some(None)`: off; the default is on, 1 s).
+    pub gc_fast_recheck: Option<Option<std::time::Duration>>,
     /// The engine's per-segment reference table (the daemon's
     /// `gc_condemn_on_cut`); `Shadow` also makes the engine switch the
     /// collector's counting of the tip root's entries on.
     pub gc_condemn_on_cut: lunix_engine::CondemnOnCut,
     /// The short grace of condemned segments under pressure (the daemon's
-    /// `gc_pressure_grace_ms`; `None`: off).
+    /// `gc_pressure_grace_ms`; `None`: off; default 2 s).
     pub gc_pressure_grace: Option<std::time::Duration>,
     /// A hook that runs inside every segment `read_extent` (before the open
     /// and after it) and may block, so that a read part outlives the
@@ -558,9 +558,9 @@ impl OpenParams {
             full_timeout: lunix_space::DEFAULT_FULL_TIMEOUT,
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
-            gc_fast_recheck: None,
+            gc_fast_recheck: Some(Some(std::time::Duration::from_secs(1))),
             gc_condemn_on_cut: lunix_engine::CondemnOnCut::Off,
-            gc_pressure_grace: None,
+            gc_pressure_grace: Some(std::time::Duration::from_millis(2_000)),
             #[cfg(feature = "crashpoints")]
             segment_read_hook: None,
             throttle_mid_rate: None,
@@ -913,8 +913,8 @@ pub fn open_volume(p: OpenParams) -> Result<VolumeStack, StackError> {
     }
     let dir: Arc<dyn VolumeDir> = Arc::new(store.clone());
     let mut gc_config = p.gc.unwrap_or_else(lunix_gc::GcConfig::daemon);
-    if p.gc_fast_recheck.is_some() {
-        gc_config.fast_recheck = p.gc_fast_recheck;
+    if let Some(fast) = p.gc_fast_recheck {
+        gc_config.fast_recheck = fast;
     }
     let deps = EngineDeps {
         dir: Arc::clone(&dir),

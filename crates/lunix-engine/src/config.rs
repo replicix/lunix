@@ -118,7 +118,7 @@ pub struct EngineConfig {
     pub gc_condemn_on_cut: CondemnOnCut,
     /// The short grace of condemned segments while the GC pressure is raised
     /// or urgent (the daemon's `gc_pressure_grace_ms`; ADR-32 amendment,
-    /// rule change F3). `None`: off (the default). The collector holds it to
+    /// rule change F3). `None`: off. Default 2 s (ADR-32 amendment, 2026-11-27). The collector holds it to
     /// its own minimum.
     pub gc_pressure_grace: Option<Duration>,
     /// Tests only: the pressure level the engine reports (to the collector,
@@ -164,7 +164,7 @@ impl EngineConfig {
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
             gc_condemn_on_cut: CondemnOnCut::Off,
-            gc_pressure_grace: None,
+            gc_pressure_grace: Some(Duration::from_millis(2_000)),
             #[cfg(feature = "testsupport")]
             gc_pressure_force: None,
         }

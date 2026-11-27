@@ -406,10 +406,16 @@ fn the_segment_grace_is_handed_over_exactly_while_the_pressure_is_raised_or_urge
     assert_eq!(tick_told(&r, &log), (false, None), "5 s after it opened");
 }
 
-/// With the key off (the default) the collector is never told a short grace.
+fn grace_off(cfg: &mut lunix_engine::EngineConfig) {
+    gc_on(cfg);
+    cfg.gc_pressure_grace = None;
+}
+
+/// With the key off (set explicitly; the default is 2 s) the collector is
+/// never told a short grace.
 #[test]
 fn without_the_key_the_collector_is_never_told_a_short_grace() {
-    let (_v, r, log) = setup_told(gc_on);
+    let (_v, r, log) = setup_told(grace_off);
     for s in [
         ThrottleState::Open,
         ThrottleState::Slowdown,

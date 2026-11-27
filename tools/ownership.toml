@@ -846,3 +846,22 @@ paths = [
   "docs/plans/v1/reports/p1-gracepre.md",
   "tools/ownership.toml",
 ]
+
+[pgracedef]
+paths = [
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/tests/pressure.rs",
+  "crates/lunix-format/FREEZE.md",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/daemon.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_gc_kill.rs",
+  "crates/lunixd/tests/stack_pgrace.rs",
+  "docs/explanation/DECISIONS.md",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-pgrace.md",
+  "docs/plans/v1/reports/p1-pgracemix.md",
+  "docs/plans/v1/reports/p1-pgracet6.md",
+  "docs/reference/gc.md",
+  "tools/ownership.toml",
+]

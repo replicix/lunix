@@ -962,10 +962,11 @@ impl Daemon {
         op.gc_pressure_rate_factor = self.cfg.gc_pressure_rate_factor;
         op.gc_condemn_on_cut = self.cfg.gc_condemn_on_cut;
         op.gc_pressure_grace = self.cfg.gc_pressure_grace;
-        op.gc_fast_recheck = self
-            .cfg
-            .gc_fast_recheck
-            .then_some(self.cfg.gc_fast_recheck_delay);
+        op.gc_fast_recheck = Some(
+            self.cfg
+                .gc_fast_recheck
+                .then_some(self.cfg.gc_fast_recheck_delay),
+        );
         if self.cfg.gc_pressure_grace.is_some() && !self.cfg.gc_fast_recheck {
             tracing::warn!(
                 volume = name,
