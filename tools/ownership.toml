@@ -865,3 +865,11 @@ paths = [
   "docs/reference/gc.md",
   "tools/ownership.toml",
 ]
+
+[defcheck]
+paths = [
+  "bench/phase1/perf/**",
+  "tests/perf/**",
+  "docs/plans/v1/reports/p1-defcheck.md",
+  "tools/ownership.toml",
+]
