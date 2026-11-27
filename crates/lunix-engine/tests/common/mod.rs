@@ -442,6 +442,10 @@ impl SegmentStore for GStore {
         not_on_queue("segments.list");
         SegmentStore::list(&self.inner)
     }
+    fn size(&self, seg: SegId) -> Result<Option<u64>> {
+        not_on_queue("segments.size");
+        SegmentStore::size(&self.inner, seg)
+    }
     fn delete(&self, seg: SegId) -> Result<u64> {
         not_on_queue("segments.delete");
         SegmentStore::delete(&self.inner, seg)
@@ -862,10 +866,24 @@ impl Vol {
         codec: PlainCodec,
         id_len: IdLen,
     ) -> Self {
+        Self::create_sized(cs, chunks, lanes, mode, codec, id_len, 256 << 10)
+    }
+
+    /// As `create_with`, with the byte size at which a segment is full: a
+    /// target below a chunk makes every chunk a segment of its own.
+    pub fn create_sized(
+        cs: u32,
+        chunks: u64,
+        lanes: u16,
+        mode: JournalMode,
+        codec: PlainCodec,
+        id_len: IdLen,
+        segment_target: u64,
+    ) -> Self {
         let clock = Arc::new(ManualClock::new(TimeMs(1_700_000_000_000)));
         let store = MemStore::with_config(MemStoreConfig {
             mode: codec.mode(),
-            segment_target: 256 << 10,
+            segment_target,
             ..MemStoreConfig::default()
         });
         let packs: Arc<dyn PackRead> = Arc::new(store.clone());

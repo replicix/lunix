@@ -19,7 +19,7 @@ mod common;
 
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +28,7 @@ use lunix_engine::{CondemnOnCut, EngineConfig};
 use lunix_format::{IdLen, SegId};
 use lunix_gc::{FloorSource, Gc, GcConfig};
 use lunix_iface::block::{BlockEngine, IoOp};
+use lunix_iface::clock::ManualClock;
 use lunix_iface::gc::{
     Collector, DeadSince, GcBudget, GcControl, GcParams, GcPassSummary, GcProgress, GcStats,
     GcStatusSnapshot, GcView, MarkReport, Moved, RefsState, RefsStats,
@@ -111,11 +112,16 @@ fn tweak(retain: u32, mode: u8) -> fn(&mut EngineConfig) {
 /// the engine in shadow mode switches it on (one switch), and a table that
 /// stayed `Rebuilding` would fail every test here.
 fn collector(pipeline: bool) -> Gc {
+    collector_every(pipeline, Duration::ZERO)
+}
+
+/// The same with `interval` between regular passes.
+fn collector_every(pipeline: bool, interval: Duration) -> Gc {
     Gc::new(
         Arc::new(NoFloor),
         GcConfig {
-            pass_interval: Duration::ZERO,
-            busy_interval: Duration::ZERO,
+            pass_interval: interval,
+            busy_interval: interval,
             pipeline,
             // The configuration C5 ships with: recheck-only passes on (forced
             // here; the engine's pressure does not exist in these tests).
@@ -136,6 +142,14 @@ struct OracleLog {
     skipped: AtomicU64,
     /// Offered segments a retained root named, and failures of the walk.
     violations: Mutex<Vec<String>>,
+    /// While set, every collector step first moves the manual clock a grace
+    /// forward: a requested pass (`run_pass`) waits out its grace in the
+    /// calling thread, so the clock has to move by itself, the same way in
+    /// every run.
+    auto_advance: AtomicBool,
+    /// `propose_dead` calls and the most segments one of them was offered.
+    proposals: AtomicU64,
+    max_offer: AtomicU64,
 }
 
 /// The collector under test, wrapped: in every call it first checks the offers
@@ -148,9 +162,16 @@ struct Oracle {
     inner: Box<dyn Collector>,
     hooks: Arc<TestHooks>,
     log: Arc<OracleLog>,
+    clock: Arc<ManualClock>,
 }
 
 impl Oracle {
+    fn auto_advance(&self) {
+        if self.log.auto_advance.load(Ordering::Relaxed) {
+            self.clock.advance(Duration::from_secs(11));
+        }
+    }
+
     fn check(&self, v: &GcView<'_>) {
         let offers = std::mem::take(&mut *lock(&self.hooks.offers));
         if offers.is_empty() {
@@ -193,6 +214,7 @@ impl Oracle {
 
 impl Collector for Oracle {
     fn step(&mut self, v: &GcView<'_>, b: GcBudget) -> Result<GcProgress> {
+        self.auto_advance();
         self.check(v);
         self.inner.step(v, b)
     }
@@ -221,10 +243,17 @@ impl Collector for Oracle {
     fn set_tip_refs(&mut self, on: bool) {
         self.inner.set_tip_refs(on);
     }
+    fn set_shadow_judge(&mut self, on: bool) {
+        self.inner.set_shadow_judge(on);
+    }
     fn take_mark_report(&mut self) -> Option<MarkReport> {
         self.inner.take_mark_report()
     }
     fn propose_dead(&mut self, v: &GcView<'_>, dead: &[DeadSince]) -> bool {
+        self.log.proposals.fetch_add(1, Ordering::Relaxed);
+        self.log
+            .max_offer
+            .fetch_max(dead.len() as u64, Ordering::Relaxed);
         self.check(v);
         self.inner.propose_dead(v, dead)
     }
@@ -235,6 +264,7 @@ fn oracle(v: &Vol, inner: Box<dyn Collector>, log: &Arc<OracleLog>) -> Box<dyn C
         inner,
         hooks: Arc::clone(&v.hooks),
         log: Arc::clone(log),
+        clock: Arc::clone(&v.clock),
     })
 }
 
@@ -258,6 +288,12 @@ enum Op {
     Pin,
     /// The pins are removed.
     Unpin,
+    /// A requested pass (`run_pass`): a mark and its deletes that no offer
+    /// precedes, entered from the control plane.
+    Pass,
+    /// The device grows by one chunk (twice per script at most): a cut that
+    /// no write asked for, with the map at a new size.
+    Grow,
 }
 
 fn ops(pool: u8) -> impl Strategy<Value = Vec<Op>> {
@@ -272,6 +308,8 @@ fn ops(pool: u8) -> impl Strategy<Value = Vec<Op>> {
             1 => any::<u8>().prop_map(Op::Reopen),
             2 => Just(Op::Pin),
             2 => Just(Op::Unpin),
+            1 => Just(Op::Pass),
+            1 => Just(Op::Grow),
         ],
         1..64,
     )
@@ -306,6 +344,9 @@ struct Cov {
     rebases: u64,
     reopens: u64,
     urgent: u64,
+    /// Requested passes that ran, and grows that happened.
+    passes: u64,
+    grows: u64,
     /// Offered segments the oracle checked, and offers it could not.
     checked: u64,
     skipped: u64,
@@ -423,8 +464,27 @@ fn run(
         cov.compacted += last.map_or(0, |o| o.stats.segments_compacted);
     };
     let mut pinned: Vec<lunix_iface::store::PinRoot> = Vec::new();
+    let mut grows = 0u32;
     for op in script {
         match *op {
+            Op::Pass => {
+                // The clock moves with every step of the pass (`Oracle`).
+                log.auto_advance.store(true, Ordering::Relaxed);
+                let res = GcControl::run_pass(&r.engine, false);
+                log.auto_advance.store(false, Ordering::Relaxed);
+                prop_assert!(res.is_ok(), "a requested pass failed: {:?}", res.err());
+                cov.passes += 1;
+                obs.push(observe(&r));
+            }
+            Op::Grow => {
+                if grows < 2 {
+                    grows += 1;
+                    let to = r.engine.size_bytes() + cs;
+                    prop_assert!(r.engine.grow(to).is_ok(), "grow failed");
+                    cov.grows += 1;
+                    obs.push(observe(&r));
+                }
+            }
             Op::Pin => {
                 let tip = lunix_iface::store::CommitStore::list(&r.store)
                     .expect("commits")
@@ -558,6 +618,8 @@ fn case(
     t.rebases += on.cov.rebases;
     t.reopens += on.cov.reopens;
     t.urgent += on.cov.urgent;
+    t.passes += on.cov.passes;
+    t.grows += on.cov.grows;
     t.checked += on.cov.checked;
     t.skipped += on.cov.skipped;
     t.pin_blocked += on.cov.pin_blocked;
@@ -603,6 +665,8 @@ fn case_active(
     t.rebases += on.cov.rebases;
     t.reopens += on.cov.reopens;
     t.urgent += on.cov.urgent;
+    t.passes += on.cov.passes;
+    t.grows += on.cov.grows;
     t.checked += on.cov.checked;
     t.skipped += on.cov.skipped;
     total.set(t);
@@ -644,6 +708,8 @@ fn case_active_moving(
     t.compacted += on.cov.compacted;
     t.reopens += on.cov.reopens;
     t.urgent += on.cov.urgent;
+    t.passes += on.cov.passes;
+    t.grows += on.cov.grows;
     t.checked += on.cov.checked;
     t.skipped += on.cov.skipped;
     total.set(t);
@@ -677,6 +743,7 @@ fn the_active_mode_is_safe_where_ids_move_dedup_and_compaction() {
     // a lost re-hint, a crash with moves pending). The collector-level tests
     // and the oracle cover a wrong proposal by offering one.
     for x in [d, c] {
+        assert!(x.passes > 0 && x.grows > 0, "{x:?}");
         assert_eq!(x.pinned_condemned, 0, "{x:?}");
         assert!(x.checked > 0 && x.skipped == 0, "{x:?}");
     }
@@ -715,6 +782,7 @@ fn the_active_mode_converges_to_the_same_files_and_obeys_the_pin_rule() {
     assert_eq!(c.pinned_condemned, 0, "{c:?}");
     assert_eq!(c.uncondemned, 0, "no id moves without compaction: {c:?}");
     assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.passes > 0 && c.grows > 0, "{c:?}");
     assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
     assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
@@ -744,6 +812,7 @@ fn the_table_matches_every_mark_on_a_dedup_heavy_workload() {
     assert!(c.dedup_hits > 0, "no dedup hit in any case: {c:?}");
     assert!(c.offered > 0 && c.confirmed > 0, "{c:?}");
     assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.passes > 0 && c.grows > 0, "{c:?}");
     assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
     assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
@@ -757,6 +826,7 @@ fn the_table_matches_every_mark_on_a_compaction_heavy_workload() {
     assert!(c.compacted > 0, "no compaction in any case: {c:?}");
     assert!(c.offered > 0 && c.confirmed > 0, "{c:?}");
     assert!(c.reopens > 0 && c.urgent > 0, "{c:?}");
+    assert!(c.passes > 0 && c.grows > 0, "{c:?}");
     assert!(c.checked > 0, "the oracle checked no offer: {c:?}");
     assert_eq!(c.skipped, 0, "offers the oracle could not check: {c:?}");
 }
@@ -789,6 +859,9 @@ impl Collector for Skewed {
     }
     fn set_tip_refs(&mut self, on: bool) {
         Collector::set_tip_refs(&mut self.0, on);
+    }
+    fn set_shadow_judge(&mut self, on: bool) {
+        Collector::set_shadow_judge(&mut self.0, on);
     }
     fn take_mark_report(&mut self) -> Option<MarkReport> {
         let mut r = Collector::take_mark_report(&mut self.0)?;
@@ -952,4 +1025,230 @@ fn the_cut_counters_sum_the_cuts_that_drained_journal_bytes() {
     r.engine.commit_now(true).expect("forced cut");
     let s = r.engine.cut_stats();
     assert_eq!((s.cuts, s.cut_bytes_sum), (last.cuts, last.cut_bytes_sum));
+}
+
+/// What a discard flood left: the files and the data, plus the figures the
+/// report reads (`LUNIX_REFS_FLOOD` raises the size; they print then).
+struct Flooded {
+    files: BTreeSet<SegId>,
+    data: Vec<u8>,
+}
+
+/// The number of chunks, each in a segment of its own, a flood test discards
+/// in one request.
+fn flood_size() -> u64 {
+    std::env::var("LUNIX_REFS_FLOOD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2_000)
+}
+
+/// 2.4: `n` chunks in `n` segments, all named by retained commits, then one
+/// request zeroes all of them; the collector is ticked between cuts until the
+/// segments are gone.
+///
+/// `slow` is the offer phase as the daemon lives it: regular passes 30 s
+/// apart and a tick every 100 ms, so only proposals act for 30 s after the
+/// flood; the function then reports the cost of the proposals over that
+/// window and returns.
+fn flood(mode: u8, n: u64, slow: bool) -> Option<Flooded> {
+    let on = mode == ON_PLAIN;
+    let gc = if slow {
+        collector_every(true, Duration::from_secs(30))
+    } else {
+        collector(true)
+    };
+    // A segment target below one chunk: every chunk is a segment of its own.
+    let mut v = Vol::create_sized(
+        CS,
+        n + 4,
+        2,
+        JournalMode::Mixed(3),
+        lunix_testkit::PlainCodec::new(),
+        IdLen::Sixteen,
+        1,
+    );
+    v.tweak = tweak(2, mode);
+    let log = Arc::new(OracleLog::default());
+    *lock(&v.collector) = Some(oracle(&v, Box::new(gc), &log));
+    let mut r = v.open().map_err(|e| e.0).expect("open");
+    let cs = u64::from(CS);
+    // A forced FULL: the tip moves without a write, so the lag runs out.
+    let tick_by = |v: &Vol, r: &mut Running, by: Duration| {
+        v.clock.advance(by);
+        r.engine.commit_now(true).expect("cut");
+        r.engine.tick().expect("tick");
+    };
+    let tick = |v: &Vol, r: &mut Running| tick_by(v, r, Duration::from_secs(11));
+    // The first mark is the table's base.
+    for _ in 0..3 {
+        tick(&v, &mut r);
+    }
+    // Sixty-four chunks per cut: a cut's journal bytes stay small, and the
+    // index (which names one run per cut) stays under its limit.
+    for i in 0..n {
+        let d = pattern(7_000 + i, CS as usize);
+        assert!(r.write(0, i * cs, &d, false).is_ok(), "write {i}");
+        if i % 64 == 63 {
+            r.engine.commit_now(false).expect("cut");
+        }
+    }
+    r.engine.commit_now(false).expect("cut");
+    for _ in 0..3 {
+        tick(&v, &mut r);
+    }
+    let before = observe(&r).segments.len() as u64;
+    assert!(before >= n, "{before} segments for {n} chunks");
+    let t0 = refs_of(&r);
+    if on {
+        assert_eq!(t0.state, RefsState::Ready, "{t0:?}");
+        assert!(t0.segments >= n, "{t0:?}");
+    }
+    let rc0 = r.engine.gc_status_handle().get().reclaim;
+    let len = u32::try_from(n * cs).expect("the flood fits one request");
+    assert!(r.hole(0, IoOp::WriteZeroes, 0, len).is_ok(), "the discard");
+    if slow {
+        let started = std::time::Instant::now();
+        let mut peak = 0u64;
+        for _ in 0..300 {
+            tick_by(&v, &mut r, Duration::from_millis(100));
+            peak = peak.max(refs_of(&r).zero_waiting);
+        }
+        let rc1 = r.engine.gc_status_handle().get().reclaim;
+        let t1 = refs_of(&r);
+        let calls = rc1.propose_calls - rc0.propose_calls;
+        let us = rc1.propose_us_sum - rc0.propose_us_sum;
+        eprintln!(
+            "flood {n}, a tick every 100 ms and passes 30 s apart, first 30 s after the discard: \
+             propose calls {calls}, propose_us_sum {us} (share of 30 s: {:.3} %), mean {:.0} us, \
+             max {} us; condemned by proposals {}, deleted {}; zero_waiting peak {peak}, \
+             at the end {}; the in-process wall time of the window was {:.2} s",
+            us as f64 / 30e6 * 100.0,
+            us as f64 / calls.max(1) as f64,
+            rc1.propose_us_max,
+            rc1.proposal_condemned - rc0.proposal_condemned,
+            rc1.proposal_deleted - rc0.proposal_deleted,
+            t1.zero_waiting,
+            started.elapsed().as_secs_f64(),
+        );
+        assert!(
+            log.max_offer.load(Ordering::Relaxed) <= 64,
+            "a proposal was offered {} segments",
+            log.max_offer.load(Ordering::Relaxed)
+        );
+        return None;
+    }
+    // The flood's cut, then `lag + 1` more with the collector ticked between
+    // them, then until the zeros are all gone.
+    let (mut ticks, mut max_waiting) = (0u32, 0u64);
+    let started = std::time::Instant::now();
+    loop {
+        tick(&v, &mut r);
+        ticks += 1;
+        let t = refs_of(&r);
+        max_waiting = max_waiting.max(t.zero_waiting);
+        if ticks >= 3 && (!on || t.zero_waiting == 0) {
+            break;
+        }
+        assert!(ticks < 200, "the zeros are not draining: {t:?}");
+    }
+    let offer_wall = started.elapsed();
+    let rc1 = r.engine.gc_status_handle().get().reclaim;
+    let t1 = refs_of(&r);
+    if on {
+        // The coverage witness: the flood existed.
+        assert!(max_waiting >= n / 2, "zero_waiting peaked at {max_waiting}");
+        assert_eq!(t1.zero_waiting, 0);
+        assert_eq!(t1.segments, t0.segments - n, "{t0:?} {t1:?}");
+        assert!(
+            log.max_offer.load(Ordering::Relaxed) <= 64,
+            "a proposal was offered {} segments (OFFER_MAX is 64)",
+            log.max_offer.load(Ordering::Relaxed)
+        );
+        assert!(log.proposals.load(Ordering::Relaxed) > 0);
+        let calls = rc1.propose_calls - rc0.propose_calls;
+        let us = rc1.propose_us_sum - rc0.propose_us_sum;
+        if std::env::var("LUNIX_REFS_FLOOD").is_ok() {
+            eprintln!(
+                "flood {n}: {ticks} ticks until the zeros drained, offer phase {:.2} s wall; \
+                 propose calls {calls}, propose_us_sum {us}, mean {:.0} us, max {} us; \
+                 condemned by proposals {}, deleted {}; zero_waiting peak {max_waiting}",
+                offer_wall.as_secs_f64(),
+                us as f64 / calls.max(1) as f64,
+                rc1.propose_us_max,
+                rc1.proposal_condemned - rc0.proposal_condemned,
+                rc1.proposal_deleted - rc0.proposal_deleted,
+            );
+        }
+    }
+    // Let the collector finish: the grace of what it condemned runs out and
+    // the segments go.
+    let (mut same, mut last) = (0u32, observe(&r).segments);
+    for _ in 0..600 {
+        tick(&v, &mut r);
+        let now = observe(&r);
+        if now.segments == last {
+            same += 1;
+            if same >= 10 {
+                break;
+            }
+        } else {
+            same = 0;
+            last = now.segments;
+        }
+    }
+    let done = observe(&r);
+    assert!(
+        same >= 10,
+        "the segments were still changing after 600 ticks"
+    );
+    let rc = r.engine.gc_status_handle().get().reclaim;
+    let t = refs_of(&r);
+    if on {
+        assert_eq!(t.drift_segments, 0, "{t:?}");
+        assert_eq!(t.report_mismatches, 0, "{t:?}");
+        assert_eq!(rc.proposal_rejected_early, 0);
+        assert_eq!(rc.propose_errors, 0);
+        assert_eq!(rc.proposal_named, 0);
+        let bad = lock(&log.violations);
+        assert!(bad.is_empty(), "the oracle: {bad:?}");
+    }
+    let data = r.read_all();
+    assert!(
+        data.iter().all(|&b| b == 0),
+        "the device does not read zero"
+    );
+    assert!(
+        (done.segments.len() as u64) < before,
+        "nothing was deleted: {} of {before}",
+        done.segments.len()
+    );
+    Some(Flooded {
+        files: done.segments,
+        data,
+    })
+}
+
+/// 2.4: a discard of N chunks in one request: bounded offers, the zeros are
+/// condemned and drained, the table's size falls by N, nothing drifts, the
+/// device reads zero and the files are those of the same script with the mode
+/// off.
+#[test]
+fn a_discard_flood_is_offered_in_bounded_calls_drains_and_leaves_the_files_of_mode_off() {
+    let n = flood_size();
+    let on = flood(ON_PLAIN, n, false).expect("the run");
+    let off = flood(OFF_PLAIN, n, false).expect("the run");
+    assert!(on.data == off.data, "the volumes read different data");
+    assert_eq!(on.files, off.files, "the volumes ended with other files");
+}
+
+/// 2.4, the cost of the offer phase as the daemon lives it (the figure the
+/// report reads; set `LUNIX_REFS_FLOOD`, else it does nothing): the share of
+/// the coordinator's time the proposals take in the 30 s after a flood.
+#[test]
+fn the_offer_phase_after_a_flood_costs_the_coordinator_little() {
+    if std::env::var("LUNIX_REFS_FLOOD").is_err() {
+        return;
+    }
+    flood(ON_PLAIN, flood_size(), true);
 }
