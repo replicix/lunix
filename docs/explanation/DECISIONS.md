@@ -2656,6 +2656,16 @@ per-read retry count, so how close a read came to its retry bound cannot be
 read from a run. The stress and kill loops of `p1/pgrace`, which do enter
 the race, remain the checks.
 
+The same day the maintainer also made `gc_fast_recheck` default to on
+(`gc_fast_recheck_delay_ms` stays 1 000; `gc_condemn_on_cut` stays `off`).
+Reason: without recheck-only passes a shortened grace waits for the regular
+pass schedule (`busy_interval` or three marks) and gains little. Every
+measured T6 arm (pgracet6 B, C, C2; pgracemix C, C2) ran with
+`gc_fast_recheck` on, and also with `gc_condemn_on_cut = "on"`. The default
+combination, grace 2 000 with fast recheck and condemn-on-cut off, has not
+had a T6 run of its own. The daemon's attach warning now fires only when
+fast recheck is turned off by hand while the grace is on.
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |

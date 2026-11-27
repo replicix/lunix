@@ -442,7 +442,7 @@ fn fast_gc(o: &mut lunixd::stack::OpenParams, arm: Arm) {
     } else {
         lunix_engine::CondemnOnCut::On
     };
-    o.gc_fast_recheck = Some(Duration::from_secs(1));
+    o.gc_fast_recheck = Some(Some(Duration::from_secs(1)));
     let base = if env_or("LUNIX_GC_PIPELINE", 1) == 0 {
         GcConfig::default()
     } else {

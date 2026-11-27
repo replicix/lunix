@@ -65,7 +65,7 @@ still runs the whole sequence: condemn, grace, recheck, delete. The
 collector's default (`GcConfig::default`, which the tests and the offline
 `fsck --repair --gc` use) is the whole sequence for every pass.
 
-**Recheck-only passes** (`gc_fast_recheck`, off by default; `GcConfig::fast_recheck`).
+**Recheck-only passes** (`gc_fast_recheck`, on by default since 2026-11-27, with the short segment grace; `GcConfig::fast_recheck` itself is `None` in the library and the daemon sets it).
 While the engine reports pressure (the gate paces or holds writes; the engine
 tells the collector before every call, `Collector::set_pressure`) and a listed
 object's grace has ended, a third kind of pass does not wait for the regular
@@ -348,9 +348,9 @@ lets it run recheck-only passes (above).
   raised or urgent; the collector refuses it without pressure and raises a
   value below its own minimum (`GcConfig::segment_grace_min`, 2 s). It is not
   a `GcParams` field: the settings validation still refuses a grace below the
-  floor. Set `gc_fast_recheck` with it: without it the next mark waits for the
-  regular schedule (`busy_interval` or three marks), and the daemon logs a
-  warning at attach.
+  floor. `gc_fast_recheck` is on by default for it: without it the next mark
+  waits for the regular schedule (`busy_interval` or three marks), so the
+  daemon logs a warning at attach when fast recheck is turned off by hand.
   - *Why it is safe:* no reader of a segment depends on the time between
     condemn and delete any more. A cut, destage, a dedup confirmation,
     compaction and the mark run under the coordinator mutex with the

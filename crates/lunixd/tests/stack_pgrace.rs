@@ -403,7 +403,7 @@ fn pgrace_open(o: &mut OpenParams) {
         busy_interval: Duration::from_secs(1),
         ..GcConfig::daemon()
     });
-    o.gc_fast_recheck = Some(Duration::from_secs(1));
+    o.gc_fast_recheck = Some(Some(Duration::from_secs(1)));
     o.gc_condemn_on_cut = CondemnOnCut::On;
     o.gc_pressure_grace = Some(SHORT);
     o.segment_read_hook = Some(read_hook());

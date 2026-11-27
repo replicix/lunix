@@ -1360,7 +1360,7 @@ mirrors (phase 5).
   grace drops to the floor (for a segment, with `gc_pressure_grace_ms` not 0,
   to that value, counted from the segment's own flag, so the backlog
   condemned before the pressure is covered at its onset) and, with
-  `gc_fast_recheck` on, a recheck-only
+  `gc_fast_recheck` on (the default since 2026-11-27), a recheck-only
   pass (mark, condemn, delete, no compaction) runs about 1 s after a
   condemned segment's grace ends, or at once when the grace shrinks.
   Regular passes keep their own schedule, so compaction is not starved.
