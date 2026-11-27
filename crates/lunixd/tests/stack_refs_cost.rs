@@ -410,13 +410,15 @@ fn the_map_transaction_costs_per_chunk() {
 fn the_table_snapshot_ready_and_rebase_cost_per_call() {
     for segments in [1_000usize, 16_000, 128_000, 1_000_000] {
         for zeros in [0usize, segments / 100, segments / 2] {
-            let (clone_ns, ready_ns, rebase_ns) = lunix_engine::table_costs(segments, zeros, 20);
+            let (start_ns, ready_ns, rebase_ns, slow_ns) =
+                lunix_engine::table_costs(segments, zeros, 20);
             eprintln!(
-                "refs cost: table of {segments} segments, {zeros} waiting: mark-start snapshot {:.2} ms, \
-                 ready() {:.3} ms, rebase {:.2} ms per call",
-                clone_ns as f64 / 1e6,
+                "refs cost: table of {segments} segments, {zeros} waiting: mark start {:.2} us, \
+                 ready() {:.4} ms, rebase {:.2} ms, slow-path rebase {:.2} ms per call",
+                start_ns as f64 / 1e3,
                 ready_ns as f64 / 1e6,
-                rebase_ns as f64 / 1e6
+                rebase_ns as f64 / 1e6,
+                slow_ns as f64 / 1e6
             );
         }
     }

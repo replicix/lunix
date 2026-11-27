@@ -136,9 +136,11 @@ pub(crate) struct SegRefs {
     /// here until the front reaches it (`ready` skips it: it is not in
     /// `zero_since` any more).
     queue: VecDeque<CutZeros>,
-    /// `counts` as they stood when the current mark pinned its roots, with
-    /// whether the table was `Ready` then.
-    snapshot: Option<Snapshot>,
+    /// What the current mark pinned its roots against: the sums of `counts`
+    /// then, whether the table was `Ready`, and the net change since.
+    open: Option<Open>,
+    /// The sums of `counts`, kept in step by `apply` and `rebase`.
+    sums: Sums,
     /// The tip of the last mark that rebased the table, and whether the
     /// table was `Ready` (and untainted) when it began: what a judgement of
     /// that mark's condemns needs.
@@ -163,11 +165,53 @@ pub(crate) struct SegRefs {
     c: Counters,
 }
 
+/// Order-independent sums over `counts`: two weighted sums of the counts and
+/// their total. A rebase compares the mark's sums with the table's at the
+/// mark start instead of walking both maps.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+struct Sums {
+    a: u64,
+    b: u64,
+    n: i64,
+}
+
+/// `splitmix64` finalizer: a cheap, well-mixed 64-bit hash.
+const fn mix(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+impl Sums {
+    /// Odd weights: a wrong count in one segment always changes `a` and `b`.
+    fn add(&mut self, seg: SegId, d: i64) {
+        let w1 = mix(seg.raw()) | 1;
+        let w2 = mix(seg.raw() ^ 0x9E37_79B9_7F4A_7C15) | 1;
+        let u = d.cast_unsigned();
+        self.a = self.a.wrapping_add(w1.wrapping_mul(u));
+        self.b = self.b.wrapping_add(w2.wrapping_mul(u));
+        self.n = self.n.wrapping_add(d);
+    }
+
+    fn of(items: impl IntoIterator<Item = (SegId, i64)>) -> Self {
+        let mut s = Self::default();
+        for (seg, d) in items {
+            s.add(seg, d);
+        }
+        s
+    }
+}
+
+/// The state kept while a mark is open (pinned its roots, has not reported).
 #[derive(Debug)]
-struct Snapshot {
+struct Open {
     tip: CommitSeq,
     ready: bool,
-    counts: HashMap<SegId, i64>,
+    /// `sums` of `counts` when the mark pinned its roots.
+    sums: Sums,
+    /// Net change per segment since then: `counts - since` is the snapshot.
+    since: HashMap<SegId, i64>,
 }
 
 impl SegRefs {
@@ -185,7 +229,8 @@ impl SegRefs {
             went_zero: BTreeSet::new(),
             zero_since: BTreeMap::new(),
             queue: VecDeque::new(),
-            snapshot: None,
+            open: None,
+            sums: Sums::default(),
             judged: None,
             offered: BTreeMap::new(),
             ready_last: 0,
@@ -198,6 +243,10 @@ impl SegRefs {
         for (&seg, &d) in deltas {
             if d == 0 {
                 continue;
+            }
+            self.sums.add(seg, d);
+            if let Some(o) = self.open.as_mut() {
+                *o.since.entry(seg).or_insert(0) += d;
             }
             let c = self.counts.entry(seg).or_insert(0);
             *c += d;
@@ -415,85 +464,132 @@ impl SegRefs {
         }
     }
 
-    /// A mark pinned its roots at `tip` (the map is at the tip): keep the
-    /// counts as they are now. Whatever failed before this moment is in the
+    /// A mark pinned its roots at `tip` (the map is at the tip): remember the
+    /// sums of the counts as they are now and record the changes from here
+    /// (no copy of the counts). Whatever failed before this moment is in the
     /// snapshot and cancels in `counts - snapshot + mark`.
     pub(crate) fn mark_started(&mut self, tip: CommitSeq) {
         self.tainted = false;
-        self.snapshot = Some(Snapshot {
+        self.open = Some(Open {
             tip,
             ready: self.state == RefsState::Ready,
-            counts: self.counts.clone(),
+            sums: self.sums,
+            since: HashMap::new(),
         });
     }
 
     /// The mark finished with the entry counts of its tip root. Compares
-    /// them with the snapshot, repairs the counts and makes the table
-    /// `Ready`, unless a map transaction failed since the snapshot (the
-    /// table then stays `Drifted` or `Rebuilding`: the next mark repairs
-    /// it). Returns the number of segments that differed (0 for the first
-    /// base: a `Rebuilding` table has nothing to compare). Ignored when no
-    /// snapshot of that tip exists.
+    /// them with the counts as they were at the mark start, repairs the
+    /// counts and makes the table `Ready`, unless a map transaction failed
+    /// since (the table then stays `Drifted` or `Rebuilding`: the next mark
+    /// repairs it). Returns the number of segments that differed (0 for the
+    /// first base: a `Rebuilding` table has nothing to compare). Ignored when
+    /// no mark of that tip is open.
+    ///
+    /// The usual case, a table that is right, is decided by the sums alone:
+    /// one pass over the mark's list, the counts untouched. Any difference in
+    /// the sums takes the exact path, which walks the counts once.
     pub(crate) fn rebase(&mut self, r: &TipRefs) -> u64 {
-        let Some(snap) = self.snapshot.take() else {
+        let Some(open) = self.open.take() else {
             return 0;
         };
-        if snap.tip != r.tip {
-            // Another mark's report: its own snapshot is still to come.
-            self.snapshot = Some(snap);
+        if open.tip != r.tip {
+            // Another mark's report: its own start is still to come.
+            self.open = Some(open);
             return 0;
         }
-        let refs: HashMap<SegId, i64> = r
-            .refs
-            .iter()
-            .map(|&(s, n)| (s, i64::try_from(n).unwrap_or(i64::MAX)))
-            .collect();
+        let mark = |&(s, n): &(SegId, u64)| (s, i64::try_from(n).unwrap_or(i64::MAX));
+        let rebuilding = self.state == RefsState::Rebuilding;
+        let msums = Sums::of(r.refs.iter().map(mark));
+        let same = !rebuilding && msums == open.sums;
+        // The exact rule runs on the slow path, and in debug builds on the
+        // fast path too: the sums are checked against it at every rebase.
+        let exact = if !rebuilding && (!same || cfg!(debug_assertions)) {
+            Some(self.exact_diff(&open, r))
+        } else {
+            None
+        };
         let mut diff = 0u64;
-        if self.state != RefsState::Rebuilding {
-            let mut first = Vec::new();
-            let keys: BTreeSet<SegId> = snap.counts.keys().chain(refs.keys()).copied().collect();
-            for s in keys {
-                let (a, b) = (
-                    snap.counts.get(&s).copied().unwrap_or(0),
-                    refs.get(&s).copied().unwrap_or(0),
-                );
-                if a != b {
-                    diff += 1;
-                    if first.len() < DRIFT_LOG {
-                        first.push((s.raw(), a, b));
-                    }
+        if same {
+            debug_assert!(
+                exact.as_ref().is_none_or(|e| e.0 == 0),
+                "the sums matched a differing mark"
+            );
+        } else {
+            if let Some((d, first)) = exact {
+                diff = d;
+                if diff > 0 {
+                    tracing::warn!(
+                        tip = r.tip.0,
+                        differing = diff,
+                        first = ?first,
+                        "the reference table differed from a mark (segment, table, mark); repaired"
+                    );
                 }
             }
-            if diff > 0 {
-                tracing::warn!(
-                    tip = r.tip.0,
-                    differing = diff,
-                    first = ?first,
-                    "the reference table differed from a mark (segment, table, mark); repaired"
-                );
+            debug_assert!(
+                rebuilding || diff > 0,
+                "the sums differed from an equal mark"
+            );
+            // counts = mark + since: the deltas since the mark began are kept.
+            self.counts.clear();
+            self.counts
+                .reserve(r.refs.len().saturating_add(open.since.len()));
+            for s in &r.refs {
+                let (seg, n) = mark(s);
+                *self.counts.entry(seg).or_insert(0) += n;
             }
+            for (&seg, &d) in &open.since {
+                *self.counts.entry(seg).or_insert(0) += d;
+            }
+            self.counts.retain(|_, v| *v != 0);
+            self.sums = Sums::of(self.counts.iter().map(|(&s, &n)| (s, n)));
         }
-        // counts = counts - snapshot + mark: the deltas since the mark began
-        // are kept.
-        for (s, v) in &snap.counts {
-            *self.counts.entry(*s).or_insert(0) -= v;
-        }
-        for (s, v) in &refs {
-            *self.counts.entry(*s).or_insert(0) += v;
-        }
-        self.counts.retain(|_, v| *v != 0);
         if diff > 0 {
             self.c.drift_segments += diff;
             self.zero_since.clear();
             self.queue.clear();
             self.went_zero.clear();
         }
-        self.judged = Some((r.tip, snap.ready && !self.tainted));
+        self.judged = Some((r.tip, open.ready && !self.tainted));
         if !self.tainted {
             self.state = RefsState::Ready;
         }
         self.c.rebases += 1;
         diff
+    }
+
+    /// The exact comparison of the counts at the mark start
+    /// (`counts - since`) with the mark: the number of differing segments and
+    /// the first few as (segment, table, mark).
+    fn exact_diff(&self, open: &Open, r: &TipRefs) -> (u64, Vec<(u64, i64, i64)>) {
+        let refs: HashMap<SegId, i64> = r
+            .refs
+            .iter()
+            .map(|&(s, n)| (s, i64::try_from(n).unwrap_or(i64::MAX)))
+            .collect();
+        let snap = |s: &SegId| {
+            self.counts.get(s).copied().unwrap_or(0) - open.since.get(s).copied().unwrap_or(0)
+        };
+        let keys: BTreeSet<SegId> = self
+            .counts
+            .keys()
+            .chain(open.since.keys())
+            .chain(refs.keys())
+            .copied()
+            .collect();
+        let mut diff = 0u64;
+        let mut first = Vec::new();
+        for s in keys {
+            let (a, b) = (snap(&s), refs.get(&s).copied().unwrap_or(0));
+            if a != b {
+                diff += 1;
+                if first.len() < DRIFT_LOG {
+                    first.push((s.raw(), a, b));
+                }
+            }
+        }
+        (diff, first)
     }
 
     /// The mark whose tip root was just rebased decided about segments
@@ -905,14 +1001,19 @@ pub(crate) fn counted_ref_map(map: Arc<dyn BlockMap>) -> (Arc<dyn BlockMap>, Tab
     )
 }
 
-/// What the table's mark-start snapshot, `ready()` and `rebase` (a mark that
-/// finds the table right, the steady state: the comparison and the repair
-/// pass over every segment) cost for a table of `segments` segments of which
-/// `zeros` wait in `zero_since`: nanoseconds per call, averaged over `reps`
-/// calls, as `(snapshot, ready, rebase)`. The mark's own count list is built
-/// outside the timed call.
+/// What the table's mark start, `ready()` and `rebase` cost for a table of
+/// `segments` segments of which `zeros` wait in `zero_since`, spread over cuts
+/// of 1,000 segments: nanoseconds per call, averaged over `reps` calls, as
+/// `(mark start, ready, rebase, slow rebase)`. `ready()` runs as the engine
+/// uses it: each offer is consumed, so the head of the queue moves. The first
+/// rebase finds the table right (the steady state), the second a mark that
+/// differs in one segment. The mark's own count list is built outside the
+/// timed calls.
 #[cfg(feature = "testsupport")]
-pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64) {
+pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64, u64) {
+    let per_call = |total: Duration, reps: u32| {
+        u64::try_from(total.as_nanos() / u128::from(reps)).unwrap_or(u64::MAX)
+    };
     let mut t = SegRefs::new(Duration::ZERO);
     t.mark_started(CommitSeq(0));
     t.rebase(&TipRefs {
@@ -924,27 +1025,40 @@ pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64
         .collect();
     let all: HashMap<SegId, i64> = ids.iter().map(|&s| (s, 1)).collect();
     t.apply(&all);
-    let gone: HashMap<SegId, i64> = ids.iter().take(zeros).map(|&s| (s, -1)).collect();
-    t.apply(&gone);
-    t.seal_cut(CommitSeq(1), Duration::ZERO);
+    let mut cut = 0u64;
+    for group in ids
+        .iter()
+        .take(zeros)
+        .copied()
+        .collect::<Vec<_>>()
+        .chunks(1000)
+    {
+        let gone: HashMap<SegId, i64> = group.iter().map(|&s| (s, -1)).collect();
+        t.apply(&gone);
+        cut += 1;
+        t.seal_cut(CommitSeq(cut), Duration::ZERO);
+    }
     let reps = reps.max(1);
-    let t0 = std::time::Instant::now();
+    let mut start_total = Duration::ZERO;
     for i in 0..reps {
-        t.mark_started(CommitSeq(u64::from(i) + 2));
+        let t0 = std::time::Instant::now();
+        t.mark_started(CommitSeq(u64::from(i) + 2 + cut));
+        start_total += t0.elapsed();
     }
-    let clone_ns = u64::try_from(t0.elapsed().as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
-    let t0 = std::time::Instant::now();
     let skip = HashSet::new();
+    let mut ready_total = Duration::ZERO;
     for _ in 0..reps {
-        std::hint::black_box(t.ready(CommitSeq(u64::MAX / 2), 0, &skip, OFFER_MAX));
+        let t0 = std::time::Instant::now();
+        let r = std::hint::black_box(t.ready(CommitSeq(u64::MAX / 2), 0, &skip, OFFER_MAX));
+        ready_total += t0.elapsed();
+        t.consume(&r, Duration::ZERO);
     }
-    let ready_ns = u64::try_from(t0.elapsed().as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
     // What a mark of this table finds: one entry in every segment still
     // referenced (the table is right).
     let mark: Vec<(SegId, u64)> = ids.iter().skip(zeros).map(|&s| (s, 1)).collect();
     let mut rebase_total = Duration::ZERO;
     for i in 0..reps {
-        let tip = CommitSeq(u64::from(i) + 10);
+        let tip = CommitSeq(u64::from(i) + 10 + cut);
         t.mark_started(tip);
         let r = TipRefs {
             tip,
@@ -954,8 +1068,27 @@ pub(crate) fn bench_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64
         std::hint::black_box(t.rebase(&r));
         rebase_total += t0.elapsed();
     }
-    let rebase_ns = u64::try_from(rebase_total.as_nanos() / u128::from(reps)).unwrap_or(u64::MAX);
-    (clone_ns, ready_ns, rebase_ns)
+    // A mark that differs in one segment, alternating so that every call
+    // finds a difference.
+    let mut slow_total = Duration::ZERO;
+    for i in 0..reps {
+        let tip = CommitSeq(u64::from(i) + 1_000_000 + cut);
+        t.mark_started(tip);
+        let mut refs = mark.clone();
+        if let Some(first) = refs.first_mut() {
+            first.1 = if i % 2 == 0 { 2 } else { 1 };
+        }
+        let r = TipRefs { tip, refs };
+        let t0 = std::time::Instant::now();
+        std::hint::black_box(t.rebase(&r));
+        slow_total += t0.elapsed();
+    }
+    (
+        per_call(start_total, reps),
+        per_call(ready_total, reps),
+        per_call(rebase_total, reps),
+        per_call(slow_total, reps),
+    )
 }
 
 #[cfg(test)]
@@ -1305,6 +1438,197 @@ mod tests {
         assert_eq!(t.rebase(&tip_refs(3, &[(1, 5)])), 0, "snapshot is gone");
         assert_eq!(t.count(seg(1)), 5);
         assert_eq!(t.state(), RefsState::Ready);
+    }
+
+    /// 2.1: deltas after the mark start survive the rebase, for a mark that
+    /// equals the snapshot (fast path) and for one that differs (exact path).
+    #[test]
+    fn deltas_after_the_mark_start_survive_the_rebase() {
+        for differing in [false, true] {
+            let mut t = ready_table();
+            t.apply(&deltas(&[(1, 1), (2, 2), (3, 1)]));
+            t.mark_started(seq(1));
+            // After the start: 1 goes to zero, 3 is revived from a count of 1
+            // to 2, 4 is new, 2 is untouched.
+            t.apply(&deltas(&[(1, -1), (3, 1), (4, 1)]));
+            t.seal_cut(seq(2), at(0));
+            assert_eq!(t.zero_since.len(), 1, "segment 1 waits");
+            let mark: &[(u64, u64)] = if differing {
+                &[(1, 1), (2, 2), (3, 1), (5, 4)]
+            } else {
+                &[(1, 1), (2, 2), (3, 1)]
+            };
+            let d = t.rebase(&tip_refs(1, mark));
+            assert_eq!(d, u64::from(differing));
+            if differing {
+                // counts == mark + deltas.
+                assert_eq!(t.count(seg(1)), 0);
+                assert_eq!(t.count(seg(2)), 2);
+                assert_eq!(t.count(seg(3)), 2);
+                assert_eq!(t.count(seg(4)), 1);
+                assert_eq!(t.count(seg(5)), 4);
+                assert!(t.zero_since.is_empty(), "a drift clears the zeros");
+            } else {
+                assert_eq!(t.count(seg(1)), 0);
+                assert_eq!(t.count(seg(3)), 2);
+                assert_eq!(t.count(seg(4)), 1);
+                assert_eq!(t.zero_since.len(), 1, "the zero is still waiting");
+            }
+            assert_eq!(t.sums, Sums::of(t.counts.iter().map(|(&s, &n)| (s, n))));
+        }
+    }
+
+    /// 2.1: whatever kind of difference a mark has, the rebase finds exactly
+    /// the differing segments (two sums of weight 1 would miss a swap and a
+    /// +1/-1 pair).
+    #[test]
+    fn any_difference_takes_the_exact_path() {
+        let case = (
+            proptest::collection::btree_map(1u64..=64, 1u64..6, 2..40),
+            0usize..5,
+            (any::<prop::sample::Index>(), any::<prop::sample::Index>()),
+            1u64..4,
+        );
+        proptest!(ProptestConfig::with_cases(256), |((counts, kind, (ia, ib), k) in case)| {
+            let keys: Vec<u64> = counts.keys().copied().collect();
+            let a = keys[ia.index(keys.len())];
+            let b = keys[ib.index(keys.len())];
+            prop_assume!(a != b);
+            let mut mark: BTreeMap<u64, u64> = counts.clone();
+            let expect = match kind {
+                0 => {
+                    *mark.get_mut(&a).expect("key") += k;
+                    1
+                }
+                1 => {
+                    prop_assume!(counts[&a] != counts[&b]);
+                    let (x, y) = (counts[&a], counts[&b]);
+                    mark.insert(a, y);
+                    mark.insert(b, x);
+                    2
+                }
+                2 => {
+                    *mark.get_mut(&a).expect("key") += 1;
+                    let y = mark.get_mut(&b).expect("key");
+                    *y -= 1;
+                    if *y == 0 {
+                        mark.remove(&b);
+                    }
+                    2
+                }
+                3 => {
+                    mark.remove(&a);
+                    1
+                }
+                _ => {
+                    mark.insert(200, 1);
+                    1
+                }
+            };
+            let mut t = ready_table();
+            let all: Vec<(u64, i64)> = counts.iter().map(|(&s, &n)| (s, n as i64)).collect();
+            t.apply(&deltas(&all));
+            t.apply(&deltas(&[(100, 1)]));
+            t.apply(&deltas(&[(100, -1)]));
+            t.seal_cut(seq(1), at(0));
+            prop_assert_eq!(t.zero_since.len(), 1, "a zero waits");
+            t.mark_started(seq(2));
+            let list: Vec<(u64, u64)> = mark.iter().map(|(&s, &n)| (s, n)).collect();
+            prop_assert_eq!(t.rebase(&tip_refs(2, &list)), expect);
+            let now: BTreeMap<u64, u64> = t
+                .counts
+                .iter()
+                .map(|(s, &n)| (s.raw(), n as u64))
+                .collect();
+            let want: BTreeMap<u64, u64> = mark.clone();
+            prop_assert_eq!(now.len(), want.len());
+            for (s, n) in &want {
+                prop_assert_eq!(t.count(seg(*s)), *n as i64);
+            }
+            prop_assert!(t.zero_since.is_empty());
+            prop_assert_eq!(t.stats().drift_segments, expect);
+        });
+    }
+
+    #[derive(Clone, Debug)]
+    enum SumOp {
+        Apply(Vec<(u8, i8)>),
+        Seal,
+        Start,
+        /// A mark equal to the snapshot, or off by one in a segment.
+        Rebase(bool),
+        Fail,
+    }
+
+    /// 2.1: the table's sums are the sums of its counts after every
+    /// operation, `Rebuilding` base included, and a rebase leaves
+    /// `mark + deltas since the start`.
+    #[test]
+    fn the_sums_follow_the_counts() {
+        let op = prop_oneof![
+            4 => proptest::collection::vec((1u8..9, -3i8..4), 0..6).prop_map(SumOp::Apply),
+            2 => Just(SumOp::Seal),
+            2 => Just(SumOp::Start),
+            3 => any::<bool>().prop_map(SumOp::Rebase),
+            1 => Just(SumOp::Fail),
+        ];
+        proptest!(ProptestConfig::with_cases(256), |(ops in proptest::collection::vec(op, 1..40))| {
+            let mut t = SegRefs::new(Duration::ZERO);
+            let mut n = 0u64;
+            let mut snap: Option<(u64, BTreeMap<u64, i64>)> = None;
+            let mut since: BTreeMap<u64, i64> = BTreeMap::new();
+            for o in ops {
+                match o {
+                    SumOp::Apply(v) => {
+                        let mut net: BTreeMap<u64, i64> = BTreeMap::new();
+                        for (s, d) in v {
+                            *net.entry(u64::from(s)).or_insert(0) += i64::from(d);
+                        }
+                        let net: Vec<(u64, i64)> = net.into_iter().collect();
+                        t.apply(&deltas(&net));
+                        if snap.is_some() {
+                            for (s, d) in net {
+                                *since.entry(s).or_insert(0) += d;
+                            }
+                        }
+                    }
+                    SumOp::Seal => {
+                        n += 1;
+                        t.seal_cut(seq(n), at(0));
+                    }
+                    SumOp::Start => {
+                        n += 1;
+                        t.mark_started(seq(n));
+                        snap = Some((n, t.counts.iter().map(|(s, &c)| (s.raw(), c)).collect()));
+                        since.clear();
+                    }
+                    SumOp::Rebase(off) => {
+                        if let Some((tip, base)) = snap.take() {
+                            let mut mark: BTreeMap<u64, i64> =
+                                base.iter().filter(|(_, c)| **c > 0).map(|(s, c)| (*s, *c)).collect();
+                            if off {
+                                *mark.entry(1).or_insert(0) += 1;
+                            }
+                            let list: Vec<(u64, u64)> =
+                                mark.iter().map(|(s, c)| (*s, *c as u64)).collect();
+                            t.rebase(&tip_refs(tip, &list));
+                            let mut want = mark;
+                            for (s, d) in std::mem::take(&mut since) {
+                                *want.entry(s).or_insert(0) += d;
+                            }
+                            want.retain(|_, c| *c != 0);
+                            let got: BTreeMap<u64, i64> =
+                                t.counts.iter().map(|(s, &c)| (s.raw(), c)).collect();
+                            prop_assert_eq!(got, want);
+                        } else {
+                            prop_assert_eq!(t.rebase(&tip_refs(999, &[])), 0);
+                        }
+                    }
+                    SumOp::Fail => t.drifted(false),
+                }
+                prop_assert_eq!(t.sums, Sums::of(t.counts.iter().map(|(&s, &c)| (s, c))));
+            }
+        });
     }
 
     /// A mark's decisions; a condemned segment `n` is `100 * n` bytes.
