@@ -1,0 +1,27 @@
+; pgracemix: mixed 4K random job, about 70 % writes and 30 % reads over each job's slice of the working set; the reads draw from the same
+; offset stream as the writes, so they hit recently overwritten blocks. ${DIST} is `random` (uniform) or `zipf:1.2`; ${RWMIXREAD} is 30.
+[w4kmix]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=randrw
+rwmixread=${RWMIXREAD}
+random_distribution=${DIST}
+bs=4k
+iodepth=${QD}
+numjobs=${JOBS}
+size=${SLICE}
+offset_increment=${SLICE}
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+ramp_time=${RAMP}
+randseed=${SEED}
+refill_buffers=1
+buffer_compress_percentage=50
+group_reporting=1
+; per-second maximum of the completion latency, both directions (column 3 of the log: 0 read, 1 write)
+write_lat_log=${LATLOG}
+log_avg_msec=1000
+log_max_value=1
+percentile_list=50:90:99:99.9:99.99

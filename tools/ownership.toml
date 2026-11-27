@@ -847,12 +847,12 @@ paths = [
   "tools/ownership.toml",
 ]
 
-# pgracet6: real-daemon T6 of the short segment grace (arms B, C, C2); a measurement
-# branch, never merged. Harness brought over from p1/c5t6.
-[pgracet6]
+# pgracemix: real-daemon read-race measurement of the short segment grace (arms C, C2); a measurement
+# branch, never merged. Harness of p1/pgracet6.
+[pgracemix]
 paths = [
   "bench/phase1/perf/**",
   "tests/perf/**",
-  "docs/plans/v1/reports/p1-pgracet6.md",
+  "docs/plans/v1/reports/p1-pgracemix.md",
   "tools/ownership.toml",
 ]

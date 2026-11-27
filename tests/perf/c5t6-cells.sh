@@ -18,6 +18,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 : "${CELL:?}" "${CHUNK:?}" "${REPS:=5}" "${RAMP:=5}" "${W_RUNTIME:=60}" "${VOL_GIB:=16}" "${WS_GIB:=2}" "${JOBS:=8}" "${SAMPLE_S:=2}"
 : "${DAEMON_CPUS:=0-7}" "${FIO_CPUS:=8-15}" "${QCPUS:=0-3}" "${VOLMODE:=integrity}" "${DESTAGE_WORKERS:=8}"
 : "${RESTART_REP:=0}" "${RESTART_AT:=30}"
+export DIST="${DIST:-random}" RWMIXREAD="${RWMIXREAD:-30}"   # pgracemix: the offset distribution and read share of w4kmix.fio
 CFG_EXTRA="${CFG_EXTRA:+$CFG_EXTRA
 }destage_workers = $DESTAGE_WORKERS"
 export CFG_EXTRA JOURNAL_MAX="${JOURNAL_MAX:-1073741824}" DAEMON_CPUS FIO_CPUS
@@ -118,6 +119,7 @@ for rep in $(seq 1 "$REPS"); do
   case "$CELL" in
     w4k|pin) run_fio "rep$rep-w4k" w4k "$W_RUNTIME" 128 "$rep" "$rs" ;;
     w4kz) run_fio "rep$rep-w4kz" w4kz "$W_RUNTIME" 128 "$rep" "$rs" ;;
+    w4kmix) run_fio "rep$rep-w4kmix" w4kmix "$W_RUNTIME" 128 "$rep" "$rs" ;;
     *) echo "unknown cell $CELL" >&2; exit 2 ;;
   esac
 done
