@@ -4,12 +4,14 @@
 //! after the grace ended is the only judge of a delete.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use lunix_format::{CommitSeq, IdLen, ObjId, SegId};
-use lunix_iface::gc::{Collector, DeadSince, GcState};
+use lunix_format::segment::FooterBody;
+use lunix_format::{CommitSeq, Hint, IdLen, ObjId, SegId};
+use lunix_iface::gc::{Collector, DeadSince, GcState, GcView};
 use lunix_iface::index::ChunkIndex;
-use lunix_iface::store::{GcStateStore, SegmentStore};
+use lunix_iface::store::{ExtentLocation, GcStateStore, SegmentInfo, SegmentStore, SegmentWriter};
 
 use super::sim::{Sim, SimCfg, GRACE};
 use crate::condemned::{CondemnedList, ObjectRef};
@@ -751,10 +753,12 @@ fn the_deferral_of_the_b1_script_ends_with_two_more_cuts() {
 /// mark that follows counts it, and the recheck un-condemns it.
 #[test]
 fn a_proposal_a_retained_older_root_still_names_is_counted_and_never_deleted() {
-    let run = |unfiltered: bool| {
+    let run = |unfiltered: bool, judge: bool| {
         let mut c = cfg();
         c.gc.propose_unfiltered = unfiltered;
         let mut s = Sim::new(c);
+        // 2.3: the same count with the engine's shadow judgement on and off.
+        s.gc.set_shadow_judge(judge);
         s.step().unwrap();
         s.write(5, 7_001);
         s.commit().unwrap();
@@ -775,22 +779,72 @@ fn a_proposal_a_retained_older_root_still_names_is_counted_and_never_deleted() {
             .collect();
         (s, old)
     };
-    // Filtered: the cut is newer than the lowest chain_floor.
-    let (mut s, old) = run(false);
-    assert!(s.propose(&old).unwrap());
-    assert!(listed(&s).is_empty());
-    assert!(s.gc.status().reclaim.proposal_rejected_early > 0);
-    // Unfiltered: condemned, then named by the older root at the next mark.
-    let (mut s, old) = run(true);
-    assert!(s.propose(&old).unwrap());
-    let taken = listed(&s);
-    assert!(!taken.is_empty(), "the filter is off");
-    s.clock.advance(GRACE * 2);
-    s.pass().unwrap();
-    let r = s.gc.status().reclaim;
-    assert!(r.proposal_named > 0, "{r:?}");
-    assert!(taken.iter().all(|x| segs(&s).contains(x)), "kept");
-    s.check_roots().unwrap();
+    for judge in [true, false] {
+        // Filtered: the cut is newer than the lowest chain_floor.
+        let (mut s, old) = run(false, judge);
+        assert!(s.propose(&old).unwrap());
+        assert!(listed(&s).is_empty());
+        assert!(s.gc.status().reclaim.proposal_rejected_early > 0);
+        // Unfiltered: condemned, then named by the older root at the next
+        // mark.
+        let (mut s, old) = run(true, judge);
+        assert!(s.propose(&old).unwrap());
+        let taken = listed(&s);
+        assert!(!taken.is_empty(), "the filter is off");
+        s.clock.advance(GRACE * 2);
+        s.pass().unwrap();
+        let r = s.gc.status().reclaim;
+        assert!(r.proposal_named > 0, "judge {judge}: {r:?}");
+        assert!(taken.iter().all(|x| segs(&s).contains(x)), "kept");
+        s.check_roots().unwrap();
+    }
+}
+
+/// 2.3: with the shadow judgement off a mark reports the segments it
+/// condemned and builds none of the three lists the engine's shadow mode
+/// reads. Control: with it on, the same mark reports them (segments an older
+/// retained root names are in `named`).
+#[test]
+fn without_the_shadow_judgement_a_mark_condemns_and_reports_no_lists() {
+    let report = |judge: bool, named_scene: bool| {
+        let mut s = if named_scene {
+            let mut s = Sim::new(cfg());
+            s.step().unwrap();
+            // A segment the tip no longer names and the retained FULLs do.
+            s.write(5, 7_001);
+            s.commit().unwrap();
+            for _ in 0..4 {
+                s.commit().unwrap();
+            }
+            s.write(5, 7_002);
+            s.commit().unwrap();
+            s
+        } else {
+            scene(3)
+        };
+        s.gc.set_shadow_judge(judge);
+        s.gc.set_tip_refs(true);
+        s.clock.advance(Duration::from_secs(40));
+        s.pass().unwrap();
+        let rep = s.gc.take_mark_report().expect("a mark ran");
+        rep.finished
+            .into_iter()
+            .filter_map(|f| f.condemned)
+            .collect::<Vec<_>>()
+    };
+    let off = report(false, false);
+    assert!(
+        off.iter().any(|c| !c.segs.is_empty()),
+        "something condemned"
+    );
+    for c in off.iter().chain(&report(false, true)) {
+        assert!(c.live.is_empty() && c.listed.is_empty() && c.named.is_empty());
+    }
+    let on = report(true, true);
+    assert!(
+        on.iter().any(|c| !c.named.is_empty()),
+        "control: the lists exist with the judgement on: {on:?}"
+    );
 }
 
 // ------------------------------------------------------------ equivalence
@@ -866,4 +920,183 @@ fn correct_proposals_converge_to_the_same_objects_as_none() {
         proposed += n;
     }
     assert!(proposed > 0, "no proposal condemned anything");
+}
+
+/// A segment store that counts `list` and `size` calls, and can fail `size`
+/// for one segment.
+struct Lookups<'a> {
+    inner: &'a dyn SegmentStore,
+    lists: AtomicU64,
+    sizes: AtomicU64,
+    fail: Option<SegId>,
+}
+
+impl<'a> Lookups<'a> {
+    fn new(inner: &'a dyn SegmentStore, fail: Option<SegId>) -> Self {
+        Self {
+            inner,
+            lists: AtomicU64::new(0),
+            sizes: AtomicU64::new(0),
+            fail,
+        }
+    }
+
+    fn counts(&self) -> (u64, u64) {
+        (
+            self.lists.load(Ordering::Relaxed),
+            self.sizes.load(Ordering::Relaxed),
+        )
+    }
+}
+
+impl SegmentStore for Lookups<'_> {
+    fn open_segment(&self) -> lunix_iface::Result<Box<dyn SegmentWriter>> {
+        self.inner.open_segment()
+    }
+    fn read_extent(&self, hint: &Hint, out: &mut Vec<u8>) -> lunix_iface::Result<()> {
+        self.inner.read_extent(hint, out)
+    }
+    fn locate(&self, hint: &Hint) -> lunix_iface::Result<ExtentLocation> {
+        self.inner.locate(hint)
+    }
+    fn footer(&self, seg: SegId) -> lunix_iface::Result<FooterBody> {
+        self.inner.footer(seg)
+    }
+    fn list(&self) -> lunix_iface::Result<Vec<SegmentInfo>> {
+        self.lists.fetch_add(1, Ordering::Relaxed);
+        self.inner.list()
+    }
+    fn size(&self, seg: SegId) -> lunix_iface::Result<Option<u64>> {
+        self.sizes.fetch_add(1, Ordering::Relaxed);
+        if self.fail == Some(seg) {
+            return Err(lunix_iface::Error::Io(std::io::Error::other("injected")));
+        }
+        self.inner.size(seg)
+    }
+    fn delete(&self, seg: SegId) -> lunix_iface::Result<u64> {
+        self.inner.delete(seg)
+    }
+}
+
+/// `Sim::propose` with the proposal's segment store replaced by `segments`.
+fn propose_through(s: &mut Sim, segments: &dyn SegmentStore, dead: &[DeadSince]) -> bool {
+    let mut gc = std::mem::replace(
+        &mut s.gc,
+        crate::Gc::new(std::sync::Arc::new(s.store.clone()), s.cfg.gc),
+    );
+    let r = s.with_view(|v| {
+        let view = GcView { segments, ..*v };
+        gc.propose_dead(&view, dead)
+    });
+    s.gc = gc;
+    r
+}
+
+/// 2.2: a proposal looks its segments up by id: no listing of the directory,
+/// at most one `size` per offered segment, before and after a delete (which
+/// used to drop the listing it kept per tip). A new test: it does not compile
+/// on the tree before `SegmentStore::size`.
+#[test]
+fn a_proposal_looks_up_sizes_by_id_and_never_lists_the_store() {
+    let mut c = cfg();
+    c.chunk_count = 256;
+    let mut s = scene_with(c, 64);
+    let first = s.dead_segments();
+    assert!(first.len() >= 64, "{} dead", first.len());
+    let first = &first[..64];
+    let store = s.store.clone();
+    let counting = Lookups::new(&store, None);
+    assert!(propose_through(&mut s, &counting, first));
+    let (lists, sizes) = counting.counts();
+    assert_eq!(listed(&s), ids(first), "the offer was condemned");
+    assert_eq!(lists, 0, "no listing on the proposal path");
+    assert!((1..=64).contains(&sizes), "{sizes} size lookups");
+    // A deleting pass, then a second batch.
+    s.clock.advance(GRACE * 2);
+    s.pass().unwrap();
+    assert!(
+        !ids(first).is_subset(&segs(&s)),
+        "the pass deleted some of the first batch"
+    );
+    make_dead(&mut s, 64, 64, 9_000);
+    let second: Vec<DeadSince> = s
+        .dead_segments()
+        .into_iter()
+        .filter(|d| !listed(&s).contains(&d.seg))
+        .collect();
+    assert!(second.len() >= 32, "{} new dead", second.len());
+    let again = Lookups::new(&store, None);
+    assert!(propose_through(
+        &mut s,
+        &again,
+        &second[..second.len().min(64)]
+    ));
+    let (lists, sizes) = again.counts();
+    assert_eq!(lists, 0, "still no listing after a delete");
+    assert!((1..=64).contains(&sizes), "{sizes} size lookups");
+    assert!(
+        second[..second.len().min(64)]
+            .iter()
+            .all(|d| listed(&s).contains(&d.seg)),
+        "the second batch was condemned"
+    );
+}
+
+/// 2.2: a failed size lookup is an error of the call (counted), not "missing":
+/// nothing of that offer is listed or flagged.
+#[test]
+fn a_failed_size_lookup_fails_the_call_and_lists_nothing() {
+    let mut s = scene(4);
+    let dead = s.dead_segments();
+    assert!(dead.len() >= 3);
+    let store = s.store.clone();
+    let counting = Lookups::new(&store, Some(dead[dead.len() - 1].seg));
+    assert!(propose_through(&mut s, &counting, &dead), "consumed");
+    assert_eq!(s.gc.status().reclaim.propose_errors, 1);
+    assert!(listed(&s).is_empty(), "{:?}", listed(&s));
+    assert!(flagged(&s).is_empty());
+    assert_eq!(s.gc.status().reclaim.proposal_condemned, 0);
+}
+
+/// 2.3, a measurement (`cargo test --release -p lunix-gc -- --ignored
+/// note_dead --nocapture`): the time of `note_dead` for a mark over 128,000
+/// live segments with the shadow judgement on and off.
+#[test]
+#[ignore = "a measurement (see the doc comment)"]
+fn note_dead_with_the_shadow_judgement_on_and_off_at_128k_live_segments() {
+    let mut l = crate::Liveness::default();
+    for n in 1..=128_000u64 {
+        let seg = ObjId::from_raw(n).unwrap();
+        l.seg_live.insert(seg, 1 << 20);
+        if n % 2 == 0 {
+            l.tip_refs.insert(seg, 3);
+        } else {
+            l.older_refs.insert(seg);
+        }
+    }
+    let todo: Vec<(ObjectRef, u64)> = (1..=64u64)
+        .map(|n| (ObjectRef::Segment(ObjId::from_raw(n).unwrap()), 1 << 20))
+        .collect();
+    let mut cfg = GcConfig::daemon();
+    cfg.tip_refs = true;
+    let mut gc = crate::Gc::new(
+        std::sync::Arc::new(lunix_testkit::MemStore::with_config(
+            lunix_testkit::MemStoreConfig::default(),
+        )),
+        cfg,
+    );
+    let mut ms = Vec::new();
+    for judge in [true, false] {
+        gc.set_shadow_judge(judge);
+        let t0 = std::time::Instant::now();
+        for _ in 0..20 {
+            gc.note_dead(&l, &todo);
+        }
+        ms.push(t0.elapsed().as_secs_f64() * 1e3 / 20.0);
+    }
+    eprintln!(
+        "note_dead at 128k live segments: judgement on {:.3} ms, off {:.4} ms per call",
+        ms[0], ms[1]
+    );
+    assert!(ms[1] < ms[0]);
 }

@@ -604,6 +604,16 @@ impl SegmentStore for LocalVolume {
         Ok(out)
     }
 
+    fn size(&self, seg: ObjId) -> Result<Option<u64>> {
+        // One stat of the sealed file: what `list` reports for it. A missing
+        // file is `None`; any other failure is an error, not "missing".
+        match std::fs::metadata(self.inner.container_path(ContainerKind::Segment, seg)) {
+            Ok(m) => Ok(Some(m.len())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err(e)),
+        }
+    }
+
     fn delete(&self, seg: ObjId) -> Result<u64> {
         self.delete_container(ContainerKind::Segment, seg)
     }
