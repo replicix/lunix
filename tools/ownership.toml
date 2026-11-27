@@ -686,6 +686,8 @@ paths = [
   "crates/lunix-gc/src/tests/mod.rs",
   "docs/plans/v1/reports/p1-footerfix.md",
   "docs/reference/gc.md",
+  "tests/perf/**",
+  "bench/phase1/perf/**",
   "tools/ownership.toml",
 ]
 
@@ -791,6 +793,8 @@ paths = [
   "docs/plans/v1/reports/p1-orphanhold.md",
   "docs/plans/v1/reports/p1-orphanhold2.md",
   "docs/reference/gc.md",
+  "tests/perf/**",
+  "bench/phase1/perf/**",
   "tools/ownership.toml",
 ]
 
@@ -863,6 +867,8 @@ paths = [
   "docs/plans/v1/reports/p1-pgracemix.md",
   "docs/plans/v1/reports/p1-pgracet6.md",
   "docs/reference/gc.md",
+  "tests/perf/**",
+  "bench/phase1/perf/**",
   "tools/ownership.toml",
 ]
 
@@ -890,5 +896,7 @@ paths = [
   "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-c5def.md",
   "docs/reference/gc.md",
+  "tests/perf/**",
+  "bench/phase1/perf/**",
   "tools/ownership.toml",
 ]

@@ -1,0 +1,54 @@
+; refsoak cell 5 (compaction-heavy), one repetition in three stonewalled phases over a working set CWS (bytes, smaller than the volume):
+;   a  4K random write over all of CWS            (CRUN s)  the chunks of one segment come from random places
+;   b  1M sequential rewrite of the first half     (one pass) kills about half of every segment's chunks: many half-live segments
+;   c  4K random write over the second half        (CRUN s)  keeps the daemon loaded while the collector compacts
+; Environment: DEV CWS CHALF CSLICE (CWS/8) CHSLICE (CHALF/8) CRUN RAMP CPUS QD SEED LATLOG.
+[global]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+cpus_allowed=${CPUS}
+randseed=${SEED}
+refill_buffers=1
+buffer_compress_percentage=50
+group_reporting=1
+percentile_list=50:90:99:99.9:99.99
+
+[a_rand_all]
+rw=randwrite
+bs=4k
+iodepth=${QD}
+numjobs=8
+size=${CSLICE}
+offset_increment=${CSLICE}
+time_based
+runtime=${CRUN}
+ramp_time=${RAMP}
+write_lat_log=${LATLOG}_a
+log_avg_msec=1000
+log_max_value=1
+
+[b_seq_half]
+stonewall
+rw=write
+bs=1m
+iodepth=32
+numjobs=1
+offset=0
+size=${CHALF}
+end_fsync=1
+
+[c_rand_second_half]
+stonewall
+rw=randwrite
+bs=4k
+iodepth=${QD}
+numjobs=8
+offset=${CHALF}
+size=${CHSLICE}
+offset_increment=${CHSLICE}
+time_based
+runtime=${CRUN}
+write_lat_log=${LATLOG}_c
+log_avg_msec=1000
+log_max_value=1
