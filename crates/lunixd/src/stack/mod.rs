@@ -522,7 +522,7 @@ pub struct OpenParams {
     /// collector's counting of the tip root's entries on.
     pub gc_condemn_on_cut: lunix_engine::CondemnOnCut,
     /// The short grace of condemned segments under pressure (the daemon's
-    /// `gc_pressure_grace_ms`; `None`: off).
+    /// `gc_pressure_grace_ms`; `None`: off; default 2 s).
     pub gc_pressure_grace: Option<std::time::Duration>,
     /// A hook that runs inside every segment `read_extent` (before the open
     /// and after it) and may block, so that a read part outlives the
@@ -560,7 +560,7 @@ impl OpenParams {
             gc_pressure_rate_factor: 4,
             gc_fast_recheck: None,
             gc_condemn_on_cut: lunix_engine::CondemnOnCut::Off,
-            gc_pressure_grace: None,
+            gc_pressure_grace: Some(std::time::Duration::from_millis(2_000)),
             #[cfg(feature = "crashpoints")]
             segment_read_hook: None,
             throttle_mid_rate: None,

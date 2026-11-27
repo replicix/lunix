@@ -220,8 +220,8 @@ in volume.json".
 **Rule change F3 (2026-11-26, ADR-32 amendment "a short segment grace under
 pressure").** The grace of a condemned segment is no longer always at least
 10 s plus twice `read_timeout`. While the engine's GC pressure is raised or
-urgent and the daemon key `gc_pressure_grace_ms` is set (0 = off, the
-default; else 2 000 ..= 10 000 ms), a segment may be deleted once its own
+urgent and the daemon key `gc_pressure_grace_ms` is set (0 = off; else
+2 000 ..= 10 000 ms; 2 000 by default since 2026-11-27), a segment may be deleted once its own
 flag is that old and a mark pinned after that finds it unreferenced, so the
 documented meaning of `gc_grace_ms` ("covers in-flight cuts, destage and
 reads; not shorter than 10 s plus twice `read_timeout_ms`") and of

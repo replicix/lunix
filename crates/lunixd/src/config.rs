@@ -45,7 +45,7 @@
 //! | `gc_fast_recheck` | `false` | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
 //! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
 //! | `gc_condemn_on_cut` | `off` | `off`, `shadow` or `on`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `on`: as `shadow`, and a segment the table finds dead (no entry since a cut, and the retained FULLs have rolled past it) is offered to the collector at the first step that finds it between passes; the collector lists, flags and starts the grace of what its own rules accept (never while a pin exists), and the recheck mark that began after the grace ended is still the only judge of a delete. `off`: no table, no extra work |
-//! | `gc_pressure_grace_ms` | 0 | `0` (off) or `2000` ..= `10000`: while writes are paced or held (and for 5 s after the gate opens), the grace of a condemned **segment** is this many milliseconds, counted from its own flag, instead of the floor (10 s plus twice `read_timeout`, 30 s by default). Map packs, index runs and commit objects keep the floor, as does every delete while writes are not slowed. A segment that was condemned before the pressure began is covered at once if its flag is old enough; a restart starts every grace again. The recheck mark that began after the grace ended is still the only judge of a delete. Without `gc_fast_recheck` the effective delay is still `busy_interval` or three marks, so set both (the daemon logs a warning at attach otherwise) |
+//! | `gc_pressure_grace_ms` | 2000 | `0` (off) or `2000` ..= `10000` (on by default, ADR-32 amendment of 2026-11-27): while writes are paced or held (and for 5 s after the gate opens), the grace of a condemned **segment** is this many milliseconds, counted from its own flag, instead of the floor (10 s plus twice `read_timeout`, 30 s by default). Map packs, index runs and commit objects keep the floor, as does every delete while writes are not slowed. A segment that was condemned before the pressure began is covered at once if its flag is old enough; a restart starts every grace again. The recheck mark that began after the grace ended is still the only judge of a delete. Without `gc_fast_recheck` the effective delay is still `busy_interval` or three marks, so set both (the daemon logs a warning at attach otherwise) |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
 //! The band's middle rate `r_mid` is `max(gc_rate, 16 MiB/s)` of each volume
@@ -149,7 +149,7 @@ pub struct DaemonConfig {
     /// The engine's per-segment reference table (`gc_condemn_on_cut`).
     pub gc_condemn_on_cut: CondemnOnCut,
     /// The short grace of condemned segments while writes are paced or held
-    /// (`gc_pressure_grace_ms`; `None`: off).
+    /// (`gc_pressure_grace_ms`; `None`: off; default 2 s).
     pub gc_pressure_grace: Option<Duration>,
 }
 
@@ -191,7 +191,7 @@ impl Default for DaemonConfig {
             gc_fast_recheck: false,
             gc_fast_recheck_delay: Duration::from_secs(1),
             gc_condemn_on_cut: CondemnOnCut::Off,
-            gc_pressure_grace: None,
+            gc_pressure_grace: Some(Duration::from_millis(2_000)),
         }
     }
 }
@@ -553,6 +553,23 @@ mod tests {
         assert!(DaemonConfig::parse("journal_resident_max = 2097151").is_err());
         assert!(DaemonConfig::parse("journal_resident_max = 0").is_err());
         assert!(DaemonConfig::parse("journal_resident_max = \"big\"").is_err());
+    }
+
+    #[test]
+    fn gc_pressure_grace_ms_defaults_to_2000_and_is_validated() {
+        let ms = |t: &str| DaemonConfig::parse(t).unwrap().gc_pressure_grace;
+        assert_eq!(
+            DaemonConfig::default().gc_pressure_grace,
+            Some(Duration::from_millis(2_000))
+        );
+        assert_eq!(ms(""), Some(Duration::from_millis(2_000)));
+        assert_eq!(ms("gc_pressure_grace_ms = 0"), None);
+        assert_eq!(
+            ms("gc_pressure_grace_ms = 10000"),
+            Some(Duration::from_millis(10_000))
+        );
+        assert!(DaemonConfig::parse("gc_pressure_grace_ms = 1999").is_err());
+        assert!(DaemonConfig::parse("gc_pressure_grace_ms = 10001").is_err());
     }
 
     #[test]

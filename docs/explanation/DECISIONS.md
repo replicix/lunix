@@ -2452,7 +2452,10 @@ sketch are in
     cuts as soon as hole records are journaled and follows with as many
     FULLs as GC's retained set holds (three with `retain_last` = 2), so the
     old extents leave every root; the urgent pass then deletes them after
-    the floor grace. About 45 s from discard to space with the defaults.
+    the floor grace, or after the short segment grace under pressure
+    (`gc_pressure_grace_ms`, 2 s by default). About 15 s plus that grace
+    (about 17 s) from discard to space with the defaults (about 45 s with
+    the key at 0).
 - **GC's duty.** The engine reads the gate's state at each tick. Outside
   `open` the collector gets four times the step budget, `gc_rate ×
   gc_pressure_rate_factor` (4; uncapped at the limit) and the floor grace
@@ -2590,7 +2593,7 @@ not be needed. The delete rule is unchanged. Its T6 measurement is
 worded in the note's sign-off section and chose to record it as this
 amendment and FREEZE rule change F3, no layout change).** *A short segment
 grace under pressure* (`gc_pressure_grace_ms`: 0 = off, else 2 000 ..=
-10 000; default 0). While GC pressure is raised or urgent, a condemned
+10 000; default 2 000 since 2026-11-27, see the addition below). While GC pressure is raised or urgent, a condemned
 segment may be deleted once its index flag is at least
 `gc_pressure_grace_ms` old and a mark whose roots were pinned after that
 finds it unreferenced. The grace counts from each segment's own flag, so
@@ -2617,9 +2620,8 @@ deletes is the existing one, and `lunix gc --status` counts them
 `Collector` trait gains one defaulted method, `set_segment_grace` (the
 short grace is not a `GcParams` field: the validation refuses a grace below
 the floor). Map leaf reads stay protected by time only; map packs keep the
-floor for that reason. The key is off by default until the T6 arm
-measurement (milestone M4 of the note) decides the default; that
-measurement is not part of this amendment. Reader groundwork landed with
+floor for that reason. The key was off by default until the T6 arm
+measurement decided the default (see the 2026-11-27 addition below). Reader groundwork landed with
 it: the descriptor cache no longer pins a file deleted while a reader was
 opening it, and the status reports the age of the hints that went stale
 under a read (`read_stale_age_min_ms`, `read_stale_age_max_ms`), whose
@@ -2628,6 +2630,31 @@ behind it is a lead working document, not in the tree; the implementation
 report is `docs/plans/v1/reports/p1-pgrace.md`. "A segment of a local
 volume" must be read again when phase 2 (remote objects, reader pins)
 lands.
+
+*Addition (2026-11-27, `p1/pgracedef`): the default is 2 000 ms.* The
+maintainer chose `gc_pressure_grace_ms` = 2 000 (on) as the default after
+the real-daemon T6 (`p1/pgracet6`, report
+`docs/plans/v1/reports/p1-pgracet6.md`) and the read-mix run
+(`p1/pgracemix`, `docs/plans/v1/reports/p1-pgracemix.md`). The key stays
+settable to 0 (off) or to 2 000 ..= 10 000. Figures: pgracet6 rep 1 at 64
+KiB, arms B (key 0) / C (5 000) / C2 (2 000): first delete after the
+pressure onset 16.6 / 0.09 / 0.09 s, longest write wait 13.2 / 2.8 / 1.2 s,
+IOPS 32.9 K / 62.8 K / 68.0 K. Gate 6 of the note (does 2 s buy at least
+10 % more sustained IOPS or 1 s less longest wait in reps 2-5 than 5 s?)
+favoured 5 s by its written rule: +3.5 % IOPS and 0.29 s less wait. The
+maintainer chose 2 s over that rule because a read can lose its segment
+only between `locate` and the read of the extent, not over the whole
+request latency, and the read-mix run found no race at 2 s: `p1/pgracemix`
+(70/30 random 4 KiB, 30.2 M guest reads in all, 14.3 M at 5 s and 15.9 M
+at 2 s) had 0 revalidations, 0 exhausted retries and 0 authentication
+failures at either setting, and on that mix C2 ran 22.7 % higher write IOPS
+than C (51.0 K against 41.6 K, reps 2-5, two blocks per arm). The open
+limit: the retry margin of the revalidating read itself is unmeasured. The
+race path was never entered in about 30 M reads, and only the totals
+`read_revalidated` and `read_revalidate_exhausted` exist; there is no
+per-read retry count, so how close a read came to its retry bound cannot be
+read from a run. The stress and kill loops of `p1/pgrace`, which do enter
+the race, remain the checks.
 
 **For the maintainer to decide** (the recommendation first):
 

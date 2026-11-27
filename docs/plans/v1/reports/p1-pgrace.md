@@ -184,3 +184,7 @@ Remote disk: 38 GiB peak (target debug and release, scratch of the parallel loop
   overstate the age by the lookup loop (microseconds), in the direction that hides an alarm, not raises one.
 - Gate: `tools/ci.sh` green (with the new cell), oracles at 400 cases 17 passed, the pgrace kill-loop arm on plain 16K
   once: 27 runs, 27 kills at 10 points, recovery, fsck and oracle clean, exhausted 0.
+
+## Default
+
+Off by default when this branch merged (S8). On 2026-11-27 the maintainer made it on: `gc_pressure_grace_ms` defaults to 2 000 (daemon, `OpenParams` and `EngineConfig`), still settable to 0 or to 2 000 ..= 10 000, after the real-daemon T6 (`p1-pgracet6.md`) and the read-mix run (`p1-pgracemix.md`); the figures and the reason for 2 s over the gate-6 rule are in the ADR-32 amendment of DECISIONS.md. Tests that needed it off set 0 explicitly.

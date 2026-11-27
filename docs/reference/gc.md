@@ -280,7 +280,7 @@ calling thread runs the collector under the coordinator mutex):
   back-off of its own: not sooner than 2 s after the end of the last urgent
   pass (either kind), doubling up to 60 s while ladder passes free nothing,
   at most the floor grace after one that condemned something (the short
-  segment grace plus 1 s with `gc_pressure_grace_ms`), back to 2 s
+  segment grace plus 1 s unless `gc_pressure_grace_ms` is 0), back to 2 s
   after one that freed bytes or when a write is admitted again; a successful
   commit does not reset it. Within the pause the step frees nothing and
   returns at once, and the ladder thread then waits 100 ms before its next
@@ -310,7 +310,7 @@ lets it run recheck-only passes (above).
 | gate state | step budget | compaction rate | grace | passes |
 |---|---|---|---|---|
 | `open` | `gc_step_budget_ms` (50 ms), `gc_rate` bytes | `gc_rate` | `gc_grace_ms` (60 s) | the pipelined schedule |
-| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms`; **segments**: `gc_pressure_grace_ms` when set (below) | the same, always busy; recheck-only passes with `gc_fast_recheck` |
+| `slowdown` (paced) | 4 x (200 ms, 4 x the bytes) | `gc_rate x gc_pressure_rate_factor` (4 x) | the floor: 10 s plus twice `read_timeout` (30 s), never longer than `gc_grace_ms`; **segments**: `gc_pressure_grace_ms` (2 s by default; below) | the same, always busy; recheck-only passes with `gc_fast_recheck` |
 | `stop`, `full` | as `slowdown` | uncapped | the floor (segments: as `slowdown`) | and the ladder's urgent pass, with its back-off |
 
 - The pressure rises at once and ends with a hold: the engine returns to the
@@ -324,8 +324,8 @@ lets it run recheck-only passes (above).
   two only moves the delete earlier by what the floor allows. The default
   `gc_grace_ms` (60 s) is not changed.
 - **A short grace for segments** (`gc_pressure_grace_ms`, a `lunixd.toml`
-  key; ADR-32 amendment of 2026-11-26, FREEZE rule change F3). Off (0) by
-  default; else 2 000 ..= 10 000 ms. While the pressure is raised or urgent,
+  key; ADR-32 amendment of 2026-11-26, FREEZE rule change F3). On by
+  default since 2026-11-27: 2 000 ms; 0 turns it off, else 2 000 ..= 10 000 ms. While the pressure is raised or urgent,
   the grace of a condemned **segment** is that value (never longer than the
   grace in force), counted from the segment's own flag on the collector's
   monotonic clock, instead of the floor. Segments listed before the pressure
@@ -490,7 +490,7 @@ their map roots are not roots, so their data may go.
    commit objects; it may not be shorter than 10 s plus twice
    `read_timeout_ms` (30 s with the defaults), and a shorter setting is
    refused. Under pressure the grace in force is the floor, and with
-   `gc_pressure_grace_ms` the grace of a **segment** is that value instead
+   `gc_pressure_grace_ms` (2 s by default) the grace of a **segment** is that value instead
    (see "GC under write pressure"): the time no longer protects any reader of
    a segment. An object read back from the list after a restart starts its
    grace again.
@@ -582,8 +582,8 @@ their map roots are not roots, so their data may go.
 
 The **urgent pass** (the space ladder's compact step) marks, deletes the
 condemned objects whose grace has run for the floor (10 s plus twice
-`read_timeout`; for a segment the short grace under pressure when
-`gc_pressure_grace_ms` is set), with that mark as their recheck, condemns what is newly dead,
+`read_timeout`; for a segment the short grace under pressure unless
+`gc_pressure_grace_ms` is 0), with that mark as their recheck, condemns what is newly dead,
 and compacts if still short. It never deletes without a recheck. When it stops
 on an error after it freed bytes, it reports the bytes freed (and writes its
 evidence) rather than an error.
@@ -653,12 +653,13 @@ scratch is bounded.
 |---|---|---|
 | `retain_last` | 2 | FULL commits kept as roots; the engine derives `chain_floor` from it |
 | `gc_grace_ms` | 60 000 | grace between condemn and delete; at least `10 000 + 2 × read_timeout_ms` |
-| `read_timeout_ms` | 10 000 | the bound a read is expected to stay within; **not enforced**. It sets the grace floor (10 s plus twice this) that map packs, index runs and commit objects keep, and that segments keep unless `gc_pressure_grace_ms` shortens theirs under pressure |
+| `read_timeout_ms` | 10 000 | the bound a read is expected to stay within; **not enforced**. It sets the grace floor (10 s plus twice this) that map packs, index runs and commit objects keep, and that segments keep only when `gc_pressure_grace_ms` is 0 (it defaults to 2 000, which shortens theirs under pressure) |
 | `gc_rate` | 67 108 864 | compaction bytes per second |
 | `gc_live_threshold` | 0.5 | compact segments whose live fraction is below this |
 | `gc_step_budget_ms` | 50 | time one step may spend |
 
-Not in `volume.json` (`GcConfig` in the code): the pipelined schedule (the
+Not in `volume.json` (`GcConfig` in the code): the segment grace under
+pressure (`gc_pressure_grace_ms`, a `lunixd.toml` key, 2 000 ms by default), the pipelined schedule (the
 daemon's), 30 s between passes and 5 s after a pass that did reclaim work, 1 GiB of
 live bytes compacted per pass (256 MiB for the daemon), a root walked in at most 64 leaf batches of at
 least 16 leaves, 32 MiB of decoded footers cached (`footer_cache_bytes`; the mark and the compactor each hold a cache of that size, so a compaction loads each source's footer about once).
