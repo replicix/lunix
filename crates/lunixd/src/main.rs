@@ -166,6 +166,13 @@ fn serve(cli: &Cli) -> anyhow::Result<i32> {
     daemon.spawn_idle_trim();
     let code = lunixd::server::run(Arc::clone(&daemon), listener, |d| d.recover_on_start())?;
     let _ = std::fs::remove_file(&daemon.config().socket);
+    // Test builds: with LUNIX_CRASH_COUNT set, write the hit count of every crash
+    // point (M15 picks the middle and last hit of a workload from it). A no-op
+    // otherwise; the call does not exist in a normal build.
+    #[cfg(feature = "crashpoints")]
+    if let Err(e) = lunix_iface::crashpoint::dump_counts() {
+        tracing::warn!(error = %e, "cannot write the crash point counts");
+    }
     Ok(code)
 }
 

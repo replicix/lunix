@@ -895,3 +895,14 @@ paths = [
   "tools/ci.sh",
   "tools/ownership.toml",
 ]
+
+# Port of p1/m15 (exit harness, report, crashpoints-only lost-write hook) onto main; the raw results stay on origin/p1/m15.
+[m15port]
+paths = [
+  "tests/exit/**",
+  "bench/phase1/exit/**",
+  "docs/plans/v1/reports/p1-m15.md",
+  "crates/lunixd/src/main.rs",
+  "crates/lunix-ublk/src/queue.rs",
+  "tools/ownership.toml",
+]
