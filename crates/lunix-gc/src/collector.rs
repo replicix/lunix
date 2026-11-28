@@ -783,11 +783,10 @@ pub struct Gc {
     carried: Evidence,
     /// The last error a proposal logged (once per distinct error).
     propose_error: Option<String>,
-    /// The sealed segments and their sizes at one tip, for the existence and
-    /// size lookups of proposals (one listing of the directory per tip, not
-    /// per call). Dropped at every delete; a segment sealed after the listing
-    /// is not in it and is rejected (a new segment is named by the tip).
-    seg_cache: Option<(CommitSeq, BTreeMap<SegId, u64>)>,
+    /// Whether `note_dead` builds the lists the engine's shadow judgement
+    /// reads (see `Collector::set_shadow_judge`); on until the engine says
+    /// otherwise.
+    shadow_judge: bool,
     /// The last pass did reclaim work worth hurrying for ([`reclaim_busy`]):
     /// with `pipeline`, the next is due after [`Gc::min_gap`].
     last_pass_busy: bool,
@@ -911,7 +910,7 @@ impl Gc {
             proposed: BTreeMap::new(),
             carried: Evidence::default(),
             propose_error: None,
-            seg_cache: None,
+            shadow_judge: true,
             last_pass_busy: false,
             last_mark: Duration::ZERO,
             last_aborted: false,
@@ -1913,7 +1912,7 @@ impl Gc {
     /// (`GcConfig::tip_refs`): the newly dead ones it condemns (with their
     /// sizes), the ones live by id that no entry of the tip hints at, the
     /// dead ones already listed, and the ones an older retained root names.
-    fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
+    pub(crate) fn note_dead(&mut self, l: &Liveness, todo: &[(ObjectRef, u64)]) {
         for (o, bytes) in todo {
             if matches!(o, ObjectRef::Segment(_)) {
                 self.reclaim.mark_condemned_segments += 1;
@@ -1931,34 +1930,43 @@ impl Gc {
                 _ => None,
             })
             .collect();
-        // Named by a retained root other than the tip (and not by the tip).
-        let named: Vec<SegId> = l
-            .older_refs
-            .iter()
-            .filter(|s| !l.tip_refs.contains_key(*s))
-            .copied()
-            .collect();
-        let live = l
-            .seg_live
+        // A proposed segment that a retained root other than the tip names
+        // (and the tip does not): the lag rule broken, the witness of mode
+        // `on`. Counted from the small side: the proposed segments.
+        self.reclaim.proposal_named += self
+            .proposed
             .keys()
-            .filter(|s| !l.tip_refs.contains_key(*s))
-            .copied()
-            .collect();
-        let listed = self
-            .list
-            .entries
-            .keys()
-            .filter_map(|o| match o {
-                ObjectRef::Segment(s) if l.live_bytes(*s) == 0 => Some(*s),
-                _ => None,
-            })
-            .collect();
-        // A proposed segment that a retained root other than the tip names:
-        // the lag rule broken (the witness of mode `on`).
-        self.reclaim.proposal_named += named
-            .iter()
-            .filter(|s| self.proposed.contains_key(*s))
+            .filter(|s| l.older_refs.contains(*s) && !l.tip_refs.contains_key(*s))
             .count() as u64;
+        // The three lists are for the engine's shadow judgement only: each
+        // is a walk over all live, retained or listed segments.
+        let (named, live, listed): (Vec<SegId>, Vec<SegId>, Vec<SegId>) = if self.shadow_judge {
+            // Named by a retained root other than the tip (and not by the tip).
+            let named = l
+                .older_refs
+                .iter()
+                .filter(|s| !l.tip_refs.contains_key(*s))
+                .copied()
+                .collect();
+            let live = l
+                .seg_live
+                .keys()
+                .filter(|s| !l.tip_refs.contains_key(*s))
+                .copied()
+                .collect();
+            let listed = self
+                .list
+                .entries
+                .keys()
+                .filter_map(|o| match o {
+                    ObjectRef::Segment(s) if l.live_bytes(*s) == 0 => Some(*s),
+                    _ => None,
+                })
+                .collect();
+            (named, live, listed)
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
         let condemned = l.roots.first().map(|r| MarkCondemned {
             tip: r.seq,
             segs,
@@ -2322,7 +2330,6 @@ impl Gc {
                 "gc: the delete of segment {s:?}, which the pass's mark found live"
             );
         }
-        self.seg_cache = None;
         let short = self.short_wait(view, obj);
         if matches!(obj, ObjectRef::Commit(_)) {
             point!(self.points, "gc.commit_delete.before_unlink");
@@ -2689,21 +2696,6 @@ impl Gc {
             self.reclaim.proposal_rejected_pins += offered.len() as u64;
             return Ok(());
         }
-        // One listing of the directory per tip (a delete drops it), not per
-        // call: the call runs under the coordinator mutex.
-        if !matches!(&self.seg_cache, Some((t, _)) if *t == view.tip.commit_seq) {
-            let sizes: BTreeMap<SegId, u64> = view
-                .segments
-                .list()?
-                .into_iter()
-                .map(|s| (s.seg, s.size_bytes))
-                .collect();
-            self.seg_cache = Some((view.tip.commit_seq, sizes));
-        }
-        let sizes = match &self.seg_cache {
-            Some((_, m)) => m,
-            None => return Err(Error::invalid("segment listing missing")),
-        };
         let room = (MAX_ENTRIES as usize)
             .saturating_sub(self.list.entries.len())
             .min(self.cfg.propose_max);
@@ -2712,10 +2704,6 @@ impl Gc {
         let mut since: Vec<(SegId, CommitSeq)> = Vec::new();
         for (&seg, &k) in &offered {
             let obj = ObjectRef::Segment(seg);
-            let Some(&bytes) = sizes.get(&seg) else {
-                kept += 1;
-                continue;
-            };
             // Every root of a mark is a FULL at or above `keep_floor`: one
             // of them can still name a segment whose count reached zero in a
             // later cut only if `k` is above it.
@@ -2734,6 +2722,13 @@ impl Gc {
                 kept += 1;
                 continue;
             }
+            // One lookup by id, after the cheap rejects: at most
+            // `propose_max` per call, and no listing of the directory under
+            // the coordinator mutex. A failed lookup fails the call.
+            let Some(bytes) = view.segments.size(seg)? else {
+                kept += 1;
+                continue;
+            };
             if todo.len() >= room {
                 full += 1;
                 continue;
@@ -3035,6 +3030,10 @@ impl Collector for Gc {
 
     fn set_tip_refs(&mut self, on: bool) {
         self.cfg.tip_refs = on;
+    }
+
+    fn set_shadow_judge(&mut self, on: bool) {
+        self.shadow_judge = on;
     }
 
     fn take_mark_report(&mut self) -> Option<MarkReport> {

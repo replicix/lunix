@@ -280,6 +280,9 @@ impl SegmentStore for SealStamp<'_> {
     fn list(&self) -> Result<Vec<SegmentInfo>> {
         self.inner.list()
     }
+    fn size(&self, seg: SegId) -> Result<Option<u64>> {
+        self.inner.size(seg)
+    }
     fn delete(&self, seg: SegId) -> Result<u64> {
         self.inner.delete(seg)
     }

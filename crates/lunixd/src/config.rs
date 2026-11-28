@@ -44,7 +44,7 @@
 //! | `throttle_pace_store_margin_percent` | 115 | the bias on `A_hat` when `throttle_pace_store_bytes` is on: the curve reads `A_hat` times this percent (too low an `A_hat` costs far more than too high a one); 100 ..= 300. The status (`write_path.store_*`, `throttle.rate`) reports both and, above the soft mark, `store_paced_above_soft`, `store_above_soft_ms` and `store_delayed_*` |
 //! | `gc_fast_recheck` | `true` (since 2026-11-27; `false` turns it off) | recheck-only GC passes while writes are paced or held: once the grace of a condemned object has ended, a pass marks, condemns and deletes without compaction, instead of waiting for the regular pass; regular passes (compaction) keep their schedule |
 //! | `gc_fast_recheck_delay_ms` | 1000 | with `gc_fast_recheck`: the delay after the end of the previous pass and after a grace end; 100 ..= 10000 |
-//! | `gc_condemn_on_cut` | `off` | `off`, `shadow` or `on`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `on`: as `shadow`, and a segment the table finds dead (no entry since a cut, and the retained FULLs have rolled past it) is offered to the collector at the first step that finds it between passes; the collector lists, flags and starts the grace of what its own rules accept (never while a pin exists), and the recheck mark that began after the grace ended is still the only judge of a delete. `off`: no table, no extra work |
+//! | `gc_condemn_on_cut` | `on` (since 2026-11-28) | `on`, `shadow` or `off`. `shadow`: the engine keeps a memory-only count of the map entries per segment (fed by the map transactions of every cut), compares it with every mark and records what it would offer for condemnation next to what the marks condemn (`lunix gc --status`: `refs`); nothing is condemned, listed or deleted because of it. `on`: as `shadow`, and a segment the table finds dead (no entry since a cut, and the retained FULLs have rolled past it) is offered to the collector at the first step that finds it between passes; the collector lists, flags and starts the grace of what its own rules accept (never while a pin exists), and the recheck mark that began after the grace ended is still the only judge of a delete. `off`: no table, no extra work (the default until 2026-11-28) |
 //! | `gc_pressure_grace_ms` | 2000 | `0` (off) or `2000` ..= `10000` (on by default, ADR-32 amendment of 2026-11-27): while writes are paced or held (and for 5 s after the gate opens), the grace of a condemned **segment** is this many milliseconds, counted from its own flag, instead of the floor (10 s plus twice `read_timeout`, 30 s by default). Map packs, index runs and commit objects keep the floor, as does every delete while writes are not slowed. A segment that was condemned before the pressure began is covered at once if its flag is old enough; a restart starts every grace again. The recheck mark that began after the grace ended is still the only judge of a delete. Without `gc_fast_recheck` the effective delay is still `busy_interval` or three marks, so the two are on together by default (the daemon logs a warning at attach if fast recheck is turned off by hand) |
 //! | `gc_pressure_rate_factor` | 4 | the compaction rate's multiple while writes are slowed (the budget is always 4 times, the grace the floor); 1 ..= 64 |
 //!
@@ -190,7 +190,7 @@ impl Default for DaemonConfig {
             gc_pressure_rate_factor: 4,
             gc_fast_recheck: true,
             gc_fast_recheck_delay: Duration::from_secs(1),
-            gc_condemn_on_cut: CondemnOnCut::Off,
+            gc_condemn_on_cut: CondemnOnCut::On,
             gc_pressure_grace: Some(Duration::from_millis(2_000)),
         }
     }
@@ -749,8 +749,8 @@ volume_roots = "/a, /b"
     fn gc_condemn_on_cut_parses_off_shadow_and_on() {
         assert_eq!(
             DaemonConfig::default().gc_condemn_on_cut,
-            CondemnOnCut::Off,
-            "off by default"
+            CondemnOnCut::On,
+            "on by default"
         );
         let c = DaemonConfig::parse("gc_condemn_on_cut = \"shadow\"\n").unwrap();
         assert_eq!(c.gc_condemn_on_cut, CondemnOnCut::Shadow);

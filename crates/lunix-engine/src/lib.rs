@@ -118,13 +118,13 @@ pub fn ref_map_counted(
     refs::counted_ref_map(map)
 }
 
-/// Measurement support (feature `testsupport`): nanoseconds per mark-start
-/// snapshot (a clone of the table's counts), per `ready()` call and per
-/// `rebase` (the mark's comparison and repair) of a table with `segments`
-/// segments of which `zeros` wait to be offered, as `(snapshot, ready,
-/// rebase)`.
+/// Measurement support (feature `testsupport`): nanoseconds per mark start,
+/// per `ready()` call (each call's offer is consumed, as the engine does), per
+/// `rebase` of a mark that finds the table right and per `rebase` of a mark
+/// that differs in one segment, of a table with `segments` segments of which
+/// `zeros` wait to be offered, as `(mark start, ready, rebase, slow rebase)`.
 #[cfg(feature = "testsupport")]
 #[doc(hidden)]
-pub fn table_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64) {
+pub fn table_costs(segments: usize, zeros: usize, reps: u32) -> (u64, u64, u64, u64) {
     refs::bench_costs(segments, zeros, reps)
 }

@@ -28,7 +28,6 @@ pub enum OnJournalDamage {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum CondemnOnCut {
     /// No table: nothing is counted or compared.
-    #[default]
     Off,
     /// The table is maintained and compared with every mark, and what it
     /// would offer for condemnation is counted and compared with what the
@@ -42,7 +41,8 @@ pub enum CondemnOnCut {
     /// went: the collector lists, flags and starts the grace of what its own
     /// rules accept, and the recheck mark that began after the grace ended
     /// is, as ever, the only judge of a delete. Nothing is offered while a
-    /// pin exists.
+    /// pin exists. The default.
+    #[default]
     On,
 }
 
@@ -163,7 +163,7 @@ impl EngineConfig {
             gc_pressure_rate_factor: 4,
             allow_unverifiable_fork: false,
             full_timeout: Duration::from_secs(60),
-            gc_condemn_on_cut: CondemnOnCut::Off,
+            gc_condemn_on_cut: CondemnOnCut::On,
             gc_pressure_grace: Some(Duration::from_millis(2_000)),
             #[cfg(feature = "testsupport")]
             gc_pressure_force: None,

@@ -228,3 +228,26 @@ fn the_writer_reports_full_at_the_target_and_hints_stay_exact() {
     assert_eq!(n, 17);
     assert_eq!(w.len(), u64::from(n) * 4068);
 }
+
+/// `size` is one lookup by id: the size `list` reports for a sealed segment,
+/// `None` for an `.open` file, a deleted segment and an id that never was.
+#[test]
+fn the_size_of_a_segment_is_its_listed_size_and_none_when_it_is_not_sealed() {
+    let dir = tempdir();
+    let vol = create(dir.path(), CryptoMode::Plain, 16 * 1024, test_opts());
+    let id = cid(1);
+    let good = super::data_extent(CryptoMode::Plain, 16 * 1024, &id, 100);
+    let mut w = vol.open_segment().expect("open");
+    w.append_extent(&id, None, &good).expect("append");
+    let seg = w.id();
+    assert_eq!(vol.size(seg).expect("size"), None, "an .open file");
+    w.seal(None).expect("seal");
+    let listed = vol.list().expect("list");
+    let info = listed.iter().find(|i| i.seg == seg).expect("listed");
+    assert!(info.size_bytes > 0);
+    assert_eq!(vol.size(seg).expect("size"), Some(info.size_bytes));
+    let never = lunix_format::SegId::from_raw(0xffff_ffff).expect("id");
+    assert_eq!(vol.size(never).expect("size"), None, "never existed");
+    vol.delete(seg).expect("delete");
+    assert_eq!(vol.size(seg).expect("size"), None, "deleted");
+}

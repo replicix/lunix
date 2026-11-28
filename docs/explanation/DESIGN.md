@@ -1365,6 +1365,14 @@ mirrors (phase 5).
   condemned segment's grace ends, or at once when the grace shrinks.
   Regular passes keep their own schedule, so compaction is not starved.
   The delete rule is the same for every pass kind.
+- **Condemn on cut.** With `gc_condemn_on_cut` on (the default since
+  2026-11-28) the engine's memory-only reference table offers a segment whose
+  last map entry went `2 x (retain_last - 1)` cuts ago, and the collector
+  condemns it between passes (never while a pin exists); the recheck mark
+  that began after the grace ended is still the only judge of a delete. A
+  mark pins the table's counts by sums (no copy), so its cost does not grow
+  with the number of segments; only the first mark after an attach and a
+  drift compare every segment. See `docs/reference/gc.md`.
 - **Mark:** walk the maps of all GC roots (§8.7: retained commits, the
   tip's FULL plus DELTAs, snapshot, reader and clone-hold pins) and
   mark the trained dictionaries (ADR-30) that live extents reference, and

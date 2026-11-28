@@ -97,8 +97,8 @@ and not before the grace last changed, to the delete), for all passes and for
 the recheck-only ones. The `gc pass done` line carries `kind`, `mark_ms` and the
 pass's own `lag_count`, `lag_mean_ms` and `lag_max_ms`.
 
-**Reference table** (`gc_condemn_on_cut = "off" | "shadow" | "on"`, `off` by
-default; `EngineConfig::gc_condemn_on_cut`). `shadow` keeps and checks the
+**Reference table** (`gc_condemn_on_cut = "off" | "shadow" | "on"`, `on` by
+default since 2026-11-28; `EngineConfig::gc_condemn_on_cut`). `shadow` keeps and checks the
 table and counts what it would offer; `on` also offers it (below). The engine keeps a memory-only count of
 the map entries per segment, by hint: every map transaction of a cut (the
 destage, and the compaction re-hints) goes through a wrapper (`RefMap`) that
@@ -114,7 +114,23 @@ engine compares that with the table as it stood when the mark pinned its roots
 runs, and the marks that finished, each with whether it began in the same call); a
 difference is counted in
 `drift_segments`, logged and repaired (`counts - snapshot + mark`: what changed
-since the mark began is kept). A table starts `rebuilding` (deltas from an
+since the mark began is kept). The table keeps no copy of its counts for a
+mark: it records the net change per segment since the mark began and two
+order-independent weighted sums of the counts. A mark that finds the sums of
+its count list equal to those at its start is a match decided in one pass over
+the mark's list, without touching the table (0.4 ms at 128,000 segments, 3 ms
+at 1,000,000; the mark start costs nothing). Any difference in the sums takes
+the exact path: one comparison over every segment, then the repair (13 ms at
+128,000, 290 ms at 1,000,000), under the coordinator mutex. The first mark after
+a start (the base) has nothing to compare (the table is `rebuilding`): it only
+does the repair pass, once per attach. Release builds also run the exact
+comparison every 128th rebase (0.1 ms per mark on average at 128,000 segments,
+2.3 ms at 1,000,000, at one mark a second) and at the rebase after an
+un-condemned proposal or a missed segment, so a collision of the sums cannot
+hide a wrong table for long. The sums are not a
+judge (a table that is wrong makes wrong proposals, which the collector's
+rejects and the recheck catch); debug builds run the exact comparison at every
+rebase and assert that the two agree. A table starts `rebuilding` (deltas from an
 unknown base) and the first mark is its base, so a restart needs no walk. A
 map transaction whose report differs from the prediction, or that could not be
 predicted, makes the table `drifted` (zeros dropped, nothing offered); a mark
@@ -198,6 +214,13 @@ is made while any pin exists (the table knows the tip only), so the segments
 keep waiting and the marks do all the condemning, as with the mode off. The
 pins file is read by the engine at most once a second (and not at all while the
 collector is busy); the collector reads it again for every offer it takes.
+
+A proposal looks
+each segment it may take up by id (`SegmentStore::size`, one `stat` of the
+sealed file) after the cheap rejects, at most `propose_max` per call; it never
+lists the segment directory. The shadow judgement's lists (`MarkCondemned`
+`live`, `listed` and `named`) are built only in mode `shadow`
+(`Collector::set_shadow_judge`).
 
 The consumed offer leaves the table; the table's count of the
 time from a count reaching zero to the consumption is `condemn_lag`.

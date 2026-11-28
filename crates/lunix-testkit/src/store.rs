@@ -683,6 +683,10 @@ impl SegmentWriter for MemSegmentWriter {
 }
 
 impl SegmentStore for MemStore {
+    fn size(&self, seg: SegId) -> Result<Option<u64>> {
+        Ok(self.st()?.d.segments.get(&seg.raw()).map(|c| c.size))
+    }
+
     fn open_segment(&self) -> Result<Box<dyn SegmentWriter>> {
         Ok(Box::new(MemSegmentWriter {
             b: Builder::new(Arc::clone(&self.0), ContainerKind::Segment)?,

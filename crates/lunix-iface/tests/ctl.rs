@@ -348,6 +348,7 @@ fn gc_status() -> impl Strategy<Value = GcStatusSnapshot> {
                         state: RefsState::Drifted,
                         segments: s[0],
                         zero_waiting: s[1],
+                        queue_len: s[2],
                         ready: s[2],
                         drift_segments: s[3],
                         rebases: s[4],

@@ -172,6 +172,19 @@ pub trait SegmentStore: Send + Sync {
     /// All sealed segments with sizes, ascending by id.
     fn list(&self) -> Result<Vec<SegmentInfo>>;
 
+    /// The size of one sealed segment, `None` when it does not exist (an
+    /// `.open` file is not sealed). A failed read is an error, never `None`.
+    /// The default lists the whole store; a store that can look one segment up
+    /// overrides it, because callers use it on paths that must not list (CI
+    /// checks that every store outside the tests directories does).
+    fn size(&self, seg: SegId) -> Result<Option<u64>> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .find(|s| s.seg == seg)
+            .map(|s| s.size_bytes))
+    }
+
     /// Deletes a sealed segment (unlink, directory fsync) and returns the bytes
     /// freed; a missing segment frees 0 (deletes are idempotent). Callers: GC,
     /// the orphan sweep at open, and destage, which deletes the segments it

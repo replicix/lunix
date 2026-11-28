@@ -865,3 +865,33 @@ paths = [
   "docs/reference/gc.md",
   "tools/ownership.toml",
 ]
+
+[c5def]
+paths = [
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/coord.rs",
+  "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/lib.rs",
+  "crates/lunix-engine/src/refs.rs",
+  "crates/lunix-engine/tests/common/mod.rs",
+  "crates/lunix-engine/tests/refs.rs",
+  "crates/lunix-cli/src/render.rs",
+  "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-gc/src/tests/propose.rs",
+  "crates/lunix-iface/src/gc.rs",
+  "crates/lunix-iface/src/store.rs",
+  "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-store/src/container.rs",
+  "crates/lunix-store/src/tests/roundtrip.rs",
+  "crates/lunix-testkit/src/store.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/stack/mod.rs",
+  "crates/lunixd/tests/stack_refs_cost.rs",
+  "docs/explanation/DECISIONS.md",
+  "docs/explanation/DESIGN.md",
+  "docs/plans/v1/reports/p1-c5def.md",
+  "docs/reference/gc.md",
+  "tools/ci.sh",
+  "tools/ownership.toml",
+]

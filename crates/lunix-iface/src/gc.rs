@@ -280,6 +280,16 @@ pub trait Collector: Send {
         let _ = on;
     }
 
+    /// Whether the engine judges offers against what the marks report as
+    /// live, listed or named (mode `shadow`): only then are those lists built
+    /// for every mark. In mode `on` the engine uses the condemned segments
+    /// only, and the collector counts the lag-rule witness itself. Called
+    /// once when the engine opens, after `set_tip_refs`. The default ignores
+    /// it; a collector that does not know the call builds the lists.
+    fn set_shadow_judge(&mut self, on: bool) {
+        let _ = on;
+    }
+
     /// What the marks did in the last call, once: the mark that began in it
     /// and is still running, and the mark that finished in it. The engine's
     /// reference table snapshots its counts at a mark's start, compares them
@@ -410,6 +420,10 @@ pub struct RefsStats {
     /// by the 64-per-step cap, a pending re-hint, or a table that is not
     /// `Ready`.
     pub zero_waiting: u64,
+    /// Cuts in the table's queue of waiting segments (bounded by twice
+    /// `zero_waiting` plus a constant: a pin that holds the offers back
+    /// cannot make it grow with its duration).
+    pub queue_len: u64,
     /// Segments offered at the last collector step (at most 64; shadow:
     /// counted, never condemned).
     pub ready: u64,

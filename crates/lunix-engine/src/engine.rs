@@ -413,6 +413,7 @@ impl Engine {
             // One switch: the table needs the marks' counts and reports.
             if let Some(c) = coord.collector.as_mut() {
                 c.set_tip_refs(true);
+                c.set_shadow_judge(cfg.gc_condemn_on_cut == crate::config::CondemnOnCut::Shadow);
             }
         }
         let cut_map: Arc<dyn BlockMap> = match &refs {

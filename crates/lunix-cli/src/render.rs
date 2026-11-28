@@ -574,10 +574,11 @@ pub fn gc_status(out: &mut dyn Write, name: &str, g: &GcStatusSnapshot) -> io::R
             out,
             "refs table",
             &format!(
-                "{:?}: {} segments, {} zero not offered, drift {} over {} rebases, {} report mismatches",
+                "{:?}: {} segments, {} zero not offered ({} cuts queued), drift {} over {} rebases, {} report mismatches",
                 t.state,
                 t.segments,
                 t.zero_waiting,
+                t.queue_len,
                 t.drift_segments,
                 t.rebases,
                 t.report_mismatches
