@@ -1,0 +1,22 @@
+neg 3000 SCRIPT_CAP=2800 bash tests/exit/negctl.sh
+crash-ext4 9000 SCRIPT_CAP=8000 FS=ext4 MODE=kill OUT=$HOME/lunix-p1/m15/scratch/m15-crash-ext4 bash tests/exit/crash-random.sh
+crash-xfs 7000 SCRIPT_CAP=6000 FS=xfs MODE=kill OUT=$HOME/lunix-p1/m15/scratch/m15-crash-xfs bash tests/exit/crash-random.sh
+crash-quiesce 3600 SCRIPT_CAP=3000 FS=ext4 MODE=quiesce OUT=$HOME/lunix-p1/m15/scratch/m15-crash-quiesce bash tests/exit/crash-random.sh
+ratios 14000 SCRIPT_CAP=13000 ROOTFS_SRC=/usr bash tests/exit/ratios.sh
+xt-ref-ext4 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=loop FS=ext4 bash tests/exit/xfstests.sh
+xt-ref-xfs 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=loop FS=xfs bash tests/exit/xfstests.sh
+xt-l64-ext4 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=lunix FS=ext4 CHUNK=65536 bash tests/exit/xfstests.sh
+xt-l64-xfs 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=lunix FS=xfs CHUNK=65536 bash tests/exit/xfstests.sh
+xt-l16-ext4 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=lunix FS=ext4 CHUNK=16384 bash tests/exit/xfstests.sh
+xt-l16-xfs 20000 SCRIPT_CAP=19000 CHECK_CAP_S=16000 TARGET=lunix FS=xfs CHUNK=16384 bash tests/exit/xfstests.sh
+cp-count 3600 SCRIPT_CAP=3000 POINTS_FROM=1 POINTS_TO=0 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-count bash tests/exit/crashpoints.sh
+cp-s1 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=1 POINTS_TO=11 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s1 bash tests/exit/crashpoints.sh
+cp-s2 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=12 POINTS_TO=22 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s2 bash tests/exit/crashpoints.sh
+cp-s3 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=23 POINTS_TO=33 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s3 bash tests/exit/crashpoints.sh
+cp-s4 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=34 POINTS_TO=44 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s4 bash tests/exit/crashpoints.sh
+cp-s5 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=45 POINTS_TO=55 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s5 bash tests/exit/crashpoints.sh
+cp-s6 20000 SCRIPT_CAP=19000 BUDGET_S=17000 POINTS_FROM=56 POINTS_TO=66 COUNTS=$HOME/lunix-p1/m15/scratch/counts-shared.txt OUT=$HOME/lunix-p1/m15/scratch/m15-cp-s6 bash tests/exit/crashpoints.sh
+fv-65536-integrity 20000 SCRIPT_CAP=19000 CHUNKS=65536 MODES=integrity OUT=$HOME/lunix-p1/m15/scratch/m15-fv-65536-integrity bash tests/exit/fio-verify.sh
+fv-65536-encrypted 20000 SCRIPT_CAP=19000 CHUNKS=65536 MODES=encrypted OUT=$HOME/lunix-p1/m15/scratch/m15-fv-65536-encrypted bash tests/exit/fio-verify.sh
+fv-16384-integrity 20000 SCRIPT_CAP=19000 CHUNKS=16384 MODES=integrity OUT=$HOME/lunix-p1/m15/scratch/m15-fv-16384-integrity bash tests/exit/fio-verify.sh
+fv-16384-encrypted 20000 SCRIPT_CAP=19000 CHUNKS=16384 MODES=encrypted OUT=$HOME/lunix-p1/m15/scratch/m15-fv-16384-encrypted bash tests/exit/fio-verify.sh

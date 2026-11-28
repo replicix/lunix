@@ -1,0 +1,5 @@
+{"cell":"ratios/c64k/fio-c50-d50","status":"pass","t":"2026-11-16T00:00:00Z","chunk":"65536","kind":"raw","cell_name":"fio-c50-d50","dir":"/x/raw/ratio-c64k-fio-c50-d50","writer_rc":"0","fsck_rc":"0"}
+{"cell":"ratios/c64k/random","status":"pass","t":"2026-11-16T00:00:00Z","chunk":"65536","kind":"raw","cell_name":"random","dir":"/x/raw/ratio-c64k-random","writer_rc":"0","fsck_rc":"0"}
+{"cell":"ratios/c64k/linux-tarball","status":"skip","t":"2026-11-16T00:00:00Z","why":"TARBALL not set"}
+{"cell":"fio-verify/raw/c64k/integrity","status":"pass","t":"2026-11-16T00:00:00Z","profiles":"6/6","runtime":"600","secs":"4500","store_bytes_after_runs":"5368709120","notes":""}
+{"cell":"crashpoint/journal.after_fdatasync/first-1/ext4","status":"unreached","t":"2026-11-16T00:00:00Z","point":"journal.after_fdatasync","kind":"first","hit":"1","fs":"ext4","crashed":"0"}

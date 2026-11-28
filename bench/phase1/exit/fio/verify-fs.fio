@@ -1,0 +1,38 @@
+; M15 item 1, files on ext4 or xfs over the Lunix device. Environment as verify-raw.fio, with DIR (the mount point)
+; instead of DEV/BASE/TRIM_BASE. Each job writes its own file DIR/main.<n>.0 of PER_JOB bytes; trims are
+; fallocate(PUNCH_HOLE) on the trim file.
+[global]
+ioengine=io_uring
+direct=1
+randseed=${SEED}
+verify=crc32c
+verify_fatal=1
+verify_dump=1
+verify_state_save=1
+do_verify=1
+; LOOPS is 1000000 for the write run (it ends by RUNTIME) and 1 for the re-verification. VONLY=1 re-verifies the data of an earlier run from its saved state (after detach and attach)
+verify_only=${VONLY}
+verify_state_load=${VONLY}
+runtime=${RUNTIME}
+directory=${DIR}
+
+[main]
+rw=randwrite
+bssplit=4k/20:8k/15:16k/15:64k/15:128k/10:256k/10:512k/8:1m/7
+iodepth=${QD}
+numjobs=${JOBS}
+size=${PER_JOB}
+loops=${LOOPS}
+
+[trimmix]
+ioengine=psync
+rw=randwrite
+bssplit=4k/40:16k/30:64k/20:256k/10
+size=${TRIM_SIZE}
+numjobs=1
+loops=1000000
+verify_backlog=32
+trim_percentage=25
+trim_backlog=32
+trim_backlog_batch=8
+trim_verify_zero=1

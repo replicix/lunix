@@ -1,0 +1,323 @@
+#!/bin/bash
+# shellcheck disable=SC2319  # `[ test ]; expect LABEL $?` is the idiom of the M12a scripts: $? is the test result, on purpose
+# M15 item 1: fio verify on the raw device and on ext4 and xfs files, chunk sizes 16 KiB and 64 KiB, encrypted and
+# integrity (unencrypted) volumes.
+#
+# One CELL = (target, chunk size, mode) on a fresh 32 GiB volume (deleted and recreated between cells). Per cell:
+#   for each PROFILE (queue depth:jobs) one fio job group of PER_PROFILE_MIB (4 GiB; the plan allows 12 GiB per
+#   group) with bssplit 4k-1M, crc32c verify with state save, a psync companion that mixes trim into its own
+#   region (trim_percentage, trim_verify_zero), and trimcheck.py running discard and write-zeroes (blkdiscard -z)
+#   checks on a third region, all for RUNTIME seconds (600);
+#   then umount, guest fsck, detach, `lunix fsck --deep`; attach again, `fio --verify_only` of every profile from
+#   its saved state; detach, `lunix fsck --deep` again.
+# Gate: zero fio errors, zero verify failures, trimcheck clean, both fscks clean (exit 0, or 1 with only orphans).
+#
+# Runtime: cells x profiles x (RUNTIME + verify) ~ 12 cells x 6 x 12 min = about 14 h; run slices with CHUNKS,
+# MODES, TARGETS (one invocation per slice); the script prints the cap it needs for LUNIX_ROOT_TIMEOUT.
+# Disk: the store of a cell (about 15 GiB written before dedup and compression) plus 32 GiB of guest file system
+# metadata at most; df-guard asks for MKFS_GIB (default 40) before every mkfs, the whole run peaks below 100 GiB.
+#
+#   tools/remote.sh root env LUNIX_ROOT_TESTS=1 LUNIX_SPIKE_DIR=<abs scratch> LUNIXD=<abs>/lunixd LUNIX=<abs>/lunix \
+#       TESTD=<abs>/lunix-ublk-testd [CHUNKS="16384 65536"] [MODES="integrity encrypted"] [TARGETS="raw ext4 xfs"] \
+#       bash tests/exit/fio-verify.sh
+here="$(cd "$(dirname "$0")" && pwd)"
+: "${CHUNKS:=16384 65536}" "${MODES:=integrity encrypted}" "${TARGETS:=raw ext4 xfs}"
+: "${PROFILES:=1:1 32:1 128:1 1:8 32:8 128:8}" "${RUNTIME:=600}" "${VOL_GIB:=32}" "${PER_PROFILE_MIB:=4096}"
+: "${CACHE_MAX:=48G}" "${SAMPLE_S:=10}" "${TRIM_MIB:=256}" "${ZERO_MIB:=1024}" "${VERIFY_GRACE:=900}"
+read -ra _c <<< "$CHUNKS"; read -ra _m <<< "$MODES"; read -ra _t <<< "$TARGETS"; read -ra PROF <<< "$PROFILES"
+NCELLS=$((${#_c[@]} * ${#_m[@]} * ${#_t[@]}))
+CELL_SECS=$((${#PROF[@]} * (RUNTIME + VERIFY_GRACE) + 3600))
+export SCRIPT_CAP="${SCRIPT_CAP:-$((NCELLS * CELL_SECS))}" FIO_GRACE="$VERIFY_GRACE"
+. "$here/lib.sh"
+harness_init m15-fio
+SIGNAL=0
+JOBDIR="$REPO/bench/phase1/exit/fio"
+say "# M15 fio verify ($(date -u +%FT%TZ), kernel $(uname -r | cut -d- -f1), $(nproc) cpus; $NCELLS cells, profiles: $PROFILES, runtime $RUNTIME s)"
+say "- script cap $SCRIPT_CAP s: run through the wrapper with LUNIX_ROOT_TIMEOUT >= $((SCRIPT_CAP + 600))"
+MIB=$((1 << 20))
+NPROF=${#PROF[@]}
+NEED_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB))
+[ "$NEED_MIB" -le $((VOL_GIB * 1024 - 1024)) ] || { say "profiles do not fit the ${VOL_GIB} GiB volume ($NEED_MIB MiB)"; exit 2; }
+# A cap needs garbage room: the regions of the profiles stay live (raw: distinct regions; files: distinct files), so the live data of a cell is
+# NPROF x (PER_PROFILE + TRIM) + ZERO. The cell is refused when the cap leaves less than 4 GiB over it (fvf-24g, 2026-11-20: six 4 GiB regions
+# under a 24 GiB cap ended in ENOSPC by design). A small cap goes with few profiles (PROFILES="128:8").
+LIVE_MIB=$((NPROF * (PER_PROFILE_MIB + TRIM_MIB) + ZERO_MIB)); CAP_MIB=$(( $(numfmt --from=iec "$CACHE_MAX") >> 20 ))
+[ "$CAP_MIB" -ge $((LIVE_MIB + 4096)) ] || { say "refusing: CACHE_MAX $CACHE_MAX leaves less than 4 GiB over the live data of $NPROF profile(s) ($LIVE_MIB MiB); use fewer profiles or a larger cap"; exit 2; }
+[ "$PER_PROFILE_MIB" -le 12288 ] || { say "PER_PROFILE_MIB above the plan's 12 GiB per job group"; exit 2; }
+
+# fio_env TARGET I QD JOBS: exports the variables of the job files
+fio_env() {
+  local i=$2 jobs=$4
+  export SEED=$((1000 + i)) QD=$3 JOBS=$jobs RUNTIME LOOPS="${CUR_WLOOPS:-1000000}" VONLY=0
+  export PER_JOB=$((PER_PROFILE_MIB * MIB / jobs)) TRIM_SIZE=$((TRIM_MIB * MIB))
+  if [ "$1" = raw ]; then
+    export DEV="$CUR_DEV" BASE=$((i * PER_PROFILE_MIB * MIB)) TRIM_BASE=$(((NPROF * PER_PROFILE_MIB + i * TRIM_MIB) * MIB))
+  else
+    export DIR="$MNT/p$i"; mkdir -p "$DIR"
+  fi
+}
+# The write run is bounded by LOOPS (whole passes over every job's file), not by time: a verify_only of a run cut off in its first loop checks
+# blocks that were never written (fio artefact, 2026-11-21). RUNTIME is the length of the trim companion; WRITE_CAP_S, a safety net far above the
+# expected time, fails the cell (the run is never verified) when the write run is not done by then. The generated job files give the companion its
+# own runtime; the job files of the other scripts are untouched.
+: "${WRITE_CAP_S:=$(( RUNTIME * 3 > 1800 ? RUNTIME * 3 : 1800 ))}"
+JOBGEN="$OUT/jobs"; mkdir -p "$JOBGEN"
+for _f in verify-raw verify-fs; do awk '/^\[trimmix\]/{print; print "runtime=${TRIM_RUNTIME}"; next} 1' "$JOBDIR/$_f.fio" > "$JOBGEN/$_f.fio"; done
+job_file() { if [ "$1" = raw ]; then echo "$JOBGEN/verify-raw.fio"; else echo "$JOBGEN/verify-fs.fio"; fi; }
+# wloops QD:JOBS: loops over the 4 GiB of a profile, about what the former 600 s run wrote on the exit volume (fvf cells of 2026-11-20), at least 1
+wloops() {
+  [ -z "${WLOOPS:-}" ] || { echo "$WLOOPS"; return; }
+  case "$1" in 1:1) echo 4 ;; 32:1) echo 10 ;; 128:1) echo 9 ;; 1:8) echo 4 ;; 32:8) echo 2 ;; 128:8) echo 1 ;; *) echo 2 ;; esac
+}
+
+
+# ---- diagnostics of a verify failure (fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach) ----------------------
+# bad_blocks STDOUT: "file offset length" of every block the pass reported as bad
+bad_blocks() { grep -aE '^verify: bad ' "$1" 2>/dev/null | sed -nE 's/^verify: .* at file ([^ ]+) offset ([0-9]+), length ([0-9]+).*/\1 \2 \3/p'; }
+# diag_pass CELLDIR TAG STDOUT QD: the failing blocks of a pass, per file; FIEMAP state and a direct re-read of every block (a transient read
+# shows data now; a persistent zero in a mapped extent is data or file system state; a zero in an unwritten extent or a hole never had data)
+diag_pass() {
+  local d=$1 tag=$2 so=$3 qd=$4 n
+  bad_blocks "$so" > "$d/bad-$tag.txt"; n=$(wc -l < "$d/bad-$tag.txt")
+  [ "$n" -gt 0 ] || return 1
+  say "- diag $tag: $n bad blocks; per file (QD $qd): $(awk '{f=$1; sub(/.*\//,"",f); c[f]++} END{for(f in c) printf "%s=%d ", f, c[f]}' "$d/bad-$tag.txt")"
+  DIAG_SUM=$(python3 -I "$here/zerodiag.py" "$d/bad-$tag.txt" "$d/reread-$tag.jsonl")
+  say "- diag $tag: re-read now: $DIAG_SUM"
+  if [ "$CUR_TGT" = xfs ]; then
+    local f; for f in $(awk '{print $1}' "$d/bad-$tag.txt" | sort -u | head -3); do xfs_bmap -v "$f" > "$d/bmap-$tag-$(basename "$f").txt" 2>&1; done
+  fi
+  return 0
+}
+# first_pass_note CELL I JOBMIB: bytes written per main job in the first pass against the size of its file (did the first loop complete?)
+first_pass_note() { # CELL I JOBMIB LOOPS
+  local jf="$OUT/raw/fio-${1//\//_}-p$2.json" w ios
+  w=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576 | floor] | "\(min)/\($sz) MiB min..max \(max)"' 2>/dev/null)
+  ios=$(fio_json "$jf" 2>/dev/null | jq -r '[.jobs[] | select(.jobname=="main") | .write.total_ios] | join(",")' 2>/dev/null)
+  say "- p$2 first pass: written per job (min of $(fio_json "$jf" 2>/dev/null | jq '[.jobs[] | select(.jobname=="main")] | length' 2>/dev/null) jobs) $w; total_ios per job $ios"
+  FIRST_LOOP_DONE=$(fio_json "$jf" 2>/dev/null | jq -r --argjson sz "$3" '[.jobs[] | select(.jobname=="main") | (.write.io_bytes // 0) / 1048576] | if min >= ($sz * '"$4"') then "yes" else "no" end' 2>/dev/null)
+}
+# win_note STATUS_JSON: the journal window counters of the daemon (misses = guest reads that went to the ring files)
+win_note() { jq -r '.write_path | "hits=\(.window_hits) misses=\(.window_misses)"' "$1" 2>/dev/null || echo "n/a"; }
+# reattach_note VOL: the recovery report of the last attach in this cell's daemon log
+reattach_note() {
+  local l; l=$(grep -a 'volume opened' "$DLOG" | grep -a "volume=\"$1\"" | tail -1)
+  REPLAYED=$(printf '%s' "$l" | sed -nE 's/.* replayed=([0-9]+).*/\1/p'); REPLAYED=${REPLAYED:-n/a}
+  GAPS=$(grep -ac 'stopped at a gap' "$DLOG")
+}
+
+
+# ---- audit of the files across the detach (2026-11-21: pre-detach and post-detach passes of one failing cell did not report the same blocks) ----
+# state-W: fio's verify state as the write run left it; every verify_only pass gets a fresh copy and a job file with the state save off, so
+# no pass can change what the next one loads. snap/cmp: extent state (FIEMAP) and a hash of every 4 KiB block (O_DIRECT) of every job file
+# before the pre-detach pass and after the re-attach; a block whose content changed, or an extent written->unwritten, is a Lunix signal.
+nosave_job() { sed 's/^verify_state_save=1/verify_state_save=0/' "$1" > "$2/$(basename "$1").nosave"; echo "$2/$(basename "$1").nosave"; }
+fresh_state() { mkdir -p "$1/old"; [ -d "$1/state-$2" ] && mv "$1/state-$2" "$1/old/state-$2.$(date +%s%N)"; cp -a "$1/stateW-$2" "$1/state-$2"; }
+audit_snap() { # DIR TAG NPROF
+  local d=$1 tag=$2 n=$3 k f
+  for k in $(seq 0 $((n - 1))); do
+    say "- audit $tag p$k: $(python3 -I "$here/blockmap.py" snap "$MNT/p$k" "$d/snap-$tag-$k.pkl.gz")"
+    for f in "$MNT"/p$k/main.*; do
+      if [ "$CUR_TGT" = xfs ]; then xfs_bmap -v "$f" > "$d/map-$tag-p$k-$(basename "$f").txt" 2>&1; else filefrag -v "$f" > "$d/map-$tag-p$k-$(basename "$f").txt" 2>&1; fi
+    done
+  done
+}
+run_cell() { # target chunk mode
+  local tgt=$1 chunk=$2 mode=$3
+  local cell="fio-verify/$tgt/c$((chunk / 1024))k/$mode" vol="v$((chunk / 1024))$tgt$mode"
+  vol=${vol:0:60}
+  local d; d=$(cell_dir "$cell"); local t0=$SECONDS bad=0 notes=""; CUR_TGT=$tgt
+  say ""; say "## cell $cell"
+  cell_begin "$vol" "$VOL_GIB" "$chunk" "$mode"
+  # ADR-32 (research note 2026-11-18, section 9.4): the cell runs with `cache_max` set (default 48G, 150 % of the 32 GiB exit volume;
+  # run the 4 GiB-profile raw cell also with CACHE_MAX=24G so that the band is exercised). The store directory is sampled every
+  # SAMPLE_S seconds and must stay under cache_max + the headroom reserve + the journal ring + the dirty commit bytes; no write may
+  # return ENOSPC; fio's longest completion must be under full_timeout; the kernel log must have no hung-task line.
+  lx space "$vol" --cache-max "$CACHE_MAX" --json > "$d/space-set.json" 2>&1
+  local cmax hdr fto vdir; cmax=$(jq -r '.settings.cache_max // empty' "$d/space-set.json" 2>/dev/null); hdr=$(jq -r '.settings.headroom // 268435456' "$d/space-set.json" 2>/dev/null)
+  fto=$(jq -r '.settings.full_timeout_ms // 60000' "$d/space-set.json" 2>/dev/null)   # null = the daemon's full_timeout_ms, 60000 by default; vdir=$(vol_dir "$vol")
+  [ -n "$fto" ] || fto=60000
+  [ -n "$cmax" ] || cmax=$(numfmt --from=iec "$CACHE_MAX")
+  local hung0; hung0=$(dmesg | grep -ciE 'hung task|blocked for more than')
+  : > "$d/store-samples.txt"
+  ( while :; do du -s --block-size=1 "$vdir" 2>/dev/null | cut -f1 >> "$d/store-samples.txt"; sleep "$SAMPLE_S"; done ) </dev/null >/dev/null 2>&1 &
+  SAMPLER_PID=$!
+  if [ "$tgt" != raw ]; then
+    mkfs_fs "$tgt" "$CUR_DEV" || { fail "$cell: mkfs"; rec "$cell" fail why=mkfs; return; }
+    mount_fs "$tgt" "$CUR_DEV" "$MNT" || { fail "$cell: mount"; rec "$cell" fail why=mount; return; }
+  fi
+  local i=0 p qd jobs fp_done="" rr_pre="" rr_post="" rr_again="" winpre="n/a" winpost="n/a" dm_rec="n/a" drc1="n/a" drc2="n/a"
+  for p in "${PROF[@]}"; do
+    qd=${p%%:*}; jobs=${p##*:}
+    fio_env "$tgt" "$i" "$qd" "$jobs"
+    mkdir -p "$d/state-$i"
+    # trimcheck region: raw = the tail of the device, file = a file in the profile directory
+    local zb=$(((NPROF * (PER_PROFILE_MIB + TRIM_MIB)) * MIB)) tc="$d/trimcheck-$i.json"
+    if [ "$tgt" = raw ]; then
+      python3 -I "$here/trimcheck.py" raw "$CUR_DEV" "$zb" $((ZERO_MIB * MIB)) "$RUNTIME" "$tc" "$((7 + i))" & TC_PID=$!
+    else
+      python3 -I "$here/trimcheck.py" file "$DIR" $((ZERO_MIB * MIB)) "$RUNTIME" "$tc" "$((7 + i))" & TC_PID=$!
+    fi
+    say "- profile $i: QD $qd, $jobs job(s), $PER_PROFILE_MIB MiB, $RUNTIME s"
+    local job; job=$(job_file "$tgt")
+    CUR_WLOOPS=$(wloops "$p"); say "  loops $CUR_WLOOPS over each job's file, trim companion $RUNTIME s, write cap $WRITE_CAP_S s"
+    local trt=$RUNTIME; LOOPS=$CUR_WLOOPS RUNTIME=$WRITE_CAP_S TRIM_RUNTIME=$trt fio_run "$cell-p$i" "$WRITE_CAP_S" "$job" "--aux-path=$d/state-$i"; local frc=$?
+    rm -rf "$d/stateW-$i"; cp -a "$d/state-$i" "$d/stateW-$i"   # state-W: the state as the write run left it, before anything else touches it
+    wait "$TC_PID"; local trc=$?
+    local jf="$OUT/raw/fio-${cell//\//_}-p$i.json" errs; errs=$(fio_errors "$jf")
+    first_pass_note "$cell" "$i" $((PER_PROFILE_MIB / jobs)) "$CUR_WLOOPS"; fp_done="$fp_done p$i:$FIRST_LOOP_DONE"
+    [ "$FIRST_LOOP_DONE" = yes ]; expect "$cell p$i: every job completed its $CUR_WLOOPS loop(s) (write run complete; fio rc $frc)" $? || { bad=1; notes="$notes;write-run-incomplete p$i"; }
+    [ "$frc" = 0 ] && [ "$errs" = 0 ]; expect "$cell p$i: fio rc $frc, job errors $errs (zero verify failures)" $? || bad=1
+    [ "$trc" = 0 ]; expect "$cell p$i: trimcheck (discard, write-zeroes) rc $trc" $? || bad=1
+    [ "$frc" = 0 ] && [ "$errs" = 0 ] && [ "$trc" = 0 ] || bad=1
+    if [ "$bad" != 0 ]; then notes="$notes;p$i"; break; fi
+    # GC runs on its own (M17.B, M12c): record the collector state and the space ledger after every profile; the store of a
+    # cell must stay below STORE_CAP_GIB (the plan's 100 GiB for the whole of M15) or the cell stops and fails
+    status_json "$vol" > "$d/status-p$i.json" 2>/dev/null; lx gc "$vol" --status --json > "$d/gc-status-p$i.json" 2>&1
+    local sbx; sbx=$(store_bytes "$vol")
+    say "- p$i: store $((sbx >> 30)) GiB, space used $(jq -r '(.space.used // 0) / 1073741824 | floor' "$d/status-p$i.json" 2>/dev/null) GiB, gc $(jq -c '{state,condemned_pending,last_pass}' "$d/gc-status-p$i.json" 2>/dev/null | cut -c1-160)"
+    if [ $((sbx >> 30)) -gt "${STORE_CAP_GIB:-80}" ]; then fail "$cell p$i: the store is above ${STORE_CAP_GIB:-80} GiB (GC is not keeping up)"; bad=1; notes="$notes;store-cap p$i"; break; fi
+    i=$((i + 1))
+  done
+  local profiles_done=$i
+  # phase 1b (cp-s... fvf-16384-integrity, 2026-11-20: 715 zero blocks after the detach and attach, none before): verify_only of every profile BEFORE the
+  # umount and the detach, on the same attach, after the guest page cache is dropped, so that a failure can be placed before or after the detach.
+  # (fio reads with O_DIRECT anyway; the daemon's own read cache is small against 4 GiB per profile.)
+  local badpre=0 pre_errs="" post_errs="" audit=0 sig="n/a" errset=""
+  if [ "$bad" = 0 ] && [ "$tgt" != raw ] && [ "${STATE_AUDIT:-1}" = 1 ]; then audit=1; sync; audit_snap "$d" pre "$profiles_done"; fi
+  if [ "$bad" = 0 ] && [ "${PRE_VERIFY:-1}" = 1 ]; then
+    sync; echo 3 > /proc/sys/vm/drop_caches
+    i=0
+    for p in "${PROF[@]:0:$profiles_done}"; do
+      qd=${p%%:*}; jobs=${p##*:}
+      fio_env "$tgt" "$i" "$qd" "$jobs"
+      local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
+      VONLY=1 LOOPS=1 RUNTIME="${VRUNTIME:-3600}" fio_run "$cell-pre$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local prc=$?
+      local pjf="$OUT/raw/fio-${cell//\//_}-pre$i.json" perrs; perrs=$(fio_errors "$pjf")
+      pre_errs="$pre_errs p$i:$perrs"
+      [ "$prc" = 0 ] && [ "$perrs" = 0 ]; expect "$cell p$i: verify_only BEFORE the detach (same attach, caches dropped): rc $prc, errors $perrs" $? || badpre=1
+      if diag_pass "$d" "pre$i" "$OUT/raw/fio-${cell//\//_}-pre$i.stdout" "$qd"; then rr_pre="$rr_pre p$i:[$DIAG_SUM]"; fi
+      i=$((i + 1))
+    done
+    status_json "$vol" > "$d/status-pre.json" 2>/dev/null; winpre=$(win_note "$d/status-pre.json")
+    say "- journal window after the pre-detach verify_only: $winpre"
+  fi
+  # phase 2: stop, check, detach, attach, verify again
+  if [ "$tgt" != raw ]; then
+    umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after the runs" $? || bad=1
+  fi
+  status_json "$vol" > "$d/status-1.json" 2>/dev/null
+  cell_end "$vol" "$(basename "$d")-1" || bad=1; drc1=$LAST_DETACH_RC
+  [ "$drc1" = 0 ] || { fail "$cell: the first detach exited $drc1"; bad=1; }
+  local sb1; sb1=$(cat "$OUT/raw/store-bytes-$(basename "$d")-1.txt")
+  if [ "$bad" = 0 ]; then
+    attach_vol "$vol"; expect "$cell: attach again" $? || bad=1
+    CUR_DEV=$(dev_of "$vol"); register_id "${CUR_DEV#/dev/ublkb}"
+    reattach_note "$vol"
+    say "- re-attach: replayed=$REPLAYED, 'journal recovery stopped at a gap' lines in the daemon log: $GAPS, detach exit code $drc1"
+    local dm0; dm0=$(dmesg | wc -l)
+    [ "$tgt" = raw ] || mount_fs "$tgt" "$CUR_DEV" "$MNT" || bad=1
+    dmesg | tail -n +$((dm0 + 1)) > "$d/dmesg-remount.txt"; dm_rec=$(grep -aic 'recover' "$d/dmesg-remount.txt")
+    if [ "$audit" = 1 ] && [ "$bad" = 0 ]; then
+      audit_snap "$d" post "$profiles_done"; sig=0; local k cs
+      for k in $(seq 0 $((profiles_done - 1))); do
+        say "- audit cmp p$k (before the detach vs after the attach): $(python3 -I "$here/blockmap.py" cmp "$d/snap-pre-$k.pkl.gz" "$d/snap-post-$k.pkl.gz" "$d/cmp-$k.json")"
+        cs=$(jq -r '.total | .content_changed + .written_to_unwritten' "$d/cmp-$k.json" 2>/dev/null); [ "${cs:-1}" = 0 ] || sig=1
+      done
+      if [ "$sig" = 1 ]; then fail "$cell: DATA-LOSS SIGNAL: a block changed or an extent went written->unwritten across the detach (see cmp-*.json)"; bad=1; SIGNAL=1; fi
+    fi
+    say "- dmesg at the re-mount: $dm_rec line(s) with 'recover' ($(grep -ai 'starting recovery' "$d/dmesg-remount.txt" | head -1))"
+    i=0
+    for p in "${PROF[@]:0:$profiles_done}"; do
+      qd=${p%%:*}; jobs=${p##*:}
+      fio_env "$tgt" "$i" "$qd" "$jobs"
+      local job; job=$(nosave_job "$(job_file "$tgt")" "$d"); fresh_state "$d" "$i"
+      VONLY=1 LOOPS=1 RUNTIME="${VRUNTIME:-3600}" fio_run "$cell-v$i" "$RUNTIME" "$job" "--aux-path=$d/state-$i" --section=main; local vrc=$?
+      local vjf="$OUT/raw/fio-${cell//\//_}-v$i.json" verrs; verrs=$(fio_errors "$vjf")
+      post_errs="$post_errs p$i:$verrs"
+      [ "$vrc" = 0 ] && [ "$verrs" = 0 ]; expect "$cell p$i: verify_only AFTER detach/attach: rc $vrc, errors $verrs" $? || bad=1
+      if diag_pass "$d" "v$i" "$OUT/raw/fio-${cell//\//_}-v$i.stdout" "$qd"; then rr_post="$rr_post p$i:[$DIAG_SUM]"; fi
+      i=$((i + 1))
+    done
+    for k in $(seq 0 $((profiles_done - 1))); do
+      [ -e "$d/bad-pre$k.txt" ] && [ -e "$d/bad-v$k.txt" ] || continue
+      awk '{print $1, $2}' "$d/bad-pre$k.txt" | sort -u > "$d/set-pre-$k.txt"; awk '{print $1, $2}' "$d/bad-v$k.txt" | sort -u > "$d/set-post-$k.txt"
+      errset="$errset p$k:pre=$(wc -l < "$d/set-pre-$k.txt"),post=$(wc -l < "$d/set-post-$k.txt"),only_pre=$(comm -23 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),only_post=$(comm -13 "$d/set-pre-$k.txt" "$d/set-post-$k.txt" | wc -l),in_unwritten_pre=$(python3 -I "$here/blockmap.py" inunw "$d/snap-pre-$k.pkl.gz" "$d/bad-pre$k.txt" 2>/dev/null | sed 's/.*in_unwritten_extent=//'),in_unwritten_post=$(python3 -I "$here/blockmap.py" inunw "$d/snap-pre-$k.pkl.gz" "$d/bad-v$k.txt" 2>/dev/null | sed 's/.*in_unwritten_extent=//')"
+    done
+    say "- error sets (offsets) pre vs post:${errset:- none}"
+    status_json "$vol" > "$d/status-post.json" 2>/dev/null; winpost=$(win_note "$d/status-post.json")
+    say "- journal window after the post-detach verify_only: $winpost"
+    [ "$tgt" = raw ] || { umount_fs "$MNT"; guest_fsck "$tgt" "$CUR_DEV"; expect "$cell: guest fsck clean after verify_only" $? || bad=1; }
+    # failing blocks: look at the same blocks again after one more detach and attach (transient or persistent)
+    cat "$d"/bad-v[0-9].txt > "$d/bad-post-all.txt" 2>/dev/null
+    if [ -s "$d/bad-post-all.txt" ]; then
+      detach_vol "$vol"; say "- extra cycle for the re-read: detach exit code $?"
+      attach_vol "$vol"; expect "$cell: attach for the re-read" $? || bad=1
+      CUR_DEV=$(dev_of "$vol"); register_id "${CUR_DEV#/dev/ublkb}"; reattach_note "$vol"
+      say "- extra attach: replayed=$REPLAYED, gap lines $GAPS"
+      [ "$tgt" = raw ] || mount_fs "$tgt" "$CUR_DEV" "$MNT" || bad=1
+      rr_again=$(python3 -I "$here/zerodiag.py" "$d/bad-post-all.txt" "$d/reread-after-extra-cycle.jsonl")
+      say "- diag: the same blocks after another detach/attach: $rr_again"
+      [ "$tgt" = raw ] || umount_fs "$MNT"
+    fi
+    # the store bound of the gate holds after a final pass and its grace: one explicit pass, FINAL_SETTLE seconds (default 120, past the
+    # 60 s grace), then the collector state, the space ledger and the store size of the settled volume
+    lx gc "$vol" --json > "$d/gc-final-pass.json" 2>&1
+    sleep "${FINAL_SETTLE:-120}"
+    lx gc "$vol" --status --json > "$d/gc-status-final.json" 2>&1
+    sbs=$(store_bytes "$vol")
+    status_json "$vol" > "$d/status-2.json" 2>/dev/null
+    detach_vol "$vol"; drc2=$?; expect "$cell: detach (exit $drc2)" $drc2 || bad=1
+    lunix_fsck "$vol" "$(basename "$d")-2"; expect "$cell: lunix fsck --deep clean (exit $FSCK_RC)" $? || bad=1
+  fi
+  local sb2; sb2=$(store_bytes "$vol")
+  [ "$badpre" = 0 ] || bad=1
+  kill "$SAMPLER_PID" 2>/dev/null; wait "$SAMPLER_PID" 2>/dev/null
+  local smax bound lat_ms hung1 enospc
+  smax=$(sort -n "$d/store-samples.txt" | tail -1); smax=${smax:-0}
+  # the dirty commit bytes are not in the status; the commit interval's worth of map dirt is small, 1 GiB is allowed for it and the journal ring
+  bound=$((cmax + hdr + JOURNAL_MAX + (1 << 30)))
+  [ "$smax" -le "$bound" ]; expect "$cell: the store directory stayed under cache_max + reserve + journal ring + 1 GiB ($((smax >> 20)) MiB of $((bound >> 20)) MiB)" $? || bad=1
+  # the longest completion of every profile's run: every report must carry latency data, or the check fails (it used to pass on an empty answer)
+  lat_ms=0; local nlat=0 lf lm
+  for lf in "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].json; do
+    [ -e "$lf" ] || continue
+    lm=$(fio_json "$lf" | jq -r '[.jobs[] | (.read.lat_ns.max // 0), (.write.lat_ns.max // 0), (.trim.lat_ns.max // 0)] | max / 1000000 | floor' 2>/dev/null)
+    case "$lm" in ''|*[!0-9]*) continue ;; esac
+    nlat=$((nlat + 1)); [ "$lm" -le "$lat_ms" ] || lat_ms=$lm
+  done
+  [ "$nlat" -gt 0 ] && [ "$nlat" = "$profiles_done" ]; expect "$cell: latency data found in $nlat of $profiles_done profile reports" $? || bad=1
+  # ADR-32's bound is on the wait in the space gate: the longest wait of any write in the gate (counters of every profile's status, the counters restart at the
+  # attach) must be within full_timeout. fio's own longest completion adds the wait for a free ublk tag when fio has more writes outstanding than the device
+  # has tags (4 queues x 128 depth, reached by the queues of fio's CPUs only): reported, not judged (diagnosis 2026-11-21: 74 % of fio's 1024 writes waited for a tag).
+  local gmax gstops
+  gmax=$(jq -s '[.[] | .throttle.delay_max_ms // 0] | max // 0' "$d"/status-p[0-9].json 2>/dev/null); gmax=${gmax:-0}
+  gstops=$(jq -s '[.[] | .throttle.stops // 0] | max // 0' "$d"/status-p[0-9].json 2>/dev/null); gstops=${gstops:-0}
+  [ "$gmax" -le $((fto + 5000)) ]; expect "$cell: the longest wait in the space gate $gmax ms is within full_timeout ($fto ms) + 5 s (gate stops $gstops)" $? || bad=1
+  say "- $cell: fio's longest completion $lat_ms ms (not judged: includes the wait for a ublk tag)"
+  enospc=$(grep -l 'No space left' "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].stdout "$OUT"/raw/fio-"${cell//\//_}"-p[0-9].json 2>/dev/null | wc -l)
+  [ "$enospc" = 0 ]; expect "$cell: no write returned ENOSPC" $? || bad=1
+  hung1=$(dmesg | grep -ciE 'hung task|blocked for more than')
+  [ "$hung1" = "$hung0" ]; expect "$cell: no hung-task line in the kernel log" $? || bad=1
+  local thr dly dmx
+  [ -s "$d/status-2.json" ] || cp "$d/status-1.json" "$d/status-2.json" 2>/dev/null   # a cell that failed early has only the status of the end of the runs
+  thr=$(jq -s '[.[] | .throttle.throttled_ms // 0] | max // 0' "$d"/status-p[0-9].json 2>/dev/null); dly=$(jq -s '[.[] | .throttle.delayed_writes // 0] | max // 0' "$d"/status-p[0-9].json 2>/dev/null)
+  thr=${thr:-n/a}; dly=${dly:-n/a}   # the largest of the per-profile statuses: the counters of status-2 restart at the attach
+  dmx=$gmax
+  local ens; ens=$(jq -r '.throttle.enospc // ([.. | .enospc? // empty] | first) // 0' "$d/status-2.json" 2>/dev/null)
+  [ "${ens:-0}" = 0 ]; expect "$cell: the gate refused no reservation for space (enospc counter $ens)" $? || bad=1
+  say "- $cell: throttled_ms $thr, delayed_writes $dly, delay_max_ms $dmx, cache_max $CACHE_MAX"
+  local st=pass; [ "$bad" = 0 ] || st=fail
+  rec "$cell" "$st" gate_max_wait_ms="${gmax:-n/a}" gate_stops="${gstops:-n/a}" target="$tgt" chunk="$chunk" mode="$mode" profiles="$profiles_done/$NPROF" runtime="$RUNTIME" \
+      secs="$((SECONDS - t0))" store_bytes_after_runs="$sb1" store_bytes_final="${sb2:-}" store_bytes_settled="${sbs:-}" cache_max="$CACHE_MAX" store_max_sampled="$smax" store_bound="$bound" fio_max_lat_ms="$lat_ms" throttled_ms="$thr" delayed_writes="$dly" delay_max_ms="$dmx" pre_verify_errors="${pre_errs# }" post_verify_errors="${post_errs# }" first_loop_complete="${fp_done# }" replayed="${REPLAYED:-n/a}" recovery_gap_lines="${GAPS:-n/a}" detach1_rc="$drc1" detach2_rc="$drc2" window_pre="$winpre" window_post="$winpost" remount_recover_lines="$dm_rec" zero_pre="${rr_pre# }" zero_post="${rr_post# }" zero_again="$rr_again" audit_signal="$sig" errsets="${errset# }" notes="$notes"
+  [ "$bad" = 0 ] || FAIL=1
+}
+
+for chunk in "${_c[@]}"; do for mode in "${_m[@]}"; do for tgt in "${_t[@]}"; do
+  run_cell "$tgt" "$chunk" "$mode"
+  [ -e "$OUT/WEDGED" ] && break 3
+done; done; done
+say ""; say "## end"
+[ "$(wc -l < "$RES")" = "$NCELLS" ]; expect "every cell produced a result record ($(wc -l < "$RES") of $NCELLS)" $? || FAIL=1
+say "overall FAIL=$FAIL"; echo "$FAIL" > "$OUT/result.txt"
+[ "${SIGNAL:-0}" = 1 ] && exit 5
+exit "$FAIL"
