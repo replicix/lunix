@@ -1,7 +1,7 @@
 #!/bin/bash
 # detached root runner: the same lock, leftovers and timeout rules as tools/remote.sh root, started on the host
 # usage: run-root.sh LOG TIMEOUT_S cmd...
-base=$HOME/lunix-p1; src=$base/m15/src; lock=$base/root.lock; left=$base/leftovers.txt
+base=$HOME/lunix-p1; src=$base/${LUNIX_M:-m15port}/src; lock=$base/root.lock; left=$base/leftovers.txt
 log=$1; tmo=$2; shift 2
 cd "$src" || exit 9
 export PATH="$HOME/.cargo/bin:$PATH" LUNIX_SPIKE_DIR=$base/m15/scratch LUNIX_M=m15 LUNIX_ON_HOST=1
