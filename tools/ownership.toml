@@ -895,3 +895,11 @@ paths = [
   "tools/ci.sh",
   "tools/ownership.toml",
 ]
+
+[shipcheck]
+paths = [
+  "tests/perf/**",
+  "bench/phase1/perf/**",
+  "docs/plans/v1/reports/p1-shipcheck.md",
+  "tools/ownership.toml",
+]

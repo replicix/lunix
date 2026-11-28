@@ -1,0 +1,39 @@
+; M16 Part A evidence: the raw limit of the file system that holds the journal (the journal rings live there). The
+; journal writes batches with fdatasync, so three shapes: 4k random writes at depth (IOPS ceiling), and group-commit-like
+; sequential 64k writes with fdatasync after each (the flush-bound ceiling BASELINE measured as 36.5 K rec/s).
+; Environment: DIR (a directory on the journal's file system), SIZE (file size), RUNTIME, CPUS.
+[global]
+directory=${DIR}
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+ramp_time=2
+group_reporting=1
+size=${SIZE}
+percentile_list=50:90:99:99.9
+
+[iops4k]
+ioengine=io_uring
+direct=1
+rw=randwrite
+bs=4k
+iodepth=128
+numjobs=8
+
+[commit64k]
+stonewall
+ioengine=psync
+direct=1
+rw=write
+bs=64k
+fdatasync=1
+numjobs=1
+
+[commit4k]
+stonewall
+ioengine=psync
+direct=1
+rw=write
+bs=4k
+fdatasync=1
+numjobs=1

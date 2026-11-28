@@ -1,0 +1,18 @@
+; M16 Part A: sequential read, hits (>= 5 GB/s): 1M reads over the slices the ingest cell wrote. Environment as seqw.fio.
+[seqr]
+filename=${DEV}
+ioengine=io_uring
+direct=1
+rw=read
+bs=1m
+iodepth=${QD}
+numjobs=${JOBS}
+size=${SLICE}
+offset_increment=${SLICE}
+cpus_allowed=${CPUS}
+time_based
+runtime=${RUNTIME}
+ramp_time=${RAMP}
+randseed=${SEED}
+group_reporting=1
+percentile_list=50:90:99:99.9:99.99
