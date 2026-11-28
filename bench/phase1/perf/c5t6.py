@@ -234,7 +234,7 @@ def rep_metrics(run, row, procs, series):
     rf_b, rf_e = (gb or {}).get("refs", {}) or {}, (ge or {}).get("refs", {}) or {}
     R = {}
     for k, v in re_.items():
-        if k in ("propose_us_max", "recheck_lag_ms_max", "fast_lag_ms_max"):
+        if k in ("propose_us_max", "recheck_lag_ms_max", "fast_lag_ms_max", "pgrace_min_wait_ms"):
             R[k] = v
         else:
             R[k] = v - rb.get(k, 0)
