@@ -77,6 +77,11 @@ if grep -rnw 'allow_floor_reset' crates --include=*.rs \
   exit 1
 fi
 
+step "every SegmentStore outside the tests directories overrides size (the default lists the whole store; a proposal calls it up to 64 times under the coordinator mutex)"
+for f in $(grep -rlE 'impl SegmentStore for' crates --include=*.rs | grep -vE '/tests?/'); do
+  grep -q 'fn size(' "$f" || { echo "$f implements SegmentStore without overriding size" >&2; exit 1; }
+done
+
 step "feature-edge check"
 bash tools/check-features.sh
 

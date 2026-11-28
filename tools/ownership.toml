@@ -178,6 +178,8 @@ paths = [
   "crates/lunix-store/src/volume.rs",
   "crates/lunix-fsck/README.md",
   "crates/lunix-gc/src/collector.rs",
+  "crates/lunix-gc/src/mark.rs",
+  "crates/lunix-cli/src/render.rs",
   "crates/lunix-gc/src/compact.rs",
   "crates/lunix-gc/src/evidence.rs",
   "crates/lunix-gc/src/points.rs",
@@ -902,5 +904,6 @@ paths = [
   "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-c5def.md",
   "docs/reference/gc.md",
+  "tools/ci.sh",
   "tools/ownership.toml",
 ]

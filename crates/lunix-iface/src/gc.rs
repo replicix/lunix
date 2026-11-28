@@ -420,6 +420,10 @@ pub struct RefsStats {
     /// by the 64-per-step cap, a pending re-hint, or a table that is not
     /// `Ready`.
     pub zero_waiting: u64,
+    /// Cuts in the table's queue of waiting segments (bounded by twice
+    /// `zero_waiting` plus a constant: a pin that holds the offers back
+    /// cannot make it grow with its duration).
+    pub queue_len: u64,
     /// Segments offered at the last collector step (at most 64; shadow:
     /// counted, never condemned).
     pub ready: u64,

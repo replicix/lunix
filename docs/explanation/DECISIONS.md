@@ -2684,8 +2684,11 @@ stops and longest wait equal within the limits; proposals 0.09 % of wall time
 at most; every safety counter clean in all blocks. **A volume with any pin
 (snapshot or reader) gets no condemn-on-cut**: nothing is offered while a pin
 exists, so such a volume behaves as with the mode `off` and the first run after
-a fill is slow; with a pin, `zero_waiting` is bounded by the segment files and
-levels off, and drains within 10 s of the release. `throttle_pace_store_bytes`
+a fill is slow; with a pin, the waiting set (`zero_waiting`) is bounded by the segments
+the pin root and the retained FULLs name and the tip no longer does (the
+measured peaks, 425 to 524 over three pinned reps, are the tip overwriting more
+of them), its per-cut queue is compacted so it cannot outgrow it, and the set
+drains within 10 s of the release. `throttle_pace_store_bytes`
 stays off by default (one 64 KiB pair at that default ran clean). The key stays
 settable: `off` removes the table, `shadow` keeps the counts without acting.
 

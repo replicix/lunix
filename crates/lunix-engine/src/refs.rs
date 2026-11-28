@@ -42,6 +42,16 @@ use crate::engine::lock;
 /// counts per step).
 pub(crate) const OFFER_MAX: usize = 64;
 
+/// Every this many rebases the exact comparison also runs in release builds
+/// (and at the next one after an un-condemned proposal or a missed segment):
+/// the sums are a filter, not a judge. At one mark a second this is 0.1 ms per
+/// mark averaged at 128,000 segments and 2.3 ms at 1,000,000.
+const EXACT_EVERY: u32 = 128;
+
+/// The per-cut queue is compacted when it holds more cuts than twice the
+/// waiting segments plus this.
+const QUEUE_SLACK: usize = 64;
+
 /// How many differing segments a drift log line names.
 const DRIFT_LOG: usize = 8;
 
@@ -141,6 +151,12 @@ pub(crate) struct SegRefs {
     open: Option<Open>,
     /// The sums of `counts`, kept in step by `apply` and `rebase`.
     sums: Sums,
+    /// Rebases since the exact comparison last ran, and whether the next one
+    /// must run it (an un-condemned proposal or a missed segment was seen).
+    since_exact: u32,
+    force_exact: bool,
+    /// `proposal_uncondemned` as the collector last reported it.
+    seen_uncondemned: u64,
     /// The tip of the last mark that rebased the table, and whether the
     /// table was `Ready` (and untainted) when it began: what a judgement of
     /// that mark's condemns needs.
@@ -231,6 +247,9 @@ impl SegRefs {
             queue: VecDeque::new(),
             open: None,
             sums: Sums::default(),
+            since_exact: 0,
+            force_exact: false,
+            seen_uncondemned: 0,
             judged: None,
             offered: BTreeMap::new(),
             ready_last: 0,
@@ -283,7 +302,40 @@ impl SegRefs {
                 segs: fresh,
                 head: 0,
             });
+            // Under a pin nothing is offered, so `ready` never gets past the
+            // front: cuts whose segments a mark judged or a write revived
+            // would pile up behind it. Compact when the queue is mostly dead.
+            if self.queue.len()
+                > self
+                    .zero_since
+                    .len()
+                    .saturating_mul(2)
+                    .saturating_add(QUEUE_SLACK)
+            {
+                self.prune_queue();
+            }
         }
+    }
+
+    /// Drops the entries of the queue that left `zero_since` (revived,
+    /// offered, judged) and the cuts that have none left.
+    fn prune_queue(&mut self) {
+        let Self {
+            zero_since, queue, ..
+        } = self;
+        queue.retain_mut(|c| {
+            let seq = c.seq;
+            let live: Vec<SegId> = c
+                .segs
+                .iter()
+                .skip(c.head)
+                .filter(|s| zero_since.get(*s).is_some_and(|(k, _)| *k == seq))
+                .copied()
+                .collect();
+            c.segs = live;
+            c.head = 0;
+            !c.segs.is_empty()
+        });
     }
 
     /// Segments zero for at least `lag` cuts at `tip`, not in `skip`, oldest
@@ -411,6 +463,12 @@ impl SegRefs {
         if r.proposal_deleted > 0 && self.first_proposal_delete.is_none() {
             self.first_proposal_delete = Some(since);
         }
+        // An offer a mark un-condemned was of a live segment: the table may
+        // be wrong, so the next rebase compares exactly.
+        if r.proposal_uncondemned > self.seen_uncondemned {
+            self.force_exact = true;
+        }
+        self.seen_uncondemned = r.proposal_uncondemned;
     }
 
     /// Shadow mode: the offer is counted and remembered for the judgement of
@@ -501,21 +559,34 @@ impl SegRefs {
         let mark = |&(s, n): &(SegId, u64)| (s, i64::try_from(n).unwrap_or(i64::MAX));
         let rebuilding = self.state == RefsState::Rebuilding;
         let msums = Sums::of(r.refs.iter().map(mark));
-        let same = !rebuilding && msums == open.sums;
-        // The exact rule runs on the slow path, and in debug builds on the
-        // fast path too: the sums are checked against it at every rebase.
-        let exact = if !rebuilding && (!same || cfg!(debug_assertions)) {
+        debug_assert!(
+            r.refs.windows(2).all(|w| w[0].0 < w[1].0),
+            "a mark's count list is ascending and unique"
+        );
+        let sums_equal = !rebuilding && msums == open.sums;
+        // The exact rule runs on the slow path, in debug builds on the fast
+        // path too, and in release every `EXACT_EVERY` rebases and at the one
+        // after an un-condemned proposal or a missed segment.
+        let due = self.force_exact || self.since_exact.saturating_add(1) >= EXACT_EVERY;
+        let exact = if !rebuilding && (!sums_equal || due || cfg!(debug_assertions)) {
             Some(self.exact_diff(&open, r))
         } else {
             None
         };
-        let mut diff = 0u64;
-        if same {
-            debug_assert!(
-                exact.as_ref().is_none_or(|e| e.0 == 0),
-                "the sums matched a differing mark"
-            );
+        debug_assert!(
+            !sums_equal || exact.as_ref().is_none_or(|e| e.0 == 0),
+            "the sums matched a differing mark"
+        );
+        // A collision of the sums found by the exact comparison is a drift.
+        let same = sums_equal && exact.as_ref().is_none_or(|e| e.0 == 0);
+        if exact.is_some() {
+            self.since_exact = 0;
+            self.force_exact = false;
         } else {
+            self.since_exact = self.since_exact.saturating_add(1);
+        }
+        let mut diff = 0u64;
+        if !same {
             if let Some((d, first)) = exact {
                 diff = d;
                 if diff > 0 {
@@ -569,7 +640,11 @@ impl SegRefs {
             .map(|&(s, n)| (s, i64::try_from(n).unwrap_or(i64::MAX)))
             .collect();
         let snap = |s: &SegId| {
-            self.counts.get(s).copied().unwrap_or(0) - open.since.get(s).copied().unwrap_or(0)
+            self.counts
+                .get(s)
+                .copied()
+                .unwrap_or(0)
+                .wrapping_sub(open.since.get(s).copied().unwrap_or(0))
         };
         let keys: BTreeSet<SegId> = self
             .counts
@@ -653,6 +728,7 @@ impl SegRefs {
                 self.c.early_bytes = self.c.early_bytes.saturating_add(bytes);
             } else if was_ready {
                 self.c.missed += 1;
+                self.force_exact = true;
                 self.c.missed_bytes = self.c.missed_bytes.saturating_add(bytes);
             }
         }
@@ -685,6 +761,7 @@ impl SegRefs {
             state: self.state,
             segments: self.counts.len() as u64,
             zero_waiting: self.zero_since.len() as u64,
+            queue_len: self.queue.len() as u64,
             ready: self.ready_last,
             drift_segments: self.c.drift_segments,
             rebases: self.c.rebases,
@@ -1373,7 +1450,13 @@ mod tests {
     fn tip_refs(tip: u64, v: &[(u64, u64)]) -> TipRefs {
         TipRefs {
             tip: seq(tip),
-            refs: v.iter().map(|&(s, n)| (seg(s), n)).collect(),
+            // Ascending and unique, as the collector reports them.
+            refs: v
+                .iter()
+                .map(|&(s, n)| (seg(s), n))
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -1629,6 +1712,83 @@ mod tests {
                 prop_assert_eq!(t.sums, Sums::of(t.counts.iter().map(|(&s, &c)| (s, c))));
             }
         });
+    }
+
+    /// S4: a long pin. The pin names segments 1..=100 that the tip no longer
+    /// does; every cut then zeroes a fresh segment that a mark condemns at
+    /// once (so it leaves `zero_since`). Nothing is offered (the engine
+    /// returns at the pin before `consume`). The queue stays bounded by the
+    /// waiting set, `zero_since` stays within what the pin names, and after
+    /// the unpin one `ready()` pops a bounded amount.
+    #[test]
+    fn a_long_pin_keeps_the_queue_and_the_waiting_set_bounded() {
+        let mut t = ready_table();
+        let pin_named: Vec<u64> = (1..=100).collect();
+        t.apply(&deltas(
+            &pin_named.iter().map(|&s| (s, 1)).collect::<Vec<_>>(),
+        ));
+        t.apply(&deltas(
+            &pin_named.iter().map(|&s| (s, -1)).collect::<Vec<_>>(),
+        ));
+        t.seal_cut(seq(1), at(0));
+        assert_eq!(t.zero_since.len(), 100, "the pin's segments wait");
+        let skip = HashSet::new();
+        let mut worst = 0usize;
+        for k in 0..3_000u64 {
+            let s = 1_000 + k;
+            t.apply(&deltas(&[(s, 1)]));
+            t.apply(&deltas(&[(s, -1)]));
+            t.seal_cut(seq(2 + k), at(0));
+            // The engine asks, a pin holds the offer back: nothing consumed.
+            let _ = t.ready(seq(10_000), 0, &skip, OFFER_MAX);
+            // A mark condemns the new segment: it leaves the waiting set.
+            t.judge(&mc(2 + k, &[s], &[], &[]), at(0));
+            worst = worst.max(t.queue.len());
+            assert!(t.zero_since.keys().all(|g| (1..=100).contains(&g.raw())));
+        }
+        assert_eq!(t.zero_since.len(), 100, "only the pin's segments wait");
+        assert!(worst <= 2 * 101 + QUEUE_SLACK + 1, "queue grew to {worst}");
+        assert_eq!(t.stats().queue_len, t.queue.len() as u64);
+        // The unpin: one call pops a bounded amount and offers 64.
+        let before = t.queue.len();
+        let out = t.ready(seq(10_000), 0, &skip, OFFER_MAX);
+        assert_eq!(out.len(), OFFER_MAX);
+        assert!(
+            before <= 2 * 101 + QUEUE_SLACK + 1,
+            "{before} cuts to look at"
+        );
+    }
+
+    /// S1: an un-condemned proposal or a missed segment makes the next rebase
+    /// compare exactly, and a collision of the sums found by that comparison
+    /// is a drift.
+    #[test]
+    fn the_exact_comparison_is_forced_by_a_suspect_table_and_finds_a_sums_collision() {
+        let mut t = ready_table();
+        t.apply(&deltas(&[(1, 2), (2, 2)]));
+        let r = lunix_iface::gc::GcReclaimStats {
+            proposal_uncondemned: 1,
+            ..Default::default()
+        };
+        t.note_collector(&r, at(0));
+        assert!(t.force_exact, "an un-condemned proposal forces it");
+        t.note_collector(&r, at(1));
+        t.mark_started(seq(1));
+        // The mark disagrees (1 has 3, 2 has 1) but its sums are those of the
+        // table (emulated: a collision).
+        let mark = tip_refs(1, &[(1, 3), (2, 1)]);
+        if let Some(o) = t.open.as_mut() {
+            o.sums = Sums::of(mark.refs.iter().map(|&(s, n)| (s, n as i64)));
+        }
+        if cfg!(debug_assertions) {
+            // Debug builds assert the sums against the exact rule.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.rebase(&mark)));
+            assert!(r.is_err(), "the debug assertion fires on a collision");
+        } else {
+            assert_eq!(t.rebase(&mark), 2, "found and repaired");
+            assert_eq!(t.count(seg(1)), 3);
+            assert!(!t.force_exact, "the flag is spent");
+        }
     }
 
     /// A mark's decisions; a condemned segment `n` is `100 * n` bytes.

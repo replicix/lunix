@@ -119,10 +119,15 @@ mark: it records the net change per segment since the mark began and two
 order-independent weighted sums of the counts. A mark that finds the sums of
 its count list equal to those at its start is a match decided in one pass over
 the mark's list, without touching the table (0.4 ms at 128,000 segments, 3 ms
-at 1,000,000; the mark start costs nothing). Any difference in the sums, and
-the first mark after a start (the base), takes the exact path: one comparison
-over every segment (13 ms at 128,000, 290 ms at 1,000,000), under the
-coordinator mutex, once per attach and once per drift. The sums are not a
+at 1,000,000; the mark start costs nothing). Any difference in the sums takes
+the exact path: one comparison over every segment, then the repair (13 ms at
+128,000, 290 ms at 1,000,000), under the coordinator mutex. The first mark after
+a start (the base) has nothing to compare (the table is `rebuilding`): it only
+does the repair pass, once per attach. Release builds also run the exact
+comparison every 128th rebase (0.1 ms per mark on average at 128,000 segments,
+2.3 ms at 1,000,000, at one mark a second) and at the rebase after an
+un-condemned proposal or a missed segment, so a collision of the sums cannot
+hide a wrong table for long. The sums are not a
 judge (a table that is wrong makes wrong proposals, which the collector's
 rejects and the recheck catch); debug builds run the exact comparison at every
 rebase and assert that the two agree. A table starts `rebuilding` (deltas from an

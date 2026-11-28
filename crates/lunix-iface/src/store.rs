@@ -175,7 +175,8 @@ pub trait SegmentStore: Send + Sync {
     /// The size of one sealed segment, `None` when it does not exist (an
     /// `.open` file is not sealed). A failed read is an error, never `None`.
     /// The default lists the whole store; a store that can look one segment up
-    /// overrides it, because callers use it on paths that must not list.
+    /// overrides it, because callers use it on paths that must not list (CI
+    /// checks that every store outside the tests directories does).
     fn size(&self, seg: SegId) -> Result<Option<u64>> {
         Ok(self
             .list()?
