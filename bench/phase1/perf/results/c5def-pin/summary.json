@@ -1,0 +1,10 @@
+{
+ "clauses": {
+  "A": "PASS",
+  "B": "NOT RUN",
+  "C": "NOT RUN",
+  "D": "NOT RUN",
+  "E": "NOT RUN",
+  "F": "PASS"
+ }
+}

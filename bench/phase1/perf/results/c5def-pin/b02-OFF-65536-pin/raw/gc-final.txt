@@ -1,0 +1,13 @@
+volume           c5t6
+state            idle
+condemned        442 waiting out the grace period
+moved pending    0 segments
+last pass        131 at 2026-11-28 08:16:40 UTC, freed 0 B
+totals           132 passes, 245.7 GiB freed, 8959 compacted, live 2.1 GiB, dead 7.6 GiB
+recheck-only     72 passes, 15195 segments deleted, 235.5 GiB freed
+pass kinds       60 regular, 72 recheck-only
+recheck lag      mean 853 ms, max 1962 ms over 16809 deletes
+recheck-only lag mean 859 ms, max 1962 ms over 16073 deletes
+short grace      15854 segments deleted (245.1 GiB freed), least wait 2009 ms, 0 un-condemned by the recheck
+durability holds 0 of 15854 segment delete verdicts deferred by an orphan copy, 0 cuts asked for; 0 marks read 0 footers for it, 0 unreadable (must be 0)
+proposals        0 offered, 0 condemned (0 B), 0 deleted (0 B), 0 un-condemned by a recheck; rejected: 0 pinned, 0 early (must be 0), 0 kept, 0 no room; 0 errors, 0 refused while busy; the marks condemned 16188 segments (250.3 GiB (268787106019 bytes)) themselves; 0 named by an older root (must be 0); 0 calls took 0 us (longest 0 us)
