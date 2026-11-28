@@ -1,0 +1,1 @@
+attached c5t6 as <scratch>/store/c5t6-w4k-state/dev/c5t6 (4 queues, depth 128)

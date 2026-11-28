@@ -290,6 +290,10 @@ def main():
             back = next((s["t"] - rel_ms for s in after if s["gc"]["refs"]["zero_waiting"] < 64), None)
             A(f"zero_waiting below 64 again {f1(back / 1000 if back is not None else None, 1)} s after the release (limit 30 s); orphan_deferrals {b['T'].get('orphan_deferrals', 0)}, hold_marks {b['T'].get('hold_marks', 0)}")
             ok_b &= back is not None and back <= 30000
+            qs = [(x["gc"]["refs"].get("queue_len", 0), x["gc"]["refs"]["zero_waiting"]) for x in b["series"] if x.get("gc") and x["gc"].get("refs")]
+            qpeak, qex = max(q for q, _ in qs), max(q - 2 * z for q, z in qs)
+            A(f"refs.queue_len peak {qpeak}; largest queue_len - 2 x zero_waiting over all samples {qex} (documented bound: <= 64, the queue slack): {'bounded' if qex <= 64 else 'NOT BOUNDED: FAIL'}")
+            ok_b &= qex <= 64
             fok = ok_b if fok is None else (fok and ok_b)
         A("")
     S["clauses"]["F"] = verdict(fok) if fok is not None else "NOT RUN"
@@ -305,6 +309,20 @@ def main():
                 m = rep1_metrics(r1)
                 A(f"| {b['name']} | {b['arm']} | {b['kind']} | {f1(m['first_delete_s'], 2)} | {m['stops']} | {f1(m['wait_s'])} | {f1(m['throttled_s'])} | {f1(m['gib5'], 2)} | {f1(m['iops'], 0)} | "
                   f"{f1(med([r['iops'] for r in r25]), 0)} | {f1(med([r['p999_s'] for r in r25]), 3)} | {sum(r['stops'] for r in r25)} | {verdict(all(rep1_clauses(m).values()))} |")
+    A("\n## SHIP against OLD, per cell (medians over blocks; rep 1 and reps 2-5 apart)\n")
+    A("| cell | arm | blocks | rep 1: first delete after onset s | rep 1 stops (sum) | rep 1 longest wait s | rep 1 throttled s | rep 1 IOPS | reps 2-5 stops (sum) | reps 2-5 longest wait s (med / worst) | reps 2-5 throttled s (med) | reps 2-5 IOPS (med) | reps 2-5 p99.9 s (med) |")
+    A("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for ck, kind in ((64, "w4k"), (16, "w4k"), (64, "w4kz")):
+        for arm in ("SHIP", "OLD"):
+            r1 = cell_reps(blocks, (arm,), ck, kind, "1")
+            r25 = cell_reps(blocks, (arm,), ck, kind, "2-5")
+            if not r1:
+                continue
+            m1 = [rep1_metrics(r) for r in r1]
+            fd = [m["first_delete_s"] for m in m1 if m["first_delete_s"] is not None]
+            A(f"| {ck}K {kind} | {arm} | {len(r1)} | {f1(med(fd), 2)} | {sum(m['stops'] for m in m1)} | {f1(med([m['wait_s'] for m in m1]), 1)} | {f1(med([m['throttled_s'] for m in m1]), 1)} | "
+              f"{f1(med([m['iops'] for m in m1]), 0)} | {sum(r['stops'] for r in r25)} | {f1(med([r['max_s'] for r in r25]), 2)} / {f1(max(r['max_s'] for r in r25), 2)} | "
+              f"{f1(med([r['throttled_ms'] / 1000 for r in r25]), 1)} | {f1(med([r['iops'] for r in r25]), 0)} | {f1(med([r['p999_s'] for r in r25]), 3)} |")
     A("\n## Clause summary\n")
     A("| clause | verdict |")
     A("|---|---|")

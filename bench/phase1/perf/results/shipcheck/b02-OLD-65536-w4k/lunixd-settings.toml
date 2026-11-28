@@ -1,0 +1,10 @@
+device = "ublk"
+harden = true
+cpus = "0-7"
+journal_max = 1073741824
+commit_interval_ms = 5000
+log_level = "debug"
+gc_pressure_grace_ms = 0
+gc_fast_recheck = false
+gc_condemn_on_cut = "off"
+destage_workers = 8

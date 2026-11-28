@@ -1,0 +1,17 @@
+volume           c5t6
+state            idle
+condemned        771 waiting out the grace period
+moved pending    0 segments
+last pass        133 at 2026-11-28 12:46:56 UTC, freed 0 B
+totals           134 passes, 267.6 GiB freed, 8458 compacted, live 2.3 GiB, dead 10.3 GiB
+recheck-only     74 passes, 16034 segments deleted, 248.7 GiB freed
+pass kinds       60 regular, 74 recheck-only
+recheck lag      mean 583 ms, max 2128 ms over 18324 deletes
+recheck-only lag mean 578 ms, max 2128 ms over 16986 deletes
+short grace      17256 segments deleted (266.9 GiB freed), least wait 2019 ms, 0 un-condemned by the recheck
+durability holds 0 of 17256 segment delete verdicts deferred by an orphan copy, 0 cuts asked for; 0 marks read 0 footers for it, 0 unreadable (must be 0)
+proposals        15179 offered, 15179 condemned (235 GiB (252407370485 bytes)), 14672 deleted (227.2 GiB (243970790600 bytes)), 0 un-condemned by a recheck; rejected: 0 pinned, 0 early (must be 0), 0 kept, 0 no room; 0 errors, 0 refused while busy; the marks condemned 2703 segments (41.5 GiB (44622300131 bytes)) themselves; 0 named by an older root (must be 0); 380 calls took 193854 us (longest 1357 us)
+refs table       ready: 192 segments, 43 zero not offered (2 cuts queued), drift 0 over 134 rebases, 0 report mismatches
+refs shadow      0 offered (0 idle, 0 busy), 0 confirmed, 0 live by id, 0 kept, 0 listed, 0 revived, 0 named by a retained root (must be 0); 2573 early by the mark, 130 not known to the table; recall 0 %
+refs bytes       confirmed 0 B, early by the mark 39.7 GiB (42691072013 bytes), not known to the table 1.7 GiB (1931228118 bytes); recall 0 %; lead 0 byte-ms
+refs timing      first ready 9147 ms, first proposal 9147 ms, its first delete 25410 ms, first mark condemn 26675 ms after attach; zero to offer mean 1960 ms; idle wait mean - ms, max 0 ms (0 waiting); 380 offers taken, 0 withheld for a pin

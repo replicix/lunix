@@ -1,0 +1,14 @@
+{
+ "clauses": {
+  "A": "PASS",
+  "A2_effective_config": "PASS",
+  "B": "PASS",
+  "C_64K": "UNDECIDED",
+  "C_16K": "FAIL",
+  "C": "FAIL",
+  "D": "PASS",
+  "D_comparisons_reported": "FAIL",
+  "E": "PASS",
+  "F": "PASS"
+ }
+}

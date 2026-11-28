@@ -1,0 +1,10 @@
+volume           c5t6
+state            deleting
+condemned        585 waiting out the grace period
+moved pending    0 segments
+last pass        75 at 2026-11-28 13:01:34 UTC, freed 2.1 GiB
+totals           74 passes, 110.8 GiB freed, 5250 compacted, live 2.1 GiB, dead 12.6 GiB
+pass kinds       74 regular, 0 recheck-only
+recheck lag      mean 3127 ms, max 10907 ms over 7670 deletes
+durability holds 0 of 7177 segment delete verdicts deferred by an orphan copy, 0 cuts asked for; 0 marks read 0 footers for it, 0 unreadable (must be 0)
+proposals        0 offered, 0 condemned (0 B), 0 deleted (0 B), 0 un-condemned by a recheck; rejected: 0 pinned, 0 early (must be 0), 0 kept, 0 no room; 0 errors, 0 refused while busy; the marks condemned 7734 segments (119.2 GiB (128046058636 bytes)) themselves; 0 named by an older root (must be 0); 0 calls took 0 us (longest 0 us)

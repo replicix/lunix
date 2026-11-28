@@ -1,0 +1,4 @@
+created volume c5t6 (integrity, uuid fe875d04-2a57-48cd-96fd-acce9024d2e9)
+directory        <scratch>/store/c5t6-w4k-vols/fe875d04-2a57-48cd-96fd-acce9024d2e9
+key file         <scratch>/store/c5t6-w4k-vols/fe875d04-2a57-48cd-96fd-acce9024d2e9/integrity.key
+Keep a copy of the key file somewhere safe: attach reads it, and the volume cannot be attached without it.

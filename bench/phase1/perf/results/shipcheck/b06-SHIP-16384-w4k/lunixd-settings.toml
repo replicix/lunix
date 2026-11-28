@@ -1,0 +1,7 @@
+device = "ublk"
+harden = true
+cpus = "0-7"
+journal_max = 1073741824
+commit_interval_ms = 5000
+log_level = "debug"
+destage_workers = 8

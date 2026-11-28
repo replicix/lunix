@@ -1,0 +1,7 @@
+warning: this is a plain volume. Plain mode detects corruption only: its
+checksums are unkeyed, so it protects against nobody who can write to the
+volume's storage. It has no key material and no key slots, and its mode can
+never be changed. Use the default integrity mode or --encrypt to detect
+tampering.
+created volume c5t6 (plain, uuid dcea3bc3-d782-453c-9118-21b31ca7b697)
+directory        <scratch>/store/c5t6-pin-vols/dcea3bc3-d782-453c-9118-21b31ca7b697
