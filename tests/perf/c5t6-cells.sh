@@ -35,15 +35,18 @@ PHASEF="$OUT/phase"; echo start > "$PHASEF"; : > "$OUT/reps.tsv"
 now_ms() { date +%s%3N; }
 phase() { echo "$1" > "$PHASEF"; }
 
-SPID=""; PPID_=""
+SPID=""; PPID_=""; SVD=""
 sampler() {
   while sleep "$SAMPLE_S"; do
     local t g s ph a b
     t=$(now_ms); ph=$(cat "$PHASEF" 2>/dev/null)
     a=$(date +%s%N); g=$(LX_TIMEOUT=20 lx gc "$VOL" --status --json 2>/dev/null); b=$(date +%s%N)
     s=$(LX_TIMEOUT=20 lx status "$VOL" --json 2>/dev/null | jq -c '{write_path,throttle,space,journal_used,stats:{commits:.stats.commits}}' 2>/dev/null)
-    jq -c -n --arg t "$t" --arg ph "$ph" --arg ms "$(((b - a) / 1000000))" --argjson gc "${g:-null}" --argjson st "${s:-null}" \
-      '{t:($t|tonumber),phase:$ph,gc_call_ms:($ms|tonumber),gc:$gc,status:$st}' >> "$OUT/series.jsonl" 2>/dev/null
+    # c5def: the sealed segment files that exist at this sample (listing of the segment directory)
+    [ -n "$SVD" ] || SVD=$(vol_dir "$VOL" 2>/dev/null)
+    ns=$(ls "$SVD/segments" 2>/dev/null | grep -c '\.seg$')
+    jq -c -n --arg t "$t" --arg ph "$ph" --arg ms "$(((b - a) / 1000000))" --arg ns "$ns" --argjson gc "${g:-null}" --argjson st "${s:-null}" \
+      '{t:($t|tonumber),phase:$ph,gc_call_ms:($ms|tonumber),nseg:($ns|tonumber),gc:$gc,status:$st}' >> "$OUT/series.jsonl" 2>/dev/null
   done
 }
 prober() {
