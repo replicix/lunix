@@ -97,8 +97,8 @@ and not before the grace last changed, to the delete), for all passes and for
 the recheck-only ones. The `gc pass done` line carries `kind`, `mark_ms` and the
 pass's own `lag_count`, `lag_mean_ms` and `lag_max_ms`.
 
-**Reference table** (`gc_condemn_on_cut = "off" | "shadow" | "on"`, `off` by
-default; `EngineConfig::gc_condemn_on_cut`). `shadow` keeps and checks the
+**Reference table** (`gc_condemn_on_cut = "off" | "shadow" | "on"`, `on` by
+default since 2026-11-28; `EngineConfig::gc_condemn_on_cut`). `shadow` keeps and checks the
 table and counts what it would offer; `on` also offers it (below). The engine keeps a memory-only count of
 the map entries per segment, by hint: every map transaction of a cut (the
 destage, and the compaction re-hints) goes through a wrapper (`RefMap`) that

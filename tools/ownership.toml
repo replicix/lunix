@@ -160,6 +160,7 @@ paths = [
   "crates/lunixd/Cargo.toml",
   "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_kill.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/tests/index_persist.rs",
   "crates/lunix-engine/tests/r1.rs",
@@ -205,6 +206,8 @@ paths = [
   "crates/lunix-gc/src/collector.rs",
   "crates/lunix-gc/src/tests/units.rs",
   "crates/lunix-engine/src/gc.rs",
+  "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/src/lib.rs",
@@ -235,6 +238,7 @@ paths = [
   "crates/lunix-gc/src/tests/crash.rs",
   "crates/lunix-gc/src/tests/pipeline.rs",
   "crates/lunix-gc/src/tests/sim.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/tests/gc_pacing.rs",
@@ -273,6 +277,7 @@ paths = [
   "crates/lunix-space/tests/model.rs",
   "crates/lunix-space/tests/bounded.rs",
   "crates/lunix-space/tests/common/mod.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
@@ -333,6 +338,7 @@ paths = [
   "crates/lunix-iface/tests/ctl.rs",
   "crates/lunix-testkit/src/space.rs",
   "crates/lunix-fsck/src/gc.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
@@ -406,6 +412,7 @@ paths = [
 # the write-path instrumentation.
 [jstall]
 paths = [
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/engine.rs",
@@ -470,6 +477,7 @@ paths = [
   "crates/lunix-destage/src/seal.rs",
   "crates/lunix-destage/src/stats.rs",
   "crates/lunix-destage/tests/seal.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/destage.rs",
@@ -508,6 +516,7 @@ paths = ["crates/lunixd/tests/stack_gc.rs", "tools/ownership.toml"]
 [tipstat]
 paths = [
   "crates/lunix-engine/src/engine.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/full.rs",
   "crates/lunix-engine/src/lib.rs",
@@ -558,6 +567,7 @@ paths = [
   "crates/lunix-iface/src/ctl/msg.rs",
   "crates/lunix-iface/src/space.rs",
   "crates/lunix-iface/tests/ctl.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/full.rs",
@@ -650,6 +660,7 @@ paths = [
   "crates/lunix-cli/src/render.rs",
   "crates/lunix-cli/tests/socket.rs",
   "crates/lunix-engine/src/config.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/src/gc.rs",
@@ -695,6 +706,7 @@ paths = [
 [refs2]
 paths = [
   "crates/lunix-cli/src/render.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/deps.rs",
   "crates/lunix-engine/src/lib.rs",
@@ -726,6 +738,7 @@ paths = [
   "crates/lunix-engine/src/cut.rs",
   "crates/lunix-engine/src/deps.rs",
   "crates/lunix-engine/src/destage.rs",
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/gc.rs",
   "crates/lunix-engine/src/lib.rs",
@@ -868,6 +881,7 @@ paths = [
 
 [c5def]
 paths = [
+  "crates/lunix-engine/src/config.rs",
   "crates/lunix-engine/src/coord.rs",
   "crates/lunix-engine/src/engine.rs",
   "crates/lunix-engine/src/lib.rs",
@@ -881,7 +895,11 @@ paths = [
   "crates/lunix-store/src/container.rs",
   "crates/lunix-store/src/tests/roundtrip.rs",
   "crates/lunix-testkit/src/store.rs",
+  "crates/lunixd/src/config.rs",
+  "crates/lunixd/src/stack/mod.rs",
   "crates/lunixd/tests/stack_refs_cost.rs",
+  "docs/explanation/DECISIONS.md",
+  "docs/explanation/DESIGN.md",
   "docs/plans/v1/reports/p1-c5def.md",
   "docs/reference/gc.md",
   "tools/ownership.toml",

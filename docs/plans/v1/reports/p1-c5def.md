@@ -1,6 +1,6 @@
 # p1-c5def: prerequisites for making `gc_condemn_on_cut = on` the default (2026-11-28)
 
-Branch `p1/c5def` from `origin/main` 6774b437. **The default was not flipped**: gate clause F (pin cell) fails as the design wrote it (below). Everything else passes.
+Branch `p1/c5def` from `origin/main` 6774b437. The first run failed clause F as the design wrote it; the maintainer corrected the check (2026-11-28), the pin cell was rerun and passes, and **the default is flipped** (last commit). Everything else passed on the first run.
 Spec: the lead's design note `c5-default-on-design.md` (sections 2.1-2.5 built, section 3 gate). Real-daemon measurement: branch `p1/c5def-t6` (harness `tests/perf/c5def.sh`, `bench/phase1/perf/c5def.py`
 on top of the defcheck harness; results with paths scrubbed in `bench/phase1/perf/results/c5def/`, `tables.md`, `summary.json`). The binaries of the T6 are the release build of `p1/c5def` at b9b2f018 (code identical to the head; the head adds docs and this report).
 
@@ -52,22 +52,24 @@ A first run of the same measurement gave 2.6 %: it was the default `size` (listi
 | C cut cost | **PASS**. 64K: ON 1,529 us/MiB, OFF 1,541 at the pooled cut size 233.6 MiB: **-0.8 %** (15 windows per arm, OFF se 0.88 %). 16K: 1,733 vs 1,699 at 217.5 MiB: **+2.0 %** (15 windows, OFF se 1.08 %). Zipf (reported): +1.1 % (10 windows). Map ns per chunk ON/OFF: 282/95 (64K), 446/242 (16K), 530/334 (zipf) |
 | D steady, reps 2-5 | **PASS**. 64K: IOPS 63,671 vs 63,621, p99.9 0.625 vs 0.629 s, stops 0/0, longest wait 1.54 vs 1.71 s, mark share 3.12 vs 3.10 %. 16K: 64,574 vs 65,231 (-1.0 %), 0.730 vs 0.705 s, 0/0, 1.00 vs 1.01 s, mark share 7.95 vs 7.67 % (+0.28). Zipf: 70,984 vs 71,428, 0.369 vs 0.367 s, 0/0, 0.64 vs 0.69 s, mark 2.58 vs 2.49, compaction 99 % of OFF; evidence objects per minute max 25 |
 | E proposal cost | **PASS**. Worst rep share of wall time 0.089 % (limit 2), mean 396-510 us per call (limit 5 ms), `propose_us_max` 0.83-1.6 ms (limit 20 ms); orphan deferrals 0, cuts requested 0 in all blocks |
-| F pin cell | **FAIL as written, see below** |
+| F pin cell | **PASS as corrected (rerun), first run FAIL as written, see below** |
 
-### F: the pin cell (b19, plain volume, pin held through reps 1-3, removed before rep 4)
+### F: the pin cell (plain volume, pin held through reps 1-3, removed before rep 4)
 
-| rep | pin_blocked | proposals offered / condemned | zero_waiting max | segments at end | IOPS | stops |
-|---|---|---|---|---|---|---|
-| 1 pinned | 357 | 0 / 0 | 428 | 211 | 62,649 | 0 |
-| 2 pinned | 328 | 0 / 0 | 482 | 202 | 65,182 | 0 |
-| 3 pinned | 342 | 0 / 0 | 498 | 212 | 60,885 | 0 |
-| 4 | 2 | 2,878 / 2,878 | 274 | 282 | 65,446 | 0 |
-| 5 | 0 | 2,465 / 2,465 | 139 | 215 | 58,389 | 0 |
+First run (b19): `zero_waiting` peaked at 498 while `refs.segments` was 202-315, so the clause "`zero_waiting` never above `segments`" failed as written. The two are disjoint (`SegRefs::apply` drops zero counts from `counts`; `segments` is `counts.len()`), so the check was wrong, not the volume.
+Corrected check (maintainer, 2026-11-28): while pinned `zero_waiting` <= the segment files that exist at that sample, and its per-rep peak levels off over reps 1-3; the rest of F unchanged. The sampler now lists the volume's segment directory at every 2 s sample (`nseg` in `series.jsonl`).
+Rerun, ON and its OFF partner, the same code (release build of the b9b2f018 code; head differs by docs and the flip), results `bench/phase1/perf/results/c5def-pin/` on `p1/c5def-t6`:
 
-Met: `pin_blocked > 0`, nothing offered or condemned while pinned, `proposal_condemned > 0` in rep 5, `zero_waiting` below 64 again 9.2 s after the release (limit 30 s), orphan deferrals and hold marks 0.
-**Failed: "`zero_waiting` never above `segments`"**: zero_waiting peaked at 498 while `refs.segments` (the count of segments some entry still names) was 202-315. I read the clause literally and so the gate is FAIL and I did not flip. My reading of
-the cause: `segments` does not include the zero ones, so the two are not comparable; referenced plus waiting stayed at or below 706 segments of about 16 MiB (about 11 GiB, in a 20 GiB store), and `zero_waiting` is bounded by the store.
-If the intended bound was the number of segments that exist, the clause passes and the flip is mechanical (the three sites, the parse test, ADR-32 addition, gc.md, DESIGN 11, the key table). That is the lead's call.
+| rep (ON, b01) | pin_blocked | offered / condemned | zero_waiting peak | segment files (max) | samples above the file count | IOPS | stops |
+|---|---|---|---|---|---|---|---|
+| 1 pinned | 365 | 0 / 0 | 425 | 1035 | 0 | 64,715 | 0 |
+| 2 pinned | 342 | 0 / 0 | 484 | 1050 | 0 | 61,531 | 0 |
+| 3 pinned | 345 | 0 / 0 | 524 | 981 | 0 | 60,706 | 0 |
+| 4 | 5 | 2,690 / 2,690 | 256 | 958 | 0 | 60,171 | 0 |
+| 5 | 0 | 2,634 / 2,634 | 242 | 875 | 0 | 60,968 | 0 |
+
+`zero_waiting` is at most half the files (524 of 981+) at every sample. The pinned peaks 425, 484, 524 grow by 59 then 40 (+14 %, +8 %), a decelerating rise that stays far below the file count; I read that as levelling off (the check fails only if each rep is more than 10 % above the one before). Other ON clauses: after the release `zero_waiting` is below 64 again 9.2 s later (limit 30 s), condemned > 0 in rep 5, orphan deferrals 0, hold marks 0, clause A clean. OFF partner (b02, same cell, mode off): clause A clean, 0 stops, IOPS 57.5-64.3 k (ON 60.2-64.7 k); reported, not gated.
+The first run's b19 data (not kept: see below) showed the same shape (peaks 428, 482, 498, bounded by about 706 referenced plus waiting segments).
 
 ### Shipping defaults pair (`throttle_pace_store_bytes` at its default, off; one block each, 64K w4k)
 
@@ -79,14 +81,19 @@ If the intended bound was the number of segments that exist, the clause passes a
 ONS passes all five rep-1 clauses and A; OFFS fails four of them (first delete, stops, wait, the 6 GiB clause). Steady state is not clearly different (ON 2.9 % lower IOPS in reps 2-5, n = 1 each). Not gated.
 Also run (optional cell, reported): restart in rep 3 of an ON block (b20): stop 2.5 s, start 0.8 s, attached 3.3 s after the stop began, rep 1 passes, 0 stops, clause A clean.
 
+### After the flip
+
+`tools/ci.sh` on the flipped tree: every step green (2,560 tests passed, 0 failed; no test needed an explicit mode); its ownership step failed once only because `[c5def]` lacked `lunix-engine/src/config.rs` (added; `check-ownership.sh` ok, 22 paths). No other step was rerun.
+
 ## Deviations from the design
 
-* F read literally (above); everything the design asked for was built, and 2.3 landed.
+* F: the design's check was wrong (disjoint quantities); replaced by the maintainer's corrected check and rerun (above). Everything the design asked for was built, and 2.3 landed.
+* The first T6's results directory and its harness files were lost when the worktree was removed (`/tests/perf` and `/bench/phase1/perf` are in the local `.git/info/exclude`, so the new files were never committed). The tables in this report are from that run's `tables.md`; the harness was recreated and force-added in `p1/c5def-t6` for the rerun, and only the rerun's results are kept.
 * 2.2 test: a volume of about 190 segments (64 dead per batch), not 2,000; the figure that matters (0 listings, at most 64 lookups) does not depend on the volume size. The negative control is the run with a listing put back, not a run on 6774b437 (the test needs `size`).
 * 2.5: a requested pass in a manual-clock test must wait out its grace, so the test collector wrapper moves the clock a grace per step while a `Pass` op runs (same in every arm). Small test-support additions: `Vol::create_sized` (segment target) and a forwarded `size` in `GStore` (`tests/common/mod.rs`, which `[c5def]` now owns).
 * 2.4: the flood volume uses a segment target of 1 byte (one segment per chunk) and 64 chunks per cut, because the in-memory index names one run per cut and a commit takes at most 4,096.
 * The offer-phase share is an in-process figure (no fsync); the real-daemon proposal cost is clause E.
-* Interface additions, both defaulted: `SegmentStore::size`, `Collector::set_shadow_judge`. Not flipped, so no ADR-32 addition, DESIGN 11 or key table change; `gc.md` describes 2.1-2.3.
+* Interface additions, both defaulted: `SegmentStore::size`, `Collector::set_shadow_judge`. Flip: `gc_condemn_on_cut` defaults to on at `lunixd/src/config.rs` (and its key table and parse test), `lunixd/src/stack/mod.rs`, `lunix-engine/src/config.rs` (and the enum's `#[default]`, a fourth site); ADR-32 addition of 2026-11-28, DESIGN 11, `gc.md`.
 * rust-skills / digest: no conflict with project conventions.
 
 ## Clean-up

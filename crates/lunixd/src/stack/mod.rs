@@ -559,7 +559,7 @@ impl OpenParams {
             throttle: lunix_space::ThrottleConfig::default(),
             gc_pressure_rate_factor: 4,
             gc_fast_recheck: Some(Some(std::time::Duration::from_secs(1))),
-            gc_condemn_on_cut: lunix_engine::CondemnOnCut::Off,
+            gc_condemn_on_cut: lunix_engine::CondemnOnCut::On,
             gc_pressure_grace: Some(std::time::Duration::from_millis(2_000)),
             #[cfg(feature = "crashpoints")]
             segment_read_hook: None,

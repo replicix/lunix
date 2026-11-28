@@ -2666,6 +2666,29 @@ combination, grace 2 000 with fast recheck and condemn-on-cut off, has not
 had a T6 run of its own. The daemon's attach warning now fires only when
 fast recheck is turned off by hand while the grace is on.
 
+*Addition (2026-11-28, `p1/c5def`): `gc_condemn_on_cut` defaults to `on`.* The
+maintainer made the reference table's active mode (C5, condemn on cut) the
+default after the prerequisites and the gate in
+`docs/plans/v1/reports/p1-c5def.md`. Prerequisites built: the table keeps no copy at
+a mark start and decides a matching mark by sums (rebase 0.4 ms at 128,000
+segments and 3.0 ms at 1,000,000, before 13.7 and 306 ms; the exact comparison
+stays for the first base and any drift), a proposal looks segments up by id
+instead of listing the directory, the shadow lists are built only in `shadow`
+mode, and the discard-flood and requested-pass/grow tests exist. Real daemon
+(integrity volume, 2 GiB working set, 5 reps, 3 blocks per arm at 64 KiB and
+16 KiB, 2 at zipf, new defaults grace 2 000 ms and fast recheck on, ON against
+`off`): rep 1 at 64 KiB first delete 0.08 s against 8.0-9.2 s, at least 11.3 GiB
+deleted within 5 s of the onset against 0, no stop; cut cost per journal byte
+-0.8 % at 64 KiB and +2.0 % at 16 KiB (limit 3 %); steady-state IOPS, p99.9,
+stops and longest wait equal within the limits; proposals 0.09 % of wall time
+at most; every safety counter clean in all blocks. **A volume with any pin
+(snapshot or reader) gets no condemn-on-cut**: nothing is offered while a pin
+exists, so such a volume behaves as with the mode `off` and the first run after
+a fill is slow; with a pin, `zero_waiting` is bounded by the segment files and
+levels off, and drains within 10 s of the release. `throttle_pace_store_bytes`
+stays off by default (one 64 KiB pair at that default ran clean). The key stays
+settable: `off` removes the table, `shadow` keeps the counts without acting.
+
 **For the maintainer to decide** (the recommendation first):
 
 | # | question | recommendation | alternative |
